@@ -249,6 +249,13 @@ def evaluate_rules(prep: Dict[str, object], preds: pd.DataFrame, model: str, bud
 
 # --------------------------------------------------------------------------- export
 
+def fold_linear(mean: np.ndarray, scale: np.ndarray, coef: np.ndarray, intercept: float) -> Tuple[np.ndarray, float]:
+    """Fold StandardScaler into ridge weights: w'x + b' == coef . ((x - mean) / scale) + intercept."""
+    w = np.asarray(coef, dtype=float) / np.asarray(scale, dtype=float)
+    b = float(intercept - np.sum(w * np.asarray(mean, dtype=float)))
+    return w, b
+
+
 def export_linear(h: pd.DataFrame, H: int, since: str, path: str) -> Dict[str, object]:
     """Fit the ridge model on all data and export it as plain JSON (scaler + coefficients)."""
     d = h[h.index >= pd.Timestamp(since, tz="UTC")]
@@ -256,11 +263,15 @@ def export_linear(h: pd.DataFrame, H: int, since: str, path: str) -> Dict[str, o
     m = make_pipeline(StandardScaler(), Ridge(alpha=10.0))
     m.fit(d[FEATURES].to_numpy(), (d[f"y_{H}"] - d["lr_now"]).to_numpy())
     sc, rg = m.named_steps["standardscaler"], m.named_steps["ridge"]
+    w, b = fold_linear(sc.mean_, sc.scale_, rg.coef_, float(rg.intercept_))
     spec = {"model": "ridge", "horizon_hours": H, "target": "log(EMA/price) change vs persistence",
             "features": FEATURES, "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
             "coef": rg.coef_.tolist(), "intercept": float(rg.intercept_), "train_rows": int(len(d)),
             "train_period": [str(d.index.min()), str(d.index.max())],
-            "formula": "yhat = lr_now + intercept + sum(coef[i] * (x[i] - mean[i]) / scale[i])"}
+            "formula": "yhat = lr_now + intercept + sum(coef[i] * (x[i] - mean[i]) / scale[i])",
+            # Scaler folded into the weights: one Dense(19 -> 1) layer, or 20 floats in Kotlin.
+            "folded_weights": w.tolist(), "folded_bias": b,
+            "folded_formula": "yhat = lr_now + folded_bias + sum(folded_weights[i] * x[i])"}
     with open(path, "w") as f:
         json.dump(spec, f, indent=1)
     return spec
