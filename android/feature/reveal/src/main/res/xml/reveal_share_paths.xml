@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The share grid image only: nothing else in the app's storage is reachable. -->
+<paths>
+    <cache-path
+        name="reveal_share"
+        path="reveal_share/" />
+</paths>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the sensor lab's single export file, nothing else. -->
+<paths>
+    <files-path
+        name="sensorlab_export"
+        path="sensorlab/export/" />
+</paths>

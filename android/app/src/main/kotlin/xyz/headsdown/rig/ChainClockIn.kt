@@ -10,6 +10,7 @@ import xyz.headsdown.feature.shift.ShiftMode
 import xyz.headsdown.feature.shift.ShiftSpec
 import xyz.headsdown.surface.tile.ClockInTransactions
 import xyz.headsdown.surface.tile.PreparedClockIn
+import xyz.headsdown.surface.widget.RigWidgetUpdates
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,6 +45,7 @@ class ChainClockIn @Inject constructor(
     private val rigKeys: RigKeyRepository,
     private val counter: RigCounter,
     private val binding: RigBindingStore,
+    private val widgets: RigWidgetUpdates,
 ) : ClockInTransactions {
 
     override suspend fun prepare(account: WalletAccount, capabilities: WalletCapabilities): PreparedClockIn? {
@@ -69,7 +71,11 @@ class ChainClockIn @Inject constructor(
         binding.save(authority)
         // Re-read the Rig: its shift_id is authoritative (the prediction is the fallback).
         val rig = runCatching { service.readRig(authority) }.getOrNull()
-        rig?.let { counter.raiseFloor(it.hbCounter) }
+        rig?.let {
+            counter.raiseFloor(it.hbCounter)
+            // The streak lives on-chain in the Rig; the widget shows the last value read.
+            widgets.onStreak(it.streak.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
+        }
         val shiftId = rig?.shiftId?.toLong()?.takeIf { it >= 0 } ?: prepared.spec.shiftId
         return prepared.spec.copy(shiftId = shiftId)
     }

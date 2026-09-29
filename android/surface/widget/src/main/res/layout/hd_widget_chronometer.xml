@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shift chronometer. Colour and size are set from code (brand vs dynamic colour). -->
+<Chronometer xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/hd_widget_chronometer"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:fontFamily="sans-serif-medium"
+    android:maxLines="1"
+    android:textColor="@color/hd_widget_ash"
+    android:textSize="15sp" />

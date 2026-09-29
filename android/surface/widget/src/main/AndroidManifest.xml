@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+            AppWidget providers must be exported for the system to deliver APPWIDGET_UPDATE.
+            Another app can send that broadcast too; all it does is re-render from local state,
+            and the receivers read nothing from the Intent.
+        -->
+        <receiver
+            android:name=".RigWidgetReceiver"
+            android:exported="true"
+            android:label="@string/hd_widget_rig_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/hd_widget_rig_info" />
+        </receiver>
+
+        <receiver
+            android:name=".CrewWidgetReceiver"
+            android:exported="true"
+            android:label="@string/hd_widget_crew_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/hd_widget_crew_info" />
+        </receiver>
+    </application>
+
+</manifest>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LOCALDEV BUILD TYPE ONLY: loopback cleartext for the local devstack (see the config). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application android:networkSecurityConfig="@xml/network_security_config_localdev" />
+
+</manifest>

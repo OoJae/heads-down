@@ -6,10 +6,15 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** Night-shift palette: charcoal surfaces, ember for "rig hot", ORE gold for hauls. */
+/**
+ * Night-shift palette: charcoal surfaces, ember for "rig hot", ORE gold for hauls. Every text
+ * colour here meets WCAG AA (4.5:1) on Charcoal and CharcoalRaised (see ThemeContrastTest);
+ * the widget's WidgetPalette and the reveal's RevealColors mirror these values.
+ */
 object HdColors {
     val Charcoal = Color(0xFF121314)
     val CharcoalRaised = Color(0xFF1C1D20)
@@ -44,6 +49,9 @@ private val typography = Typography(
     bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
     labelLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
 )
+
+/** Monospace caps for pixel-style labels ("HEADS DOWN", "RIG"). */
+val PixelLabel = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, letterSpacing = 2.sp)
 
 /** Always dark: this app lives on a nightstand. */
 @Composable

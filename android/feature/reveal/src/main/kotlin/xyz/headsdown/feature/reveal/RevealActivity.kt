@@ -1,100 +1,93 @@
 package xyz.headsdown.feature.reveal
 
+import android.animation.ValueAnimator
+import android.app.KeyguardManager
+import android.content.ActivityNotFoundException
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationManagerCompat
-
-/** Placeholder haul until the indexer / ShiftLog is wired in. */
-data class HaulSummary(
-    val roundsDark: String = "—",
-    val roundsDug: String = "—",
-    val oreMined: String = "—",
-    val effectivePrice: String = "—",
-)
+import androidx.core.content.getSystemService
+import androidx.lifecycle.lifecycleScope
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import xyz.headsdown.feature.reveal.haul.HaulRepository
+import xyz.headsdown.feature.reveal.haul.HaulSummary
+import xyz.headsdown.feature.reveal.share.RevealShare
+import xyz.headsdown.feature.reveal.share.ShareGrid
+import xyz.headsdown.feature.reveal.ui.RevealRoute
+import xyz.headsdown.feature.reveal.ui.RevealUiState
+import xyz.headsdown.surface.haptics.HapticCue
+import xyz.headsdown.surface.haptics.HapticMoment
+import xyz.headsdown.surface.haptics.Haptics
+import java.time.ZoneId
+import javax.inject.Inject
 
 /**
- * STUB: the morning haul reveal. Opened full-screen over the lock screen by the exact alarm
- * (manifest: `showWhenLocked` + `turnScreenOn`, not exported). The board replay, near
- * misses and the one-tap clock-out arrive with the on-chain program and indexer.
+ * The morning haul reveal. Opened full-screen over the lock screen by the exact alarm
+ * (manifest: `showWhenLocked` + `turnScreenOn`, not exported), or from the home screen.
+ *
+ * The drumroll plays with the board replay; the Motherlode flourish only if the rig really
+ * shared one. Sharing asks to unlock first, because the share sheet cannot show over the lock
+ * screen. "Buy the rest at market" is a stub until the Jupiter leg is wired.
  */
+@AndroidEntryPoint
 class RevealActivity : ComponentActivity() {
+
+    @Inject lateinit var haulRepository: HaulRepository
+    @Inject lateinit var haptics: Haptics
+
+    private var state by mutableStateOf<RevealUiState>(RevealUiState.Loading)
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         NotificationManagerCompat.from(this).cancel(RevealAlarmReceiver.NOTIFICATION_ID)
-        setContent { RevealScreen(HaulSummary(), onDone = ::finish) }
-    }
-}
-
-private val Charcoal = Color(0xFF121314)
-private val OreGold = Color(0xFFF2B233)
-private val Ember = Color(0xFFFF6A1A)
-
-@Composable
-fun RevealScreen(summary: HaulSummary, onDone: () -> Unit) {
-    MaterialTheme(colorScheme = darkColorScheme(background = Charcoal, primary = OreGold, secondary = Ember)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Charcoal)
-                .safeDrawingPadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("Morning haul", color = OreGold, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text("Last night's shift", color = Color(0xFFB9B4AE), fontSize = 16.sp)
-            Spacer(Modifier.height(32.dp))
-            Stat("Rounds dark", summary.roundsDark)
-            Stat("Rounds dug", summary.roundsDug)
-            Stat("ORE mined", summary.oreMined)
-            Stat("Effective price per ORE", summary.effectivePrice)
-            Spacer(Modifier.height(32.dp))
-            Text(
-                "The board replay and clock-out arrive with the on-chain program. This build has not spent anything.",
-                color = Color(0xFF8C8680),
-                fontSize = 13.sp,
+        HighRefreshRate.request(this)
+        lifecycleScope.launch {
+            val haul = runCatching { haulRepository.latest() }.getOrNull()
+            state = if (haul == null) RevealUiState.NoHaul else RevealUiState.Ready(haul)
+        }
+        // "Remove animations" in accessibility settings: show the final board at once.
+        val animate = ValueAnimator.areAnimatorsEnabled()
+        setContent {
+            RevealRoute(
+                state = state,
+                zone = ZoneId.systemDefault(),
+                animate = animate,
+                onReplayStarted = { haptics.play(HapticCue.REVEAL_DRUMROLL, HapticMoment.REVEAL) },
+                onReplayFinished = { haul ->
+                    if (haul.sharedMotherlode) haptics.play(HapticCue.MOTHERLODE_FLOURISH, HapticMoment.REVEAL)
+                },
+                onBuyRest = { /* Stub: the Jupiter buy leg is wired later. The screen says nothing was bought. */ },
+                onShare = ::share,
+                onDone = ::finish,
             )
-            Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = onDone,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = OreGold, contentColor = Charcoal),
-            ) { Text("Done") }
+        }
+    }
+
+    private fun share(haul: HaulSummary) {
+        val open = {
+            try {
+                startActivity(RevealShare.chooser(this, ShareGrid.from(haul), haul.shiftId))
+            } catch (_: ActivityNotFoundException) {
+                // No app can receive an image: nothing to do.
+            }
+        }
+        val keyguard = getSystemService<KeyguardManager>()
+        if (keyguard?.isKeyguardLocked == true) {
+            keyguard.requestDismissKeyguard(
+                this,
+                object : KeyguardManager.KeyguardDismissCallback() {
+                    override fun onDismissSucceeded() = open()
+                },
+            )
+        } else {
+            open()
         }
     }
 }
-
-@Composable
-private fun Stat(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = Color(0xFFECE7E1), fontSize = 16.sp)
-        Text(value, color = OreGold, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Preview
-@Composable
-private fun RevealPreview() = RevealScreen(HaulSummary(roundsDark = "312", roundsDug = "288"), onDone = {})

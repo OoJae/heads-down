@@ -1,7 +1,15 @@
 package xyz.headsdown.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,7 +35,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -41,18 +56,28 @@ import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.surface.tile.TileRenderer
 import xyz.headsdown.ui.theme.HdColors
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import xyz.headsdown.ui.theme.PixelLabel
 import java.text.DateFormat
 import java.util.Date
 
-private data class RigLook(val word: String, val color: Color, val line: String)
+object HomeTags {
+    const val RIG_WORD = "home-rig-word"
+    const val CLOCK_IN = "home-clock-in"
+    const val PREVIEW_REVEAL = "home-preview-reveal"
+    const val ADD_WIDGET = "home-add-widget"
+    const val SENSOR_LAB = "home-sensor-lab"
+    const val HOW_IT_WORKS = "home-how-it-works"
+}
 
-private fun lookOf(state: ShiftState): RigLook = when (state) {
-    ShiftState.Idle -> RigLook("Rig cold", HdColors.AshMuted, "Clock in, then lay your phone face-down.")
-    is ShiftState.Armed -> RigLook("Armed", HdColors.Ember, "Lay your phone face-down to start the shift.")
-    is ShiftState.Down -> RigLook("Rig hot", HdColors.Ember, "Signing a heartbeat every ORE round.")
-    is ShiftState.Cooling -> RigLook("Cooling", HdColors.Cooling, "Put it back face-down to keep the shift alive.")
-    is ShiftState.Broken -> RigLook("Rig cold", HdColors.AshMuted, breakLine(state.reason))
-    is ShiftState.Frozen -> RigLook("Frozen", HdColors.Frost, "No digs until you unfreeze it with your wallet.")
+internal data class RigLook(val word: String, val color: Color, val line: String, val pixels: Int)
+
+internal fun lookOf(state: ShiftState): RigLook = when (state) {
+    ShiftState.Idle -> RigLook("Rig cold", HdColors.AshMuted, "Clock in, then lay your phone face-down.", 0)
+    is ShiftState.Armed -> RigLook("Armed", HdColors.Ember, "Lay your phone face-down to start the shift.", 1)
+    is ShiftState.Down -> RigLook("Rig hot", HdColors.Ember, "Signing a heartbeat every ORE round.", 5)
+    is ShiftState.Cooling -> RigLook("Cooling", HdColors.Cooling, "Put it back face-down to keep the shift alive.", 3)
+    is ShiftState.Broken -> RigLook("Rig cold", HdColors.AshMuted, breakLine(state.reason), 0)
+    is ShiftState.Frozen -> RigLook("Frozen", HdColors.Frost, "No digs until you unfreeze it with your wallet.", 5)
 }
 
 private fun breakLine(reason: BreakReason) = when (reason) {
@@ -71,6 +96,12 @@ fun HomeScreen(
     onEndShift: () -> Unit,
     onFreeze: () -> Unit,
     onOpenSetup: () -> Unit,
+    onHowItWorks: () -> Unit = {},
+    onPreviewReveal: () -> Unit = {},
+    /** Null where the launcher cannot pin widgets. */
+    onAddWidget: (() -> Unit)? = null,
+    /** Non-null only in debug builds (the sensor lab does not exist in release). */
+    onOpenSensorLab: (() -> Unit)? = null,
 ) {
     Column(
         Modifier
@@ -81,22 +112,38 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            PixelMark(Modifier.size(28.dp))
+            Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("Heads Down", style = MaterialTheme.typography.headlineSmall)
-                Text("Your phone's night shift · powered by ORE", color = HdColors.AshMuted)
+                Text("HEADS DOWN", style = PixelLabel, color = HdColors.AshMuted)
+                Text(
+                    "Your phone's night shift",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.semantics { heading() },
+                )
             }
             TextButton(onClick = onOpenSetup) { Text(if (onboarding.allDone) "Setup" else "Finish setup") }
         }
 
         HealthBanner(health, onOpenSetup)
         RigCard(snapshot, onClockIn, onEndShift, onFreeze)
-        HaulCard()
+        HaulCard(onPreviewReveal)
+        if (onAddWidget != null) WidgetCard(onAddWidget)
 
         Text(
             trustFootnote(snapshot, onboarding),
             color = HdColors.AshMuted,
             style = MaterialTheme.typography.bodyMedium,
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = onHowItWorks, modifier = Modifier.testTag(HomeTags.HOW_IT_WORKS)) { Text("How the night shift works") }
+            if (onOpenSensorLab != null) {
+                TextButton(onClick = onOpenSensorLab, modifier = Modifier.testTag(HomeTags.SENSOR_LAB)) {
+                    Text("Sensor lab (debug)", color = HdColors.Cooling)
+                }
+            }
+        }
+        Text("Powered by ORE", style = PixelLabel, color = HdColors.AshMuted)
     }
 }
 
@@ -107,10 +154,20 @@ private fun RigCard(snapshot: ShiftSnapshot, onClockIn: () -> Unit, onEndShift: 
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(if (hot) 2.dp else 1.dp, if (hot) HdColors.Ember else HdColors.CharcoalOutline),
+        border = if (hot) BorderStroke(2.dp, emberBreath()) else BorderStroke(1.dp, HdColors.CharcoalOutline),
     ) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(look.word, style = MaterialTheme.typography.displaySmall, color = look.color)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HeatPixels(look.pixels, look.color)
+                Spacer(Modifier.size(10.dp))
+                Text("RIG", style = PixelLabel, color = HdColors.AshMuted)
+            }
+            Text(
+                look.word,
+                style = MaterialTheme.typography.displaySmall,
+                color = look.color,
+                modifier = Modifier.testTag(HomeTags.RIG_WORD),
+            )
             Text(look.line, color = HdColors.Ash)
             val since = snapshot.darkSinceWallMillis
             if (since != null && snapshot.state !is ShiftState.Idle) {
@@ -127,7 +184,7 @@ private fun RigCard(snapshot: ShiftSnapshot, onClockIn: () -> Unit, onEndShift: 
             when (snapshot.state) {
                 ShiftState.Idle, is ShiftState.Broken -> Button(
                     onClick = onClockIn,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_IN),
                     colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
                 ) { Text("Clock in") }
                 is ShiftState.Armed, is ShiftState.Down, is ShiftState.Cooling -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -141,16 +198,83 @@ private fun RigCard(snapshot: ShiftSnapshot, onClockIn: () -> Unit, onEndShift: 
 }
 
 @Composable
-private fun HaulCard() {
+private fun HaulCard(onPreviewReveal: () -> Unit) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, HdColors.OreGold.copy(alpha = 0.5f)),
     ) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Haul", color = HdColors.OreGold, style = MaterialTheme.typography.titleMedium)
+            Text("HAUL", style = PixelLabel, color = HdColors.OreGold)
             Text("— ORE", color = HdColors.OreGold, style = MaterialTheme.typography.displaySmall)
             Text("Your first haul appears after your first mined shift.", color = HdColors.AshMuted)
+            TextButton(onClick = onPreviewReveal, modifier = Modifier.testTag(HomeTags.PREVIEW_REVEAL)) {
+                Text("Preview the morning reveal (sample night)", color = HdColors.OreGold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WidgetCard(onAddWidget: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, HdColors.CharcoalOutline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("HOME SCREEN", style = PixelLabel, color = HdColors.AshMuted)
+            Text("Rig heat and a shift clock that ticks by itself, on your home screen.", color = HdColors.Ash)
+            OutlinedButton(onClick = onAddWidget, modifier = Modifier.testTag(HomeTags.ADD_WIDGET)) { Text("Add the Rig widget") }
+        }
+    }
+}
+
+/** A slow ember breath around a hot rig. Composed only while hot, so a cold screen is still. */
+@Composable
+private fun emberBreath(): Color {
+    val glow by rememberInfiniteTransition(label = "rig-glow").animateFloat(
+        initialValue = 0.55f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1_600, easing = LinearEasing), RepeatMode.Reverse),
+        label = "rig-glow-alpha",
+    )
+    return HdColors.Ember.copy(alpha = glow)
+}
+
+/** Five pixels that fill with heat, as on the widget. */
+@Composable
+private fun HeatPixels(lit: Int, color: Color) {
+    Canvas(
+        Modifier
+            .size(width = 38.dp, height = 6.dp)
+            .semantics { contentDescription = "Heat $lit of 5" },
+    ) {
+        val px = size.height
+        val gap = (size.width - 5 * px) / 4
+        repeat(5) { i ->
+            drawRect(
+                color = if (i < lit) color else HdColors.CharcoalOutline,
+                topLeft = Offset(i * (px + gap), 0f),
+                size = Size(px, px),
+            )
+        }
+    }
+}
+
+/** The pixel mark: a face-down phone (ember) under an ORE-gold heartbeat pixel. */
+@Composable
+private fun PixelMark(modifier: Modifier) {
+    Box(modifier) {
+        Canvas(Modifier.fillMaxSize()) {
+            val p = size.minDimension / 7
+            fun px(x: Int, y: Int, c: Color) = drawRect(c, Offset(x * p, y * p), Size(p, p))
+            // heartbeat
+            px(1, 2, HdColors.OreGold); px(2, 2, HdColors.OreGold); px(3, 1, HdColors.OreGold)
+            px(4, 3, HdColors.OreGold); px(5, 2, HdColors.OreGold)
+            // phone, face-down
+            for (x in 0..6) px(x, 5, HdColors.Ember)
+            px(0, 4, HdColors.EmberDim); px(6, 4, HdColors.EmberDim)
         }
     }
 }
@@ -197,15 +321,27 @@ private fun trustFootnote(snapshot: ShiftSnapshot, onboarding: OnboardingState):
     if (snapshot.state is ShiftState.Down && !snapshot.signing) append(" (No rig key: this shift is focus-only.)")
 }
 
-@Preview
+@Preview(widthDp = 400, heightDp = 1100)
 @Composable
-private fun HomePreview() = HeadsDownTheme {
+private fun HomeHotPreview() = HeadsDownTheme {
     HomeScreen(
         snapshot = ShiftSnapshot(
             ShiftState.Down(ShiftSpec(1, ShiftMode.NIGHT), 0, 0),
             darkRounds = 55,
             darkSinceWallMillis = System.currentTimeMillis() - 72 * 60_000,
         ),
+        onboarding = OnboardingState(),
+        health = ShiftHealth.NoRecentShift,
+        onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {},
+        onAddWidget = {}, onOpenSensorLab = {},
+    )
+}
+
+@Preview(widthDp = 400, heightDp = 1000)
+@Composable
+private fun HomeColdPreview() = HeadsDownTheme {
+    HomeScreen(
+        snapshot = ShiftSnapshot.IDLE,
         onboarding = OnboardingState(),
         health = ShiftHealth.NoRecentShift,
         onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {},

@@ -15,13 +15,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import xyz.headsdown.BuildConfig
+import xyz.headsdown.config.BuildTransports
+import xyz.headsdown.config.EndpointKind
+import xyz.headsdown.config.EndpointPolicy
+import xyz.headsdown.config.EndpointVerdict
 import xyz.headsdown.core.chain.Ore
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.clockin.ClockInService
 import xyz.headsdown.core.chain.rpc.OkHttpJsonRpcTransport
 import xyz.headsdown.core.chain.rpc.RpcProtocolException
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
-import xyz.headsdown.core.chain.uplink.CrankUplink
 import xyz.headsdown.core.keys.PrefsCounterStore
 import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.keys.RigKeyManager
@@ -33,6 +36,8 @@ import xyz.headsdown.core.wallet.KeystoreAesGcmCipher
 import xyz.headsdown.core.wallet.SharedPreferencesSecretStore
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
 import xyz.headsdown.feature.reveal.RevealScheduler
+import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
+import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.shift.BoardRoundSource
 import xyz.headsdown.feature.shift.CrankHeartbeatSink
 import xyz.headsdown.feature.shift.HeartbeatSink
@@ -44,12 +49,16 @@ import xyz.headsdown.rig.ChainClockIn
 import xyz.headsdown.rig.FileHeartbeatLog
 import xyz.headsdown.rig.RigBindingStore
 import xyz.headsdown.rig.RigKeyRepository
+import xyz.headsdown.surface.haptics.Haptics
+import xyz.headsdown.surface.widget.GlanceRigWidgetUpdates
+import xyz.headsdown.surface.widget.RigWidgetUpdates
 import xyz.headsdown.surface.tile.ClockInTransactions
 import javax.inject.Singleton
 
 /**
  * The production graph. Endpoints come from BuildConfig (see app/build.gradle.kts: HTTPS/WSS
- * only, no query strings or credentials, so no provider key can be baked into the APK).
+ * only, no query strings or credentials, so no provider key can be baked into the APK; the
+ * `localdev` build type alone may use loopback HTTP/WS for a devstack behind `adb reverse`).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -62,9 +71,16 @@ object AppModule {
     @Provides @Singleton
     fun okHttp(): OkHttpClient = OkHttpJsonRpcTransport.defaultClient()
 
+    /**
+     * The RPC endpoint is re-checked against [EndpointPolicy] before any transport exists:
+     * HTTPS everywhere, loopback HTTP only in the `localdev` build type.
+     */
     @Provides @Singleton
-    fun solanaRpc(client: OkHttpClient): SolanaJsonRpc =
-        SolanaJsonRpc(OkHttpJsonRpcTransport(BuildConfig.SOLANA_RPC_URL, client))
+    fun solanaRpc(client: OkHttpClient): SolanaJsonRpc {
+        val url = BuildConfig.SOLANA_RPC_URL
+        EndpointPolicy.require(EndpointKind.RPC, url, BuildConfig.LOOPBACK_CLEARTEXT_ALLOWED)
+        return SolanaJsonRpc(BuildTransports.transports.rpc(url, client))
+    }
 
     @Provides @Singleton
     fun wallet(@ApplicationContext context: Context, rpc: SolanaJsonRpc): HeadsDownWallet = HeadsDownWallet(
@@ -97,8 +113,13 @@ object AppModule {
         // Outlives any one shift service, so the sink's graceful close can finish.
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val url = BuildConfig.CRANK_WS_URL
+        val verdict = EndpointPolicy.require(EndpointKind.CRANK, url, BuildConfig.LOOPBACK_CLEARTEXT_ALLOWED)
         return CrankHeartbeatSink(
-            uplinkFactory = if (url.isEmpty()) null else { onConnected -> CrankUplink(url, client, scope, onConnected = onConnected) },
+            uplinkFactory = if (verdict == EndpointVerdict.Disabled) {
+                null
+            } else {
+                { onConnected -> BuildTransports.transports.uplink(url, client, scope, onConnected) }
+            },
             log = log,
             clock = { SystemClock.elapsedRealtime() },
             scope = scope,
@@ -117,6 +138,22 @@ object AppModule {
 
     @Provides @Singleton
     fun keepAlive(@ApplicationContext context: Context) = KeepAlive(context)
+
+    /** Update hooks for the home-screen widgets (the app's shift observer calls them). */
+    @Provides @Singleton
+    fun widgetUpdates(@ApplicationContext context: Context): RigWidgetUpdates =
+        GlanceRigWidgetUpdates(context, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+
+    /** One haptics engine (and at most one SoundPool) for the whole app. */
+    @Provides @Singleton
+    fun haptics(@ApplicationContext context: Context) = Haptics(context)
+
+    /**
+     * The morning haul. SAMPLE data until the indexer serves real ShiftLogs: the reveal labels
+     * it "not your data", and it is never pushed to the widget.
+     */
+    @Provides @Singleton
+    fun haulRepository(): HaulRepository = FakeHaulRepository()
 }
 
 @Module
