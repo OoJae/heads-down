@@ -409,13 +409,22 @@ fn dig_one(
         .saturating_sub(exec_before);
 
     let m_after = match ore::read_miner(miner)? {
-        Some(x) if x.authority == g.authority && x.round_id == ctx.board_round => x,
+        Some(x) if x.authority == g.authority => x,
         _ => return Err(HdError::InvalidOreAccount.into()),
     };
-    let deployed_now = m_after
-        .deployed_sum()?
-        .checked_sub(sum_before)
-        .ok_or(HdError::InvalidOreAccount)?;
+    let deployed_now = if m_after.round_id == ctx.board_round {
+        // ORE reset / extended the Miner for this round: the new SOL on it.
+        m_after
+            .deployed_sum()?
+            .checked_sub(sum_before)
+            .ok_or(HdError::InvalidOreAccount)?
+    } else if m_after.round_id == m.round_id {
+        // ORE returned before touching the Miner (e.g. its Motherlode
+        // no-op, `deploy.rs:79-84`): nothing was deployed.
+        0
+    } else {
+        return Err(HdError::InvalidOreAccount.into());
+    };
     let debit = match ore::read_automation(automation)? {
         Some(a) => {
             let d = balance_before
