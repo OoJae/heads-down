@@ -1,0 +1,6 @@
+# litesvm 0.17 pulls agave 4.3 crates that declare rust-version = 1.97.1.
+# cargo-build-sbf ignores this file and uses its own platform-tools toolchain.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy"]

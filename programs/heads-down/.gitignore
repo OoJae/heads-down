@@ -1,0 +1,10 @@
+# Build output
+target/
+
+# Mainnet dumps (regenerate with tests/fixtures/fetch-fixtures.sh)
+tests/fixtures/*.json
+tests/fixtures/*.so
+tests/fixtures/*.txt
+
+# Never commit keypairs (the deploy key lives in ~/.config/heads-down/)
+*-keypair.json
