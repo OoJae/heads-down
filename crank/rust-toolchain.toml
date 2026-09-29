@@ -1,0 +1,5 @@
+[toolchain]
+# litesvm 0.17 (dev-dependency) links Agave 4.3 crates that declare rust-version 1.97.1.
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy"]
