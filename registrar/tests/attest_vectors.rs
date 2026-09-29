@@ -123,6 +123,11 @@ fn tee_and_strongbox_keys_under_rsa_root_rkp() {
     let sb = verify(&vector("caiman_sdk36_SB_EC_RKP"), T_2025_09_28).unwrap();
     assert_eq!(sb.level, 2);
     assert_eq!(sb.keymint_security_level, SecurityLevel::StrongBox);
+    // Google's collector requested device-ID attestation (brand, model...); it is flagged in
+    // the published summary. Heads Down itself never requests it.
+    assert!(tee.device_ids_present && sb.device_ids_present);
+    let frankel = verify(&vector("frankel_sdk37_TEE_EC_2026"), T_2026_09_10).unwrap();
+    assert!(!frankel.device_ids_present);
 }
 
 #[test]

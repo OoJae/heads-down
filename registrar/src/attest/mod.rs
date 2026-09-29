@@ -71,6 +71,9 @@ pub struct AttestationSummary {
     pub verified_boot_state: Option<VerifiedBootState>,
     pub device_locked: Option<bool>,
     pub os_patch_level: Option<i64>,
+    /// Device-identifier attestation tags (brand, model, IMEI, ...) were present. Heads Down never
+    /// requests them; `true` means the client asked for more than it should have.
+    pub device_ids_present: bool,
     pub serials: Vec<String>,
 }
 
@@ -104,6 +107,7 @@ impl Verifier {
             verified_boot_state: rot.map(|r| r.verified_boot_state),
             device_locked: rot.map(|r| r.device_locked),
             os_patch_level: kd.hardware_enforced.os_patch_level,
+            device_ids_present: kd.hardware_enforced.has_device_ids || kd.software_enforced.has_device_ids,
             serials: chain.serials,
         })
     }
