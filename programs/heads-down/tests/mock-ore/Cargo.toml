@@ -1,0 +1,16 @@
+[package]
+name = "mock-ore"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "TEST ONLY: a malicious / broken stand-in for ORE, deployed at ORE's address in LiteSVM to prove heads_down's post-CPI invariants."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false, features = ["cpi", "copy"] }
+pinocchio-system = "0.6.1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

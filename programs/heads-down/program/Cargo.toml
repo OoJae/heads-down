@@ -1,0 +1,48 @@
+[package]
+name = "heads-down"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "Apache-2.0"
+description = "Heads Down: a phone-gated ORE rig. The Executor PDA deploys a user's own ORE Automation only on a fresh Android Keystore P-256 heartbeat."
+publish = false
+
+[lib]
+name = "heads_down"
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+# Production build: hardcoded mainnet SGT anchors (sgt-verify refuses to
+# compile if `test-group` is also enabled).
+mainnet = ["sgt-verify/mainnet"]
+# Devnet / test build: SGT anchors swapped at compile time for a test group
+# (SGT_VERIFY_TEST_GROUP / SGT_VERIFY_TEST_AUTHORITY, else the public test keys).
+devnet = ["sgt-verify/test-group"]
+# Compile as a plain library (host tools, the test client) without the SBF
+# entrypoint, allocator and panic handler symbols.
+no-entrypoint = []
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false, features = ["cpi", "copy"] }
+pinocchio-system = "0.6.1"
+# `sha2` gives the const PDA derivation used for the Config / Executor addresses.
+solana-address = { version = "2.7", default-features = false, features = ["copy", "sha2"] }
+solana-sha256-hasher = { version = "3.1", default-features = false }
+solana-keccak-hasher = { version = "3.1", default-features = false }
+bytemuck = { version = "1.25", default-features = false, features = ["derive", "min_const_generics"] }
+p256-introspect = { path = "../../../crates/p256-introspect" }
+sgt-verify = { path = "../../../crates/sgt-verify" }
+
+# Host builds (unit tests, the test client) hash with the pure-Rust crates; the
+# SBF build uses the sol_sha256 / sol_keccak256 syscalls.
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
+solana-keccak-hasher = { version = "3.1", features = ["sha3"] }
+solana-address = { version = "2.7", features = ["curve25519", "decode"] }
+
+[dev-dependencies]
+sha3 = "0.10"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

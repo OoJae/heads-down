@@ -1,0 +1,14 @@
+# Standalone workspace for the heads_down on-chain program and its LiteSVM
+# fork suite. It consumes ../../crates/p256-introspect and ../../crates/sgt-verify
+# by path and is not part of any root workspace.
+[workspace]
+resolver = "2"
+members = ["program", "tests", "tests/mock-ore"]
+# `cargo test` at this root runs only the program's host unit tests; the fork
+# suite needs the SBF builds first (scripts/test.sh).
+default-members = ["program"]
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
