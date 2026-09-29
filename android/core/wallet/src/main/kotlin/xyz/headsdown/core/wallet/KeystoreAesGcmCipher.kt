@@ -2,7 +2,9 @@ package xyz.headsdown.core.wallet
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -35,18 +37,26 @@ class KeystoreAesGcmCipher(
     }
 
     override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray {
-        require(ciphertext.size > 1 + IV_BYTES + TAG_BYTES) { "ciphertext too short" }
-        require(ciphertext[0] == VERSION) { "unknown blob version" }
+        if (ciphertext.size <= 1 + IV_BYTES + TAG_BYTES) throw UnrecoverableCiphertextException("ciphertext too short")
+        if (ciphertext[0] != VERSION) throw UnrecoverableCiphertextException("unknown blob version")
+        // A missing key means the blob was sealed by a key that no longer exists.
+        val key = existingKey() ?: throw UnrecoverableCiphertextException("vault key missing")
         val iv = ciphertext.copyOfRange(1, 1 + IV_BYTES)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BYTES * 8, iv))
+        try {
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BYTES * 8, iv))
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            throw UnrecoverableCiphertextException("vault key invalidated", e)
+        }
         cipher.updateAAD(associatedData)
-        return cipher.doFinal(ciphertext, 1 + IV_BYTES, ciphertext.size - 1 - IV_BYTES)
+        return cipher.doFinal(ciphertext, 1 + IV_BYTES, ciphertext.size - 1 - IV_BYTES) // AEADBadTagException on tamper
     }
+
+    private fun existingKey(): SecretKey? = keyStore.getKey(alias, null) as? SecretKey
 
     @Synchronized
     private fun key(): SecretKey {
-        (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
+        existingKey()?.let { return it }
         val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
@@ -75,8 +85,8 @@ class SharedPreferencesSecretStore(context: Context, fileName: String = FILE_NAM
     private val prefs = context.applicationContext.getSharedPreferences(fileName, Context.MODE_PRIVATE)
 
     override fun get(key: String): String? = prefs.getString(key, null)
-    override fun put(key: String, value: String) = prefs.edit().putString(key, value).apply()
-    override fun remove(key: String) = prefs.edit().remove(key).apply()
+    override fun put(key: String, value: String) = prefs.edit { putString(key, value) }
+    override fun remove(key: String) = prefs.edit { remove(key) }
 
     companion object {
         const val FILE_NAME = "hd_wallet_vault"

@@ -1,6 +1,6 @@
 package xyz.headsdown.core.wallet
 
-import android.net.Uri
+import androidx.core.net.toUri
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import com.solana.mobilewalletadapter.clientlib.Blockchain
 import com.solana.mobilewalletadapter.clientlib.ConnectionIdentity
@@ -40,8 +40,8 @@ data class SubmissionReport(val outcomes: List<ConfirmationOutcome>) {
 /** Where the dApp identifies itself to the wallet. */
 object HeadsDownIdentity {
     val connectionIdentity = ConnectionIdentity(
-        identityUri = Uri.parse("https://headsdown.xyz"),
-        iconUri = Uri.parse("favicon.ico"), // resolved relative to identityUri by the wallet
+        identityUri = "https://headsdown.xyz".toUri(),
+        iconUri = "favicon.ico".toUri(), // resolved relative to identityUri by the wallet
         identityName = "Heads Down",
     )
     const val SIWS_DOMAIN = "headsdown.xyz"

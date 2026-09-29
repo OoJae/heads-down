@@ -15,6 +15,7 @@ dependencies {
         exclude(group = "androidx.test.ext")
         exclude(group = "androidx.test")
     }
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.kotlinx.coroutines.android)
 }

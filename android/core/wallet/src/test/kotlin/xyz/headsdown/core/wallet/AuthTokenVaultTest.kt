@@ -91,6 +91,31 @@ class AuthTokenVaultTest {
     }
 
     @Test
+    fun `transient keystore failure keeps the blob`() {
+        vault.save("solana:devnet", token)
+        val locked = object : AeadCipher {
+            override fun encrypt(plaintext: ByteArray, associatedData: ByteArray) = error("unused")
+            override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray =
+                throw IllegalStateException("Keystore: device locked")
+        }
+        assertNull(AuthTokenVault(locked, store).load("solana:devnet"))
+        assertEquals("a transient failure must not delete the session", 1, store.map.size)
+        assertEquals(token, vault.load("solana:devnet"))
+    }
+
+    @Test
+    fun `unrecoverable ciphertext is discarded`() {
+        vault.save("solana:devnet", token)
+        val invalidated = object : AeadCipher {
+            override fun encrypt(plaintext: ByteArray, associatedData: ByteArray) = error("unused")
+            override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray =
+                throw UnrecoverableCiphertextException("vault key invalidated")
+        }
+        assertNull(AuthTokenVault(invalidated, store).load("solana:devnet"))
+        assertTrue(store.map.isEmpty())
+    }
+
+    @Test
     fun `garbage and missing entries return null`() {
         assertNull(vault.load("solana:devnet"))
         store.map["mwa_auth_token.solana:devnet"] = "not base64 !!"

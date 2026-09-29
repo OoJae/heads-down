@@ -1,14 +1,22 @@
 package xyz.headsdown.core.wallet
 
 import java.util.Base64
+import javax.crypto.AEADBadTagException
 
 /** Authenticated encryption. `encrypt` output is self-contained (it carries its own IV). */
 interface AeadCipher {
     fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray
 
-    /** Throws on any authentication failure (tampering, wrong AAD, wrong or rotated key). */
+    /**
+     * Throws [UnrecoverableCiphertextException] (or `AEADBadTagException`) when the blob can
+     * never be decrypted (tampering, wrong AAD, key invalidated or replaced), and any other
+     * exception for transient failures (e.g. device locked) where the blob is still good.
+     */
     fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray
 }
+
+/** The ciphertext is permanently unreadable; the caller should discard it. */
+class UnrecoverableCiphertextException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /** Minimal persistent string store. Only ever sees ciphertext. */
 interface SecretStore {
@@ -23,8 +31,10 @@ interface SecretStore {
  *
  * - The AAD binds each blob to its purpose and chain (`hd/mwa-auth-token/v1/<chain>`), so a
  *   devnet token blob cannot be replayed as a mainnet one, nor any other blob as a token.
- * - Any decryption failure (tampered prefs, restored backup from another device, invalidated
- *   Keystore key) clears the entry and returns null: the user simply re-authorizes.
+ * - A permanently unreadable blob (tampered prefs, restored from another device, invalidated
+ *   Keystore key) is deleted and null returned: the user simply re-authorizes.
+ * - A transient failure (e.g. the Keystore refuses while the device is locked) returns null
+ *   but keeps the blob, so a valid session is not thrown away.
  * - Never logs. [AuthToken.toString] is redacted.
  */
 class AuthTokenVault(
@@ -39,14 +49,23 @@ class AuthTokenVault(
     fun load(chain: String): AuthToken? {
         val encoded = store.get(storageKey(chain)) ?: return null
         return try {
-            val blob = Base64.getDecoder().decode(encoded)
+            val blob = Base64.getDecoder().decode(encoded) // IllegalArgumentException if corrupt
             val plain = cipher.decrypt(blob, aad(chain))
             AuthToken(String(plain, Charsets.UTF_8))
+        } catch (_: UnrecoverableCiphertextException) {
+            discard(chain)
+        } catch (_: AEADBadTagException) {
+            discard(chain)
+        } catch (_: IllegalArgumentException) {
+            discard(chain)
         } catch (_: Exception) {
-            // Fail closed and self-heal: an unreadable token is as good as no token.
-            store.remove(storageKey(chain))
-            null
+            null // transient: fail closed for now, keep the blob
         }
+    }
+
+    private fun discard(chain: String): AuthToken? {
+        store.remove(storageKey(chain))
+        return null
     }
 
     fun clear(chain: String) = store.remove(storageKey(chain))
