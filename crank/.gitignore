@@ -1,0 +1,8 @@
+/target/
+/.hd-crank/
+/test-fixtures/mock-heads-down/target/
+# Never commit keypairs or local configs with endpoints.
+*keypair*.json
+id.json
+crank.toml
+.env
