@@ -124,7 +124,7 @@ def main() -> int:
     sample = "--sample" in sys.argv
     res = run(sample)
     os.makedirs(OUT, exist_ok=True)
-    with open(os.path.join(OUT, "validation.json"), "w") as f:
+    with open(os.path.join(OUT, "validation_sample.json" if sample else "validation.json"), "w") as f:
         json.dump(res, f, indent=1, default=str)
     print(json.dumps(res, indent=1, default=str))
     return 0

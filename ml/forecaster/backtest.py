@@ -305,94 +305,109 @@ def _style(ax):
     ax.set_axisbelow(True)
 
 
-def fig_eff_vs_budget(sweep: pd.DataFrame, path: str) -> None:
+def fig_eff_vs_budget(sweep: pd.DataFrame, path: str, chunked: Optional[Dict[float, float]] = None) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(8, 4.6), dpi=130, facecolor=PALETTE["surface"])
+    P = PALETTE
+    fig, ax = plt.subplots(figsize=(8, 4.6), dpi=130, facecolor=P["surface"])
     _style(ax)
-    series = [("always_mine", "Always mine (claim nightly)", PALETTE["blue"]),
-              ("always_mine_hold", "Always mine (hold unrefined)", PALETTE["aqua"]),
-              ("gate_ev", "Gate: EMA + Motherlode pot", PALETTE["orange"])]
+    ax.axhline(1.0, color=P["ink2"], linewidth=1)
+    ax.text(sweep.index.min(), 0.985, "always buy = 1.0", va="top", ha="left", color=P["ink2"], fontsize=9)
+    for b in HEADLINE_BUDGETS:
+        ax.axvline(b, color=P["grid"], linewidth=1)
+    series = [("always_mine", "Always mine, every round (claim nightly)", P["blue"]),
+              ("always_mine_hold", "Always mine, every round (keep ORE unrefined)", P["aqua"]),
+              ("gate_ev", "Motherlode-aware gate, every round (claim)", P["orange"])]
     for key, label, color in series:
         if key in sweep.columns:
             ax.plot(sweep.index, sweep[key], color=color, linewidth=2, marker="o", markersize=4, label=label)
-    ax.axhline(1.0, color=PALETTE["ink2"], linewidth=1)
-    ax.text(sweep.index.min(), 1.0, " always buy = 1.0", va="bottom", ha="left", color=PALETTE["ink2"], fontsize=9)
-    for b in HEADLINE_BUDGETS:
-        ax.axvline(b, color=PALETTE["grid"], linewidth=1)
+    if chunked:
+        xs = sorted(chunked)
+        ax.plot(xs, [chunked[x] for x in xs], linestyle="none", marker="D", markersize=8, color=P["yellow"],
+                markeredgecolor=P["surface"], markeredgewidth=2,
+                label="Same budget in 0.001 SOL deploys, gated (claim)")
     ax.set_xscale("log")
-    ax.set_xlabel("Nightly budget, SOL deployed (log scale)", color=PALETTE["ink"])
-    ax.set_ylabel("Effective price / always-buy price", color=PALETTE["ink"])
-    ax.set_title("Small budgets pay the fixed crank fee on every round", loc="left", color=PALETTE["ink"], fontsize=11)
-    ax.legend(frameon=False, fontsize=9, loc="upper right")
+    ax.set_xlabel("Nightly budget, SOL deployed (log scale; grey lines = 0.02 / 0.04 / 0.05)", color=P["ink"])
+    ax.set_ylabel("Effective SOL per ORE / always-buy", color=P["ink"])
+    ax.set_title("Small budgets pay the fixed 5,000-lamport crank fee on every round", loc="left",
+                 color=P["ink"], fontsize=11)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper right")
     fig.tight_layout()
-    fig.savefig(path, facecolor=PALETTE["surface"])
+    fig.savefig(path, facecolor=P["surface"])
     plt.close(fig)
 
 
 def fig_night_hist(dists: List[Dict[str, object]], path: str) -> None:
+    """ECDF of ORE mined per night; the curve's height at 0 is the zero-ORE-night probability."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    P = PALETTE
     budgets = sorted({d["budget"] for d in dists})
-    fig, axes = plt.subplots(1, len(budgets), figsize=(4.2 * len(budgets), 3.8), dpi=130,
-                             facecolor=PALETTE["surface"], sharey=True)
+    fig, axes = plt.subplots(1, len(budgets), figsize=(4.6 * len(budgets), 4.0), dpi=130,
+                             facecolor=P["surface"], sharey=True)
     axes = np.atleast_1d(axes)
-    colors = {"all25": PALETTE["blue"], "rand5": PALETTE["orange"]}
-    labels = {"all25": "All 25 tiles", "rand5": "5 random tiles"}
+    style = {"all25": (P["blue"], "All 25 tiles"), "rand5": (P["orange"], "5 random tiles"),
+             "split15": (P["aqua"], "15 split tiles"), "solo10": (P["yellow"], "10 solo tiles")}
     for ax, b in zip(axes, budgets):
         _style(ax)
-        for d in dists:
-            if d["budget"] != b or d["policy"] not in colors:
+        hi = max(np.percentile(d["samples"], 97) for d in dists if d["budget"] == b)
+        for pol in ("all25", "rand5", "split15", "solo10"):
+            d = next((d for d in dists if d["budget"] == b and d["policy"] == pol), None)
+            if d is None:
                 continue
-            s = d["samples"]
-            hi = np.percentile(s, 99)
-            bins = np.linspace(0, max(hi, 1e-9), 50)
-            ax.hist(np.clip(s, 0, hi), bins=bins, histtype="step", linewidth=2, color=colors[d["policy"]],
-                    density=True, label=f"{labels[d['policy']]}  (P0={100 * d['p_zero']:.1f}%)")
-        ax.set_title(f"{b:g} SOL/night deployed", loc="left", color=PALETTE["ink"], fontsize=10)
-        ax.set_xlabel("ORE mined per night (after 10% refining)", color=PALETTE["ink"], fontsize=9)
-        ax.legend(frameon=False, fontsize=8)
-    axes[0].set_ylabel("Density", color=PALETTE["ink"])
-    fig.suptitle("ORE per night for a small rig (Monte Carlo over real rounds)", x=0.01, ha="left",
-                 color=PALETTE["ink"], fontsize=11)
+            s = np.sort(d["samples"])
+            y = np.arange(1, len(s) + 1) / len(s)
+            color, label = style[pol]
+            ax.step(np.clip(s, 0, hi), y, where="post", color=color, linewidth=2,
+                    label=f"{label}: P(0 ORE) = {100 * d['p_zero']:.0f}%")
+        ax.set_xlim(-0.02 * hi, hi)
+        ax.set_title(f"{b:g} SOL/night deployed", loc="left", color=P["ink"], fontsize=10)
+        ax.set_xlabel("ORE mined per night, after the 10% refining fee", color=P["ink"], fontsize=9)
+        ax.legend(frameon=False, fontsize=8, loc="lower right")
+    axes[0].set_ylabel("Share of nights at or below", color=P["ink"])
+    fig.suptitle("ORE per night for a small rig: Monte Carlo over 47 real nights", x=0.01, ha="left",
+                 color=P["ink"], fontsize=11)
     fig.tight_layout()
-    fig.savefig(path, facecolor=PALETTE["surface"])
+    fig.savefig(path, facecolor=P["surface"])
     plt.close(fig)
 
 
 def fig_cost_vs_price(r_all: pd.DataFrame, prices: pd.DataFrame, A: float, costs: L.Costs, path: str,
-                      since: str = REGIME_START) -> None:
+                      since: str = REGIME_START, budget_label: str = "") -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    P = PALETTE
     x = r_all[(r_all["time"] >= pd.Timestamp(since, tz="UTC")) & r_all["ema_warm"]].copy()
     x["hour"] = x["time"].dt.floor("h")
-    h = x.groupby("hour").agg(ema=("ema_after", "mean"), pot=("pot_before", "mean"))
-    h["ema_sol"] = h["ema"] / L.LAMPORTS_PER_SOL
+    x["ema_ev"] = x["ema_before"] * 1.2 / (1 + x["pot_before"].fillna(100 * L.ONE_ORE) / L.ONE_ORE / L.MOTHERLODE_ODDS)
+    h = x.groupby("hour").agg(ema=("ema_before", "mean"), ema_ev=("ema_ev", "mean"))
     h["user"] = L.user_cost_estimate(h["ema"].to_numpy(), A, costs, None, True)
     px = prices.copy()
     px["hour"] = pd.to_datetime(px["ts"], unit="s", utc=True)
     h = h.join(px.set_index("hour")["close"], how="inner")
     roll = lambda s: s.rolling(6, min_periods=1).median()  # noqa: E731
-    fig, ax = plt.subplots(figsize=(9, 4.4), dpi=130, facecolor=PALETTE["surface"])
+    fig, ax = plt.subplots(figsize=(9, 4.6), dpi=130, facecolor=P["surface"])
     _style(ax)
-    ax.plot(h.index, h["close"], color=PALETTE["ink"], linewidth=1.5, label="Market price (ORE/SOL pool)")
-    ax.plot(h.index, roll(h["ema_sol"]), color=PALETTE["blue"], linewidth=1.5,
-            label="Protocol production_cost_ema (6h median)")
-    ax.plot(h.index, roll(h["user"]), color=PALETTE["orange"], linewidth=1.5,
-            label=f"Small-rig all-in cost at {A * 1e-9 * 1e6:.0f} µSOL/round (6h median)")
-    ax.set_ylabel("SOL per ORE", color=PALETTE["ink"])
-    ax.set_title("Mining cost vs market, reconstructed from every round since Aug 13", loc="left",
-                 color=PALETTE["ink"], fontsize=11)
-    ax.legend(frameon=False, fontsize=8, loc="upper left")
+    ax.plot(h.index, h["close"], color=P["ink"], linewidth=1.8, label="Market price (ORE/SOL pool)")
+    ax.plot(h.index, roll(h["ema"] / L.LAMPORTS_PER_SOL), color=P["blue"], linewidth=1.3,
+            label="production_cost_ema (protocol fee per 1.2 ORE)")
+    ax.plot(h.index, roll(h["ema_ev"] / L.LAMPORTS_PER_SOL), color=P["aqua"], linewidth=1.3,
+            label="Same, adjusted for the Motherlode pot's expected value")
+    ax.plot(h.index, roll(h["user"]), color=P["orange"], linewidth=1.3,
+            label=f"All-in cost for a {budget_label} rig (admin + refining + crank fees)")
+    ax.set_ylabel("SOL per ORE (6-hour rolling median)", color=P["ink"])
+    ax.set_title("Mining cost vs market price, rebuilt from every ORE round since Aug 13", loc="left",
+                 color=P["ink"], fontsize=11)
+    ax.legend(frameon=False, fontsize=8, loc="upper right")
     fig.autofmt_xdate()
     fig.tight_layout()
-    fig.savefig(path, facecolor=PALETTE["surface"])
+    fig.savefig(path, facecolor=P["surface"])
     plt.close(fig)
 
 
@@ -525,11 +540,14 @@ def run(args) -> Dict[str, object]:
     print(vc.to_string(index=False, float_format=lambda v: f"{v:.6g}"))
 
     if not args.no_figures:
-        os.makedirs(FIG, exist_ok=True)
-        fig_eff_vs_budget(sweep, os.path.join(FIG, "eff_price_vs_budget.png"))
-        fig_night_hist(dists, os.path.join(FIG, "ore_per_night.png"))
-        fig_cost_vs_price(prep["all_rounds"], prep["prices"], 1.0 * L.LAMPORTS_PER_SOL / n_med, costs,
-                          os.path.join(FIG, "cost_vs_price.png"))
+        fig_dir = os.path.join(OUT, "figures_sample") if args.sample else FIG  # never overwrite published figures
+        os.makedirs(fig_dir, exist_ok=True)
+        chunked_pts = {B: 1 + res["chunked"][f"{B}|1000000|claim"]["chunked_gate_ev"]["vs_always_buy_pct"] / 100
+                       for B in HEADLINE_BUDGETS if f"{B}|1000000|claim" in res["chunked"]}
+        fig_eff_vs_budget(sweep, os.path.join(fig_dir, "eff_price_vs_budget.png"), chunked_pts)
+        fig_night_hist(dists, os.path.join(fig_dir, "ore_per_night.png"))
+        fig_cost_vs_price(prep["all_rounds"], prep["prices"], 0.04 * L.LAMPORTS_PER_SOL / n_med, costs,
+                          os.path.join(fig_dir, "cost_vs_price.png"), budget_label="0.04 SOL/night")
     res["runtime_s"] = round(time.time() - t0, 1)
     return res
 
@@ -551,9 +569,10 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     res = run(args)
     os.makedirs(OUT, exist_ok=True)
-    with open(os.path.join(OUT, "backtest_results.json"), "w") as f:
+    name = "backtest_results_sample.json" if args.sample else "backtest_results.json"
+    with open(os.path.join(OUT, name), "w") as f:
         json.dump(res, f, indent=1, default=str)
-    print(f"\nwrote {os.path.join(OUT, 'backtest_results.json')} in {res['runtime_s']}s")
+    print(f"\nwrote {os.path.join(OUT, name)} in {res['runtime_s']}s")
     return 0
 
 

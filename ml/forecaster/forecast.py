@@ -128,6 +128,8 @@ def walk_forward(h: pd.DataFrame, H: int, since: str, min_train_days: int = 7,
     d = h[h.index >= pd.Timestamp(since, tz="UTC")].copy()
     ok = d[FEATURES].notna().all(axis=1) & d[f"y_{H}"].notna()
     d = d[ok]
+    if len(d) < 48:  # e.g. the offline sample: too short for 24h lags plus a training window
+        return pd.DataFrame()
     target = d[f"y_{H}"] - d["lr_now"]  # predict the change vs persistence
     start = d.index.min() + pd.Timedelta(days=min_train_days)
     cut_points = pd.date_range(start, d.index.max(), freq=f"{refit_hours}h", tz="UTC")
@@ -345,15 +347,18 @@ def main(argv=None) -> int:
                       f"[{fc['ci95_lo']:+.2f}, {fc['ci95_hi']:+.2f}] (negative = forecast cheaper)")
 
         os.makedirs(OUT, exist_ok=True)
-        res["export"] = export_linear(h, 1, since, os.path.join(OUT, "forecaster_ridge_h1.json"))
+        suffix = "_sample" if args.sample else ""
+        res["export"] = export_linear(h, 1, since, os.path.join(OUT, f"forecaster_ridge_h1{suffix}.json"))
         if not args.no_figures:
-            os.makedirs(FIG, exist_ok=True)
-            fig_forecast(pred1, os.path.join(FIG, "forecast_walkforward.png"), 1)
+            fig_dir = os.path.join(OUT, "figures_sample") if args.sample else FIG
+            os.makedirs(fig_dir, exist_ok=True)
+            fig_forecast(pred1, os.path.join(fig_dir, "forecast_walkforward.png"), 1)
     os.makedirs(OUT, exist_ok=True)
     res["runtime_s"] = round(time.time() - t0, 1)
-    with open(os.path.join(OUT, "forecast_results.json"), "w") as f:
+    name = "forecast_results_sample.json" if args.sample else "forecast_results.json"
+    with open(os.path.join(OUT, name), "w") as f:
         json.dump(res, f, indent=1, default=str)
-    print(f"\nwrote {os.path.join(OUT, 'forecast_results.json')} in {res['runtime_s']}s")
+    print(f"\nwrote {os.path.join(OUT, name)} in {res['runtime_s']}s")
     return 0
 
 
