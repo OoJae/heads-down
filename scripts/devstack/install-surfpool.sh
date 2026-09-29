@@ -7,6 +7,7 @@
 # The digests below are GitHub's own asset digests for the tag, re-checked after download.
 #
 # Installs to $HD_DEVSTACK_HOME/bin/surfpool (outside the repo; nothing on your PATH changes).
+# SURFPOOL_TARBALL=<path> installs from an already-downloaded tarball (still hash-checked).
 source "$(dirname "$0")/lib.sh"
 
 VERSION="v1.6.0"
@@ -24,8 +25,13 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 URL="https://github.com/solana-foundation/surfpool/releases/download/$VERSION/$ASSET"
-log "downloading $URL"
-curl -fL --retry 3 -o "$TMP/$ASSET" "$URL"
+if [[ -n "${SURFPOOL_TARBALL:-}" ]]; then
+  log "using the local tarball $SURFPOOL_TARBALL (hash-checked below)"
+  cp "$SURFPOOL_TARBALL" "$TMP/$ASSET"
+else
+  log "downloading $URL"
+  curl -fL --retry 3 -o "$TMP/$ASSET" "$URL"
+fi
 GOT="$(shasum -a 256 "$TMP/$ASSET" | cut -d' ' -f1)"
 [[ "$GOT" == "$SHA" ]] || die "SHA-256 mismatch for $ASSET: got $GOT, expected $SHA (refusing to install)"
 tar -xzf "$TMP/$ASSET" -C "$TMP"

@@ -50,6 +50,9 @@ for p in "$HD_RPC_PORT" "$HD_WS_PORT" "$HD_CRANK_PORT" "$HD_INDEXER_PORT" "$HD_F
   port_busy "$p" && die "port $p is in use (lsof -nP -iTCP:$p -sTCP:LISTEN)"
 done
 mkdir -p "$HD_DEVSTACK_HOME" "$LOGS" "$RUN"
+# Keep the previous run's logs one level down; every run starts with fresh log files.
+rm -rf "$LOGS/prev" && mkdir -p "$LOGS/prev"
+for f in "$LOGS"/*.log; do if [[ -e "$f" ]]; then mv "$f" "$LOGS/prev/"; fi; done
 
 # ---- build ---------------------------------------------------------------------------------------
 if [[ $BUILD == 1 || ! -f "$HD_SO" ]]; then
@@ -102,11 +105,16 @@ if [[ "$HD_DEVSTACK_ENGINE" == "test-validator" ]]; then
     --bpf-program mintzxW6Kckmeyh1h6Zfdj9QcYgCzhPSGiC8ChZ6fCx "$FIXTURES/ore_mint.so" \
     "${ACCOUNT_ARGS[@]}"
 else
-  rm -rf "$RUN/crank-state" "$RUN/indexer-pg"
+  # Surfpool keeps its state in memory: every start is a fresh fork of mainnet "now".
+  rm -rf "$RUN/crank-state" "$RUN/indexer-pg" "$RUN/surfpool"
+  mkdir -p "$RUN/surfpool"
   log "starting surfpool $("$SURFPOOL_BIN" --version | awk '{print $2}') (lazy mainnet fork) on $RPC_URL (ws $WS_URL)"
-  start_bg validator "$LOGS/validator.log" "$SURFPOOL_BIN" start --rpc-url "$HD_MAINNET_RPC" --no-tui --no-studio \
-    --no-deploy --port "$HD_RPC_PORT" --ws-port "$HD_WS_PORT" --airdrop-amount 0 --log-bytes-limit 0 \
-    --log-path "$LOGS/surfpool"
+  (
+    cd "$RUN/surfpool"
+    start_bg validator "$LOGS/validator.log" "$SURFPOOL_BIN" start --rpc-url "$HD_MAINNET_RPC" --no-tui --no-studio \
+      --no-deploy --port "$HD_RPC_PORT" --ws-port "$HD_WS_PORT" --airdrop-amount 0 --log-bytes-limit 0 \
+      --log-path "$LOGS/surfpool"
+  )
 fi
 for _ in $(seq 1 180); do
   rpc getSlot | grep -q '"result"' && break
