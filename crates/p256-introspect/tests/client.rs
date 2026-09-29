@@ -41,6 +41,8 @@ const RFC6979_UX: &str = "60FED4BA255A9D31C961EB74C6356D68C049B8923B61FA6CE66962
 const RFC6979_UY: &str = "7903FE1008B8BC99A41AE9E95628BC64F2F1B20C2D7E9F5177A3C294D4462299";
 const RFC6979_SAMPLE_R: &str = "EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716";
 const RFC6979_SAMPLE_S: &str = "F7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8";
+/// n - RFC6979_SAMPLE_S (computed independently in Python).
+const RFC6979_SAMPLE_S_LOW: &str = "0834E36AD29A83BF2BC9385E491D6099C8FDF9D1ED67AA7EA5F51F93782857A9";
 const RFC6979_TEST_R: &str = "F1ABB023518351CD71D881567B1EA663ED3EFCF6C5132B354F28D3B0B7D38367";
 const RFC6979_TEST_S: &str = "019F4113742A2B14BD25926B49C649155F267E60D3814B4C0CC84250E46F0083";
 
@@ -65,6 +67,8 @@ fn rfc6979_known_answer_high_s_vector_normalizes_and_verifies() {
 
     let low = der_to_low_s_raw(&der).unwrap();
     assert_eq!(low[..32], raw[..32], "r is unchanged");
+    // n - s, the value the precompile must be given.
+    assert_eq!(&low[32..], hex(RFC6979_SAMPLE_S_LOW).as_slice());
     assert!(is_low_s(low[32..].try_into().unwrap()));
     verify_like_precompile(&pk, b"sample", &low).unwrap();
     assert_eq!(normalize_low_s(&raw).unwrap(), low);
