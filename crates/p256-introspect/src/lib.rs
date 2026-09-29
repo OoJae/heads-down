@@ -73,6 +73,8 @@
 
 pub mod constants;
 pub mod error;
+pub mod sysvar;
 
 pub use constants::*;
 pub use error::{IntrospectError, ERROR_CODE_BASE};
+pub use sysvar::{InstructionsSysvar, IntrospectedInstruction};
