@@ -1,5 +1,24 @@
 # CHAMPION SPEC
 
+> **Corrections after the day-1 spikes (2026-09-29).** Where this spec and
+> [`programs/heads-down/INTERFACE.md`](../programs/heads-down/INTERFACE.md) disagree, **INTERFACE.md wins**.
+> - **Price gate:** ORE stores `max_production_cost` but does **not** enforce it (`deploy.rs` checks only the
+>   Motherlode bounds). The heads_down program enforces a **Motherlode-aware** gate on
+>   `Board.production_cost_ema` and `Treasury.motherlode` ([docs/ORE.md](ORE.md)).
+> - **Dig cadence:** the phone heartbeats every round off-chain. The program **digs in concentrated chunks
+>   (≥ 0.001 SOL) on least-crowded split tiles only when the gate opens**, instead of deploying every round.
+>   Fixed per-dig fees make per-round micro-deploys 36–90% more expensive than buying at nightly budgets.
+>   The gated chunk design beats buying by about 1.4–5.5% ([ml/forecaster/RESULTS.md](../ml/forecaster/RESULTS.md)).
+> - **Foreman Cost Forecaster:** demoted to **advisory**. It showed no skill over the live on-chain rule.
+> - **Heartbeats:** the phone signs `SHA-256(preimage)` (32 bytes) so 7 heartbeats fit per v0 transaction.
+>   On-chain verification happens only at dig time.
+> - **Burying:** use ORE's permissionless `bury` instruction. The "grams" address `GHRBYPA4…` is an
+>   ordinary wallet whose burning cannot be verified from ORE's source ([docs/ORE.md](ORE.md) §10).
+> - **Proven on a mainnet fork:** a heads_down PDA executor deploys through ORE CPI, attackers can't, and the
+>   PDA can pay ORE's checkpoint fee ([spikes/ore-executor](../spikes/ore-executor/README.md)).
+> - **Device:** the build targets any Android. It is developed and filmed on a Redmi 14C (no gyroscope, virtual
+>   proximity sensor), with a guest tier on any phone and an SGT-verified Seeker tier.
+
 ## PRODUCT_DEFINITION
 Heads Down is a native Android (Kotlin) app for Solana Seeker. It gives the phone a job during the hours it would otherwise sit idle.
 
@@ -103,7 +122,7 @@ WITHOUT AN AIRDROP OR IN A BAD-EV WEEK: focus-only shifts (zero SOL) still count
 - RIG / trustless phone gate. Your ORE Automation's executor is the Heads Down Executor PDA. A permissionless crank can dig for a rig only when that rig's Keystore P-256 heartbeat for the current ORE round verifies on-chain (secp256r1 precompile, checked instructions sysvar, offsets confined to the same instruction). The program, not the cranker, computes the amount and the tiles.
 - RIG / custody stays in ORE. The authority is your Seed Vault wallet. ORE enforces deploy-or-return. You can withdraw or close at any time. There is no Heads Down vault for mining funds.
 - RIG / shift modes. Night Shift (charger, planned window, exact-alarm clock-out). Day Shift (25/50/90-minute desk rig). Motherlode Hunter preset (ORE-native min_motherlode). Focus-only (zero SOL, which still counts for streaks, rooms and Stack).
-- RIG / mine-or-buy engine (from STASH). An ORE-native max_production_cost ceiling is set at refuel, plus a tighter program-level gate from the Foreman plan. At clock-out, a 'buy the rest at market' leg runs via Jupiter when mining was pricier. A weekly scoreboard compares effective price per ORE with market. Buy mode is available for bad-EV stretches.
+- RIG / mine-or-buy engine (from STASH). The heads_down program enforces a Motherlode-aware production-cost gate (ORE does not enforce `max_production_cost`). At clock-out, a 'buy the rest at market' leg runs via Jupiter when mining was pricier. A weekly scoreboard compares effective price per ORE with market. Buy mode is available for bad-EV stretches.
 - RIG / budgets. A weekly refuel cap, per-shift cap, per-round cap and expiry, all signed by the wallet. The P-256 key and the AI can only tighten them, never raise them. Hard ceilings are shown in the UI.
 - RIG / crowd-aware placement computed on-chain. The program reads the live Round's per-tile totals and picks the least-crowded split tiles plus the plan's solo count, and deploys late in the round. The crank has no discretion.
 - RIG / heartbeat leases. Solo shifts may sign short leases of 3 rounds or fewer to save battery. Stack requires a heartbeat every round. Offline means no mining.
@@ -161,7 +180,7 @@ PROGRAM: heads_down
   - ORE oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv: Board BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi, Treasury 45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG, Config 9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy. Round, Miner and Automation accounts are re-derived from their seeds.
   - Token-2022 (SGT reads) and SPL Token (SKR SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3, ORE mint oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp).
   - System, Secp256r1SigVerify1111111111111111111111111, the Ed25519 precompile, and the instructions sysvar Sysvar1nstructions1111111111111111111111111.
-  - ORE's bury address GHRBYPA4cujFwfyhNNm6NLTh4egdTrcz7xkBbEwM4xX, which auto-burns ORE.
+  - ORE's permissionless `bury` instruction (tag 24) for Bury-auction proceeds (not the unverifiable `GHRBYPA4…` wallet).
 
 ACCOUNTS
 - Config [b'config']:
@@ -213,7 +232,7 @@ INSTRUCTIONS
 - rotate_key: signed by the holder.
 - refuel(caps, expiry)
   - Signed by the holder.
-  - The same transaction carries ORE automate: deposit, executor = the Executor PDA, Discretionary fixed fee, per-tile amount, max_production_cost and optional min_motherlode conditions, and reload.
+  - The same transaction carries ORE automate: deposit, executor = the Executor PDA, Discretionary fixed fee equal to Config.executor_fee, per-tile amount, optional min_motherlode, and reload (ORE does not enforce max_production_cost; the program gates).
   - Optionally it also carries a Jupiter SKR/USDC-to-SOL swap.
 - arm_shift(plan): P-256-signed with no wallet, or signed by the holder. It checks the plan against caps and expiry and opens a new shift_id.
 - dig(rigs[], hb_ix_index[])
@@ -377,11 +396,11 @@ ORE TOUCHPOINTS
   - the authority is the user's Seed Vault wallet (or an optional secondary Seed Vault account);
   - the executor is the Heads Down Executor PDA;
   - the strategy is Discretionary with a fixed crank-cost fee.
-- Native conditions and settings: max_production_cost, min_motherlode for the Hunter preset, per-tile amount, and reload, all under deploy-or-return custody.
+- Native conditions and settings: min_motherlode for the Hunter preset, per-tile amount and reload, all under deploy-or-return custody. The cost gate is enforced by heads_down, not ORE.
 - deploy by CPI from dig, plus checkpoint.
 - Partial claims, and the refining-fee share for unrefined ORE, shown in the UI.
 - Optional stORE through ORE's stake and LST programs.
-- ORE's bury address for Bury-auction proceeds.
+- ORE's `bury` instruction for Bury-auction proceeds.
 - Live Board, Round and Treasury data through Helius LaserStream.
 - api.ore.com: /stats/history for the EV meter and Forecaster, /events/motherlode for near-miss replays, /users for display names.
 
@@ -412,7 +431,7 @@ KEYS
 - Rig P-256 Keystore key
   - Non-exportable, StrongBox where available, attested at registration.
   - Signs plans, heartbeats, BREAK and FREEZE. It cannot move funds.
-  - Worst case if the app or device is compromised: your armed weekly budget is deployed into ORE at or below the max_production_cost you capped (it buys you ORE at a price you capped), plus the outcomes of Stack tables you joined.
+  - Worst case if the app or device is compromised: your armed weekly budget is deployed into ORE only when the program's gate is at or below the cost ceiling you capped (it buys you ORE at a price you capped), plus the outcomes of Stack tables you joined.
   - Mitigations: instant Freeze with the device key, and Revoke through Seed Vault.
 - Crank and relayer (anyone)
   - Liveness only. They cannot deploy without a fresh heartbeat, cannot pick amounts or tiles, and cannot touch bonds.
