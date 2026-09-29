@@ -19,14 +19,39 @@ val defaultCrank = "wss://crank-$cluster.headsdown.xyz/v1/heartbeats"
 val rpcUrl = (findProperty("headsdown.rpcUrl") as String?) ?: defaultRpc
 val crankUrl = (findProperty("headsdown.crankUrl") as String?) ?: defaultCrank
 
-fun requireEndpoint(name: String, url: String, scheme: String) {
+// LOCAL DEVSTACK (the `localdev` build type only): a validator and hd-crank on the laptop,
+// reached from the phone through `adb reverse tcp:8899 tcp:8899` and `adb reverse tcp:8787 tcp:8787`.
+//   ./gradlew :app:assembleLocaldev [-Pheadsdown.localdev.rpcUrl=http://127.0.0.1:8899]
+//       [-Pheadsdown.localdev.crankUrl=ws://127.0.0.1:8787/ws]
+// Debug and release never read these, and still refuse http:// and ws:// outright.
+val localdevRpcUrl = (findProperty("headsdown.localdev.rpcUrl") as String?) ?: "http://127.0.0.1:8899"
+val localdevCrankUrl = (findProperty("headsdown.localdev.crankUrl") as String?) ?: "ws://127.0.0.1:8787/ws"
+
+/**
+ * The build-time half of `xyz.headsdown.config.EndpointPolicy` (tested in app unit tests; the
+ * app re-checks at startup). TLS schemes always; cleartext only with [allowLoopback] and only to
+ * 127.0.0.1 / localhost; never user-info, a query string (`?api-key=`) or a fragment.
+ */
+fun requireEndpoint(name: String, url: String, secure: String, cleartext: String, allowLoopback: Boolean) {
     val uri = URI(url)
-    require(uri.scheme == scheme && !uri.host.isNullOrEmpty()) { "$name must be a $scheme:// URL" }
-    // A query string or user-info is where provider keys hide (?api-key=...): refuse to bake one in.
-    require(uri.rawQuery == null && uri.rawUserInfo == null) { "$name must not carry a query string or credentials" }
+    val scheme = uri.scheme?.lowercase()
+    val host = uri.host?.lowercase()
+    require(!host.isNullOrEmpty()) { "$name must have a host" }
+    require(uri.rawQuery == null && uri.rawUserInfo == null && uri.rawFragment == null) {
+        "$name must not carry credentials, a query string or a fragment"
+    }
+    if (scheme == secure) return
+    require(scheme == cleartext && allowLoopback) {
+        "$name must be a $secure:// URL" + if (allowLoopback) "" else " ($cleartext:// only in the localdev build type)"
+    }
+    require(host == "127.0.0.1" || host == "localhost") { "$name: $cleartext:// is allowed only to 127.0.0.1 or localhost" }
 }
-requireEndpoint("headsdown.rpcUrl", rpcUrl, "https")
-if (crankUrl.isNotEmpty()) requireEndpoint("headsdown.crankUrl", crankUrl, "wss")
+requireEndpoint("headsdown.rpcUrl", rpcUrl, "https", "http", allowLoopback = false)
+if (crankUrl.isNotEmpty()) requireEndpoint("headsdown.crankUrl", crankUrl, "wss", "ws", allowLoopback = false)
+requireEndpoint("headsdown.localdev.rpcUrl", localdevRpcUrl, "https", "http", allowLoopback = true)
+if (localdevCrankUrl.isNotEmpty()) {
+    requireEndpoint("headsdown.localdev.crankUrl", localdevCrankUrl, "wss", "ws", allowLoopback = true)
+}
 
 android {
     namespace = "xyz.headsdown"
@@ -38,6 +63,7 @@ android {
         buildConfigField("String", "SOLANA_CHAIN", "\"solana:$cluster\"")
         buildConfigField("String", "SOLANA_RPC_URL", "\"$rpcUrl\"")
         buildConfigField("String", "CRANK_WS_URL", "\"$crankUrl\"")
+        buildConfigField("boolean", "LOOPBACK_CLEARTEXT_ALLOWED", "false")
     }
 
     buildFeatures {
@@ -53,7 +79,20 @@ android {
                 "proguard-rules.pro",
             )
         }
+        // Debug + loopback cleartext for the local devstack (src/localdev: network security
+        // config for 127.0.0.1/localhost and the loopback transports). Installs beside debug.
+        create("localdev") {
+            initWith(getByName("debug"))
+            matchingFallbacks += listOf("debug")
+            applicationIdSuffix = ".localdev"
+            versionNameSuffix = "-localdev"
+            buildConfigField("String", "SOLANA_RPC_URL", "\"$localdevRpcUrl\"")
+            buildConfigField("String", "CRANK_WS_URL", "\"$localdevCrankUrl\"")
+            buildConfigField("boolean", "LOOPBACK_CLEARTEXT_ALLOWED", "true")
+        }
     }
+
+    testOptions.unitTests.isIncludeAndroidResources = true
 
     lint {
         // Belt and braces with the R8 -assumenosideeffects rule: any unconditional
@@ -71,6 +110,10 @@ android {
     }
 }
 
+// Test-only versions (fold into gradle/libs.versions.toml when the catalog is next touched).
+val robolectric = "4.17"
+val androidxTestCore = "1.7.0"
+
 dependencies {
     implementation(projects.core.keys)
     implementation(projects.core.wallet)
@@ -81,9 +124,16 @@ dependencies {
     implementation(projects.surface.tile)
     implementation(projects.surface.notification)
     implementation(projects.surface.haptics)
+    implementation(projects.surface.widget)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("org.robolectric:robolectric:$robolectric")
+    testImplementation("androidx.test:core:$androidxTestCore")
 }
