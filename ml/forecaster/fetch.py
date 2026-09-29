@@ -46,6 +46,10 @@ ORE_API = "https://api.ore.com"
 GECKO_API = "https://api.geckoterminal.com/api/v2"
 # Deepest ORE/SOL pool listed by api.ore.com/market (Orca whirlpool).
 ORE_SOL_POOL = "27ExzqiGapKFd6NhffapRfdSkuykTVUqY5qeuNnrzBNm"
+DEFAULT_RPC = "https://api.mainnet-beta.solana.com"
+BOARD_ADDRESS = "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi"
+TREASURY_ADDRESS = "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG"
+ORE_PROGRAM = "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv"
 USER_AGENT = "HeadsDown-forecaster/0.1 (+research backtest; polite fetcher)"
 
 # ORE sentinel pubkey written into Round.top_miner when the +1 ORE is split pro-rata.
@@ -126,6 +130,19 @@ class Fetcher:
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 120)
         raise RuntimeError(f"giving up on {url} after {self.retries} attempts")
+
+
+    def post_json(self, url: str, payload: Any) -> Any:
+        wait = self._last + self.sleep - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
+                                     headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            body = resp.read()
+        self._last = time.time()
+        self.requests += 1
+        return json.loads(body)
 
 
 def log(msg: str) -> None:
@@ -388,6 +405,41 @@ def fetch_round_miners(f: Fetcher, n: int) -> None:
                 log(f"round miners {k}/{len(wanted)}")
 
 
+def fetch_chain(f: Fetcher, rpc: str) -> None:
+    """Snapshot ORE's Board and Treasury accounts (one getMultipleAccounts call).
+
+    Board    = disc(8) round_id start_slot end_slot production_cost_ema     (u64 LE)
+    Treasury = disc(8) motherlode rewards_factor(16) total_refined total_unclaimed
+    Used to check the EMA / Motherlode-pot reconstruction against live chain state.
+    """
+    import base64
+    import struct
+
+    res = f.post_json(rpc, {"jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts",
+                            "params": [[BOARD_ADDRESS, TREASURY_ADDRESS],
+                                       {"encoding": "base64", "commitment": "confirmed"}]})
+    slot = res["result"]["context"]["slot"]
+    board_acc, treas_acc = res["result"]["value"]
+    for acc, name, size in ((board_acc, "Board", 40), (treas_acc, "Treasury", 48)):
+        if acc is None or acc.get("owner") != ORE_PROGRAM:
+            raise RuntimeError(f"{name} account missing or not owned by the ORE program")
+        if len(base64.b64decode(acc["data"][0])) != size:
+            raise RuntimeError(f"{name} account has an unexpected size (layout changed?)")
+    b = base64.b64decode(board_acc["data"][0])
+    t = base64.b64decode(treas_acc["data"][0])
+    round_id, start_slot, end_slot, ema = struct.unpack_from("<4Q", b, 8)
+    motherlode = struct.unpack_from("<Q", t, 8)[0]
+    total_refined, total_unclaimed = struct.unpack_from("<2Q", t, 32)
+    row = {"fetched_at": iso(time.time()), "slot": slot, "round_id": round_id, "start_slot": start_slot,
+           "end_slot": end_slot, "production_cost_ema": ema, "motherlode": motherlode,
+           "total_refined": total_refined, "total_unclaimed": total_unclaimed}
+    path = os.path.join(DATA, "chain_snapshots.csv")
+    rows = read_csv(path) + [row]
+    write_csv(path, list(row), rows)
+    log(f"chain @slot {slot}: round {round_id}, production_cost_ema {ema / 1e9:.4f} SOL/ORE, "
+        f"motherlode {motherlode / 1e11:.1f} ORE, unrefined {total_unclaimed / 1e11:.0f} ORE")
+
+
 # --------------------------------------------------------------------------- sample
 
 def make_sample(n_rounds: int = 300) -> None:
@@ -424,7 +476,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--sleep", type=float, default=1.0, help="seconds between requests (be polite)")
     ap.add_argument("--max-pages", type=int, default=2000, help="cap on /events/reset pages per run")
     ap.add_argument("--miners-sample", type=int, default=0, help="also sample N /round/{id}/miners")
-    ap.add_argument("--only", choices=["stats", "motherlode", "resets", "gecko", "miners"], nargs="*",
+    ap.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL", DEFAULT_RPC),
+                    help="Solana RPC for the Board/Treasury snapshot (read-only)")
+    ap.add_argument("--only", choices=["stats", "motherlode", "resets", "gecko", "miners", "chain"], nargs="*",
                     help="fetch only these sources")
     ap.add_argument("--make-sample", action="store_true", help="write data/sample/ from the cache and exit")
     args = ap.parse_args(argv)
@@ -434,7 +488,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         make_sample()
         return 0
     since = parse_since(args.since)
-    only = set(args.only or ["stats", "motherlode", "resets", "gecko"])
+    only = set(args.only or ["stats", "motherlode", "resets", "gecko", "chain"])
     f = Fetcher(sleep=args.sleep)
     t0 = time.time()
     if "stats" in only:
@@ -449,9 +503,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         fetch_gecko(g, since, "usd")
     if "resets" in only:
         fetch_resets(f, since, args.max_pages)
+    if "chain" in only:
+        fetch_chain(f, args.rpc)
     if "miners" in only or args.miners_sample:
         fetch_round_miners(f, args.miners_sample)
-    log(f"done: {f.requests} api.ore.com requests in {time.time() - t0:.0f}s")
+    log(f"done: {f.requests} requests in {time.time() - t0:.0f}s")
     return 0
 
 
