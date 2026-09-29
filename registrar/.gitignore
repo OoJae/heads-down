@@ -1,0 +1,9 @@
+/target/
+# Runtime state: nonce database, transparency log, registrar key. Never commit.
+/data/
+*.db
+*.db-wal
+*.db-shm
+*keypair*.json
+registrar-key*
+.env
