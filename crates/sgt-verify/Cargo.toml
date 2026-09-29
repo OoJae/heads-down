@@ -2,7 +2,7 @@
 # pulled into (or depend on) the Heads Down root workspace.
 [workspace]
 resolver = "2"
-members = [".", "probe"]
+members = [".", "probe", "litesvm-tests"]
 # `cargo test` at this root runs only the library's own tests. The LiteSVM
 # suite needs the SBF probe built first: see scripts/test-all.sh.
 default-members = ["."]
