@@ -77,6 +77,8 @@ pub mod precompile;
 pub mod sysvar;
 mod verify;
 
+#[cfg(feature = "client")]
+pub mod client;
 
 pub use constants::*;
 pub use error::{IntrospectError, ERROR_CODE_BASE};
