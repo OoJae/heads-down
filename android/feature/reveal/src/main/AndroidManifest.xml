@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 13+: exact alarms for alarm-style apps, granted at install. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Android 12/12L only (USE_EXACT_ALARM does not exist there): user-grantable. -->
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <application>
+        <activity
+            android:name=".RevealActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity="xyz.headsdown.reveal"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:turnScreenOn="true" />
+
+        <receiver
+            android:name=".RevealAlarmReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>
