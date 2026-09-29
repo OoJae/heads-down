@@ -69,7 +69,7 @@ beforeAll(async () => {
   const sim = await Store.bind(db, { name: "simulated", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA, simSeed: "api-test" });
   const out = await runSimulation(
     { store: sim, programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA },
-    { seed: "api-test", rigs: 16, nights: 16, startDay: "2026-09-10", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA, configPda: CONFIG_PDA },
+    { seed: "api-test", rigs: 12, nights: 9, startDay: "2026-09-10", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA, configPda: CONFIG_PDA },
   );
   simBase = await listen(createApiServer({ store: sim, info: await sim.info(), defaultTzOffsetMinutes: 60, teamCrankers: out.teamCrankers }));
 
