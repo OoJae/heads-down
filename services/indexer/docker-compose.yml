@@ -1,0 +1,24 @@
+# Local Postgres for the indexer. Dev-only credentials; never reuse them anywhere else.
+#   docker compose up -d
+#   DATABASE_URL=postgres://headsdown:headsdown-dev@127.0.0.1:54329/headsdown pnpm migrate
+# No Docker? Use DATABASE_URL=pglite://.data/pg (embedded Postgres, same schema).
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: headsdown
+      POSTGRES_PASSWORD: headsdown-dev
+      POSTGRES_DB: headsdown
+    ports:
+      - "127.0.0.1:54329:5432" # loopback only
+    volumes:
+      - headsdown-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U headsdown -d headsdown"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  headsdown-pg:
