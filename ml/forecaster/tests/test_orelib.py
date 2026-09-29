@@ -203,3 +203,39 @@ def test_sample_motherlode_payouts_match_pot_reconstruction():
     r = L.load_rounds(sample=True)
     h = r[r.motherlode_hit & r.pot_before.notna()]
     assert np.allclose(h.motherlode, h.pot_before)
+
+
+# --------------------------------------------------------------------------- on-chain gate form
+
+def test_ema_ev_integer_form():
+    # A 100-ORE pot is the long-run average: the adjustment is exactly 1.2 / 1.2.
+    assert L.ema_ev_lamports(900_000_000, 100 * L.ONE_ORE) == 900_000_000
+    # Empty pot: 1 ORE per round instead of 1.2, so the EV cost is 20% higher.
+    assert L.ema_ev_lamports(900_000_000, 0) == 1_080_000_000
+    # 400-ORE pot: 1.8 ORE per round.
+    assert L.ema_ev_lamports(900_000_000, 400 * L.ONE_ORE) == 600_000_000
+    # Extremes stay exact in Python ints (the Rust side must use u128 / checked math).
+    big = L.ema_ev_lamports(2**64 - 1, 3_000_000 * L.ONE_ORE)
+    assert 0 < big < 2**64
+    with pytest.raises(ValueError):
+        L.ema_ev_lamports(-1, 0)
+
+
+def test_on_chain_threshold_matches_float_gate():
+    rng = np.random.default_rng(1)
+    costs = L.Costs()
+    n = 20_000
+    ema = rng.uniform(0.3e9, 1.5e9, n).astype(np.int64)
+    pot = (rng.uniform(0, 500, n) * L.ONE_ORE).astype(np.int64)
+    price = rng.uniform(0.4, 1.2, n)
+    A = 2_000_000.0
+    buy = price * (1 + costs.buy_cost_bps / 1e4)
+    float_gate = L.user_cost_estimate(ema.astype(float), A, costs, pot.astype(float)) < buy
+    thr = np.array([L.ev_threshold_lamports(p, A, costs) for p in price])
+    int_gate = np.array([L.ema_ev_lamports(int(e), int(q)) for e, q in zip(ema, pot)]) < thr
+    disagree = float_gate != int_gate
+    # Only the A/(D+A) ~ A/D approximation separates them: rare, and only at the boundary.
+    assert disagree.mean() < 0.005
+    if disagree.any():
+        est = L.user_cost_estimate(ema[disagree].astype(float), A, costs, pot[disagree].astype(float))
+        assert np.all(np.abs(est / buy[disagree] - 1) < 2e-3)

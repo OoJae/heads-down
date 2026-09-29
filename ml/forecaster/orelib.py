@@ -356,6 +356,38 @@ def user_cost_estimate(ema_lamports_per_ore: np.ndarray, per_round_lamports: flo
     return e_cost / e_ore / LAMPORTS_PER_SOL  # SOL per ORE
 
 
+# --------------------------------------------------------------------------- on-chain form
+
+def ema_ev_lamports(ema: int, pot_grams: int) -> int:
+    """Motherlode-adjusted EMA, integer-only, as the heads_down program would compute it.
+
+    ema_ev = ema * 1.2 / (1 + pot/500)  ==  ema * 6 * 500 * ONE_ORE / (5 * (500 * ONE_ORE + pot))
+    Reads only Board.production_cost_ema and Treasury.motherlode; u128 intermediate, no overflow:
+    ema < 2^64, 3000 * ONE_ORE < 2^49, so the product stays < 2^113.
+    """
+    if ema < 0 or pot_grams < 0:
+        raise ValueError("negative input")
+    num = int(ema) * 6 * MOTHERLODE_ODDS * ONE_ORE
+    den = 5 * (MOTHERLODE_ODDS * ONE_ORE + int(pot_grams))
+    return num // den
+
+
+def ev_threshold_lamports(price_sol_per_ore: float, per_round_lamports: float, costs: "Costs",
+                          claim: bool = True) -> int:
+    """The plan value `max_ev_cost` the phone signs at arm time.
+
+    Mining beats buying when  k * ema_ev / protocol_rate < price * (1 + buy_cost), where
+    k = (loss_rate * A + crank_fee) / (A * net) is the small rig's SOL per protocol-fee lamport.
+    (The A / (D + A) share is approximated by A / D; A / D < 1e-3 for any rig this app targets.)
+    """
+    A = float(per_round_lamports)
+    net = (1.0 - costs.refining_fee) if claim else 1.0
+    k = (EXPECTED_LOSS_RATE * A + costs.crank_fee_lamports) / (A * net)
+    protocol_rate = EXPECTED_LOSS_RATE * PROTOCOL_SHARE_OF_LOSS
+    thr = price_sol_per_ore * (1 + costs.buy_cost_bps / 1e4) * protocol_rate / k * LAMPORTS_PER_SOL
+    return int(max(0.0, min(thr, 2**63 - 1)))
+
+
 @dataclass
 class StrategyResult:
     name: str
