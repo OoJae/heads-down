@@ -161,7 +161,7 @@ def parse_since(s: str) -> int:
 
 
 def write_csv(path: str, fields: List[str], rows: Iterable[Dict[str, Any]]) -> int:
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.tmp"
     n = 0
     with open(tmp, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
@@ -181,7 +181,7 @@ def read_csv(path: str) -> List[Dict[str, str]]:
 
 
 def dump_json(path: str, obj: Any) -> None:
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
         json.dump(obj, f, separators=(",", ":"))
     os.replace(tmp, path)

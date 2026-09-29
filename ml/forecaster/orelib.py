@@ -115,9 +115,18 @@ def enrich_rounds(df: pd.DataFrame, motherlode_hits: Optional[pd.DataFrame] = No
     (lamports/ORE), ema_before (the Board.production_cost_ema a deploy in this round sees),
     ema_after, ema_warm (False during the first 5*EMA_WINDOW rounds of the series).
     """
+    cols = ["total_deployed", "total_vaulted", "total_winnings", "total_minted", "motherlode",
+            "deployed_winning_square", "round_id", "ts", "winning_square", "is_split"]
+    df = df.copy()
+    for c in cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    bad = df[cols].isna().any(axis=1)
+    if bad.any():  # e.g. a truncated line in a cache file: drop it rather than guess
+        import warnings
+        warnings.warn(f"dropping {int(bad.sum())} malformed round rows")
+        df = df[~bad]
     df = df.sort_values("round_id").drop_duplicates("round_id").reset_index(drop=True)
-    for c in ["total_deployed", "total_vaulted", "total_winnings", "total_minted", "motherlode",
-              "deployed_winning_square", "round_id", "ts", "winning_square", "is_split"]:
+    for c in cols:
         df[c] = df[c].astype("int64")
     df["time"] = pd.to_datetime(df["ts"], unit="s", utc=True)
     df["refund"] = (df["winning_square"] < 0) | (df["total_minted"] == 0)

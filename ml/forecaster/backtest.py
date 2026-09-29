@@ -57,9 +57,15 @@ def prepare(sample: bool, window: L.ShiftWindow, since: str = REGIME_START,
             min_frac: float = 0.9) -> Dict[str, object]:
     rounds = L.load_rounds(sample=sample)
     prices = L.load_prices(sample=sample)
+    return prepare_frames(rounds, prices, window, None if sample else since, min_frac)
+
+
+def prepare_frames(rounds: pd.DataFrame, prices: pd.DataFrame, window: L.ShiftWindow,
+                   since: Optional[str] = REGIME_START, min_frac: float = 0.9) -> Dict[str, object]:
+    """In-shift rounds of complete nights, with deploy-time price and the clock-out price."""
     r = L.attach_known_price(rounds, prices)
     r = r[r["ema_warm"] & r["price_known"].notna() & ~r["refund"]]
-    if not sample:
+    if since:
         r = r[r["time"] >= pd.Timestamp(since, tz="UTC")]
     r = r.copy()
     r["night"] = window.assign(r)
@@ -161,6 +167,57 @@ def evaluate(r: pd.DataFrame, A: float, costs: L.Costs, decisions: Dict[str, np.
         per["rounds"] = df.groupby("night").size()
         out[name] = per
     return out
+
+
+def chunk_mask(r: pd.DataFrame, budget_sol: float, chunk_lamports: float, costs: L.Costs,
+               rule: str = "gate_ev", policy: str = "split15", claim: bool = True) -> np.ndarray:
+    """Rounds a concentrated rig digs in: rule-open rounds, first-come, until the budget is used."""
+    n_med = int(r.groupby("night").size().median())
+    if rule == "gate_ev":
+        want = decisions_for(r, chunk_lamports, costs, claim=claim, policy=policy)["gate_ev"]
+    elif rule == "spread":
+        k = max(1, int(round(n_med / max(budget_sol * L.LAMPORTS_PER_SOL / chunk_lamports, 1))))
+        pos = r.groupby("night").cumcount().to_numpy()
+        want = (pos % k) == 0
+    else:
+        raise ValueError(rule)
+    max_chunks = int(budget_sol * L.LAMPORTS_PER_SOL // chunk_lamports)
+    # Rounds are time-ordered within a night: take open rounds first-come until the budget is used.
+    taken = pd.Series(want.astype(int), index=r.index).groupby(r["night"]).cumsum()
+    return want & (taken.to_numpy() <= max_chunks)
+
+
+def evaluate_chunked(r: pd.DataFrame, budget_sol: float, chunk_lamports: float, costs: L.Costs,
+                     rule: str = "gate_ev", policy: str = "split15", claim: bool = True,
+                     motherlode: str = "ev") -> pd.DataFrame:
+    """Same nightly budget, fewer and bigger deploys: the fixed crank fee is paid on fewer rounds.
+
+    The rig still heartbeats every round but digs `chunk_lamports` only in rounds the rule opens,
+    until the night's budget (SOL deployed) is used. Spend is matched to the flat strategies at
+    the same budget: whatever the flat all-round rig would have spent (fees on B plus a crank fee
+    on every round) and the chunked rig did not, buys ORE at clock-out.
+      rule="gate_ev": deploy when the EV rule (at chunk size) says mining beats buying
+      rule="spread" : deploy every k-th round, k = rounds / (budget / chunk), no gate
+    """
+    n_med = int(r.groupby("night").size().median())
+    A_flat = budget_sol * L.LAMPORTS_PER_SOL / n_med
+    slot_flat = (L.expected_loss_rate("all25") * A_flat + costs.crank_fee_lamports) / L.LAMPORTS_PER_SOL
+    net = (1 - costs.refining_fee) if claim else 1.0
+    e_ore = L.expected_round_ore(r, policy, chunk_lamports, motherlode=motherlode) * net / L.ONE_ORE
+    e_sol = (L.expected_round_loss(r, policy, chunk_lamports) + costs.crank_fee_lamports) / L.LAMPORTS_PER_SOL
+    mine = chunk_mask(r, budget_sol, chunk_lamports, costs, rule, policy, claim)
+    buy_px = r["clockout_price"].to_numpy() * (1 + costs.buy_cost_bps / 1e4)
+    df = pd.DataFrame({"night": r["night"].to_numpy(), "mined": mine.astype(int),
+                       "sol_mine": np.where(mine, e_sol, 0.0), "ore_mine": np.where(mine, e_ore, 0.0),
+                       "budget": slot_flat, "px": buy_px})
+    per = df.groupby("night").agg(mined=("mined", "sum"), sol_mine=("sol_mine", "sum"),
+                                  ore_mine=("ore_mine", "sum"), budget=("budget", "sum"),
+                                  px=("px", "first"), rounds=("mined", "size"))
+    per["sol_buy"] = (per["budget"] - per["sol_mine"]).clip(lower=0)
+    per["ore_buy"] = per["sol_buy"] / per["px"]
+    per["sol"] = per["sol_mine"] + per["sol_buy"] + costs.tx_lamports_per_night / L.LAMPORTS_PER_SOL
+    per["ore"] = per["ore_mine"] + per["ore_buy"]
+    return per
 
 
 def summarize(per_night: Dict[str, pd.DataFrame], r: pd.DataFrame, costs: L.Costs,
@@ -407,6 +464,26 @@ def run(args) -> Dict[str, object]:
                  "gate_ev_hold", "oracle_hour", "gate_ev_mined_share", "always_mine_realized",
                  "gate_ev_realized"]].round(3).to_string())
 
+    # Same small budgets, concentrated into fewer, bigger deploys on split tiles.
+    res["chunked"] = {}
+    print("\n== same budget, fewer bigger deploys (split-15 tiles; spend-matched to the flat rig)")
+    for B in HEADLINE_BUDGETS:
+        A = B * L.LAMPORTS_PER_SOL / n_med
+        base = evaluate(r, A, costs, {"always_buy": np.zeros(len(r), dtype=bool),
+                                      "always_mine": np.ones(len(r), dtype=bool)})
+        for chunk in args.chunks:
+            for claim in (True, False):
+                per = dict(base)
+                per["chunked_gate_ev"] = evaluate_chunked(r, B, chunk, costs, "gate_ev", claim=claim)
+                per["chunked_spread"] = evaluate_chunked(r, B, chunk, costs, "spread", claim=claim)
+                s = summarize(per, r, costs, n_boot=1000)
+                key = f"{B}|{int(chunk)}|{'claim' if claim else 'hold'}"
+                res["chunked"][key] = s.round(6).to_dict(orient="index")
+                print(f"B={B} chunk={chunk / 1e9:g} SOL {'claim' if claim else 'hold unrefined'}: " + ", ".join(
+                    f"{k} {v['vs_always_buy_pct']:+.1f}% [{v['ci95_lo_pct']:+.1f},{v['ci95_hi_pct']:+.1f}]"
+                    f" mined {v['mined_round_share'] * n_med:.0f}/night"
+                    for k, v in s.to_dict(orient="index").items() if k != "always_buy"))
+
     # Crank-fee and buy-cost sensitivity at 0.04 SOL/night.
     A04 = 0.04 * L.LAMPORTS_PER_SOL / n_med
     for fee in (0, 2_000, 5_000, 7_000):
@@ -431,6 +508,22 @@ def run(args) -> Dict[str, object]:
     print(vt.to_string(index=False, float_format=lambda v: f"{v:.6g}"))
     print(f"P(night contains a Motherlode hit) = {dists[0]['p_motherlode_night']:.2f}")
 
+    # Variance of the concentrated rig (split-15 tiles, 0.001 SOL chunks, EV gate / spread).
+    res["variance_chunked"] = []
+    for B in (0.02, 0.04):
+        for rule in ("gate_ev", "spread"):
+            for claim in (True, False):
+                m = chunk_mask(r, B, 1_000_000, costs, rule, "split15", claim)
+                d = night_distribution(r, 1_000_000, costs, "split15", n_sims=args.sims, claim=claim, decisions=m)
+                d.update(budget=B, rule=rule, claim=claim, mined_rounds_per_night=float(m.sum() / r["night"].nunique()),
+                         p_no_mining_night=float(np.mean(pd.Series(m).groupby(r["night"].to_numpy()).sum() == 0)))
+                res["variance_chunked"].append({k: (float(v) if isinstance(v, (float, np.floating)) else v)
+                                                for k, v in d.items() if k != "samples"})
+    print("\n== ORE mined per night, concentrated rig (split-15, 0.001 SOL chunks)")
+    vc = pd.DataFrame(res["variance_chunked"])[["budget", "rule", "claim", "mined_rounds_per_night", "mean_ore",
+                                                "p5", "median", "p95", "p_zero", "p_no_mining_night"]]
+    print(vc.to_string(index=False, float_format=lambda v: f"{v:.6g}"))
+
     if not args.no_figures:
         os.makedirs(FIG, exist_ok=True)
         fig_eff_vs_budget(sweep, os.path.join(FIG, "eff_price_vs_budget.png"))
@@ -452,6 +545,8 @@ def main(argv=None) -> int:
     ap.add_argument("--end-hour", type=float, default=7.0, help="shift end, local hour")
     ap.add_argument("--utc-offset", type=float, default=1.0, help="user's UTC offset (WAT = +1)")
     ap.add_argument("--sims", type=int, default=4000, help="Monte Carlo draws per night")
+    ap.add_argument("--chunks", type=float, nargs="*", default=[1_000_000, 2_000_000],
+                    help="deploy sizes (lamports per mined round) for the concentrated strategy")
     ap.add_argument("--no-figures", action="store_true")
     args = ap.parse_args(argv)
     res = run(args)
