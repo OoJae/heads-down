@@ -3,7 +3,7 @@
 //! a host-side `AccountView` harness.
 #![allow(dead_code)]
 
-use std::{fs, path::PathBuf, str::FromStr};
+use std::{fs, path::PathBuf, str::FromStr, sync::OnceLock};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use pinocchio::{
@@ -91,7 +91,13 @@ pub fn load_fixture(rel: &str) -> Fixture {
     }
 }
 
+/// All real SGT fixtures (parsed once per test binary).
 pub fn real_sgts() -> Vec<RealSgt> {
+    static CACHE: OnceLock<Vec<RealSgt>> = OnceLock::new();
+    CACHE.get_or_init(load_real_sgts).clone()
+}
+
+fn load_real_sgts() -> Vec<RealSgt> {
     let manifest = json(&fixtures_dir().join("manifest.json"));
     let strings = |v: &Value| -> Vec<String> {
         v.as_array()
