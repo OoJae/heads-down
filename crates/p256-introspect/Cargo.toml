@@ -27,6 +27,12 @@ p256 = { version = "0.14", optional = true, default-features = false, features =
 
 [dev-dependencies]
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std", "pkcs8", "getrandom"] }
+# base58 decoding, only to cross-check the hard-coded program ids in tests.
+solana-address = { version = "2.7", features = ["decode"] }
+
+[[test]]
+name = "client"
+required-features = ["client"]
 
 [profile.release]
 overflow-checks = true
