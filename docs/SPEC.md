@@ -334,7 +334,7 @@ FOREMAN: an on-device AI crew boss that plans, prices and polices every shift, b
 
 BOUNDS
 - The Foreman can only tighten caps signed by Seed Vault. It can never raise a budget, move funds, or sign anything other than P-256 plans and heartbeats.
-- ORE's native max_production_cost stays as the outer guardrail.
+- ORE stores the Automation's max_production_cost condition but does not enforce it: deploy.rs checks only min/max_motherlode (ORE commit b92c504). The Heads Down program enforces the production-cost gate itself in dig, against Board.production_cost_ema (lamports per whole ORE, a 20-round EMA updated in ORE's reset.rs), using the tighter of the wallet-signed ceiling and the plan threshold. See docs/ORE.md.
 
 EXPLAINER
 - Deterministic, template-authoritative cards explain why the rig stayed cold at 3 am, what the executor can and cannot do, and the effective price paid.
