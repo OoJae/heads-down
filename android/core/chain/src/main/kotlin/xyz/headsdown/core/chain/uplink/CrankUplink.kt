@@ -21,6 +21,15 @@ import kotlin.random.Random
 
 enum class UplinkState { STOPPED, CONNECTING, CONNECTED, BACKING_OFF }
 
+/** The seam the heartbeat sink talks to (a [CrankUplink] in production, a fake in tests). */
+interface MessageUplink {
+    fun start()
+    fun stop()
+
+    /** True if [text] was handed to an open connection. Must not block or throw. */
+    fun send(text: String): Boolean
+}
+
 /**
  * Exponential backoff with **equal jitter**: attempt `n` waits a uniformly random duration in
  * `[d/2, d]` where `d = min(max, base · 2^n)`. The lower half keeps a floor (no hot reconnect
@@ -64,7 +73,7 @@ class CrankUplink(
     private val backoff: Backoff = Backoff(),
     /** Called on OkHttp's thread each time a socket opens (e.g. to flush fresh pending frames). */
     private val onConnected: () -> Unit = {},
-) {
+) : MessageUplink {
     private val request: Request
     private val client: OkHttpClient = client.newBuilder()
         .pingInterval(PING_SECONDS, TimeUnit.SECONDS) // detect a dead socket within ~2 pings
@@ -88,23 +97,24 @@ class CrankUplink(
 
     /** Starts the connect loop (idempotent). */
     @Synchronized
-    fun start() {
+    override fun start() {
         if (loop?.isActive == true) return
         loop = scope.launch { connectLoop() }
     }
 
-    /** Stops reconnecting and closes the socket (idempotent). */
+    /** Stops reconnecting and closes the socket gracefully (idempotent). */
     @Synchronized
-    fun stop() {
+    override fun stop() {
+        val open = socket
+        socket = null // no new sends from here on
+        open?.close(NORMAL_CLOSURE, null) // frames already queued are still written
         loop?.cancel()
         loop = null
-        socket?.close(NORMAL_CLOSURE, null)
-        socket = null
         _state.value = UplinkState.STOPPED
     }
 
     /** True if [text] was handed to an open socket. Never blocks, never throws. */
-    fun send(text: String): Boolean {
+    override fun send(text: String): Boolean {
         val s = socket ?: return false
         return try {
             s.send(text)
@@ -146,11 +156,15 @@ class CrankUplink(
                     closed.complete(Unit)
                 }
             })
+            var wasOpen = false
             try {
-                if (opened.await()) attempt = 0
+                wasOpen = opened.await()
+                if (wasOpen) attempt = 0
                 closed.await()
             } finally {
-                ws.cancel()
+                // An open socket closes gracefully (OkHttp writes queued frames before the close
+                // frame, with its own 60 s cap); a handshake still in flight is aborted.
+                if (wasOpen) ws.close(NORMAL_CLOSURE, null) else ws.cancel()
                 if (socket === ws) socket = null
             }
             _state.value = UplinkState.BACKING_OFF
