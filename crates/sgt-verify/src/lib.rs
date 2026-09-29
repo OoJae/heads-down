@@ -29,7 +29,7 @@
 //!   byte-exact synthetic SGT accounts, an `AccountView` harness).
 
 #![no_std]
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 #![deny(missing_docs)]
 #![cfg_attr(
     not(test),
@@ -53,11 +53,13 @@ compile_error!(
 );
 
 pub mod anchors;
-#[allow(dead_code)]
 mod bytes;
 pub mod error;
 pub mod layout;
+pub mod parse;
 pub mod tlv;
+mod verify;
 
 pub use anchors::{SGT_AUTHORITY, SGT_GROUP, TOKEN_2022_PROGRAM_ID};
 pub use error::SgtError;
+pub use verify::{verify_sgt, verify_sgt_raw, RawAccount, SgtInfo};
