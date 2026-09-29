@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use hd_crank::hd::{self, DigEntry, HdConfig, HdEvent, HeartbeatFields, Rig, RigAccounts, RigState};
+use hd_crank::hd::{self, DigEntry, HdEvent, HeartbeatFields, Rig, RigAccounts, RigState};
 use hd_crank::ore::{self as core, Automation, Board, BOARD_ADDRESS};
 use serde_json::{json, Value};
 use solana_address::Address;
@@ -27,7 +27,7 @@ use solana_signer::Signer;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::hd as hdix;
-use crate::ore;
+use crate::clockin;
 use crate::phone::Phone;
 use crate::util::{wait_for, Chain, Landed, SOL};
 
@@ -122,8 +122,7 @@ pub async fn run(o: SmokeOpts) -> Result<()> {
     if is != 200 {
         bail!("indexer /v1/health returned {is}");
     }
-    let (co, cd, _) = chain.data(&hdix::config()).await?.ok_or_else(|| anyhow!("heads_down Config missing: run up.sh"))?;
-    let cfg = HdConfig::decode(&hd::PROGRAM_ID, &co, &cd).map_err(|e| anyhow!("Config: {e}"))?;
+    let cfg = clockin::config(&chain).await?;
     let b0 = board(&chain).await?;
     step!(
         "stack up: crank healthy, indexer healthy; heads_down Config executor_fee {} crank_fee {}; ORE round {} (ema {} lamports/ORE)",
@@ -137,33 +136,18 @@ pub async fn run(o: SmokeOpts) -> Result<()> {
     let wallet = Keypair::new();
     let phone = Phone::random()?;
     chain.airdrop(&wallet.pubkey(), SOL).await?;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
-    let tile_cap = 100_000; // automation.amount: ORE's per-square ceiling for any executor
-    let caps = hdix::Caps { week: SOL, shift: SOL / 10, round: 5_000_000, max_cost: 2 * SOL, expiry: now + 86_400 };
-    let plan = hdix::Plan {
-        max_ev_cost: 2 * SOL,
-        dig_lamports: 1_000_000,
-        split: 10,
-        solo: 0,
-        lease: 1,
-        flags: 0,
-        window_start: now - 600,
-        window_end: now + 3 * 3600,
-    };
     let w = wallet.pubkey();
     let rig_addr = hdix::rig(&w);
-    let onboard = [
-        ore::automate_ix(&w, &hdix::executor(), tile_cap, SOL / 20, cfg.executor_fee),
-        hdix::register_rig_ix(&w, &phone.pubkey()),
-        hdix::set_caps_ix(&w, &caps),
-        hdix::arm_wallet_ix(&w, &plan),
-    ];
-    let l = chain.send(&wallet, &onboard).await.context("clock-in transaction")?;
-    let r0 = rig(&chain, &rig_addr).await?;
-    if r0.state != RigState::Armed {
-        bail!("rig not Armed after clock-in: {:?}", r0.state);
-    }
-    step!("clock-in (automate + register_rig + set_caps + arm_shift, 1 tx {}): rig {rig_addr} Armed, shift {}", l.signature, r0.shift_id);
+    // Lease 1: a heartbeat covers only the round it names, so lifting the phone turns the
+    // very next round cold (phones in the field should sign lease 2-3, crank INTERFACE-NOTES 17).
+    let (l, r0) = clockin::clock_in(&chain, &wallet, &phone.pubkey(), clockin::ClockIn::standard(1, 3 * 3600))
+        .await
+        .context("clock-in transaction")?;
+    step!(
+        "clock-in (automate + register_rig + set_caps + arm_shift, 1 tx {}): rig {rig_addr} Armed, shift {}, 0.001 SOL digs on 10 split tiles",
+        l.signature,
+        r0.shift_id
+    );
     let accounts = RigAccounts::derive(rig_addr, w);
 
     // ---- 2. the phone streams heartbeats --------------------------------------------------------

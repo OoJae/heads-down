@@ -7,6 +7,7 @@
 //! | `init` | heads_down `initialize_config` + Executor PDA float |
 //! | `driver` | the ORE round driver (background miner, entropy reveal, `reset`) |
 //! | `smoke` | the phone-less end-to-end "trustless beat" |
+//! | `clock-in` | a Mac-held dev wallet arms a rig for a phone's Keystore P-256 key |
 //! | `fund` | airdrop SOL on the local validator |
 //! | `status` | ORE / heads_down state on the fork |
 //! | `probe` | engine capability check (secp256r1 precompile really verifies, v1 getTransaction, SPL Token) |
@@ -14,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod clockin;
 mod driver;
 mod entropy;
 mod genesis;
@@ -111,6 +113,18 @@ enum Cmd {
         #[arg(long, default_value_t = 480)]
         timeout_secs: u64,
     },
+    /// Arm a rig for an external phone's P-256 key (hex, 33-byte SEC1 compressed).
+    ClockIn {
+        /// Dev wallet keypair (created by clock-in.sh under ~/.config/heads-down/devstack).
+        #[arg(long)]
+        wallet: PathBuf,
+        #[arg(long)]
+        p256: String,
+        #[arg(long, default_value_t = 2)]
+        lease: u8,
+        #[arg(long, default_value_t = 8.0)]
+        hours: f64,
+    },
     /// Airdrop SOL to a pubkey.
     Fund {
         to: Address,
@@ -148,6 +162,7 @@ async fn main() -> Result<()> {
         Cmd::Smoke { crank_ws, crank_http, indexer, timeout_secs } => {
             smoke::run(smoke::SmokeOpts { rpc: cli.rpc, crank_ws, crank_http, indexer, timeout: Duration::from_secs(timeout_secs) }).await
         }
+        Cmd::ClockIn { wallet, p256, lease, hours } => clockin::run(&cli.rpc, &wallet, &p256, lease, hours).await,
         Cmd::Fund { to, sol } => admin::fund(&cli.rpc, &to, sol).await,
         Cmd::Status => admin::status(&cli.rpc).await,
         Cmd::Probe => admin::probe(&cli.rpc).await,
