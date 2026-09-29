@@ -1390,7 +1390,6 @@ name = "heads-down-tests"
 version = "0.0.1"
 dependencies = [
  "base64",
- "ed25519-dalek 2.2.0",
  "heads-down",
  "litesvm",
  "p256",
@@ -1399,7 +1398,6 @@ dependencies = [
  "sgt-verify",
  "solana-account",
  "solana-address 2.7.0",
- "solana-address-lookup-table-interface",
  "solana-clock 3.2.1",
  "solana-instruction 3.5.1",
  "solana-instruction-error",

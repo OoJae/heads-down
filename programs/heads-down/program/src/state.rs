@@ -539,3 +539,9 @@ pub fn load_uninit_mut<T: Account>(
 pub fn addr(bytes: &[u8; 32]) -> Address {
     Address::new_from_array(*bytes)
 }
+
+/// View raw account bytes (exact length) as `T`, for off-chain clients,
+/// indexers and tests. No owner / tag checks: callers do those.
+pub fn view<T: Account>(data: &[u8]) -> Option<&T> {
+    bytemuck::try_from_bytes::<T>(data).ok()
+}
