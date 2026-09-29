@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors WidgetPalette and the app's HdColors (static picker previews and layouts). -->
+    <color name="hd_widget_charcoal">#FF121314</color>
+    <color name="hd_widget_ember">#FFFF6A1A</color>
+    <color name="hd_widget_gold">#FFF2B233</color>
+    <color name="hd_widget_ash">#FFECE7E1</color>
+    <color name="hd_widget_ash_muted">#FF9A948D</color>
+    <color name="hd_widget_cooling">#FFFFB067</color>
+</resources>

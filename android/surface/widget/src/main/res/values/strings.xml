@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hd_widget_rig_label">Heads Down rig</string>
+    <string name="hd_widget_rig_description">Rig heat, time dark this shift, your last haul and your streak.</string>
+    <string name="hd_widget_crew_label">Heads Down crew (preview)</string>
+    <string name="hd_widget_crew_description">Placeholder: shows who in your room is dark once rooms are live.</string>
+    <string name="hd_widget_preview_brand" translatable="false">HEADS DOWN</string>
+    <string name="hd_widget_preview_heat">Rig hot</string>
+    <string name="hd_widget_preview_dark">Dark for 1:12</string>
+    <string name="hd_widget_preview_footer">Last haul 0.0194 ORE · Streak 23 nights</string>
+    <string name="hd_widget_preview_crew_tag">CREW · PREVIEW · NOT LIVE</string>
+    <string name="hd_widget_preview_crew_line">Rooms are not live yet.</string>
+</resources>
