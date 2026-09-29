@@ -1,0 +1,68 @@
+[package]
+name = "hd-registrar"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Heads Down registrar: Android Key Attestation verifier (Ed25519 vouchers for the heads_down program) and Sign-In-With-Solana nonce service"
+publish = false
+
+# Standalone workspace: the registrar is an off-chain service with its own lockfile,
+# independent from the on-chain crates and the program.
+[workspace]
+
+[lib]
+name = "hd_registrar"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hd-registrar"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP service
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "matched-path", "tracing"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }
+tower = { version = "0.5", features = ["util", "timeout", "limit"] }
+tower-http = { version = "0.6", features = ["limit", "trace", "timeout", "request-id", "util"] }
+governor = { version = "0.10", default-features = false, features = ["std"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Serialization / encoding
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+hex = "0.4"
+bs58 = "0.5"
+time = { version = "0.3", features = ["parsing", "formatting", "macros"] }
+
+# Crypto
+ring = "0.17"
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize", "fast"] }
+p256 = { version = "0.13", default-features = false, features = ["arithmetic", "std"] }
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2"
+zeroize = "1"
+
+# X.509 + ASN.1 DER (asn1-rs is re-exported through x509-parser -> der-parser)
+x509-parser = "0.18"
+
+# Storage
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+# Errors / logging
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
+tempfile = "3"
+http-body-util = "0.1"
+solana-ed25519-program = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
