@@ -61,7 +61,8 @@ object NightShiftCopy {
         ),
         Step(
             "Pick it up and it goes cold",
-            "Lifting, unlocking or unplugging cools the rig within 10 seconds. If Android closes the app, " +
+            "Lifting the phone or unplugging it cools the rig at once, and the shift ends if it is not back " +
+                "face-down within 10 seconds; unlocking ends it straight away. If Android closes the app, " +
                 "there are no heartbeats and no digs, and nothing is lost.",
         ),
         Step(
