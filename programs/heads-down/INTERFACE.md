@@ -49,10 +49,11 @@ Tags: Config=1, Rig=2, SeekerSeat=3, ShiftLog=4. A handler MUST check tag + owne
 | 8 | governance | Address (Squads vault; proposes changes) |
 | 40 | registrar | Address (Ed25519 key attesting hardware-backed P-256 keys) |
 | 72 | crank_fee | u64 lamports reimbursed to the cranker per rig-round dug |
-| 80 | recommended_executor_fee | u64 lamports (the Discretionary `fee` clients set in `automate`) |
+| 80 | executor_fee | u64 lamports — the Discretionary `fee` every rig's Automation MUST use (checked in `dig`) |
 | 88 | bury_bps | u16 |
 | 90 | paused | u8 (1 = `dig` disabled; circuit breaker) |
-| 91 | _pad | [u8;5] |
+| 91 | executor_bump | u8 (canonical bump of `[b"executor"]`, stored at init; never taken from ix data) |
+| 92 | _pad | [u8;4] |
 | 96 | ore_layout_hash | [u8;32] sha256 of pinned ORE account sizes + discriminators |
 | 128 | pending_exists | u8 |
 | 129 | _pad | [u8;7] |
@@ -79,10 +80,10 @@ No withdraw path. The executor PDA's lamports can flow only to: ORE (checkpoint 
 | 120 | cap_week | u64 | lamports/week (wallet-signed) |
 | 128 | cap_shift | u64 | lamports/shift |
 | 136 | cap_round | u64 | lamports/round (all tiles) |
-| 144 | cap_max_cost | u64 | lamports per ORE ceiling for `Board.production_cost_ema` |
+| 144 | cap_max_cost | u64 | wallet-signed ceiling (lamports per ORE) on the **pot-adjusted** cost `ema_ev` (see Gate) |
 | 152 | caps_expiry_ts | i64 | unix seconds; caps invalid after |
-| 160 | plan_max_cost | u64 | ≤ cap_max_cost |
-| 168 | plan_round | u64 | ≤ cap_round |
+| 160 | plan_max_ev_cost | u64 | ≤ cap_max_cost; client computes it at arm from the market price |
+| 168 | plan_dig_lamports | u64 | SOL per dig (a concentrated chunk, e.g. 1_000_000); ≤ cap_round |
 | 176 | plan_split_tiles | u8 | 0..=15 |
 | 177 | plan_solo_tiles | u8 | 0..=10 (plan_split+plan_solo ≥ 1 unless focus-only) |
 | 178 | plan_lease_rounds | u8 | 1..=3 |
@@ -121,8 +122,13 @@ No withdraw path. The executor PDA's lamports can flow only to: ORE (checkpoint 
 89 mode u8 (0 night,1 day,2 focus_only) | 90 _pad[6] | 96 start_ts i64 | 104 end_ts i64 | 112 reserved[16]`
 
 ## Signed P-256 messages (verified via the secp256r1 precompile, same transaction)
-All messages are **raw bytes** (the precompile hashes with SHA-256 itself; Android signs with
-`SHA256withECDSA` over the same raw bytes). Signatures are raw r‖s, **low-S**.
+**The signed message is the 32-byte `SHA-256(preimage)`.** Android signs those 32 bytes with
+`SHA256withECDSA`; the precompile verifies ECDSA-P256 over SHA-256 of the same 32 bytes. The program
+**recomputes the preimage from its own state plus the fields carried in the instruction data**
+(`sol_sha256`) and requires byte-equality with the precompile entry's message. 32-byte messages fit
+7 heartbeats per legacy/v0 tx and 27 per v1 (measured, `spikes/secp256r1`). Signatures are raw r‖s,
+**low-S** (the crank or client normalizes; no private key needed). Pubkeys are 33-byte compressed.
+Preimages:
 
 ```
 HEARTBEAT (94 bytes):
@@ -130,7 +136,7 @@ HEARTBEAT (94 bytes):
 BREAK / FREEZE (86 bytes):
   "HDv1"(4) | program_id(32) | rig(32) | kind u8 (2 BREAK, 3 FREEZE) | counter u64 | shift_id u64 | reason u8
 PLAN (arm_shift without wallet; 113 bytes):
-  "HDv1"(4) | program_id(32) | rig(32) | kind u8 = 4 | counter u64 | max_cost u64 | round_lamports u64 |
+  "HDv1"(4) | program_id(32) | rig(32) | kind u8 = 4 | counter u64 | max_ev_cost u64 | dig_lamports u64 |
   split u8 | solo u8 | lease u8 | flags u8 | window_start i64 | window_end i64
 ```
 Byte offsets inside each message are the running sums of the field sizes above (no padding).
@@ -157,9 +163,15 @@ A heartbeat grants a lease over rounds `[round_id, round_id + min(lease_rounds, 
 | 14 | `close_rig` | authority | requires state Idle/Frozen; closes Rig (+SeekerSeat) to authority |
 
 ### `dig` (tag 6)
-Data: `[6, n u8, per-rig entries...]`, entry = `hb_ix u8` (index of the Secp256r1SigVerify instruction
-in this transaction carrying a HEARTBEAT for this rig, or `0xFF` = reuse the rig's current lease),
-`hb_sig_index u8` (which signature within that precompile instruction).
+Data: `[6, n u8, per-rig entries...]`, entry (20 bytes) = `hb_ix u8` (index of the Secp256r1SigVerify
+instruction carrying this rig's HEARTBEAT, or `0xFF` = reuse the rig's current lease), `hb_sig_index u8`,
+`counter u64`, `round_id u64`, `lease_rounds u8`, `_pad u8`. With these plus `rig.shift_id` and the rig
+address the program rebuilds the HEARTBEAT preimage, hashes it and compares to the precompile message.
+
+**Cadence (economics, `ml/forecaster/RESULTS.md`):** phones heartbeat every round **off-chain** to the
+crank; the crank submits an on-chain heartbeat **only when it digs**. Digs are concentrated chunks
+(`plan_dig_lamports`, ≥ 0.001 SOL) on the least-crowded **split** tiles, only when the gate opens. Per-round
+flat deploys are uneconomic at nightly budgets (fixed fees dominate).
 
 Accounts (fixed order):
 ```
@@ -178,16 +190,31 @@ except account-validation failures, which fail the transaction:
    `counter > rig.hb_counter`, `shift_id == rig.shift_id`, `round_id ≤ board.round_id`; set lease.
    Require `lease_from ≤ board.round_id ≤ lease_to` and state ∈ {Armed, Down} (Armed → Down).
 3. Idempotency: `rig.last_dug_round != board.round_id`.
-4. Gate: `board.production_cost_ema ≤ min(plan_max_cost, cap_max_cost)`; caps not expired; within plan window.
-5. Amount: `round_lamports = min(plan_round, cap_round, cap_shift − spent_shift, cap_week − spent_week,
-   automation.balance − executor fee)`; `k = split + solo`; `per_tile = min(round_lamports / k, automation.amount)`; skip if 0.
+4. Gate (Motherlode-aware, integer, lamports per ORE):
+   `ema_ev = ema · 6 · 500 · 10^11 / (5 · (500 · 10^11 + pot))` where `ema = Board.production_cost_ema`
+   and `pot = Treasury.motherlode` (ORE base units, 11 decimals); dig iff `ema_ev ≤ min(plan_max_ev_cost, cap_max_cost)`.
+   Caps not expired; within plan window; `config.paused == 0`.
+5. Amount: `dig_lamports = min(plan_dig_lamports, cap_round, cap_shift − spent_shift, cap_week − spent_week)`;
+   `k = split + solo`; `per_tile = min(dig_lamports / k, automation.amount)`; skip if 0 or if
+   `automation.balance < per_tile·k + automation.fee` (ORE would close the automation and no-op).
+   Require `automation.strategy == 2` and `automation.fee == config.executor_fee` (else `StrategyMismatch`).
+   **Pre-flight every ORE abort condition** and skip the rig instead of failing the batch: board window
+   (`start_slot ≤ slot < end_slot`), miner checkpointed (`miner.round_id == board.round_id` or
+   `miner.checkpoint_id == miner.round_id`; ORE `assert!`-panics otherwise), Motherlode conditions on the
+   Automation (ORE silently returns Ok without deploying if they fail).
 6. Tiles: compute ORE's `distribution_mask(round_id)` on-chain (keccak), pick `split` least-crowded split tiles and
    `solo` least-crowded solo tiles by `round.deployed` (ties → lowest index).
-7. CPI ORE `deploy(per_tile, mask)` signed by the Executor PDA; **reload** automation/round after CPI;
-   add actual debit to spent_*; update counters; `last_dug_round = board.round_id`.
-8. Reimburse cranker `config.crank_fee` from the Executor PDA if it stays ≥ rent-exempt + reserve.
+7. CPI ORE `deploy(per_tile, mask)` signed by the Executor PDA (`authority` ALWAYS = `rig.authority`,
+   never from ix data — if it were the Executor PDA, ORE would treat it as a manual deploy of the pool's
+   own lamports). **Reload** automation/round after CPI and **detect no-ops/closures** by the automation
+   balance delta and owner/length: count only the actual debit into spent_*; no crank reimbursement for a no-op.
+   Assert `executor_after + CHECKPOINT_FEE ≥ executor_before` (ORE may pull the checkpoint fee from the signer).
+   Update counters; `last_dug_round = board.round_id`.
+8. Reimburse cranker `config.crank_fee` from the Executor PDA only after a real deploy, and only if the
+   PDA stays ≥ rent-exempt + reserve.
 
 The crank prepends ORE `checkpoint` instructions (permissionless) for miners whose `checkpoint_id != round_id`.
+Always pass all 12 ORE-facing accounts (ORE `deploy` does `accounts.split_at(10)` and panics on fewer).
 
 ## Errors (`ProgramError::Custom`)
 ```
@@ -200,6 +227,6 @@ The crank prepends ORE `checkpoint` instructions (permissionless) for miners who
 ```
 
 ## Events (logged via `sol_log_data`, first byte = event tag)
-`1 RigDug{rig, round_id, lamports, mask u32, ema}` · `2 RigSkipped{rig, round_id, error u32}` ·
+`1 RigDug{rig, round_id, lamports, mask u32, ema_ev}` · `2 RigSkipped{rig, round_id, error u32}` ·
 `3 ShiftArmed{rig, shift_id}` · `4 ShiftEnded{rig, shift_id, dark_rounds, rounds_dug, lamports, reason}` ·
 `5 SeekerVerified{rig, sgt_mint, member_number}`
