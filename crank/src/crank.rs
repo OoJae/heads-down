@@ -85,6 +85,8 @@ pub struct Fetched {
     pub miners: HashMap<Address, Option<RawAccount>>,
     /// Executor PDA balance.
     pub executor_lamports: u64,
+    /// heads_down Config read in the same call (`None` if absent or undecodable).
+    pub config: Option<HdConfig>,
 }
 
 /// Read rigs and their ORE accounts, pre-filtering rigs that cannot dig this round anyway
@@ -104,7 +106,8 @@ pub async fn fetch_for_plan(
         .cloned()
         .collect();
     let executor = hd::executor_pda(program_id).0;
-    let mut keys = vec![executor];
+    // The Config rides along so `paused` and the fees are as fresh as the Automations.
+    let mut keys = vec![executor, hd::config_pda(program_id).0];
     for (a, r) in &rigs {
         let acc = RigAccounts::derive(*a, r.authority);
         keys.push(acc.automation);
@@ -112,12 +115,22 @@ pub async fn fetch_for_plan(
     }
     let accs = rpc.get_multiple_accounts(&keys).await?;
     let executor_lamports = accs.first().and_then(|a| a.as_ref()).map_or(0, |a| a.lamports);
+    let config = match accs.get(1).and_then(|a| a.as_ref()) {
+        Some(c) => match HdConfig::decode(program_id, &c.owner, &c.data) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                breaker.trip(format!("heads_down Config: {e}"));
+                None
+            }
+        },
+        None => None,
+    };
     let mut automations = HashMap::new();
     let mut miners = HashMap::new();
     for (i, (a, r)) in rigs.iter().enumerate() {
         let acc = RigAccounts::derive(*a, r.authority);
-        let au = accs.get(1 + 2 * i).cloned().flatten();
-        let mi = accs.get(2 + 2 * i).cloned().flatten();
+        let au = accs.get(2 + 2 * i).cloned().flatten();
+        let mi = accs.get(3 + 2 * i).cloned().flatten();
         if let Some(x) = &au {
             breaker.observe_user_account(OreKind::Automation, &x.owner, &x.data);
         }
@@ -127,7 +140,7 @@ pub async fn fetch_for_plan(
         automations.insert(acc.automation, au);
         miners.insert(acc.miner, mi);
     }
-    Ok(Fetched { rigs, all_rigs, automations, miners, executor_lamports })
+    Ok(Fetched { rigs, all_rigs, automations, miners, executor_lamports, config })
 }
 
 /// Plan from a view plus freshly fetched accounts.
@@ -370,13 +383,14 @@ impl Crank {
     /// One planning + submission pass for the current round.
     pub async fn dig_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
         let board = view.board.ok_or_else(|| anyhow::anyhow!("no Board"))?;
-        let config = self.hd_config().await.ok_or_else(|| anyhow::anyhow!("heads_down Config unavailable"))?;
         let heartbeats: HashMap<Address, VerifiedHeartbeat> =
             self.store.snapshot().into_iter().map(|h| (h.rig, h)).collect();
         let fetched = fetch_for_plan(&self.rpc, &self.program_id, board.round_id, &heartbeats, &self.breaker).await?;
         if self.breaker.is_tripped() {
             return Ok(());
         }
+        let config = fetched.config.ok_or_else(|| anyhow::anyhow!("heads_down Config unavailable"))?;
+        *lock(&self.hd_config) = Some(config);
         self.metrics.rigs_seen.set_u64(fetched.all_rigs.len() as u64);
         for (a, r) in &fetched.all_rigs {
             (self.rig_seed)(*a, r.clone());
