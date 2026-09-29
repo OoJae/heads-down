@@ -78,6 +78,8 @@ wincode = "0.6"
 [dev-dependencies]
 litesvm = { version = "0.17.0", features = ["precompiles"] }
 solana-account = "4"
+solana-clock = "~3.2"
+solana-slot-hashes = "~3.2"
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std", "getrandom"] }
 tempfile = "3"
 
