@@ -1,0 +1,4 @@
+node_modules/
+# Embedded (PGlite) database directories created by `pnpm demo` / DATABASE_URL=pglite://...
+.data/
+*.tsbuildinfo
