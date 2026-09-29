@@ -1390,6 +1390,7 @@ name = "heads-down-tests"
 version = "0.0.1"
 dependencies = [
  "base64",
+ "bytemuck",
  "heads-down",
  "litesvm",
  "p256",
