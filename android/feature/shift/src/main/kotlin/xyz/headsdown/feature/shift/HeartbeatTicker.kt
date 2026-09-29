@@ -73,6 +73,12 @@ class RigBinding(programId: ByteArray, rigAddress: ByteArray) {
  */
 fun interface HeartbeatSink {
     suspend fun deliver(message: SignedRigMessage<*>)
+
+    /** A shift started: connect whatever the sink needs. */
+    fun open() {}
+
+    /** The shift ended: release connections so nothing runs between shifts. */
+    fun close() {}
 }
 
 sealed interface TickResult {

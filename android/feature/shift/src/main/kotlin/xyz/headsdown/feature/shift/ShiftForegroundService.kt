@@ -26,6 +26,8 @@ import androidx.core.content.getSystemService
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -176,6 +178,7 @@ class ShiftForegroundService : LifecycleService() {
             onResult = { _, result -> mainHandler.post { onTick(result) } },
         )
         ticker = t
+        runCatching { sink.open() } // uplink connects in the background; never blocks the shift
         tickerJob = lifecycleScope.launch(Dispatchers.Default) { t.run() }
         publish()
     }
@@ -236,9 +239,12 @@ class ShiftForegroundService : LifecycleService() {
     }
 
     /** Best-effort BREAK/FREEZE. Liveness only: without heartbeats the rig is cold anyway. */
+    @OptIn(DelicateCoroutinesApi::class) // CoroutineStart.ATOMIC, reason below
     private fun relaySignal(sign: (HeartbeatTicker) -> SignedShiftSignal) {
         val t = ticker ?: return
-        lifecycleScope.launch(Dispatchers.Default) {
+        // ATOMIC: the shift is ending and the service may be destroyed right after this; the
+        // relay must still run (it has no suspension point before the hand-off to the sink).
+        lifecycleScope.launch(Dispatchers.Default, start = CoroutineStart.ATOMIC) {
             val signed = runCatching { sign(t) }.getOrNull()
             if (signed != null) runCatching { sink.deliver(signed) }
         }
@@ -248,6 +254,9 @@ class ShiftForegroundService : LifecycleService() {
     private fun finishShift(reason: String?) {
         tickerJob?.cancel()
         tickerJob = null
+        // The sink closes its uplink after a short grace period on its own scope, so a
+        // BREAK/FREEZE relayed a moment ago still goes out.
+        runCatching { sink.close() }
         hotSpec = null
         mainHandler.removeCallbacksAndMessages(null)
         releaseWakeLock()
