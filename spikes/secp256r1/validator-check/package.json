@@ -1,0 +1,13 @@
+{
+  "name": "p256-spike-validator-check",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Spike 1(b) cross-check on a real solana-test-validator, signing with Node's OpenSSL P-256",
+  "type": "module",
+  "scripts": {
+    "check": "node check.mjs"
+  },
+  "dependencies": {
+    "@solana/web3.js": "1.99.0"
+  }
+}
