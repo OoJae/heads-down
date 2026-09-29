@@ -15,6 +15,12 @@
     public static int println(...);
 }
 
+# Library code guards logging with Log.isLoggable(); its result is used, so the rule above
+# cannot delete it. Declaring it always false lets R8 fold those branches away entirely.
+-assumevalues class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int) return false;
+}
+
 # --- Crash reports: keep line numbers, hide original file names -------------------------
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
