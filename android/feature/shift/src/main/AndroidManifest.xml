@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <uses-feature
+        android:name="android.hardware.sensor.accelerometer"
+        android:required="true" />
+
+    <application>
+        <!-- Not exported: only this app can start, stop or freeze a shift. -->
+        <service
+            android:name=".ShiftForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started overnight or desk shift: while the phone lies face-down, the app signs one hardware-key heartbeat per ~78 s ORE mining round so the user's own on-chain ORE automation may deploy. Picking the phone up stops it within 10 s." />
+        </service>
+    </application>
+
+</manifest>
