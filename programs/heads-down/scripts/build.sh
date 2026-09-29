@@ -19,4 +19,7 @@ else
     cargo-build-sbf --manifest-path program/Cargo.toml --features devnet --sbf-out-dir target/deploy-devnet
 fi
 
-ls -l target/deploy/heads_down.so target/deploy-devnet/heads_down.so
+# TEST ONLY: the misbehaving ORE stand-in used by tests/tests/ore_semantics.rs.
+cargo-build-sbf --manifest-path tests/mock-ore/Cargo.toml --sbf-out-dir target/deploy-mock
+
+ls -l target/deploy/heads_down.so target/deploy-devnet/heads_down.so target/deploy-mock/mock_ore.so
