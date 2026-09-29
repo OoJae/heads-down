@@ -442,27 +442,43 @@ def fetch_chain(f: Fetcher, rpc: str) -> None:
 
 # --------------------------------------------------------------------------- sample
 
-def make_sample(n_rounds: int = 300) -> None:
-    """Write the small committed sample (<50 KB) used by tests and `--sample` runs."""
+def make_sample(n_rounds: int = 400) -> None:
+    """Write the small committed sample (<50 KB) used by tests and `--sample` runs.
+
+    It is one real WAT night (22:00-06:00 UTC) that contains a Motherlode hit, so the offline
+    tests exercise the pot reconstruction and a smoke backtest has a full shift to replay.
+    """
     os.makedirs(SAMPLE, exist_ok=True)
     resets = read_csv(os.path.join(DATA, "reset_events.csv"))
     if not resets:
         raise SystemExit("no cached reset_events.csv; run fetch.py first")
-    tail = resets[-n_rounds:]
-    fields = [k for k in RESET_FIELDS if k != "top_miner"]
+    by_night: Dict[str, List[Dict[str, Any]]] = {}
+    for r in resets:
+        t = dt.datetime.fromtimestamp(int(r["ts"]), tz=dt.timezone.utc)
+        if t.hour >= 22 or t.hour < 6:
+            key = (t - dt.timedelta(hours=6)).strftime("%Y-%m-%d")
+            by_night.setdefault(key, []).append(r)
+    candidates = [k for k, rows in sorted(by_night.items())
+                  if len(rows) >= n_rounds and any(int(x["motherlode"]) > 0 for x in rows)]
+    if not candidates:
+        raise SystemExit("no cached night with a Motherlode hit")
+    night = by_night[candidates[-1]]
+    hit_i = max(i for i, x in enumerate(night) if int(x["motherlode"]) > 0)
+    start = min(max(0, hit_i - n_rounds // 2), len(night) - n_rounds)
+    tail = night[start:start + n_rounds]
+    fields = [k for k in RESET_FIELDS if k not in ("top_miner", "start_slot", "end_slot")]
     write_csv(os.path.join(SAMPLE, "reset_events_sample.csv"), fields, tail)
     lo_ts = int(tail[0]["ts"]) - 3600
-    hi_ts = int(tail[-1]["ts"]) + 3600
-    ml = read_csv(os.path.join(DATA, "motherlode_events.csv"))
-    write_csv(os.path.join(SAMPLE, "motherlode_events_sample.csv"), fields, ml[-20:])
-    gecko = [r for r in read_csv(os.path.join(DATA, "ore_sol_1h.csv")) if lo_ts - 86400 <= int(r["ts"]) <= hi_ts]
+    hi_ts = int(tail[-1]["ts"]) + 8 * 3600  # covers the morning clock-out
+    ml = [r for r in read_csv(os.path.join(DATA, "motherlode_events.csv")) if int(r["ts"]) <= hi_ts][-10:]
+    write_csv(os.path.join(SAMPLE, "motherlode_events_sample.csv"), ["round_id", "ts", "motherlode"], ml)
+    gecko = [r for r in read_csv(os.path.join(DATA, "ore_sol_1h.csv")) if lo_ts - 6 * 3600 <= int(r["ts"]) <= hi_ts]
     write_csv(os.path.join(SAMPLE, "ore_sol_1h_sample.csv"), ["ts", "open", "high", "low", "close", "volume_usd"], gecko)
-    snaps = read_csv(os.path.join(DATA, "stats_snapshots.csv"))[-48:]
-    write_csv(os.path.join(SAMPLE, "stats_snapshots_sample.csv"),
-              ["ts", "price", "production_cost", "volume_24h", "staking_apy", "circulating_supply", "liquidity"],
-              snaps)
+    snaps = read_csv(os.path.join(DATA, "stats_snapshots.csv"))[-24:]
+    write_csv(os.path.join(SAMPLE, "stats_snapshots_sample.csv"), ["ts", "price", "production_cost"], snaps)
     total = sum(os.path.getsize(os.path.join(SAMPLE, x)) for x in os.listdir(SAMPLE))
-    log(f"sample written to {SAMPLE}: {total / 1024:.1f} KB")
+    log(f"sample: night of {candidates[-1]} (UTC-6h), rounds {tail[0]['round_id']}..{tail[-1]['round_id']}, "
+        f"{sum(int(x['motherlode']) > 0 for x in tail)} Motherlode hit(s); {total / 1024:.1f} KB in {SAMPLE}")
     if total > 50 * 1024:
         raise SystemExit("sample exceeds 50 KB; lower n_rounds")
 
