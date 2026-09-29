@@ -216,12 +216,14 @@ class InstructionVectorsTest {
             HeadsDownInstructions.setCaps(authority, caps).data.hex(),
         )
         assertEquals("05" + "00" + plan.encode().hex(), HeadsDownInstructions.armShift(authority, plan).data.hex())
+        // P-256 tail = the dig entry's order: precompile_ix u8 | sig_index u8 | counter u64.
         assertEquals(
-            "05" + "01" + plan.encode().hex() + "2900000000000000" + "00" + "00",
+            "05" + "01" + plan.encode().hex() + "00" + "00" + "2900000000000000",
             HeadsDownInstructions.armShiftP256(payer, rig, plan, P256Auth(41uL, 0, 0)).data.hex(),
         )
         assertEquals("080006", HeadsDownInstructions.breakShift(authority, ShiftEndReason.MANUAL).data.hex())
-        assertEquals("080101" + "2c00000000000000" + "01" + "00", HeadsDownInstructions.breakShiftP256(payer, rig, ShiftEndReason.PICKUP, P256Auth(44uL, 1, 0)).data.hex())
+        assertEquals("080101" + "01" + "00" + "2c00000000000000", HeadsDownInstructions.breakShiftP256(payer, rig, ShiftEndReason.PICKUP, P256Auth(44uL, 1, 0)).data.hex())
+        assertEquals("090103" + "00" + "02" + "2e00000000000000", HeadsDownInstructions.freezeRigP256(payer, rig, P256Auth(46uL, 0, 2)).data.hex())
         assertEquals("090003", HeadsDownInstructions.freezeRig(authority).data.hex())
         assertEquals("01" + p256.hex() + "ff" + "00" + "0000000000000000", HeadsDownInstructions.registerRig(authority, p256).data.hex())
         assertEquals("0b", HeadsDownInstructions.endShift(authority, rig, 7uL).data.hex())

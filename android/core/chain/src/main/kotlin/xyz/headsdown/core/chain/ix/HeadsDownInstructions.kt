@@ -157,8 +157,8 @@ object HeadsDownInstructions {
     }
 
     /**
-     * `arm_shift` (tag 5), P-256 PLAN path, 48 bytes: `tag | auth=1 | plan(36) | counter u64 |
-     * precompile_ix u8 | sig_index u8`.
+     * `arm_shift` (tag 5), P-256 PLAN path, 48 bytes: `tag | auth=1 | plan(36) | precompile_ix u8 |
+     * sig_index u8 | counter u64`.
      *
      * Accounts: `payer (signer, w) | rig (w) | instructions sysvar`.
      */
@@ -177,8 +177,8 @@ object HeadsDownInstructions {
         walletRigInstruction(authority, DataWriter(3).u8(TAG_BREAK_SHIFT).u8(AUTH_WALLET).u8(reason.wire).build())
 
     /**
-     * `break_shift` (tag 8), P-256 BREAK path, 13 bytes: `tag | auth=1 | reason u8 | counter u64 |
-     * precompile_ix u8 | sig_index u8`. Accounts: `payer (signer, w) | rig (w) | instructions sysvar`.
+     * `break_shift` (tag 8), P-256 BREAK path, 13 bytes: `tag | auth=1 | reason u8 | precompile_ix u8 |
+     * sig_index u8 | counter u64`. Accounts: `payer (signer, w) | rig (w) | instructions sysvar`.
      */
     fun breakShiftP256(payer: Pubkey, rig: Pubkey, reason: ShiftEndReason, auth: P256Auth): Instruction =
         p256RigInstruction(payer, rig, DataWriter(13).u8(TAG_BREAK_SHIFT).u8(AUTH_P256).u8(reason.wire).p256Tail(auth).build())
@@ -258,5 +258,6 @@ object HeadsDownInstructions {
         data,
     )
 
-    private fun DataWriter.p256Tail(auth: P256Auth) = u64(auth.counter).u8(auth.precompileIx).u8(auth.sigIndex)
+    /** Same field order as a `dig` entry: `hb_ix u8 | hb_sig_index u8 | counter u64`. */
+    private fun DataWriter.p256Tail(auth: P256Auth) = u8(auth.precompileIx).u8(auth.sigIndex).u64(auth.counter)
 }
