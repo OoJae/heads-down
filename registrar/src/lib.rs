@@ -22,6 +22,7 @@
 
 pub mod attest;
 pub mod clock;
+pub mod config;
 pub mod nonce;
 pub mod session;
 pub mod siws;
