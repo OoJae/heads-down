@@ -1,0 +1,532 @@
+/*
+ * Heads Down palette (android/app/.../ui/theme/Theme.kt): charcoal night, ember = rig hot,
+ * ORE gold = hauls. DARK BY DEFAULT; light only when the viewer picks it.
+ *
+ * Chart marks use separately validated steps (dataviz validate_palette.js, all checks PASS):
+ *   dark  on #1C1D20: guest #E8590F, seeker #3987E5, haul #C98500
+ *   light on #FFFFFF: guest #C2410C, seeker #2A78D6, haul #B07A00
+ * Text never wears a data color; identity comes from the swatch beside it.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #121314;
+  --surface: #1c1d20;
+  --surface-2: #232428;
+  --outline: #2e2f33;
+  --grid: #2e2f33;
+  --text: #ece7e1;
+  --text-2: #b9b2aa;
+  --text-muted: #9a948d;
+  --ember: #ff6a1a;
+  --ember-dim: #7a3514;
+  --gold: #f2b233;
+  --frost: #8fb8de;
+  --viz-guest: #e8590f;
+  --viz-seeker: #3987e5;
+  --viz-haul: #c98500;
+  --viz-context: #55565c;
+  --heat-on: #121314;
+  --sim-a: #3a2a0a;
+  --sim-b: #2b2007;
+  --sim-text: #ffd27a;
+  --ok: #3fb97a;
+  --warn: #f2b233;
+  --focus: #8fb8de;
+  --radius: 12px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f4f1;
+  --surface: #ffffff;
+  --surface-2: #f1eeea;
+  --outline: #dcd7d0;
+  --grid: #e6e2dc;
+  --text: #1a1714;
+  --text-2: #4a443e;
+  --text-muted: #6b645c;
+  --ember: #c2410c;
+  --ember-dim: #fbd5c0;
+  --gold: #8a5a00;
+  --frost: #2a78d6;
+  --viz-guest: #c2410c;
+  --viz-seeker: #2a78d6;
+  --viz-haul: #b07a00;
+  --viz-context: #b8b3ac;
+  --heat-on: #ffffff;
+  --sim-a: #fff1cc;
+  --sim-b: #ffe8a8;
+  --sim-text: #5c3d00;
+  --ok: #1d7a4c;
+  --warn: #8a5a00;
+  --focus: #2a78d6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--frost);
+  text-underline-offset: 2px;
+}
+
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* ---- header / nav ---------------------------------------------------------------- */
+.site-header {
+  border-bottom: 1px solid var(--outline);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.site-header .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ember);
+  box-shadow: 0 0 10px var(--ember);
+}
+.brand small {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.nav {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  flex: 1 1 100%;
+  order: 3;
+  scrollbar-width: none;
+}
+.nav a {
+  color: var(--text-2);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.nav a[aria-current="page"] {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.theme-toggle {
+  margin-left: auto;
+  background: var(--surface);
+  color: var(--text-2);
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+@media (min-width: 760px) {
+  .nav {
+    flex: 0 1 auto;
+    order: 0;
+  }
+}
+
+main {
+  padding: 20px 0 48px;
+}
+
+h1 {
+  font-size: 24px;
+  line-height: 1.25;
+  margin: 8px 0 4px;
+}
+h2 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+.lede {
+  color: var(--text-2);
+  margin: 0 0 20px;
+  max-width: 70ch;
+}
+.muted {
+  color: var(--text-muted);
+}
+.small {
+  font-size: 13px;
+}
+
+/* ---- dataset banner -------------------------------------------------------------- */
+.sim-banner {
+  background: repeating-linear-gradient(135deg, var(--sim-a) 0 14px, var(--sim-b) 14px 28px);
+  color: var(--sim-text);
+  border-bottom: 1px solid var(--gold);
+}
+.sim-banner .wrap {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  font-size: 14px;
+}
+.sim-banner strong {
+  letter-spacing: 0.06em;
+}
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.live-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.sim-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--sim-text);
+  background: var(--sim-b);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  padding: 0 4px;
+  vertical-align: middle;
+}
+
+/* ---- cards and tiles ------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.grid {
+  display: grid;
+  gap: 12px;
+}
+.tiles {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+@media (min-width: 760px) {
+  .tiles {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.section {
+  margin-top: 28px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 132px;
+}
+.tile-label {
+  font-size: 13px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tile-value {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.tile-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.sw-guest {
+  background: var(--viz-guest);
+}
+.sw-seeker {
+  background: var(--viz-seeker);
+}
+.sw-haul {
+  background: var(--viz-haul);
+}
+.sw-context {
+  background: var(--viz-context);
+}
+.tile-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  border: 1px dashed var(--outline);
+  border-radius: 6px;
+  padding: 1px 6px;
+  align-self: flex-start;
+}
+
+/* ---- evidence -------------------------------------------------------------------- */
+.evidence {
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+.evidence a,
+.evidence span {
+  white-space: nowrap;
+}
+.evidence .noproof {
+  color: var(--text-muted);
+}
+
+/* ---- charts ---------------------------------------------------------------------- */
+.chart {
+  position: relative;
+}
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.chart .tick {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart .gridline {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.chart .bar {
+  cursor: default;
+}
+.chart .bar:focus {
+  outline: none;
+}
+.chart .bar:focus-visible .mark,
+.chart .bar:hover .mark {
+  filter: brightness(1.18);
+}
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+  transform: translate(-50%, calc(-100% - 10px));
+  white-space: nowrap;
+  z-index: 5;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 4px 0 8px;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+details.table-view {
+  margin-top: 8px;
+  font-size: 13px;
+}
+details.table-view summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+/* ---- tables ---------------------------------------------------------------------- */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--outline);
+  white-space: nowrap;
+}
+th {
+  color: var(--text-2);
+  font-weight: 600;
+}
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.heat {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border-radius: 6px;
+  border: 2px solid var(--surface);
+  min-width: 64px;
+}
+.heat.immature {
+  color: var(--text-muted);
+  background: repeating-linear-gradient(45deg, transparent 0 5px, var(--surface-2) 5px 10px);
+}
+
+/* ---- meters ---------------------------------------------------------------------- */
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ember-dim);
+  overflow: hidden;
+  margin: 6px 0 2px;
+}
+:root[data-theme="light"] .meter {
+  background: #fbe3d6;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--viz-guest);
+}
+.meter.seeker {
+  background: color-mix(in oklab, var(--viz-seeker) 30%, var(--surface));
+}
+.meter.seeker > span {
+  background: var(--viz-seeker);
+}
+
+/* ---- misc ------------------------------------------------------------------------ */
+.state {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-2);
+}
+.state.error {
+  color: var(--text);
+  border-color: var(--ember);
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-decoration: none;
+  font-size: 14px;
+}
+.btn:hover {
+  border-color: var(--ember);
+}
+.pill-ok {
+  color: var(--ok);
+}
+.pill-warn {
+  color: var(--warn);
+}
+.site-footer {
+  border-top: 1px solid var(--outline);
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 20px 0 32px;
+}
+code,
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+dl.defs dt {
+  font-weight: 600;
+  margin-top: 12px;
+}
+dl.defs dd {
+  margin: 2px 0 0;
+  color: var(--text-2);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .brand-dot {
+    animation: glow 3.2s ease-in-out infinite;
+  }
+  @keyframes glow {
+    50% {
+      box-shadow: 0 0 2px var(--ember);
+    }
+  }
+}
+@media (forced-colors: active) {
+  .swatch,
+  .meter > span {
+    forced-color-adjust: none;
+  }
+}
