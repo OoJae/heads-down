@@ -12,8 +12,8 @@
 use pinocchio::{
     cpi::{invoke_signed, Signer},
     error::ProgramError,
-    instruction::{InstructionAccount, InstructionView},
-    no_allocator, nostd_panic_handler, program_entrypoint, seeds, AccountView, Address,
+    instruction::{seeds, InstructionAccount, InstructionView},
+    no_allocator, nostd_panic_handler, program_entrypoint, AccountView, Address,
     ProgramResult,
 };
 
