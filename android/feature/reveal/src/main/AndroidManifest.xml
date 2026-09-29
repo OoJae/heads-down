@@ -29,7 +29,7 @@
             the user picks in the share sheet (a one-off read grant). Not exported.
         -->
         <provider
-            android:name="androidx.core.content.FileProvider"
+            android:name=".share.RevealShareFileProvider"
             android:authorities="${applicationId}.reveal.share"
             android:exported="false"
             android:grantUriPermissions="true">

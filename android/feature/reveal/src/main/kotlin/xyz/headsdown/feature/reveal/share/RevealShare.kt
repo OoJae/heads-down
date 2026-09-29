@@ -74,6 +74,12 @@ object ShareGridImage {
     }
 }
 
+/**
+ * Our own FileProvider subclass, so its manifest entry never collides with another module's
+ * provider in the merged manifest.
+ */
+class RevealShareFileProvider : FileProvider()
+
 /** Builds the share-sheet Intent for the grid image (plus the emoji grid as text). */
 object RevealShare {
     private const val DIR = "reveal_share"
