@@ -72,6 +72,11 @@ class InstructionVectorsTest {
                 HeadsDownInstructions.registerRig(authority, p256, RegistrarAttestation(0, 1, 451_800_000uL)),
             ),
             Vector(
+                "rotate_key", """{"authority": "$authority", "p256_pubkey_hex": "${p256.hex()}"}""",
+                listOf("authority", "config", "rig", "instructions_sysvar"),
+                HeadsDownInstructions.rotateKey(authority, p256),
+            ),
+            Vector(
                 "set_caps",
                 """{"authority": "$authority", "cap_week": "500000000", "cap_shift": "120000000", "cap_round": "2000000", "cap_max_cost": "670000000", "caps_expiry_ts": "1790600000"}""",
                 listOf("authority", "rig"),
@@ -164,7 +169,7 @@ class InstructionVectorsTest {
         val root = Json.parseToJsonElement(javaClass.getResource("/ix_vectors.json")!!.readText()).jsonObject
         val byName = root["instructions"]!!.jsonArray.associateBy { it.jsonObject["name"]!!.jsonPrimitive.content }
         val expectedSizes = mapOf(
-            "ore_automate_heads_down" to 66, "ore_revoke" to 66, "register_rig_guest" to 44, "set_caps" to 41,
+            "ore_automate_heads_down" to 66, "ore_revoke" to 66, "register_rig_guest" to 44, "rotate_key" to 44, "set_caps" to 41,
             "arm_shift_wallet" to 38, "arm_shift_p256" to 48, "break_shift_wallet" to 3, "break_shift_p256" to 13,
             "freeze_rig_wallet" to 3, "freeze_rig_p256" to 13, "unfreeze_rig" to 1, "end_shift" to 1, "close_rig_guest" to 1,
             "secp256r1_heartbeat" to 2 + 14 + 33 + 64 + 32,

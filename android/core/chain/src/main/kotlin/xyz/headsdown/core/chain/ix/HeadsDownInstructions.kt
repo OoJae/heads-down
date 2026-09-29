@@ -64,6 +64,7 @@ data class RegistrarAttestation(val ed25519Ix: Int, val level: Int, val expirySl
 object HeadsDownInstructions {
     const val TAG_REGISTER_RIG = 1
     const val TAG_SET_CAPS = 3
+    const val TAG_ROTATE_KEY = 4
     const val TAG_ARM_SHIFT = 5
     const val TAG_BREAK_SHIFT = 8
     const val TAG_FREEZE_RIG = 9
@@ -87,15 +88,7 @@ object HeadsDownInstructions {
      * Accounts: `authority (signer, writable: pays rent) | config | rig (w) | system | instructions sysvar`.
      */
     fun registerRig(authority: Pubkey, p256Pubkey: ByteArray, attestation: RegistrarAttestation? = null): Instruction {
-        require(p256Pubkey.size == P256.COMPRESSED_PUBLIC_KEY_BYTES) { "p256 key must be 33-byte compressed" }
-        P256.decompress(p256Pubkey) // throws unless it is a point on P-256
-        val data = DataWriter(44)
-            .u8(TAG_REGISTER_RIG)
-            .bytes(p256Pubkey)
-            .u8(attestation?.ed25519Ix ?: NO_ATTESTATION)
-            .u8(attestation?.level ?: 0)
-            .u64(attestation?.expirySlot ?: 0uL)
-            .build()
+        val data = keyBody(TAG_REGISTER_RIG, p256Pubkey, attestation)
         return Instruction(
             programId,
             listOf(
@@ -108,6 +101,26 @@ object HeadsDownInstructions {
             data,
         )
     }
+
+    /**
+     * `rotate_key` (tag 4), 44 bytes, same body as [registerRig]:
+     * `tag | new p256_pubkey[33] | attestation_ix u8 (0xFF none) | attestation_level u8 | attestation_expiry_slot u64`.
+     * Used when the Rig exists but this install holds a different Keystore key (reinstall,
+     * new phone): without it every heartbeat would fail the on-chain pubkey check.
+     *
+     * Accounts: `authority (signer) | config | rig (w) | instructions sysvar`.
+     */
+    fun rotateKey(authority: Pubkey, p256Pubkey: ByteArray, attestation: RegistrarAttestation? = null): Instruction =
+        Instruction(
+            programId,
+            listOf(
+                AccountMeta.signer(authority, writable = false),
+                AccountMeta.readonly(HeadsDownProgram.config.address),
+                AccountMeta.writable(HeadsDownProgram.rig(authority).address),
+                AccountMeta.readonly(WellKnown.INSTRUCTIONS_SYSVAR),
+            ),
+            keyBody(TAG_ROTATE_KEY, p256Pubkey, attestation),
+        )
 
     /**
      * `set_caps` (tag 3), 41 bytes:
@@ -213,6 +226,18 @@ object HeadsDownInstructions {
     }
 
     // ------------------------------------------------------------------------------ helpers
+
+    private fun keyBody(tag: Int, p256Pubkey: ByteArray, attestation: RegistrarAttestation?): ByteArray {
+        require(p256Pubkey.size == P256.COMPRESSED_PUBLIC_KEY_BYTES) { "p256 key must be 33-byte compressed" }
+        P256.decompress(p256Pubkey) // throws unless it is a point on P-256
+        return DataWriter(44)
+            .u8(tag)
+            .bytes(p256Pubkey)
+            .u8(attestation?.ed25519Ix ?: NO_ATTESTATION)
+            .u8(attestation?.level ?: 0)
+            .u64(attestation?.expirySlot ?: 0uL)
+            .build()
+    }
 
     private fun walletRigInstruction(authority: Pubkey, data: ByteArray) = Instruction(
         programId,

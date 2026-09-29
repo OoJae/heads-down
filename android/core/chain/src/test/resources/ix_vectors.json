@@ -89,6 +89,20 @@
       "data_hex": "010360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb60001c0ebed1a00000000"
     },
     {
+      "name": "rotate_key",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"},
+      "roles_count": 4,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "config", "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW", "signer": false, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 44,
+      "data_hex": "040360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6ff000000000000000000"
+    },
+    {
       "name": "set_caps",
       "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
       "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "cap_week": "500000000", "cap_shift": "120000000", "cap_round": "2000000", "cap_max_cost": "670000000", "caps_expiry_ts": "1790600000"},
