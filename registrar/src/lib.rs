@@ -20,6 +20,7 @@
     )
 )]
 
+pub mod attest;
 pub mod clock;
 pub mod nonce;
 pub mod session;
