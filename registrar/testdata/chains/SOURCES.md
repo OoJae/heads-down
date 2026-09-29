@@ -17,7 +17,7 @@ values.
 | `blueline_sdk28_TEE_EC_NONE.pem` | `testdata/blueline/sdk28/TEE_EC_NONE.pem` | factory keys, RSA root (2016 cert) | **unlocked bootloader** (`deviceLocked=false`, `UNVERIFIED`) |
 | `marlin_sdk29_SOFTWARE_EC.pem` | `testdata/marlin/sdk29/TEE_EC_NONE.pem` | Android **software** attestation root | unknown root; `attestationSecurityLevel=SOFTWARE` |
 | `akita_sdk34_SB_RSA_NONE.pem` | `testdata/akita/sdk34/SB_RSA_NONE.pem` | RKP, RSA root | an **RSA** leaf key (must be rejected: rigs are P-256) |
-| `quirk_tags_not_in_ascending_order.pem` | `testdata/invalid/tags_not_in_ascending_order.pem` | factory keys, RSA root | real device quirk: AuthorizationList tags out of order (Google logs and accepts) |
+| `edited_tags_not_in_ascending_order.pem` | `testdata/invalid/tags_not_in_ascending_order.pem` | factory keys, RSA root | a real chain whose leaf was **edited** (AuthorizationList tags reordered) without re-signing. Google's `VerifierCliTest.run_invalidChain_outputsFailure` expects "Verification Failed"; we reject it with `BadSignature(0)`, while its KeyDescription still parses (tags flagged as unordered) |
 | `quirk_non_der_bool_device_locked.pem` | `testdata/invalid/malformed_rot_device_locked.pem` | factory keys, RSA root | real device quirk: `deviceLocked` BOOLEAN encoded as `0x01` (Google logs and accepts as true) |
 | `android_software_attestation_roots.pem` | `src/main/kotlin/SoftwareRoot.kt` (two PEM literals) | | the AOSP software attestation roots; used only to let a test reach the software-level policy |
 
