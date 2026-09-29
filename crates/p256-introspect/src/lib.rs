@@ -54,7 +54,7 @@
 //! ```
 //!
 //! Host-side helpers (DER -> raw, low-S, key compression, instruction
-//! builder) live in [`client`] behind the `client` feature.
+//! builder) live in the `client` module behind the `client` feature.
 
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 #![forbid(unsafe_code)]
