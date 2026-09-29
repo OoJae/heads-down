@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hd_charcoal">#FF121314</color>
+    <color name="hd_ember">#FFFF6A1A</color>
+
+    <!-- Compose draws everything; the window only needs the charcoal background (no white flash). -->
+    <style name="Theme.HeadsDown" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/hd_charcoal</item>
+        <item name="android:colorAccent">@color/hd_ember</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

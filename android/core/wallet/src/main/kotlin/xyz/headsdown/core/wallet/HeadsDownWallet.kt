@@ -1,0 +1,152 @@
+package xyz.headsdown.core.wallet
+
+import androidx.core.net.toUri
+import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
+import com.solana.mobilewalletadapter.clientlib.Blockchain
+import com.solana.mobilewalletadapter.clientlib.ConnectionIdentity
+import com.solana.mobilewalletadapter.clientlib.MobileWalletAdapter
+import com.solana.mobilewalletadapter.clientlib.Solana
+import com.solana.mobilewalletadapter.clientlib.TransactionResult
+import com.solana.mobilewalletadapter.clientlib.protocol.MobileWalletAdapterClient.AuthorizationResult
+import com.solana.mobilewalletadapter.common.signin.SignInWithSolana
+
+/** A connected wallet account. Public data only. */
+data class WalletAccount(val publicKey: ByteArray, val label: String?) {
+    val address: String get() = Base58.encode(publicKey)
+
+    override fun equals(other: Any?): Boolean = other is WalletAccount && publicKey.contentEquals(other.publicKey)
+    override fun hashCode(): Int = publicKey.contentHashCode()
+}
+
+/** SIWS proof to hand to the SIWS verifier (single-use server nonce, 10-minute expiry). */
+class SignInProof(val account: WalletAccount, val signedMessage: ByteArray, val signature: ByteArray)
+
+sealed interface WalletResult<out T> {
+    data class Success<T>(val value: T) : WalletResult<T>
+    data object NoWalletInstalled : WalletResult<Nothing>
+
+    /** User declined, wallet error, timeout. [reason] is a fixed MWA message, never a token. */
+    data class Failed(val reason: String) : WalletResult<Nothing>
+}
+
+/**
+ * Result of submitting transactions. [allConfirmed] is true only when **every** signature was
+ * confirmed on-chain with `err == null`; it is the single source of truth for success UI.
+ */
+data class SubmissionReport(val outcomes: List<ConfirmationOutcome>) {
+    val allConfirmed: Boolean get() = outcomes.isNotEmpty() && outcomes.all { it.isSuccess }
+}
+
+/** Where the dApp identifies itself to the wallet. */
+object HeadsDownIdentity {
+    val connectionIdentity = ConnectionIdentity(
+        identityUri = "https://headsdown.xyz".toUri(),
+        iconUri = "favicon.ico".toUri(), // resolved relative to identityUri by the wallet
+        identityName = "Heads Down",
+    )
+    const val SIWS_DOMAIN = "headsdown.xyz"
+}
+
+/**
+ * Mobile Wallet Adapter (clientlib-ktx 2.0.3) for Heads Down.
+ *
+ * - One wallet confirmation per user action; all calls need an [ActivityResultSender] made
+ *   in `Activity.onCreate` (MWA cannot run from a Service: see the tile's trampoline).
+ * - The auth token is restored from and persisted to [AuthTokenVault]; it is never logged.
+ * - [signAndSend] reports success only after [ConfirmationPoller] saw each signature
+ *   confirmed with `err == null`. A wallet "sent" response is not success.
+ */
+class HeadsDownWallet(
+    private val adapter: MobileWalletAdapter,
+    private val vault: AuthTokenVault,
+    private val poller: ConfirmationPoller,
+    private val chain: Blockchain = Solana.Devnet,
+) {
+    init {
+        adapter.blockchain = chain
+    }
+
+    suspend fun connect(sender: ActivityResultSender): WalletResult<WalletAccount> {
+        restoreToken()
+        return when (val result = adapter.connect(sender)) {
+            is TransactionResult.Success -> onAuthorized(result.authResult)
+            is TransactionResult.NoWalletFound -> WalletResult.NoWalletInstalled
+            is TransactionResult.Failure -> failed(result.message)
+        }
+    }
+
+    /**
+     * Sign In With Solana. [nonce] must come from the SIWS nonce service (single use, >= 8
+     * alphanumerics); the returned proof is verified server-side, not trusted locally.
+     */
+    suspend fun signIn(sender: ActivityResultSender, nonce: String, statement: String): WalletResult<SignInProof> {
+        restoreToken()
+        val payload = SignInWithSolana.Payload(
+            HeadsDownIdentity.SIWS_DOMAIN, null, statement, null, "1", chain.fullName, nonce,
+            null, null, null, null, null,
+        )
+        return when (val result = adapter.signIn(sender, payload)) {
+            is TransactionResult.Success -> {
+                val account = when (val auth = onAuthorized(result.authResult)) {
+                    is WalletResult.Success -> auth.value
+                    is WalletResult.Failed -> return auth
+                    WalletResult.NoWalletInstalled -> return WalletResult.NoWalletInstalled
+                }
+                val siws = result.payload
+                WalletResult.Success(SignInProof(account, siws.signedMessage, siws.signature))
+            }
+            is TransactionResult.NoWalletFound -> WalletResult.NoWalletInstalled
+            is TransactionResult.Failure -> failed(result.message)
+        }
+    }
+
+    /**
+     * Signs and sends serialized transactions in one wallet session, then waits for on-chain
+     * confirmation of each. [lastValidBlockHeight] is the one returned with the blockhash the
+     * transactions were built against.
+     */
+    suspend fun signAndSend(
+        sender: ActivityResultSender,
+        transactions: List<ByteArray>,
+        lastValidBlockHeight: Long,
+    ): WalletResult<SubmissionReport> {
+        require(transactions.isNotEmpty()) { "nothing to send" }
+        restoreToken()
+        val result = adapter.transact(sender) { signAndSendTransactions(transactions.toTypedArray()) }
+        return when (result) {
+            is TransactionResult.Success -> {
+                persistToken(result.authResult)
+                val signatures = result.payload.signatures.map(Base58::encode)
+                WalletResult.Success(SubmissionReport(signatures.map { poller.await(it, lastValidBlockHeight) }))
+            }
+            is TransactionResult.NoWalletFound -> WalletResult.NoWalletInstalled
+            is TransactionResult.Failure -> failed(result.message)
+        }
+    }
+
+    suspend fun disconnect(sender: ActivityResultSender) {
+        restoreToken()
+        adapter.disconnect(sender)
+        vault.clear(chain.fullName)
+    }
+
+    private fun restoreToken() {
+        adapter.authToken = vault.load(chain.fullName)?.value
+    }
+
+    private fun persistToken(auth: AuthorizationResult) {
+        auth.authToken.takeIf { it.isNotEmpty() }?.let { vault.save(chain.fullName, AuthToken(it)) }
+    }
+
+    private fun onAuthorized(auth: AuthorizationResult): WalletResult<WalletAccount> {
+        persistToken(auth)
+        val account = auth.accounts.firstOrNull() ?: return WalletResult.Failed("wallet returned no accounts")
+        return WalletResult.Success(WalletAccount(account.publicKey, account.accountLabel))
+    }
+
+    private fun failed(message: String): WalletResult.Failed {
+        // A failed authorization may mean the stored token was revoked: drop it.
+        if (message == "Auth token invalid") vault.clear(chain.fullName)
+        return WalletResult.Failed(message)
+    }
+}

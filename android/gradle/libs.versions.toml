@@ -1,0 +1,67 @@
+# Single source of truth for every Android dependency and plugin version.
+# Resolved and verified against Google Maven / Maven Central on 2026-09-29.
+[versions]
+agp = "9.4.1"
+# AGP 9 ships built-in Kotlin support (runtime KGP 2.2.10). We pin a newer KGP so the
+# Compose compiler plugin (versioned with Kotlin) and the Kotlin compiler always match.
+kotlin = "2.4.20"
+ksp = "2.3.12"
+hilt = "2.60.1"
+
+compileSdk = "37"
+targetSdk = "36"
+minSdk = "31"
+
+androidxCore = "1.19.1"          # NotificationCompat.ProgressStyle + setRequestPromotedOngoing (since 1.17)
+activity = "1.13.0"
+lifecycle = "2.11.0"
+composeBom = "2026.09.00"
+coroutines = "1.11.0"
+# Pinned by the build plan. 2.2.0 exists upstream; bump deliberately after on-device testing.
+mwa = "2.0.3"
+junit = "4.13.2"
+
+[libraries]
+# Build logic (compileOnly in build-logic)
+android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
+compose-gradlePlugin = { group = "org.jetbrains.kotlin", name = "compose-compiler-gradle-plugin", version.ref = "kotlin" }
+
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCore" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activity" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycle" }
+
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+
+hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
+hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
+
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+
+mwa-clientlib-ktx = { group = "com.solanamobile", name = "mobile-wallet-adapter-clientlib-ktx", version.ref = "mwa" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+
+# Convention plugins (android/build-logic)
+headsdown-android-application = { id = "headsdown.android.application" }
+headsdown-android-library = { id = "headsdown.android.library" }
+headsdown-android-compose = { id = "headsdown.android.compose" }
+headsdown-hilt = { id = "headsdown.hilt" }
