@@ -82,6 +82,10 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     let now = clk.unix_timestamp;
     let rig_address = *rig.address();
     let mut g = state::load_mut::<Rig>(rig)?;
+    // Authority first: nothing about the rig is checked for strangers.
+    if authority.address().as_array() != &g.authority {
+        return Err(HdError::Unauthorized.into());
+    }
 
     match g.state {
         rig_state::IDLE => {}

@@ -56,6 +56,9 @@ pub fn process_break(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult
     };
     let rig_address = *rig.address();
     let mut g = state::load_mut::<Rig>(rig)?;
+    if authority.address().as_array() != &g.authority {
+        return Err(HdError::Unauthorized.into());
+    }
     match g.state {
         rig_state::ARMED | rig_state::DOWN | rig_state::COOLING => {}
         rig_state::FROZEN => return Err(HdError::RigFrozen.into()),
