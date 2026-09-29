@@ -185,11 +185,6 @@ pub async fn run(o: DriverOpts) -> Result<()> {
     let payer = read_keypair(&o.payer)?;
     let bg = o.background.as_ref().map(|p| read_keypair(p)).transpose()?;
     let hash_chain = HashChain::load(&o.entropy_secret)?;
-    for k in std::iter::once(&payer).chain(bg.iter()) {
-        if chain.balance(&k.pubkey()).await.unwrap_or(0) < SOL {
-            chain.airdrop(&k.pubkey(), 100 * SOL).await?;
-        }
-    }
     say!(
         "ore-round-driver: payer {} background miner {}",
         payer.pubkey(),
@@ -200,6 +195,13 @@ pub async fn run(o: DriverOpts) -> Result<()> {
     let mut last_err = String::new();
     loop {
         let step = async {
+            // Keep the driver's own keys funded (local airdrops; retried like everything else).
+            for k in std::iter::once(&payer).chain(bg.iter()) {
+                if chain.balance(&k.pubkey()).await? < SOL {
+                    chain.airdrop(&k.pubkey(), 100 * SOL).await?;
+                    say!("funded {} with 100 SOL (local airdrop)", k.pubkey());
+                }
+            }
             let s = snapshot(&chain).await?;
             let b = s.board;
             if !b.started() {
