@@ -8,8 +8,11 @@ import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import xyz.headsdown.core.wallet.HeadsDownWallet
+import xyz.headsdown.core.wallet.PreparedTransactions
 import xyz.headsdown.core.wallet.WalletAccount
+import xyz.headsdown.core.wallet.WalletCapabilities
 import xyz.headsdown.core.wallet.WalletResult
+import xyz.headsdown.core.wallet.WalletSession
 import xyz.headsdown.feature.shift.ShiftController
 import xyz.headsdown.feature.shift.ShiftMode
 import xyz.headsdown.feature.shift.ShiftSpec
@@ -17,19 +20,30 @@ import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.feature.shift.ShiftStatusRepository
 import javax.inject.Inject
 
-/** A clock-in the wallet must sign: refuel + arm_shift, built against a fresh blockhash. */
-class PreparedClockIn(
-    val spec: ShiftSpec,
-    val transactions: List<ByteArray>,
-    val lastValidBlockHeight: Long,
-)
-
 /**
- * Builds the clock-in transactions for [account], or returns null when there is nothing to
- * sign yet (no deployed program / focus-only), in which case a zero-SOL focus shift is armed.
+ * The clock-in transaction the wallet signs (ORE automate + register_rig? + set_caps +
+ * arm_shift), built inside the wallet session against a fresh blockhash, plus the shift it arms.
  */
+class PreparedClockIn(
+    transactions: List<ByteArray>,
+    lastValidBlockHeight: Long,
+    val spec: ShiftSpec,
+) : PreparedTransactions(transactions, lastValidBlockHeight)
+
+/** Builds and finalizes clock-ins. Implemented in the app over core/chain. */
 fun interface ClockInTransactions {
-    suspend fun prepare(account: WalletAccount): PreparedClockIn?
+    /**
+     * Builds the clock-in for [account] in the wallet's preferred transaction version, or
+     * returns null when there is nothing to sign on this cluster (heads_down not deployed), in
+     * which case a zero-SOL focus shift is armed locally.
+     */
+    suspend fun prepare(account: WalletAccount, capabilities: WalletCapabilities): PreparedClockIn?
+
+    /**
+     * Runs only after every signature confirmed with `err == null`: bind the Rig locally and
+     * return the shift to arm (with the on-chain `shift_id`).
+     */
+    suspend fun confirmed(account: WalletAccount, prepared: PreparedClockIn): ShiftSpec = prepared.spec
 }
 
 /**
@@ -42,7 +56,7 @@ fun interface ClockInTransactions {
  * - It trusts **no intent extras** and reads nothing from its Intent: the action is decided
  *   solely from local shift state (clock in when cold, end when running).
  * - A clock-in only arms the shift after the wallet's transactions are **confirmed on-chain
- *   with err == null** ([HeadsDownWallet.signAndSend]); any other outcome arms nothing.
+ *   with err == null** ([HeadsDownWallet.signAndSendInSession]); any other outcome arms nothing.
  * - Recreated mid-flow (process death) it finishes instead of replaying a wallet request.
  */
 @AndroidEntryPoint
@@ -78,28 +92,32 @@ class TrampolineActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * One wallet session, one approval: authorize, build the clock-in for the authorized
+     * account and the wallet's transaction version, sign and send. The shift is armed only when
+     * every signature confirmed with `err == null`.
+     */
     private suspend fun clockIn() {
-        val account = when (val connected = wallet.connect(sender)) {
-            is WalletResult.Success -> connected.value
-            WalletResult.NoWalletInstalled -> return toast("Install a Solana wallet (Solflare, Phantom or Seed Vault) to clock in.")
-            is WalletResult.Failed -> return toast("Wallet: ${connected.reason}")
+        val result = wallet.signAndSendInSession(sender) { account, capabilities ->
+            clockInTransactions.prepare(account, capabilities)
         }
-        val prepared = clockInTransactions.prepare(account)
-        if (prepared == null) {
-            // Nothing to sign yet: a focus-only shift (zero SOL) still counts for the streak.
-            shifts.arm(ShiftSpec(shiftId = System.currentTimeMillis() / 1000, mode = ShiftMode.FOCUS_ONLY))
-            return toast("Rig armed (focus only). Lay your phone face-down.")
-        }
-        when (val sent = wallet.signAndSend(sender, prepared.transactions, prepared.lastValidBlockHeight)) {
-            is WalletResult.Success ->
-                if (sent.value.allConfirmed) {
-                    shifts.arm(prepared.spec)
-                    toast("Clocked in. Lay your phone face-down.")
-                } else {
-                    toast("Clock-in did not confirm on-chain. Nothing was armed.")
+        when (result) {
+            WalletResult.NoWalletInstalled -> toast("Install a Solana wallet (Solflare, Phantom or Seed Vault) to clock in.")
+            is WalletResult.Failed -> toast("Wallet: ${result.reason}")
+            is WalletResult.Success -> when (val session = result.value) {
+                is WalletSession.NothingToSign -> {
+                    // Nothing on-chain to arm on this cluster: a zero-SOL focus shift still counts.
+                    shifts.arm(ShiftSpec(shiftId = System.currentTimeMillis() / 1000, mode = ShiftMode.FOCUS_ONLY))
+                    toast("Rig armed (focus only). Lay your phone face-down.")
                 }
-            WalletResult.NoWalletInstalled -> toast("No wallet found.")
-            is WalletResult.Failed -> toast("Wallet: ${sent.reason}")
+                is WalletSession.Submitted ->
+                    if (session.report.allConfirmed) {
+                        shifts.arm(clockInTransactions.confirmed(session.account, session.prepared))
+                        toast("Clocked in. Lay your phone face-down.")
+                    } else {
+                        toast("Clock-in did not confirm on-chain. Nothing was armed.")
+                    }
+            }
         }
     }
 

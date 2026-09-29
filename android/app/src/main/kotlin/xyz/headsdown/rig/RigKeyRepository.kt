@@ -57,6 +57,10 @@ class RigKeyRepository @Inject constructor(
         RigKeyStatus.Failed(e.javaClass.simpleName)
     }
 
+    /** The 33-byte compressed rig key, or null when none exists yet. */
+    fun compressedPublicKey(): ByteArray? =
+        if (!keys.hasKey(alias)) null else runCatching { keys.compressedPublicKey(alias) }.getOrNull()
+
     override fun messageSigner(): RigMessageSigner? =
         if (!keys.hasKey(alias)) null else runCatching { keys.messageSigner(alias, counter) }.getOrNull()
 }
