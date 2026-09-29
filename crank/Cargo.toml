@@ -26,6 +26,8 @@ fork = []
 # Same fork suite, but loading the real programs/heads-down build instead of the mock.
 # Wire once the program lands: HD_PROGRAM_SO=../programs/heads-down/target/deploy/heads_down.so
 real-program = ["fork"]
+# End-to-end: solana-test-validator + live ORE binary + mock program + the real app::run wiring.
+e2e = ["fork"]
 # Helius LaserStream gRPC behind the ChainSource trait (stub; see README).
 laserstream = []
 # Helius Sender (sender.helius-rpc.com) as an alternative submit path, with a Jito tip.
