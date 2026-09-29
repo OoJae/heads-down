@@ -9,6 +9,7 @@ import com.solana.mobilewalletadapter.clientlib.Solana
 import com.solana.mobilewalletadapter.clientlib.TransactionResult
 import com.solana.mobilewalletadapter.clientlib.protocol.MobileWalletAdapterClient.AuthorizationResult
 import com.solana.mobilewalletadapter.common.signin.SignInWithSolana
+import kotlinx.coroutines.CancellationException
 
 /** A connected wallet account. Public data only. */
 data class WalletAccount(val publicKey: ByteArray, val label: String?) {
@@ -25,7 +26,7 @@ sealed interface WalletResult<out T> {
     data class Success<T>(val value: T) : WalletResult<T>
     data object NoWalletInstalled : WalletResult<Nothing>
 
-    /** User declined, wallet error, timeout. [reason] is a fixed MWA message, never a token. */
+    /** User declined, wallet error, timeout. [reason] is a fixed string ([WalletFailures]), never a token. */
     data class Failed(val reason: String) : WalletResult<Nothing>
 }
 
@@ -125,6 +126,73 @@ class HeadsDownWallet(
         }
     }
 
+    /**
+     * One wallet association, one approval: authorize (or silently reauthorize), read the
+     * wallet's capabilities, let [prepare] build the transactions for the authorized account
+     * against a fresh blockhash, then `signAndSendTransactions`. After the session closes, each
+     * signature is awaited with [ConfirmationPoller] (`err == null` only).
+     *
+     * [prepare] returning null means there is nothing to sign ([WalletSession.NothingToSign]).
+     * If [prepare] throws (RPC down, unexpected chain state), nothing is sent and the result is
+     * [WalletResult.Failed] with [PREPARE_FAILED]; the exception text is never surfaced.
+     */
+    suspend fun <T : PreparedTransactions> signAndSendInSession(
+        sender: ActivityResultSender,
+        prepare: suspend (account: WalletAccount, capabilities: WalletCapabilities) -> T?,
+    ): WalletResult<WalletSession<T>> {
+        restoreToken()
+        val result = adapter.transact(sender) { auth ->
+            val first = auth.accounts.firstOrNull() ?: return@transact SessionStep.NoAccount
+            val account = WalletAccount(first.publicKey, first.accountLabel)
+            val capabilities = try {
+                getCapabilities().let {
+                    WalletCapabilities.fromMwa(it.supportedTransactionVersions, it.maxTransactionsPerSigningRequest)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                WalletCapabilities.LEGACY_ONLY // every MWA wallet signs legacy transactions
+            }
+            val prepared = try {
+                prepare(account, capabilities)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                return@transact SessionStep.PrepareFailed
+            } ?: return@transact SessionStep.Empty(account)
+            val limit = capabilities.maxTransactionsPerRequest
+            if (limit in 1 until prepared.transactions.size) return@transact SessionStep.TooMany
+            val sent = signAndSendTransactions(prepared.transactions.toTypedArray())
+            SessionStep.Sent(account, prepared, sent.signatures.map(Base58::encode))
+        }
+        return when (result) {
+            is TransactionResult.Success -> {
+                persistToken(result.authResult)
+                when (val step = result.payload) {
+                    SessionStep.NoAccount -> WalletResult.Failed("wallet returned no accounts")
+                    SessionStep.PrepareFailed -> WalletResult.Failed(PREPARE_FAILED)
+                    SessionStep.TooMany -> WalletResult.Failed("Too many payloads to sign")
+                    is SessionStep.Empty -> WalletResult.Success(WalletSession.NothingToSign(step.account))
+                    is SessionStep.Sent -> {
+                        val outcomes = step.signatures.map { poller.await(it, step.prepared.lastValidBlockHeight) }
+                        WalletResult.Success(WalletSession.Submitted(step.account, step.prepared, SubmissionReport(outcomes)))
+                    }
+                }
+            }
+            is TransactionResult.NoWalletFound -> WalletResult.NoWalletInstalled
+            is TransactionResult.Failure -> failed(result.message)
+        }
+    }
+
+    /** What happened inside the MWA session, before confirmation polling. */
+    private sealed interface SessionStep<out T> {
+        data object NoAccount : SessionStep<Nothing>
+        data object PrepareFailed : SessionStep<Nothing>
+        data object TooMany : SessionStep<Nothing>
+        class Empty(val account: WalletAccount) : SessionStep<Nothing>
+        class Sent<T>(val account: WalletAccount, val prepared: T, val signatures: List<String>) : SessionStep<T>
+    }
+
     suspend fun disconnect(sender: ActivityResultSender) {
         restoreToken()
         adapter.disconnect(sender)
@@ -148,6 +216,10 @@ class HeadsDownWallet(
     private fun failed(message: String): WalletResult.Failed {
         // A failed authorization may mean the stored token was revoked: drop it.
         if (message == "Auth token invalid") vault.clear(chain.fullName)
-        return WalletResult.Failed(message)
+        return WalletResult.Failed(WalletFailures.sanitize(message))
+    }
+
+    companion object {
+        const val PREPARE_FAILED = "Could not build the transaction. Nothing was sent."
     }
 }
