@@ -255,12 +255,15 @@ h2 {
   gap: 12px;
 }
 .tiles {
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 @media (min-width: 760px) {
   .tiles {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+.grid > * {
+  min-width: 0;
 }
 .section {
   margin-top: 28px;
@@ -330,7 +333,7 @@ h2 {
 }
 .evidence a,
 .evidence span {
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .evidence .noproof {
   color: var(--text-muted);
@@ -342,8 +345,6 @@ h2 {
 }
 .chart svg {
   display: block;
-  width: 100%;
-  height: auto;
   overflow: visible;
 }
 .chart .tick {

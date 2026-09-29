@@ -12,12 +12,9 @@ export function CohortTable({ report }: { report: CohortReport }) {
     return <p className="muted">No cohorts yet: a cohort starts on a rig&apos;s first armed shift.</p>;
   }
   return (
+    <>
     <div className="table-scroll">
-      <table>
-        <caption className="small muted" style={{ textAlign: "left", captionSide: "bottom", paddingTop: 8 }}>
-          Cohort = night of a rig&apos;s first armed shift. Dk = share of that cohort active on night +k exactly.
-          Hatched cells are not complete yet.
-        </caption>
+      <table aria-describedby="cohort-note">
         <thead>
           <tr>
             <th scope="col">First-shift night</th>
@@ -79,5 +76,10 @@ export function CohortTable({ report }: { report: CohortReport }) {
         </tfoot>
       </table>
     </div>
+    <p id="cohort-note" className="small muted" style={{ marginBottom: 0 }}>
+      Cohort = night of a rig&apos;s first armed shift. Dk = share of that cohort active on night +k exactly. Hatched cells
+      are not complete yet.
+    </p>
+    </>
   );
 }
