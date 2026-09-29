@@ -26,3 +26,4 @@ pub mod nonce;
 pub mod session;
 pub mod siws;
 pub mod util;
+pub mod voucher;
