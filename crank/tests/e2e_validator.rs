@@ -393,6 +393,19 @@ config_poll_secs = 5
     assert!(body.contains("hd_crank_circuit_breaker_tripped 0"));
     let state = std::fs::read_to_string(dir.path().join("state/lookup_tables.json")).expect("crank created a lookup table");
     println!("lookup tables: {state}");
+    // The crank registered every rig's four accounts in its table as they appeared.
+    let v: Value = serde_json::from_str(&state).unwrap();
+    let key: Address = v["tables"][0].as_str().unwrap().parse().unwrap();
+    let acc = rpc.get_account(&key).await.unwrap().unwrap();
+    let table = hd_crank::alt::LookupTable::decode(key, &acc.owner, &acc.data).unwrap();
+    assert_eq!(table.authority, Some(cranker.pubkey()));
+    for (wallet, _, rig) in &users {
+        let ra = RigAccounts::derive(*rig, wallet.pubkey());
+        for a in hd_crank::alt::rig_addresses(&ra) {
+            assert!(table.addresses.contains(&a), "rig account {a} in the lookup table");
+        }
+    }
+    println!("lookup table holds {} addresses", table.addresses.len());
     crank_task.abort();
 }
 

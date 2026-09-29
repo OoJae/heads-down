@@ -176,6 +176,7 @@ pub struct Crank {
     known_rigs: Mutex<Vec<(Address, Rig)>>,
     rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
     nonce: AtomicU64,
+    alt_sync: tokio::sync::Mutex<()>,
 }
 
 impl Crank {
@@ -209,6 +210,7 @@ impl Crank {
             known_rigs: Mutex::new(Vec::new()),
             rig_seed,
             nonce: AtomicU64::new(0),
+            alt_sync: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -314,12 +316,37 @@ impl Crank {
             if let Ok(b) = self.rpc.get_balance(&self.cranker()).await {
                 self.metrics.cranker_lamports.set_u64(b);
             }
-            if let Some(board) = self.chain.borrow().board {
+            let (board, slots_left) = {
+                let v = self.chain.borrow();
+                (v.board, v.slots_left())
+            };
+            if let Some(board) = board {
                 self.store.prune(board.round_id, Duration::from_secs(15 * 60));
             }
             self.metrics.heartbeats_held.set_u64(self.store.len() as u64);
+            // Register new rigs in the lookup table as they appear, but never inside the dig
+            // window (an extend is only usable from the next slot anyway).
+            let quiet = slots_left.is_none_or(|l| l > self.cfg.dig.deploy_margin_slots.saturating_add(10));
+            if quiet && self.alts_in_use() && !self.breaker.is_tripped() {
+                match load_diggable_rigs(&self.rpc, &self.program_id).await {
+                    Ok(rigs) => {
+                        for (a, r) in &rigs {
+                            (self.rig_seed)(*a, r.clone());
+                        }
+                        *lock(&self.known_rigs) = rigs;
+                        if let Err(e) = self.sync_alts().await {
+                            tracing::warn!(error = %e, "lookup table sync failed");
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "reading rigs failed"),
+                }
+            }
             tokio::time::sleep(every).await;
         }
+    }
+
+    fn alts_in_use(&self) -> bool {
+        self.cfg.dig.tx_format == TxFormat::V0 && self.cfg.alt.enabled
     }
 
     async fn on_new_round(self: Arc<Self>, round_id: u64) {
@@ -328,7 +355,7 @@ impl Crank {
         if self.breaker.is_tripped() {
             return;
         }
-        if self.cfg.dig.tx_format == TxFormat::V0 && self.cfg.alt.enabled {
+        if self.alts_in_use() {
             if let Err(e) = self.sync_alts().await {
                 tracing::warn!(error = %e, "lookup table sync failed");
             }
@@ -626,6 +653,8 @@ impl Crank {
 
     /// Make sure the crank's tables hold the shared accounts and every known rig's four.
     async fn sync_alts(&self) -> anyhow::Result<()> {
+        // The poller and new-round maintenance both sync; never interleave (double creates).
+        let _guard = self.alt_sync.lock().await;
         let me = self.cranker();
         if lock(&self.alts).iter().all(|t| t.authority != Some(me)) {
             if !self.cfg.alt.auto_create {
