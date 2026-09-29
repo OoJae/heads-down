@@ -13,7 +13,8 @@ dependencies {
     api(projects.core.keys)
     // SolanaRpc / Commitment / SignatureStatus (the confirmation poller's port) and Base58.
     api(projects.core.wallet)
-    implementation(libs.okhttp)
+    // api: OkHttpClient and okio.ByteString appear in this module's public types.
+    api(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
     // Ed25519 on-curve test for find_program_address: the TweetNaCl port web3-solana uses.
