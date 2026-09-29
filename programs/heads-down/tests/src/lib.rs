@@ -38,6 +38,8 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 pub use solana_transaction_error::TransactionError;
 
+pub mod vectors;
+
 // ---- ids --------------------------------------------------------------------
 
 /// heads_down program id.
@@ -525,8 +527,9 @@ pub mod golden {
     /// The pinned `ema_ev` (lamports per ORE) the gate compares against.
     pub const EMA_EV: u64 = 653_163_071;
 
-    /// `Round.deployed[i]`: 370 SOL-milli-ish values, all distinct, so the
-    /// least-crowded tile order has no ties.
+    /// `Round.deployed[i]` = 0.370 + ((11 i) mod 25) / 1000 SOL: 25 distinct
+    /// values near the live board's ~0.39 SOL per square, so the
+    /// least-crowded square order has no ties.
     pub fn round_deployed() -> [u64; 25] {
         std::array::from_fn(|i| 370_000_000 + ((i as u64 * 11) % 25) * 1_000_000)
     }
