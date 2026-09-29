@@ -78,6 +78,7 @@ pub fn params(format: TxFormat, cranker: Address) -> BuildParams {
         loaded_accounts_data_size_limit: 64 * 1024 * 1024,
         max_account_locks: DEFAULT_MAX_ACCOUNT_LOCKS,
         max_rigs_per_tx: 64,
+        tip: None,
     }
 }
 

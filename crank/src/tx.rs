@@ -80,6 +80,7 @@ pub fn set_compute_unit_price(micro_lamports: u64) -> Instruction {
 
 /// Compute estimate used before (or instead of) simulation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct CuEstimate {
     /// Fixed overhead per transaction.
     pub base: u32,
@@ -142,6 +143,22 @@ pub struct BuildParams {
     pub max_account_locks: usize,
     /// Hard cap on rigs per transaction.
     pub max_rigs_per_tx: usize,
+    /// Optional tip transfer appended last (Helius Sender requires one): `(recipient, lamports)`.
+    pub tip: Option<(Address, u64)>,
+}
+
+/// System `Transfer` (tag 2, u64) from `from` to `to`.
+pub fn system_transfer(from: &Address, to: &Address, lamports: u64) -> Instruction {
+    let mut data = 2u32.to_le_bytes().to_vec();
+    data.extend_from_slice(&lamports.to_le_bytes());
+    Instruction {
+        program_id: ore::SYSTEM_PROGRAM_ID,
+        accounts: vec![
+            solana_instruction::AccountMeta::new(*from, true),
+            solana_instruction::AccountMeta::new(*to, false),
+        ],
+        data,
+    }
 }
 
 /// Transaction build failures.
@@ -229,6 +246,10 @@ pub fn build_instructions(p: &BuildParams, rigs: &[RigDig]) -> Result<Vec<Instru
     }
     let pairs: Vec<(RigAccounts, DigEntry)> = rigs.iter().map(|r| r.accounts).zip(entries).collect();
     ixs.push(hd::dig_ix(&p.program_id, &p.cranker, &ore::round_pda(p.round_id), &pairs)?);
+    // Last, so it never shifts a precompile index.
+    if let Some((to, lamports)) = p.tip {
+        ixs.push(system_transfer(&p.cranker, &to, lamports));
+    }
     Ok(ixs)
 }
 
