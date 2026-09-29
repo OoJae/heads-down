@@ -1,0 +1,21 @@
+[package]
+name = "sgt-verify-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Minimal SBF program that calls sgt_verify::verify_sgt, for LiteSVM integration tests."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+# Build against the test group instead of mainnet (scripts/build-sbf.sh
+# produces both variants).
+test-group = ["sgt-verify/test-group"]
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false, features = ["cpi"] }
+sgt-verify = { path = ".." }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

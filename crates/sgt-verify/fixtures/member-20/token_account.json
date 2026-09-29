@@ -1,0 +1,16 @@
+{
+  "source": "mainnet-beta getAccountInfo (finalized) via https://api.mainnet-beta.solana.com",
+  "slot": 451707733,
+  "pubkey": "BLJGXXKnNdZEaXTGqZaaNoZ1UkkbD1dXht8DjVz2eeZV",
+  "account": {
+    "lamports": 2074080,
+    "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "executable": false,
+    "rentEpoch": 18446744073709551615,
+    "space": 170,
+    "data": [
+      "Rtbm56e2Wpp6IcN4mzsGGaAfQo0zuMd+o6vhmFUcUriyuHInog796Brm99sgWk6YceGIkLx6iZ8CQvrrizfbMAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgcAAAA=",
+      "base64"
+    ]
+  }
+}

@@ -1,0 +1,3 @@
+target/
+# Local test-SGT keys and dumps written by scripts/make-test-sgt.sh.
+.test-sgt/

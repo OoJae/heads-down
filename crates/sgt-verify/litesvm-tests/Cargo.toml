@@ -1,0 +1,22 @@
+[package]
+name = "sgt-verify-litesvm-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "LiteSVM integration tests: the SBF probe running verify_sgt against real and forged SGT accounts."
+
+# Versions pinned to what litesvm 0.17.0 itself uses.
+[dependencies]
+base64 = "0.22"
+litesvm = "0.17.0"
+serde_json = "1"
+sgt-verify = { path = "..", features = ["std"] }
+solana-account = "4"
+solana-address = "2.7"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-message = "4"
+solana-signer = "3"
+solana-transaction = { version = "4", features = ["wincode"] }
+solana-transaction-error = "3"
+solana-instruction-error = "2"

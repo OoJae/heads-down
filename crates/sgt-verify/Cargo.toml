@@ -1,0 +1,54 @@
+# Standalone workspace: sgt-verify is published on its own and must not be
+# pulled into (or depend on) the Heads Down root workspace.
+[workspace]
+resolver = "2"
+members = [".", "probe", "litesvm-tests"]
+# `cargo test` at this root runs only the library's own tests. The LiteSVM
+# suite needs the SBF probe built first: see scripts/test-all.sh.
+default-members = ["."]
+
+[package]
+name = "sgt-verify"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+license = "Apache-2.0"
+description = "In-program Seeker Genesis Token (SGT) verification for Pinocchio programs, with a spoof suite."
+keywords = ["solana", "seeker", "token-2022", "pinocchio", "sgt"]
+categories = ["no-std", "cryptography::cryptocurrencies"]
+readme = "README.md"
+
+[features]
+default = []
+# Host-side test kit: Token-2022 instruction builders for a test SGT group,
+# byte-exact synthetic SGT accounts, and an AccountView harness.
+std = [
+    "dep:solana-instruction",
+    "solana-address/curve25519",
+    "solana-address/std",
+]
+# Swap the hardcoded mainnet trust anchors (group GT22s89…, authority GT2zuH…)
+# for a devnet/test group. Values come from SGT_VERIFY_TEST_GROUP and
+# SGT_VERIFY_TEST_AUTHORITY at build time; see README.md. Never ship this.
+test-group = []
+# Guard for production builds: enabling it together with `test-group` is a
+# compile error, so feature unification can never smuggle test anchors into a
+# mainnet binary.
+mainnet = []
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false }
+solana-address = { version = "2.7", default-features = false, features = ["decode", "copy"] }
+solana-instruction = { version = "3", optional = true }
+
+[dev-dependencies]
+base64 = "0.22"
+serde_json = "1"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
