@@ -1,19 +1,24 @@
 package xyz.headsdown.feature.shift
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 
 /**
  * Write-ahead heartbeat counter. `commit()` (synchronous) runs before the signature exists,
  * so a crash can skip a value but can never reuse one: the on-chain rule is
  * `counter > rig.counter`.
  */
+// commit() is deliberate throughout: the result must be known before a signature exists.
+@SuppressLint("ApplySharedPref", "UseKtx")
 class PrefsHeartbeatCounter(context: Context) : HeartbeatCounter {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     @Synchronized
     override fun next(): ULong {
         val next = current() + 1uL
+        check(next != 0uL) { "counter exhausted" } // u64 wrap would reuse values
         check(prefs.edit().putLong(KEY, next.toLong()).commit()) { "counter not persisted" }
         return next
     }
@@ -50,22 +55,24 @@ class ShiftJournal(context: Context) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun onArmed(spec: ShiftSpec, nowWall: Long) {
-        prefs.edit().clear()
-            .putLong(K_SHIFT, spec.shiftId)
-            .putString(K_MODE, spec.mode.name)
-            .putLong(K_ARMED, nowWall)
-            .putInt(K_ROUNDS, 0)
-            .apply()
+        prefs.edit {
+            clear()
+            putLong(K_SHIFT, spec.shiftId)
+            putString(K_MODE, spec.mode.name)
+            putLong(K_ARMED, nowWall)
+            putInt(K_ROUNDS, 0)
+        }
     }
 
     fun onHeartbeat(nowWall: Long, darkRounds: Int) {
-        prefs.edit().putLong(K_LAST_HB, nowWall).putInt(K_ROUNDS, darkRounds).apply()
+        prefs.edit { putLong(K_LAST_HB, nowWall).putInt(K_ROUNDS, darkRounds) }
     }
 
     /** Graceful or deliberate end (user end, break, freeze): anything but an OS kill. */
     fun onEnded(nowWall: Long, reason: String) {
-        // commit(): this is the record that distinguishes "we stopped" from "we were killed".
-        prefs.edit().putLong(K_ENDED, nowWall).putString(K_REASON, reason).commit()
+        // commit = true: this record is what distinguishes "we stopped" from "we were killed",
+        // and the process may be torn down right after stopSelf().
+        prefs.edit(commit = true) { putLong(K_ENDED, nowWall).putString(K_REASON, reason) }
     }
 
     fun last(): ShiftRecord? {

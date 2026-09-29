@@ -14,6 +14,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -76,7 +77,11 @@ class ShiftForegroundService : LifecycleService() {
     /** Written on the main thread, read by the ticker thread. */
     @Volatile private var hotSpec: ShiftSpec? = null
 
-    /** Last accelerometer sample time (elapsedRealtime ms), written on the sensor thread. */
+    /**
+     * When the last accelerometer batch was delivered (elapsedRealtime ms), written on the
+     * sensor thread. Delivery time rather than `SensorEvent.timestamp`, whose clock base is
+     * not guaranteed to be elapsedRealtime on every device; batching adds at most ~1 s.
+     */
     @Volatile private var lastPostureSampleAt: Long = Long.MIN_VALUE
 
     private val signalReceiver = object : BroadcastReceiver() {
@@ -96,7 +101,7 @@ class ShiftForegroundService : LifecycleService() {
         override fun onSensorChanged(event: SensorEvent) {
             if (event.sensor.type != Sensor.TYPE_ACCELEROMETER || event.values.size < 3) return
             val verdict = detector.onSample(event.values[0], event.values[1], event.values[2], event.timestamp)
-            lastPostureSampleAt = event.timestamp / 1_000_000
+            lastPostureSampleAt = SystemClock.elapsedRealtime()
             if (verdict != lastVerdict) {
                 lastVerdict = verdict
                 mainHandler.post { dispatch(ShiftEvent.Posture(verdict)) }
@@ -135,14 +140,14 @@ class ShiftForegroundService : LifecycleService() {
             ACTION_ARM -> {
                 val spec = repository.takePendingArm()
                 if (spec == null) {
-                    if (machine.state == ShiftState.Idle) finishShift("no pending arm")
+                    if (machine.state == ShiftState.Idle) finishShift(reason = null)
                 } else {
                     arm(spec)
                 }
             }
             ACTION_END -> dispatch(ShiftEvent.End)
             ACTION_FREEZE -> dispatch(ShiftEvent.Freeze)
-            else -> if (machine.state == ShiftState.Idle) finishShift("unknown start")
+            else -> if (machine.state == ShiftState.Idle) finishShift(reason = null)
         }
         return START_NOT_STICKY
     }
@@ -206,10 +211,13 @@ class ShiftForegroundService : LifecycleService() {
         }
         snapshot = snapshot.copy(state = to)
         publish()
+        // Every exit from a running shift is journaled, so the health check can tell an
+        // ended shift from one the OS killed (which never reaches this code).
+        val wasRunning = t.from !is ShiftState.Idle
         when (to) {
-            ShiftState.Idle -> finishShift("ended")
-            is ShiftState.Broken -> finishShift("broken:${to.reason}")
-            is ShiftState.Frozen -> if (t.from !is ShiftState.Frozen) finishShift("frozen")
+            ShiftState.Idle -> finishShift(reason = if (wasRunning) "ended" else null)
+            is ShiftState.Broken -> finishShift(reason = "broken:${to.reason}")
+            is ShiftState.Frozen -> if (t.from !is ShiftState.Frozen) finishShift(reason = "frozen")
             else -> Unit
         }
     }
@@ -235,12 +243,14 @@ class ShiftForegroundService : LifecycleService() {
         }
     }
 
-    private fun finishShift(reason: String) {
+    /** @param reason journaled end reason, or null when no shift was running. */
+    private fun finishShift(reason: String?) {
         tickerJob?.cancel()
         tickerJob = null
+        hotSpec = null
         mainHandler.removeCallbacksAndMessages(null)
         releaseWakeLock()
-        if (snapshot.state != ShiftState.Idle || reason != "ended") journal.onEnded(System.currentTimeMillis(), reason)
+        if (reason != null) journal.onEnded(System.currentTimeMillis(), reason)
         val finalState = machine.state
         if (finalState is ShiftState.Broken || finalState is ShiftState.Frozen) {
             // Leave a non-ongoing "rig cold/frozen" notification behind.
@@ -261,7 +271,11 @@ class ShiftForegroundService : LifecycleService() {
         sensorThread?.quitSafely()
         releaseWakeLock()
         mainHandler.removeCallbacksAndMessages(null)
-        repository.publish(ShiftSnapshot.IDLE)
+        // Keep a finished shift's outcome (broken reason / frozen) visible; anything else is cold.
+        val last = snapshot.state
+        repository.publish(
+            if (last is ShiftState.Broken || last is ShiftState.Frozen) snapshot else ShiftSnapshot.IDLE,
+        )
         super.onDestroy()
     }
 
@@ -272,12 +286,9 @@ class ShiftForegroundService : LifecycleService() {
     }
 
     private fun promoteToForeground() {
-        ServiceCompat.startForeground(
-            this,
-            ShiftNotificationFactory.SHIFT_NOTIFICATION_ID,
-            currentNotification(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-        )
+        // The specialUse type exists from Android 14; on 12/13 no type is required.
+        val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        ServiceCompat.startForeground(this, ShiftNotificationFactory.SHIFT_NOTIFICATION_ID, currentNotification(), type)
     }
 
     private fun currentNotification(): Notification =

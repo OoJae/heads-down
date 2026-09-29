@@ -3,6 +3,7 @@ package xyz.headsdown.ui
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,8 +24,8 @@ import xyz.headsdown.feature.reveal.RevealScheduler
 import xyz.headsdown.feature.shift.ShiftController
 import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.ShiftSnapshot
-import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.feature.shift.ShiftStatusRepository
+import xyz.headsdown.feature.shift.isRunning
 import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.surface.tile.TileAddOutcome
@@ -97,18 +98,18 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun onNotificationPermissionAsked() = prefs.edit().putBoolean(K_NOTIF_ASKED, true).apply()
+    fun onNotificationPermissionAsked() = prefs.edit { putBoolean(K_NOTIF_ASKED, true) }
 
     fun openKeepAlive(step: KeepAliveStep) {
         keepAlive.open(step, appLabel = "Heads Down")
         if (step == KeepAliveStep.AUTOSTART) {
             // Autostart cannot be read back on HyperOS; the user confirms it in the checklist.
-            prefs.edit().putBoolean(K_AUTOSTART_OPENED, true).apply()
+            prefs.edit { putBoolean(K_AUTOSTART_OPENED, true) }
         }
     }
 
     fun confirmAutostart() {
-        prefs.edit().putBoolean(K_AUTOSTART, true).apply()
+        prefs.edit { putBoolean(K_AUTOSTART, true) }
         _onboarding.value = _onboarding.value.copy(autostartConfirmed = true)
     }
 
@@ -116,7 +117,7 @@ class HomeViewModel @Inject constructor(
         val added = outcome == TileAddOutcome.ADDED || outcome == TileAddOutcome.ALREADY_ADDED
         // Android 12 has no prompt: the user adds the tile by hand and confirms here.
         if (added || outcome == TileAddOutcome.UNSUPPORTED) {
-            prefs.edit().putBoolean(K_TILE, true).apply()
+            prefs.edit { putBoolean(K_TILE, true) }
             _onboarding.value = _onboarding.value.copy(tileAdded = true)
         }
     }
@@ -138,7 +139,7 @@ class HomeViewModel @Inject constructor(
 
     private fun evaluateHealth(): ShiftHealth {
         val record = journal.last() ?: return ShiftHealth.NoRecentShift
-        val running = shift.value.state !is ShiftState.Idle
+        val running = shift.value.state.isRunning
         val exits = runCatching { keepAlive.recentExits() }.getOrDefault(emptyList())
         return ShiftHealthCheck.evaluate(
             last = LastShift(

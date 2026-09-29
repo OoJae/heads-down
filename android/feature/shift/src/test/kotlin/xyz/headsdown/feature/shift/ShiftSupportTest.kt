@@ -41,6 +41,17 @@ class ShiftSupportTest {
     }
 
     @Test
+    fun `only armed, down and cooling count as a running shift`() {
+        val spec = ShiftSpec(1, ShiftMode.DAY)
+        assertTrue(ShiftState.Armed(spec, 0).isRunning)
+        assertTrue(ShiftState.Down(spec, 0, 0).isRunning)
+        assertTrue(ShiftState.Cooling(spec, 0, 1, CoolReason.LIFTED, 0).isRunning)
+        assertFalse(ShiftState.Idle.isRunning)
+        assertFalse(ShiftState.Broken(spec, 0, BreakReason.LIFTED).isRunning)
+        assertFalse(ShiftState.Frozen(1, 0).isRunning)
+    }
+
+    @Test
     fun `snapshot maps onto notification phases`() {
         val spec = ShiftSpec(1, ShiftMode.FOCUS_ONLY, plannedRounds = 20)
         val cases = mapOf(

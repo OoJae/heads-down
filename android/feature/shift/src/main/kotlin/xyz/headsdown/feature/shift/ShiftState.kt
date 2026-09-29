@@ -107,3 +107,7 @@ val ShiftState.spec: ShiftSpec?
     }
 
 val ShiftState.isHot: Boolean get() = this is ShiftState.Down
+
+/** A shift is in progress (the foreground service must be alive for it). */
+val ShiftState.isRunning: Boolean
+    get() = this is ShiftState.Armed || this is ShiftState.Down || this is ShiftState.Cooling

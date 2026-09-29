@@ -23,7 +23,7 @@ class ShiftController @Inject constructor(
     }
 
     fun end() {
-        if (repository.snapshot.value.state == ShiftState.Idle) return
+        if (!repository.snapshot.value.state.isRunning) return
         ContextCompat.startForegroundService(context, serviceIntent(ShiftForegroundService.ACTION_END))
     }
 
