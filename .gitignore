@@ -38,3 +38,6 @@ ml/**/checkpoints/
 # Local spike data (mainnet dumps can be large; regenerate with scripts)
 spikes/**/fixtures/*.json
 spikes/**/fixtures/*.bin
+
+# Agent worktrees / local tooling
+.claude/
