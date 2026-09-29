@@ -2,12 +2,12 @@
 //! from the phone key, wallet-only unfreeze, record_heartbeats, the
 //! permissionless end_shift rules, ShiftLog and streak accounting.
 
-use heads_down_tests::*;
 use hd::{
     error::HdError,
     message::kind,
     state::{break_reason, plan_flags, rig_state},
 };
+use heads_down_tests::*;
 use p256_introspect::IntrospectError;
 
 /// automate + register + caps, but not armed.
@@ -52,7 +52,13 @@ fn signal_by_p256(env: &mut Env, user: &mut User, freeze: bool, reason: u8) -> T
 fn record(env: &mut Env, user: &mut User, round: u64, lease: u8) -> TxResult {
     let shift = env.rig(&user.rig).shift_id.get();
     let hb = user.heartbeat(shift, round, lease);
-    env.send(&[secp_ix_for(&[hb]), ix_record(&[(user.rig, entry_for(&hb, 0, 0))])], &[])
+    env.send(
+        &[
+            secp_ix_for(&[hb]),
+            ix_record(&[(user.rig, entry_for(&hb, 0, 0))]),
+        ],
+        &[],
+    )
 }
 
 fn set_board_round(env: &mut Env, round: u64) {
@@ -71,22 +77,42 @@ fn phone_key_arms_a_shift_within_wallet_caps() {
     assert_eq!(rig.shift_id.get(), 1);
     assert_eq!(rig.hb_counter.get(), 1);
     assert_eq!(rig.plan_dig_lamports.get(), plan.dig_lamports);
-    assert_eq!(events(&meta.logs), vec![Event::ShiftArmed { rig: u.rig, shift_id: 1 }]);
+    assert_eq!(
+        events(&meta.logs),
+        vec![Event::ShiftArmed {
+            rig: u.rig,
+            shift_id: 1
+        }]
+    );
 
     // The same signed PLAN replayed after the shift ends: stale counter.
     let w = u.wallet.insecure_clone();
     ok(env.send_as(&w, &[ix_end_shift(&w.pubkey(), &u.rig, 1)], &[]));
     let (d, s) = plan_signature(&u, 1, &plan);
-    let res = env.send(&[secp_ix(&[(s, u.p256(), d.to_vec())]), ix_arm_p256(&u.pubkey(), &plan, 1, 0, 0)], &[]);
+    let res = env.send(
+        &[
+            secp_ix(&[(s, u.p256(), d.to_vec())]),
+            ix_arm_p256(&u.pubkey(), &plan, 1, 0, 0),
+        ],
+        &[],
+    );
     assert_hd(&res, 1, HdError::StaleHeartbeat);
 
     // A plan above the wallet's caps cannot be armed by the phone key.
     let mut greedy = plan;
     greedy.dig_lamports = Caps::standard().round + 1;
-    assert_hd(&arm_by_plan(&mut env, &mut u, &greedy), 1, HdError::PlanExceedsCaps);
+    assert_hd(
+        &arm_by_plan(&mut env, &mut u, &greedy),
+        1,
+        HdError::PlanExceedsCaps,
+    );
     let mut greedy = plan;
     greedy.max_ev_cost = Caps::standard().max_cost + 1;
-    assert_hd(&arm_by_plan(&mut env, &mut u, &greedy), 1, HdError::PlanExceedsCaps);
+    assert_hd(
+        &arm_by_plan(&mut env, &mut u, &greedy),
+        1,
+        HdError::PlanExceedsCaps,
+    );
 
     // A PLAN signed by another key.
     let other = User::new(&mut env, 50);
@@ -94,7 +120,10 @@ fn phone_key_arms_a_shift_within_wallet_caps() {
     let d = hd::message::digest(&hd::message::plan_preimage(&u.rig, counter, &plan));
     let s = other.sign(&d);
     let res = env.send(
-        &[secp_ix(&[(s, other.p256(), d.to_vec())]), ix_arm_p256(&u.pubkey(), &plan, counter, 0, 0)],
+        &[
+            secp_ix(&[(s, other.p256(), d.to_vec())]),
+            ix_arm_p256(&u.pubkey(), &plan, counter, 0, 0),
+        ],
         &[],
     );
     assert_custom(&res, 1, IntrospectError::PublicKeyMismatch.code());
@@ -102,7 +131,11 @@ fn phone_key_arms_a_shift_within_wallet_caps() {
     // Wallet mode without the wallet's signature.
     let mut ix = ix_arm_wallet(&u.pubkey(), &plan);
     ix.accounts[1].is_signer = false;
-    assert_ix_err(&env.send(&[ix], &[]), 0, InstructionError::MissingRequiredSignature);
+    assert_ix_err(
+        &env.send(&[ix], &[]),
+        0,
+        InstructionError::MissingRequiredSignature,
+    );
 }
 
 #[test]
@@ -171,13 +204,21 @@ fn pickup_cools_the_rig_and_a_fresh_heartbeat_resumes_it() {
     ok(record(&mut env, &mut u, r, 1));
     assert_eq!(env.rig(&u.rig).state, rig_state::DOWN);
 
-    ok(signal_by_p256(&mut env, &mut u, false, break_reason::PICKUP));
+    ok(signal_by_p256(
+        &mut env,
+        &mut u,
+        false,
+        break_reason::PICKUP,
+    ));
     let rig = env.rig(&u.rig);
     assert_eq!(rig.state, rig_state::COOLING);
     assert_eq!(rig.break_reason, break_reason::PICKUP);
     // The outstanding lease cannot be reused while cooling.
     let meta = ok(env.dig_with(&[], &[DigRig::new(&u, reuse_lease())]));
-    assert_eq!(skipped_code(&events(&meta.logs), &u.rig), Some(HdError::RigNotArmed.code()));
+    assert_eq!(
+        skipped_code(&events(&meta.logs), &u.rig),
+        Some(HdError::RigNotArmed.code())
+    );
     // Phone back down: a fresh heartbeat resumes the shift (and can dig).
     let meta = ok(env.dig_fresh(&mut [&mut u]));
     assert!(dug(&events(&meta.logs), &u.rig).is_some());
@@ -188,7 +229,10 @@ fn pickup_cools_the_rig_and_a_fresh_heartbeat_resumes_it() {
     let stale = env.rig(&u.rig).hb_counter.get();
     let (d, s) = signal_signature(&u, kind::BREAK, stale, shift, break_reason::MANUAL);
     let res = env.send(
-        &[secp_ix(&[(s, u.p256(), d.to_vec())]), ix_break_p256(&u.pubkey(), break_reason::MANUAL, stale, 0, 0)],
+        &[
+            secp_ix(&[(s, u.p256(), d.to_vec())]),
+            ix_break_p256(&u.pubkey(), break_reason::MANUAL, stale, 0, 0),
+        ],
         &[],
     );
     assert_hd(&res, 1, HdError::StaleHeartbeat);
@@ -196,16 +240,27 @@ fn pickup_cools_the_rig_and_a_fresh_heartbeat_resumes_it() {
     let c = u.next_counter();
     let (d, s) = signal_signature(&u, kind::BREAK, c, shift, 3);
     let res = env.send(
-        &[secp_ix(&[(s, u.p256(), d.to_vec())]), ix_freeze_p256(&u.pubkey(), 3, c, 0, 0)],
+        &[
+            secp_ix(&[(s, u.p256(), d.to_vec())]),
+            ix_freeze_p256(&u.pubkey(), 3, c, 0, 0),
+        ],
         &[],
     );
     assert_custom(&res, 1, IntrospectError::MessageMismatch.code());
 
     // Manual break: Broken; heartbeats no longer revive it.
-    ok(signal_by_p256(&mut env, &mut u, false, break_reason::MANUAL));
+    ok(signal_by_p256(
+        &mut env,
+        &mut u,
+        false,
+        break_reason::MANUAL,
+    ));
     assert_eq!(env.rig(&u.rig).state, rig_state::BROKEN);
     let meta = ok(record(&mut env, &mut u, r, 1));
-    assert_eq!(skipped_code(&events(&meta.logs), &u.rig), Some(HdError::RigNotArmed.code()));
+    assert_eq!(
+        skipped_code(&events(&meta.logs), &u.rig),
+        Some(HdError::RigNotArmed.code())
+    );
     // Invalid reasons are malformed data (checked before state).
     let w = u.wallet.insecure_clone();
     for reason in [0, 3, 7] {
@@ -217,7 +272,11 @@ fn pickup_cools_the_rig_and_a_fresh_heartbeat_resumes_it() {
     }
     // A broken rig cannot be broken again.
     assert_hd(
-        &env.send_as(&w, &[ix_break_wallet(&w.pubkey(), break_reason::MANUAL)], &[]),
+        &env.send_as(
+            &w,
+            &[ix_break_wallet(&w.pubkey(), break_reason::MANUAL)],
+            &[],
+        ),
         0,
         HdError::InvalidRigState,
     );
@@ -248,7 +307,10 @@ fn phone_can_freeze_only_the_wallet_can_unfreeze() {
     assert_hd(&env.send_as(&mallory, &[ix], &[]), 0, HdError::Unauthorized);
     // A frozen rig cannot be re-armed or closed by the phone, and cannot dig.
     let meta = ok(env.dig_fresh(&mut [&mut u]));
-    assert_eq!(skipped_code(&events(&meta.logs), &u.rig), Some(HdError::RigFrozen.code()));
+    assert_eq!(
+        skipped_code(&events(&meta.logs), &u.rig),
+        Some(HdError::RigFrozen.code())
+    );
 
     // The wallet unfreezes: the open shift becomes Broken, end_shift seals it
     // with reason freeze.
@@ -281,11 +343,19 @@ fn anyone_may_end_a_shift_only_after_the_window_and_the_lease() {
     let cranker = env.cranker.pubkey();
 
     // Inside the window: only the authority.
-    assert_hd(&env.send(&[ix_end_shift(&cranker, &u.rig, 1)], &[]), 0, HdError::Unauthorized);
+    assert_hd(
+        &env.send(&[ix_end_shift(&cranker, &u.rig, 1)], &[]),
+        0,
+        HdError::Unauthorized,
+    );
     // Window over but the lease still covers the current round.
     env.advance_time(8 * 3_600 + 1);
     set_board_round(&mut env, r + 2);
-    assert_hd(&env.send(&[ix_end_shift(&cranker, &u.rig, 1)], &[]), 0, HdError::Unauthorized);
+    assert_hd(
+        &env.send(&[ix_end_shift(&cranker, &u.rig, 1)], &[]),
+        0,
+        HdError::Unauthorized,
+    );
     // Lease expired too: the crank may seal it (and pays the rent).
     set_board_round(&mut env, r + 4);
     // Wrong ShiftLog address is refused.
@@ -302,7 +372,14 @@ fn anyone_may_end_a_shift_only_after_the_window_and_the_lease() {
     assert_eq!(rig.gap_count.get(), 2); // r+3, r+4
     assert_eq!(rig.streak.get(), 1);
     assert_eq!(rig.state, rig_state::IDLE);
-    assert!(matches!(events(&meta.logs)[..], [Event::ShiftEnded { reason: 0, dark_rounds: 3, .. }]));
+    assert!(matches!(
+        events(&meta.logs)[..],
+        [Event::ShiftEnded {
+            reason: 0,
+            dark_rounds: 3,
+            ..
+        }]
+    ));
 }
 
 #[test]
@@ -378,7 +455,10 @@ fn record_heartbeats_counts_dark_rounds_without_deploying() {
     );
     assert_hd(&res, 1, HdError::DuplicateRig);
     let meta = ok(env.send(&[ix_record(&[(a.rig, reuse_lease())])], &[]));
-    assert_eq!(skipped_code(&events(&meta.logs), &a.rig), Some(HdError::InvalidHeartbeat.code()));
+    assert_eq!(
+        skipped_code(&events(&meta.logs), &a.rig),
+        Some(HdError::InvalidHeartbeat.code())
+    );
 
     // A focus-only day shift ends with mode 2.
     let w = a.wallet.insecure_clone();
@@ -406,7 +486,10 @@ fn close_rig_requires_an_idle_rig_and_its_authority() {
     // Close, then try to use the rig in the same transaction: gone.
     let res = env.send_as(
         &w,
-        &[ix_close_rig(&w.pubkey(), None), ix_set_caps(&w.pubkey(), Caps::standard())],
+        &[
+            ix_close_rig(&w.pubkey(), None),
+            ix_set_caps(&w.pubkey(), Caps::standard()),
+        ],
         &[],
     );
     assert_hd(&res, 1, HdError::InvalidAccountTag);

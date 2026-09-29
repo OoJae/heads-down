@@ -3,8 +3,8 @@
 //! precompile and introspected through the checked instructions sysvar.
 //! Every attack here must deploy nothing.
 
-use heads_down_tests::*;
 use hd::error::HdError;
+use heads_down_tests::*;
 use p256_introspect::IntrospectError;
 
 fn setup(seed: u8) -> (Env, User) {
@@ -16,7 +16,12 @@ fn setup(seed: u8) -> (Env, User) {
 
 /// Dig one rig with `hb` in a precompile at index 1 and `entry`; return the
 /// rig's RigSkipped code (the transaction itself must succeed).
-fn skip_of(env: &mut Env, user: &User, hbs: &[Heartbeat], entry: hd::instructions::HeartbeatEntry) -> u32 {
+fn skip_of(
+    env: &mut Env,
+    user: &User,
+    hbs: &[Heartbeat],
+    entry: hd::instructions::HeartbeatEntry,
+) -> u32 {
     let meta = ok(env.dig_with(hbs, &[DigRig::new(user, entry)]));
     let evs = events(&meta.logs);
     assert!(dug(&evs, &user.rig).is_none(), "must not dig");
@@ -37,7 +42,10 @@ fn stale_counter_is_rejected() {
     // Accept counter 5 via record_heartbeats (no dig).
     let hb5 = user.heartbeat_with(5, 1, r, 3);
     ok(env.send(
-        &[secp_ix_for(&[hb5]), ix_record(&[(user.rig, entry_for(&hb5, 0, 0))])],
+        &[
+            secp_ix_for(&[hb5]),
+            ix_record(&[(user.rig, entry_for(&hb5, 0, 0))]),
+        ],
         &[],
     ));
     assert_eq!(env.rig(&user.rig).hb_counter.get(), 5);
@@ -138,9 +146,18 @@ fn heartbeat_signed_by_another_rigs_key_is_rejected() {
         IntrospectError::PublicKeyMismatch.code()
     );
     // ...and claiming the victim's key in the precompile fails the precompile.
-    let forged = Heartbeat { pubkey: victim.p256(), ..hb };
+    let forged = Heartbeat {
+        pubkey: victim.p256(),
+        ..hb
+    };
     let res = env.dig_with(&[forged], &[DigRig::new(&victim, entry_for(&forged, 1, 0))]);
-    assert!(matches!(res, Err(Failure { err: TransactionError::InstructionError(1, _), .. })));
+    assert!(matches!(
+        res,
+        Err(Failure {
+            err: TransactionError::InstructionError(1, _),
+            ..
+        })
+    ));
     assert_nothing_spent(&env, &victim);
 }
 
@@ -149,7 +166,8 @@ fn offsets_pointing_into_a_foreign_instruction_are_rejected() {
     let (mut env, victim) = setup(6);
     let mut attacker = User::new(&mut env, 98);
     let r = env.board_round;
-    let victim_hb_digest = hd::message::digest(&hd::message::heartbeat_preimage(&victim.rig, 1, 1, r, 3));
+    let victim_hb_digest =
+        hd::message::digest(&hd::message::heartbeat_preimage(&victim.rig, 1, 1, r, 3));
 
     // ix 1: a valid precompile for the attacker's own (key, message).
     let own = attacker.heartbeat(1, r, 3);
@@ -167,7 +185,11 @@ fn offsets_pointing_into_a_foreign_instruction_are_rejected() {
     let msg_off = u16::from_le_bytes(data[10..12].try_into().unwrap()) as usize;
     data[pk_off..pk_off + 33].copy_from_slice(&victim.p256());
     data[msg_off..msg_off + 32].copy_from_slice(&victim_hb_digest);
-    let smuggler = Instruction { program_id: secp256r1_id(), accounts: vec![], data };
+    let smuggler = Instruction {
+        program_id: secp256r1_id(),
+        accounts: vec![],
+        data,
+    };
 
     let entry = hd::instructions::HeartbeatEntry {
         hb_ix: 2,
@@ -176,7 +198,11 @@ fn offsets_pointing_into_a_foreign_instruction_are_rejected() {
         round_id: r,
         lease_rounds: 3,
     };
-    let dig = ix_dig(&env.cranker.pubkey(), &env.round, &[DigRig::new(&victim, entry)]);
+    let dig = ix_dig(
+        &env.cranker.pubkey(),
+        &env.round,
+        &[DigRig::new(&victim, entry)],
+    );
     let meta = ok(env.send(&[compute_limit(1_400_000), honest, smuggler, dig], &[]));
     assert_eq!(
         skipped_code(&events(&meta.logs), &victim.rig),
@@ -197,10 +223,20 @@ fn spoofed_instructions_sysvar_fails_the_transaction() {
     env.svm
         .set_account(
             fake,
-            Account { lamports: SOL, data, owner: SYSTEM, executable: false, rent_epoch: 0 },
+            Account {
+                lamports: SOL,
+                data,
+                owner: SYSTEM,
+                executable: false,
+                rent_epoch: 0,
+            },
         )
         .unwrap();
-    let mut dig = ix_dig(&env.cranker.pubkey(), &env.round, &[DigRig::new(&user, entry_for(&hb, 1, 0))]);
+    let mut dig = ix_dig(
+        &env.cranker.pubkey(),
+        &env.round,
+        &[DigRig::new(&user, entry_for(&hb, 1, 0))],
+    );
     dig.accounts[11] = AccountMeta::new_readonly(fake, false);
     let res = env.send(&[compute_limit(1_400_000), secp_ix_for(&[hb]), dig], &[]);
     assert_custom(&res, 2, IntrospectError::InvalidInstructionsSysvar.code());
@@ -257,8 +293,14 @@ fn a_fresh_heartbeat_later_in_the_batch_cannot_be_borrowed_by_another_rig() {
     ];
     let meta = ok(env.dig_with(&[ha, hb], &rigs));
     let evs = events(&meta.logs);
-    assert_eq!(skipped_code(&evs, &a.rig), Some(IntrospectError::PublicKeyMismatch.code()));
-    assert_eq!(skipped_code(&evs, &b.rig), Some(IntrospectError::PublicKeyMismatch.code()));
+    assert_eq!(
+        skipped_code(&evs, &a.rig),
+        Some(IntrospectError::PublicKeyMismatch.code())
+    );
+    assert_eq!(
+        skipped_code(&evs, &b.rig),
+        Some(IntrospectError::PublicKeyMismatch.code())
+    );
 }
 
 fn hex_to_32(s: &str) -> [u8; 32] {
@@ -270,7 +312,12 @@ fn sub_be(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     let mut borrow = 0i16;
     for i in (0..32).rev() {
         let mut v = a[i] as i16 - b[i] as i16 - borrow;
-        borrow = if v < 0 { v += 256; 1 } else { 0 };
+        borrow = if v < 0 {
+            v += 256;
+            1
+        } else {
+            0
+        };
         out[i] = v as u8;
     }
     out

@@ -178,7 +178,10 @@ pub type TxResult = Result<TransactionMetadata, Failure>;
 #[track_caller]
 pub fn assert_custom(res: &TxResult, ix: u8, code: u32) {
     match res {
-        Ok(m) => panic!("expected Custom({code:#x}) at ix {ix}, got success\n{}", m.pretty_logs()),
+        Ok(m) => panic!(
+            "expected Custom({code:#x}) at ix {ix}, got success\n{}",
+            m.pretty_logs()
+        ),
         Err(f) => assert_eq!(
             f.err,
             TransactionError::InstructionError(ix, InstructionError::Custom(code)),
@@ -198,7 +201,10 @@ pub fn assert_hd(res: &TxResult, ix: u8, e: hd::error::HdError) {
 #[track_caller]
 pub fn assert_ix_err(res: &TxResult, ix: u8, err: InstructionError) {
     match res {
-        Ok(m) => panic!("expected {err:?} at ix {ix}, got success\n{}", m.pretty_logs()),
+        Ok(m) => panic!(
+            "expected {err:?} at ix {ix}, got success\n{}",
+            m.pretty_logs()
+        ),
         Err(f) => assert_eq!(
             f.err,
             TransactionError::InstructionError(ix, err),
@@ -336,7 +342,9 @@ pub fn events(logs: &[String]) -> Vec<Event> {
             if let Some(b64) = rest.strip_prefix("data: ") {
                 if stack.last() == Some(&hd_id) {
                     for part in b64.split(' ') {
-                        let d = base64::engine::general_purpose::STANDARD.decode(part).unwrap();
+                        let d = base64::engine::general_purpose::STANDARD
+                            .decode(part)
+                            .unwrap();
                         if let Some(e) = decode_event(&d) {
                             out.push(e);
                         }
@@ -409,8 +417,11 @@ impl Env {
     pub fn build(build: Build, sigverify: bool, init: bool) -> Self {
         let mut svm = LiteSVM::new().with_sigverify(sigverify);
         let f = fixtures();
-        svm.add_program(ORE, &std::fs::read(f.join("ore.so")).expect("run fetch-fixtures.sh"))
-            .unwrap();
+        svm.add_program(
+            ORE,
+            &std::fs::read(f.join("ore.so")).expect("run fetch-fixtures.sh"),
+        )
+        .unwrap();
         svm.add_program(ENTROPY, &std::fs::read(f.join("entropy.so")).unwrap())
             .unwrap();
         let so = so_path(build);
@@ -508,7 +519,12 @@ impl Env {
     }
 
     /// Send with an explicit fee payer.
-    pub fn send_as(&mut self, payer: &Keypair, ixs: &[Instruction], signers: &[&Keypair]) -> TxResult {
+    pub fn send_as(
+        &mut self,
+        payer: &Keypair,
+        ixs: &[Instruction],
+        signers: &[&Keypair],
+    ) -> TxResult {
         let mut all: Vec<&Keypair> = vec![payer];
         for s in signers {
             if s.pubkey() != payer.pubkey() {
@@ -521,10 +537,10 @@ impl Env {
             &all,
             self.svm.latest_blockhash(),
         );
-        let res = self
-            .svm
-            .send_transaction(tx)
-            .map_err(|f| Failure { err: f.err, logs: f.meta.logs });
+        let res = self.svm.send_transaction(tx).map_err(|f| Failure {
+            err: f.err,
+            logs: f.meta.logs,
+        });
         self.svm.expire_blockhash();
         res
     }
@@ -730,7 +746,11 @@ pub fn seat_pda(mint: &Address) -> Address {
 }
 /// ShiftLog PDA.
 pub fn shift_log_pda(rig: &Address, shift_id: u64) -> Address {
-    Address::find_program_address(&[hd::SHIFT_SEED, rig.as_ref(), &shift_id.to_le_bytes()], &HD).0
+    Address::find_program_address(
+        &[hd::SHIFT_SEED, rig.as_ref(), &shift_id.to_le_bytes()],
+        &HD,
+    )
+    .0
 }
 /// ORE Automation PDA.
 pub fn automation_pda(authority: &Address) -> Address {
@@ -788,13 +808,21 @@ pub fn secp_ix(entries: &[([u8; 64], [u8; 33], Vec<u8>)]) -> Instruction {
 
 /// Secp256r1SigVerify for heartbeats.
 pub fn secp_ix_for(hbs: &[Heartbeat]) -> Instruction {
-    let e: Vec<_> = hbs.iter().map(|h| (h.sig, h.pubkey, h.digest.to_vec())).collect();
+    let e: Vec<_> = hbs
+        .iter()
+        .map(|h| (h.sig, h.pubkey, h.digest.to_vec()))
+        .collect();
     secp_ix(&e)
 }
 
 /// Ed25519SigVerify for one `(pubkey, sig, msg)` with every index 0xFFFF
 /// (or `index` when given).
-pub fn ed25519_ix(pubkey: &[u8; 32], sig: &[u8; 64], msg: &[u8], index: Option<u16>) -> Instruction {
+pub fn ed25519_ix(
+    pubkey: &[u8; 32],
+    sig: &[u8; 64],
+    msg: &[u8],
+    index: Option<u16>,
+) -> Instruction {
     let ix = index.unwrap_or(u16::MAX);
     let (pk_off, sig_off, msg_off) = (16u16, 48u16, 112u16);
     let mut data = vec![1u8, 0];
@@ -854,7 +882,16 @@ pub fn ore_automate(
 /// The standard Automation for the suite: Discretionary, fee = EXECUTOR_FEE,
 /// executor = Executor PDA, per-square cap TILE_CAP.
 pub fn ore_automate_default(wallet: &Address, deposit: u64) -> Instruction {
-    ore_automate(wallet, &EXECUTOR, TILE_CAP, deposit, EXECUTOR_FEE, 2, 0, u16::MAX)
+    ore_automate(
+        wallet,
+        &EXECUTOR,
+        TILE_CAP,
+        deposit,
+        EXECUTOR_FEE,
+        2,
+        0,
+        u16::MAX,
+    )
 }
 
 /// Automation fields.
@@ -892,7 +929,10 @@ impl Env {
     /// Miner `deployed[25]` and `round_id`.
     pub fn miner_deployed(&self, a: &Address) -> ([u64; 25], u64) {
         let d = self.account(a).data;
-        (std::array::from_fn(|i| u64_at(&d, 64 + 8 * i)), u64_at(&d, 664))
+        (
+            std::array::from_fn(|i| u64_at(&d, 64 + 8 * i)),
+            u64_at(&d, 664),
+        )
     }
 
     /// Overwrite a u64 inside an account (fixture surgery).
@@ -1004,7 +1044,11 @@ fn push_attestation(data: &mut Vec<u8>, att: Option<AttestationArg>) {
 }
 
 /// `register_rig`.
-pub fn ix_register_rig(authority: &Address, p256: &[u8; 33], att: Option<AttestationArg>) -> Instruction {
+pub fn ix_register_rig(
+    authority: &Address,
+    p256: &[u8; 33],
+    att: Option<AttestationArg>,
+) -> Instruction {
     let mut data = vec![hd::tag::REGISTER_RIG];
     data.extend_from_slice(p256);
     push_attestation(&mut data, att);
@@ -1025,7 +1069,11 @@ pub fn ix_register_rig(authority: &Address, p256: &[u8; 33], att: Option<Attesta
 }
 
 /// `rotate_key`.
-pub fn ix_rotate_key(authority: &Address, p256: &[u8; 33], att: Option<AttestationArg>) -> Instruction {
+pub fn ix_rotate_key(
+    authority: &Address,
+    p256: &[u8; 33],
+    att: Option<AttestationArg>,
+) -> Instruction {
     let mut data = vec![hd::tag::ROTATE_KEY];
     data.extend_from_slice(p256);
     push_attestation(&mut data, att);
@@ -1110,12 +1158,26 @@ pub fn plan_signature(user: &User, counter: u64, plan: &Plan) -> ([u8; 32], [u8;
 }
 
 /// BREAK / FREEZE signature.
-pub fn signal_signature(user: &User, kind: u8, counter: u64, shift_id: u64, reason: u8) -> ([u8; 32], [u8; 64]) {
-    let d = message::digest(&message::signal_preimage(kind, &user.rig, counter, shift_id, reason));
+pub fn signal_signature(
+    user: &User,
+    kind: u8,
+    counter: u64,
+    shift_id: u64,
+    reason: u8,
+) -> ([u8; 32], [u8; 64]) {
+    let d = message::digest(&message::signal_preimage(
+        kind, &user.rig, counter, shift_id, reason,
+    ));
     (d, user.sign(&d))
 }
 
-fn signal_ix(tag: u8, authority: &Address, wallet_signs: bool, reason: u8, p256: Option<(u64, u8, u8)>) -> Instruction {
+fn signal_ix(
+    tag: u8,
+    authority: &Address,
+    wallet_signs: bool,
+    reason: u8,
+    p256: Option<(u64, u8, u8)>,
+) -> Instruction {
     let mut data = vec![tag, u8::from(p256.is_some()), reason];
     let mut accounts = vec![
         AccountMeta::new(rig_pda(authority), false),
@@ -1139,16 +1201,40 @@ pub fn ix_break_wallet(authority: &Address, reason: u8) -> Instruction {
     signal_ix(hd::tag::BREAK_SHIFT, authority, true, reason, None)
 }
 /// `break_shift` by a P-256 BREAK.
-pub fn ix_break_p256(authority: &Address, reason: u8, counter: u64, ix: u8, sig: u8) -> Instruction {
-    signal_ix(hd::tag::BREAK_SHIFT, authority, false, reason, Some((counter, ix, sig)))
+pub fn ix_break_p256(
+    authority: &Address,
+    reason: u8,
+    counter: u64,
+    ix: u8,
+    sig: u8,
+) -> Instruction {
+    signal_ix(
+        hd::tag::BREAK_SHIFT,
+        authority,
+        false,
+        reason,
+        Some((counter, ix, sig)),
+    )
 }
 /// `freeze_rig` by the wallet.
 pub fn ix_freeze_wallet(authority: &Address) -> Instruction {
     signal_ix(hd::tag::FREEZE_RIG, authority, true, 3, None)
 }
 /// `freeze_rig` by a P-256 FREEZE.
-pub fn ix_freeze_p256(authority: &Address, reason: u8, counter: u64, ix: u8, sig: u8) -> Instruction {
-    signal_ix(hd::tag::FREEZE_RIG, authority, false, reason, Some((counter, ix, sig)))
+pub fn ix_freeze_p256(
+    authority: &Address,
+    reason: u8,
+    counter: u64,
+    ix: u8,
+    sig: u8,
+) -> Instruction {
+    signal_ix(
+        hd::tag::FREEZE_RIG,
+        authority,
+        false,
+        reason,
+        Some((counter, ix, sig)),
+    )
 }
 /// `unfreeze_rig`.
 pub fn ix_unfreeze(authority: &Address, signs: bool) -> Instruction {
@@ -1178,7 +1264,13 @@ pub fn ix_end_shift(caller: &Address, rig: &Address, shift_id: u64) -> Instructi
 }
 
 /// `propose_config`.
-pub fn ix_propose(governance: &Address, registrar: &Address, crank_fee: u64, bury_bps: u16, paused: u8) -> Instruction {
+pub fn ix_propose(
+    governance: &Address,
+    registrar: &Address,
+    crank_fee: u64,
+    bury_bps: u16,
+    paused: u8,
+) -> Instruction {
     let mut data = vec![hd::tag::PROPOSE_CONFIG];
     data.extend_from_slice(registrar.as_ref());
     data.extend_from_slice(&crank_fee.to_le_bytes());

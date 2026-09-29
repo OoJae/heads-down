@@ -274,8 +274,13 @@ pub struct Rig {
     pub shift_open: u8,
     /// Extension: break reason recorded by break/freeze, used by end_shift.
     pub break_reason: u8,
+    /// Extension: canonical bump of ORE `["automation", authority]`, found
+    /// once at registration so `dig` re-derives with one SHA-256.
+    pub ore_automation_bump: u8,
+    /// Extension: canonical bump of ORE `["miner", authority]`.
+    pub ore_miner_bump: u8,
     /// Padding.
-    pub _pad4: [u8; 6],
+    pub _pad4: [u8; 4],
     /// Extension: unix time the shift was armed.
     pub shift_start_ts: I64,
     /// Reserved, zero.
@@ -404,6 +409,8 @@ const _: () = {
     // Extensions inside reserved[48] @336.
     assert!(offset_of!(Rig, shift_open) == 336);
     assert!(offset_of!(Rig, break_reason) == 337);
+    assert!(offset_of!(Rig, ore_automation_bump) == 338);
+    assert!(offset_of!(Rig, ore_miner_bump) == 339);
     assert!(offset_of!(Rig, shift_start_ts) == 344);
     assert!(offset_of!(Rig, reserved) == 352);
 
@@ -488,7 +495,9 @@ pub fn is_initialized<T: Account>(account: &AccountView) -> bool {
 }
 
 /// Borrow `account` as `T` after owner / length / tag / version checks.
-pub fn load<T: Account>(account: &AccountView) -> Result<Ref<'_, T>, pinocchio::error::ProgramError> {
+pub fn load<T: Account>(
+    account: &AccountView,
+) -> Result<Ref<'_, T>, pinocchio::error::ProgramError> {
     check_shape::<T>(account)?;
     let data = account.try_borrow()?;
     let view = Ref::try_map(data, |d| {

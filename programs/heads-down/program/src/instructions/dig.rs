@@ -25,7 +25,7 @@ use pinocchio::{
     error::ProgramError,
     instruction::seeds,
     sysvars::{rent::Rent, Sysvar},
-    AccountView, ProgramResult,
+    AccountView, Address, ProgramResult,
 };
 use pinocchio_system::instructions::Transfer;
 
@@ -34,8 +34,9 @@ use crate::{
     events,
     instructions::{apply_heartbeat, lease_covers, HeartbeatEntry, ENTRY_LEN, NO_HEARTBEAT},
     logic,
-    ore::{self, DeployAccounts, CHECKPOINT_FEE, ONE_ORE, STRATEGY_DISCRETIONARY, SYSTEM_PROGRAM_ID},
-    pda,
+    ore::{
+        self, DeployAccounts, CHECKPOINT_FEE, ONE_ORE, STRATEGY_DISCRETIONARY, SYSTEM_PROGRAM_ID,
+    },
     state::{self, plan_flags, rig_state, Rig},
     util::{clock, load_config, require_signer, require_writable},
     EXECUTOR_ID, EXECUTOR_SEED,
@@ -226,8 +227,19 @@ fn dig_one(
     if authority.address().as_array() != &g.authority {
         return Err(HdError::Unauthorized.into());
     }
-    let (auto_pda, _) = pda::find(&[ore::AUTOMATION_SEED, &g.authority], &ore::ORE_PROGRAM_ID);
-    let (miner_pda, _) = pda::find(&[ore::MINER_SEED, &g.authority], &ore::ORE_PROGRAM_ID);
+    // Re-derive from rig.authority with the canonical bumps found at
+    // registration: one SHA-256 each instead of a bump search (the bump is
+    // never caller-supplied; ORE re-checks the seeds inside the CPI too).
+    let auto_pda = Address::derive_address(
+        &[ore::AUTOMATION_SEED, &g.authority],
+        Some(g.ore_automation_bump),
+        &ore::ORE_PROGRAM_ID,
+    );
+    let miner_pda = Address::derive_address(
+        &[ore::MINER_SEED, &g.authority],
+        Some(g.ore_miner_bump),
+        &ore::ORE_PROGRAM_ID,
+    );
     if automation.address() != &auto_pda || miner.address() != &miner_pda {
         return Err(HdError::InvalidOreAccount.into());
     }
@@ -261,7 +273,8 @@ fn dig_one(
         _ => skip!(HdError::RigNotArmed),
     }
     if entry.hb_ix != NO_HEARTBEAT {
-        if let Err(code) = apply_heartbeat(&mut g, &rig_address, s.ix_sysvar, entry, ctx.board_round)
+        if let Err(code) =
+            apply_heartbeat(&mut g, &rig_address, s.ix_sysvar, entry, ctx.board_round)
         {
             return Ok(Err(code));
         }
@@ -391,7 +404,9 @@ fn dig_one(
         return Err(HdError::InvalidExecutor.into());
     }
     let cp_paid = if checkpoint_due { CHECKPOINT_FEE } else { 0 };
-    let fee_received = exec_after.saturating_add(cp_paid).saturating_sub(exec_before);
+    let fee_received = exec_after
+        .saturating_add(cp_paid)
+        .saturating_sub(exec_before);
 
     let m_after = match ore::read_miner(miner)? {
         Some(x) if x.authority == g.authority && x.round_id == ctx.board_round => x,
@@ -408,7 +423,10 @@ fn dig_one(
                 .ok_or(HdError::InvalidOreAccount)?;
             // The Automation may only have paid the tiles plus the one fee
             // the Executor received.
-            if d != deployed_now.checked_add(fee_received).ok_or(HdError::MathOverflow)? {
+            if d != deployed_now
+                .checked_add(fee_received)
+                .ok_or(HdError::MathOverflow)?
+            {
                 return Err(HdError::InvalidOreAccount.into());
             }
             d
@@ -446,7 +464,10 @@ fn dig_one(
     g.shift_rounds_dug.set(v);
     let v = g.lifetime_rounds_dug.get().saturating_add(1);
     g.lifetime_rounds_dug.set(v);
-    let v = g.lifetime_lamports_deployed.get().saturating_add(deployed_now);
+    let v = g
+        .lifetime_lamports_deployed
+        .get()
+        .saturating_add(deployed_now);
     g.lifetime_lamports_deployed.set(v);
     drop(g);
 

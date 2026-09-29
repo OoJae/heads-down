@@ -20,7 +20,7 @@ use pinocchio::{error::ProgramError, instruction::seeds, AccountView, ProgramRes
 use crate::{
     ed25519,
     error::HdError,
-    message, pda,
+    message, ore, pda,
     state::{self, rig_state, Config, Header, Rig},
     util::{clock, load_config, require_signer, Reader},
     ID, RIG_SEED,
@@ -116,8 +116,21 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
         &signer_seeds,
     )?;
 
+    // Canonical bumps of the user's ORE Automation / Miner PDAs, found once
+    // here so every dig re-derives them with a single hash.
+    let (_, auto_bump) = pda::find(
+        &[ore::AUTOMATION_SEED, authority.address().as_ref()],
+        &ore::ORE_PROGRAM_ID,
+    );
+    let (_, miner_bump) = pda::find(
+        &[ore::MINER_SEED, authority.address().as_ref()],
+        &ore::ORE_PROGRAM_ID,
+    );
+
     let now = clock()?.unix_timestamp;
     let mut g = state::load_uninit_mut::<Rig>(rig)?;
+    g.ore_automation_bump = auto_bump;
+    g.ore_miner_bump = miner_bump;
     g.header = Header::new(state::tag::RIG, bump);
     g.authority = *authority.address().as_array();
     g.p256_pubkey = p256;

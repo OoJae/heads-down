@@ -7,8 +7,8 @@
 //!   `crates/sgt-verify/fixtures` (real holders cannot sign here, so that SVM
 //!   runs with sigverify off; the program still sees `is_signer`).
 
-use heads_down_tests::*;
 use hd::error::HdError;
+use heads_down_tests::*;
 use sgt_verify::{
     anchors::{PUBLIC_TEST_AUTHORITY, PUBLIC_TEST_GROUP},
     layout::SGT_MINT_LEN,
@@ -43,9 +43,17 @@ impl Issuer {
         assert_eq!(authority.pubkey(), PUBLIC_TEST_AUTHORITY);
         assert_eq!(group.pubkey(), PUBLIC_TEST_GROUP);
         env.svm.airdrop(&authority.pubkey(), SOL).unwrap();
-        let rent = env.svm.minimum_balance_for_rent_exemption(TEST_GROUP_MINT_LEN);
+        let rent = env
+            .svm
+            .minimum_balance_for_rent_exemption(TEST_GROUP_MINT_LEN);
         let payer = env.cranker.pubkey();
-        let ixs = create_test_group(&payer, &group.pubkey(), &authority.pubkey(), 1_000_000, rent);
+        let ixs = create_test_group(
+            &payer,
+            &group.pubkey(),
+            &authority.pubkey(),
+            1_000_000,
+            rent,
+        );
         ok(env.send(&ixs, &[&group, &authority]));
         Self { authority }
     }
@@ -54,7 +62,14 @@ impl Issuer {
         let member = Keypair::new();
         let rent = env.svm.minimum_balance_for_rent_exemption(SGT_MINT_LEN);
         let payer = env.cranker.pubkey();
-        let ixs = issue_test_sgt(&payer, &PUBLIC_TEST_GROUP, &self.authority.pubkey(), &member.pubkey(), holder, rent);
+        let ixs = issue_test_sgt(
+            &payer,
+            &PUBLIC_TEST_GROUP,
+            &self.authority.pubkey(),
+            &member.pubkey(),
+            holder,
+            rent,
+        );
         let a = self.authority.insecure_clone();
         ok(env.send(&ixs, &[&member, &a]));
         member.pubkey()
@@ -80,11 +95,22 @@ fn devnet_build_verifies_a_test_sgt_and_repoints_the_seat_after_a_move() {
 
     // A verifies: seat created, rig upgraded to tier 1.
     let wa = a.wallet.insecure_clone();
-    let meta = ok(env.send_as(&wa, &[ix_verify_seeker(&wa.pubkey(), &ata_a, &mint, None)], &[]));
-    println!("verify_seeker (create seat): {} CU", meta.compute_units_consumed);
+    let meta = ok(env.send_as(
+        &wa,
+        &[ix_verify_seeker(&wa.pubkey(), &ata_a, &mint, None)],
+        &[],
+    ));
+    println!(
+        "verify_seeker (create seat): {} CU",
+        meta.compute_units_consumed
+    );
     assert_eq!(
         events(&meta.logs),
-        vec![Event::SeekerVerified { rig: a.rig, sgt_mint: mint, member_number: 1 }]
+        vec![Event::SeekerVerified {
+            rig: a.rig,
+            sgt_mint: mint,
+            member_number: 1
+        }]
     );
     let seat = env.seat(&seat_pda(&mint));
     assert_eq!(seat.header.tag, 3);
@@ -95,27 +121,56 @@ fn devnet_build_verifies_a_test_sgt_and_repoints_the_seat_after_a_move() {
     assert_eq!((rig_a.tier, rig_a.sgt_mint), (1, mint.to_bytes()));
 
     // Re-verifying is idempotent.
-    ok(env.send_as(&wa, &[ix_verify_seeker(&wa.pubkey(), &ata_a, &mint, None)], &[]));
+    ok(env.send_as(
+        &wa,
+        &[ix_verify_seeker(&wa.pubkey(), &ata_a, &mint, None)],
+        &[],
+    ));
 
     // Someone who does not hold it cannot claim it (owner field mismatch).
     register(&mut env, &b);
     let wb = b.wallet.insecure_clone();
-    let res = env.send_as(&wb, &[ix_verify_seeker(&wb.pubkey(), &ata_a, &mint, Some(a.rig))], &[]);
+    let res = env.send_as(
+        &wb,
+        &[ix_verify_seeker(&wb.pubkey(), &ata_a, &mint, Some(a.rig))],
+        &[],
+    );
     assert_custom(&res, 0, sgt_err(SgtError::TokenAccountOwnerMismatch));
 
     // Solana Mobile moves the SGT to B's wallet (thaw, delegate transfer, freeze).
     issuer.move_sgt(&mut env, &mint, &a.pubkey(), &b.pubkey());
     let ata_b = associated_token_address(&b.pubkey(), &mint);
     // A's old holding no longer verifies.
-    let res = env.send_as(&wa, &[ix_verify_seeker(&wa.pubkey(), &ata_a, &mint, None)], &[]);
+    let res = env.send_as(
+        &wa,
+        &[ix_verify_seeker(&wa.pubkey(), &ata_a, &mint, None)],
+        &[],
+    );
     assert_custom(&res, 0, sgt_err(SgtError::AmountNotOne));
     // B must name the rig the seat points at.
-    let res = env.send_as(&wb, &[ix_verify_seeker(&wb.pubkey(), &ata_b, &mint, None)], &[]);
+    let res = env.send_as(
+        &wb,
+        &[ix_verify_seeker(&wb.pubkey(), &ata_b, &mint, None)],
+        &[],
+    );
     assert_hd(&res, 0, HdError::SeatTaken);
-    let res = env.send_as(&wb, &[ix_verify_seeker(&wb.pubkey(), &ata_b, &mint, Some(Keypair::new().pubkey()))], &[]);
+    let res = env.send_as(
+        &wb,
+        &[ix_verify_seeker(
+            &wb.pubkey(),
+            &ata_b,
+            &mint,
+            Some(Keypair::new().pubkey()),
+        )],
+        &[],
+    );
     assert_hd(&res, 0, HdError::SeatTaken);
     // With A's rig: the seat moves, A is downgraded, B is Seeker tier.
-    ok(env.send_as(&wb, &[ix_verify_seeker(&wb.pubkey(), &ata_b, &mint, Some(a.rig))], &[]));
+    ok(env.send_as(
+        &wb,
+        &[ix_verify_seeker(&wb.pubkey(), &ata_b, &mint, Some(a.rig))],
+        &[],
+    ));
     let seat = env.seat(&seat_pda(&mint));
     assert_eq!(seat.rig, b.rig.to_bytes());
     assert_eq!(seat.authority, b.pubkey().to_bytes());
@@ -132,8 +187,15 @@ fn devnet_build_verifies_a_test_sgt_and_repoints_the_seat_after_a_move() {
     let seat_rent = env.lamports(&seat_pda(&mint));
     let rig_rent = env.lamports(&b.rig);
     let before = env.lamports(&wb.pubkey());
-    let meta = ok(env.send_as(&wb, &[ix_close_rig(&wb.pubkey(), Some(seat_pda(&mint)))], &[]));
-    assert_eq!(env.lamports(&wb.pubkey()), before + seat_rent + rig_rent - meta.fee);
+    let meta = ok(env.send_as(
+        &wb,
+        &[ix_close_rig(&wb.pubkey(), Some(seat_pda(&mint)))],
+        &[],
+    ));
+    assert_eq!(
+        env.lamports(&wb.pubkey()),
+        before + seat_rent + rig_rent - meta.fee
+    );
     assert!(env.svm.get_account(&seat_pda(&mint)).is_none());
     ok(env.send_as(&wa, &[ix_close_rig(&wa.pubkey(), None)], &[]));
 }
@@ -162,7 +224,16 @@ fn devnet_build_rejects_real_and_forged_sgts() {
     let forged = Keypair::new().pubkey();
     let data = sgt_mint_bytes(&forged, &fake_group, &PUBLIC_TEST_AUTHORITY, 7);
     env.svm
-        .set_account(forged, Account { lamports: SOL, data, owner: token_2022_id(), executable: false, rent_epoch: 0 })
+        .set_account(
+            forged,
+            Account {
+                lamports: SOL,
+                data,
+                owner: token_2022_id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
         .unwrap();
     let fta = Keypair::new().pubkey();
     env.svm
@@ -177,13 +248,21 @@ fn devnet_build_rejects_real_and_forged_sgts() {
             },
         )
         .unwrap();
-    let res = env.send_as(&w, &[ix_verify_seeker(&w.pubkey(), &fta, &forged, None)], &[]);
+    let res = env.send_as(
+        &w,
+        &[ix_verify_seeker(&w.pubkey(), &fta, &forged, None)],
+        &[],
+    );
     assert_custom(&res, 0, sgt_err(SgtError::GroupMismatch));
     // The same bytes owned by the legacy token program.
     let mut acc = env.account(&forged);
     acc.owner = Address::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
     env.svm.set_account(forged, acc).unwrap();
-    let res = env.send_as(&w, &[ix_verify_seeker(&w.pubkey(), &fta, &forged, None)], &[]);
+    let res = env.send_as(
+        &w,
+        &[ix_verify_seeker(&w.pubkey(), &fta, &forged, None)],
+        &[],
+    );
     assert_custom(&res, 0, sgt_err(SgtError::MintNotToken2022));
     assert_eq!(env.rig(&u.rig).tier, 0);
 }
@@ -198,8 +277,10 @@ struct RealSgt {
 }
 
 fn real_sgts(env: &mut Env) -> Vec<RealSgt> {
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(sgt_fixtures().join("manifest.json")).unwrap()).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(sgt_fixtures().join("manifest.json")).unwrap(),
+    )
+    .unwrap();
     manifest["sgts"]
         .as_array()
         .unwrap()
@@ -216,7 +297,12 @@ fn real_sgts(env: &mut Env) -> Vec<RealSgt> {
             mint.rent_epoch = 0;
             env.svm.set_account(sgt.mint, mint).unwrap();
             env.svm
-                .set_account(sgt.token_account, load_fixture_account(&sgt_fixtures().join(format!("{label}/token_account.json"))))
+                .set_account(
+                    sgt.token_account,
+                    load_fixture_account(
+                        &sgt_fixtures().join(format!("{label}/token_account.json")),
+                    ),
+                )
                 .unwrap();
             env.svm.airdrop(&sgt.holder, SOL).unwrap();
             sgt
@@ -231,10 +317,10 @@ fn send_as_holder(env: &mut Env, holder: &Address, ixs: &[Instruction]) -> TxRes
     let message = Message::new(ixs, Some(&payer.pubkey()));
     let mut tx = solana_transaction::Transaction::new_unsigned(message);
     tx.partial_sign(&[&payer], env.svm.latest_blockhash());
-    let res = env
-        .svm
-        .send_transaction(tx)
-        .map_err(|f| Failure { err: f.err, logs: f.meta.logs });
+    let res = env.svm.send_transaction(tx).map_err(|f| Failure {
+        err: f.err,
+        logs: f.meta.logs,
+    });
     env.svm.expire_blockhash();
     res
 }
@@ -245,19 +331,35 @@ fn mainnet_build_verifies_real_sgts_and_repoints_after_a_move() {
     let sgts = real_sgts(&mut env);
     for sgt in &sgts {
         let p256 = User::from_wallet(Keypair::new(), 5).p256();
-        ok(send_as_holder(&mut env, &sgt.holder, &[ix_register_rig(&sgt.holder, &p256, None)]));
+        ok(send_as_holder(
+            &mut env,
+            &sgt.holder,
+            &[ix_register_rig(&sgt.holder, &p256, None)],
+        ));
         let meta = ok(send_as_holder(
             &mut env,
             &sgt.holder,
-            &[ix_verify_seeker(&sgt.holder, &sgt.token_account, &sgt.mint, None)],
+            &[ix_verify_seeker(
+                &sgt.holder,
+                &sgt.token_account,
+                &sgt.mint,
+                None,
+            )],
         ));
         let rig = rig_pda(&sgt.holder);
         assert_eq!(
             events(&meta.logs),
-            vec![Event::SeekerVerified { rig, sgt_mint: sgt.mint, member_number: sgt.member }]
+            vec![Event::SeekerVerified {
+                rig,
+                sgt_mint: sgt.mint,
+                member_number: sgt.member
+            }]
         );
         assert_eq!(env.rig(&rig).tier, 1);
-        assert_eq!(env.seat(&seat_pda(&sgt.mint)).member_number.get(), sgt.member);
+        assert_eq!(
+            env.seat(&seat_pda(&sgt.mint)).member_number.get(),
+            sgt.member
+        );
     }
 
     // Move member #20 to a new wallet (bytes as Token-2022 leaves them after
@@ -284,12 +386,33 @@ fn mainnet_build_verifies_real_sgts_and_repoints_after_a_move() {
     register(&mut env, &new_holder);
     let w = new_holder.wallet.insecure_clone();
     let old_rig = rig_pda(&sgt.holder);
-    ok(env.send_as(&w, &[ix_verify_seeker(&w.pubkey(), &new_ata, &sgt.mint, Some(old_rig))], &[]));
-    assert_eq!(env.seat(&seat_pda(&sgt.mint)).rig, new_holder.rig.to_bytes());
+    ok(env.send_as(
+        &w,
+        &[ix_verify_seeker(
+            &w.pubkey(),
+            &new_ata,
+            &sgt.mint,
+            Some(old_rig),
+        )],
+        &[],
+    ));
+    assert_eq!(
+        env.seat(&seat_pda(&sgt.mint)).rig,
+        new_holder.rig.to_bytes()
+    );
     assert_eq!(env.rig(&old_rig).tier, 0);
     assert_eq!(env.rig(&new_holder.rig).tier, 1);
     // The previous holder can no longer verify.
-    let res = send_as_holder(&mut env, &sgt.holder, &[ix_verify_seeker(&sgt.holder, &sgt.token_account, &sgt.mint, None)]);
+    let res = send_as_holder(
+        &mut env,
+        &sgt.holder,
+        &[ix_verify_seeker(
+            &sgt.holder,
+            &sgt.token_account,
+            &sgt.mint,
+            None,
+        )],
+    );
     assert_custom(&res, 0, sgt_err(SgtError::AmountNotOne));
 }
 
@@ -336,5 +459,9 @@ fn mainnet_build_rejects_test_group_sgts() {
     // The wallet must sign, and must own the rig.
     let mut ix = ix_verify_seeker(&w.pubkey(), &ta, &mint, None);
     ix.accounts[0].is_signer = false;
-    assert_ix_err(&env.send(&[ix], &[]), 0, InstructionError::MissingRequiredSignature);
+    assert_ix_err(
+        &env.send(&[ix], &[]),
+        0,
+        InstructionError::MissingRequiredSignature,
+    );
 }

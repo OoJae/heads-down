@@ -182,14 +182,35 @@ mod tests {
     #[test]
     fn pinned_ore_and_precompile_ids_match_base58() {
         let cases = [
-            (ore::ORE_PROGRAM_ID, "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv"),
-            (ore::BOARD_ADDRESS, "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi"),
-            (ore::CONFIG_ADDRESS, "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy"),
-            (ore::TREASURY_ADDRESS, "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG"),
-            (ore::VAR_ADDRESS, "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E"),
-            (ore::ENTROPY_PROGRAM_ID, "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X"),
+            (
+                ore::ORE_PROGRAM_ID,
+                "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+            ),
+            (
+                ore::BOARD_ADDRESS,
+                "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+            ),
+            (
+                ore::CONFIG_ADDRESS,
+                "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy",
+            ),
+            (
+                ore::TREASURY_ADDRESS,
+                "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+            ),
+            (
+                ore::VAR_ADDRESS,
+                "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E",
+            ),
+            (
+                ore::ENTROPY_PROGRAM_ID,
+                "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X",
+            ),
             (ore::SYSTEM_PROGRAM_ID, "11111111111111111111111111111111"),
-            (ed25519::ED25519_PROGRAM_ID, "Ed25519SigVerify111111111111111111111111111"),
+            (
+                ed25519::ED25519_PROGRAM_ID,
+                "Ed25519SigVerify111111111111111111111111111",
+            ),
             (
                 instructions::initialize_config::BPF_LOADER_UPGRADEABLE_ID,
                 "BPFLoaderUpgradeab1e11111111111111111111111",

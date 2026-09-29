@@ -3,8 +3,8 @@
 //! Keystore-style P-256 heartbeat through the gate, the dig CPI into ORE,
 //! spend accounting, crank reimbursement, events, ShiftLog and close.
 
-use heads_down_tests::*;
 use hd::state::{break_reason, rig_state};
+use heads_down_tests::*;
 
 #[test]
 fn onboarding_is_one_wallet_transaction() {
@@ -13,7 +13,9 @@ fn onboarding_is_one_wallet_transaction() {
     let meta = ok(env.onboard(&user, SOL / 20, Caps::standard(), &standard_plan()));
 
     // ORE Automation: Discretionary, fee = executor_fee, executor = our PDA.
-    let a = env.automation(&user.automation()).expect("automation created");
+    let a = env
+        .automation(&user.automation())
+        .expect("automation created");
     assert_eq!(a.strategy, 2);
     assert_eq!(a.fee, EXECUTOR_FEE);
     assert_eq!(a.executor, EXECUTOR);
@@ -31,7 +33,13 @@ fn onboarding_is_one_wallet_transaction() {
     assert_eq!(rig.freezes_left, 2);
     assert_eq!(rig.shift_open, 1);
     let evs = events(&meta.logs);
-    assert_eq!(evs, vec![Event::ShiftArmed { rig: user.rig, shift_id: 1 }]);
+    assert_eq!(
+        evs,
+        vec![Event::ShiftArmed {
+            rig: user.rig,
+            shift_id: 1
+        }]
+    );
 }
 
 #[test]
@@ -54,7 +62,11 @@ fn heartbeat_gated_dig_deploys_through_ore() {
     assert_eq!(expected_mask.count_ones(), 10);
     assert_eq!(expected_mask & solo, 0, "split tiles only");
     // Independently: every chosen tile is no more crowded than any unchosen split tile.
-    let max_chosen = (0..25).filter(|i| expected_mask & (1 << i) != 0).map(|i| round_before[i]).max().unwrap();
+    let max_chosen = (0..25)
+        .filter(|i| expected_mask & (1 << i) != 0)
+        .map(|i| round_before[i])
+        .max()
+        .unwrap();
     let min_unchosen = (0..25)
         .filter(|i| expected_mask & (1 << i) == 0 && solo & (1 << i) == 0)
         .map(|i| round_before[i])
@@ -80,10 +92,16 @@ fn heartbeat_gated_dig_deploys_through_ore() {
     let auto_after = env.automation(&user.automation()).unwrap().balance;
     assert_eq!(auto_before - auto_after, 10 * per_tile + EXECUTOR_FEE);
     // Executor: +fee from ORE, -crank_fee reimbursement.
-    assert_eq!(env.lamports(&EXECUTOR), exec_before + EXECUTOR_FEE - CRANK_FEE);
+    assert_eq!(
+        env.lamports(&EXECUTOR),
+        exec_before + EXECUTOR_FEE - CRANK_FEE
+    );
     // Cranker: reimbursed minus the tx fee (1 tx signature + 1 secp256r1 signature).
     assert_eq!(meta.fee, 10_000);
-    assert_eq!(env.lamports(&env.cranker.pubkey()), crank_before - meta.fee + CRANK_FEE);
+    assert_eq!(
+        env.lamports(&env.cranker.pubkey()),
+        crank_before - meta.fee + CRANK_FEE
+    );
     // Executor stays a data-less System account.
     let ex = env.account(&EXECUTOR);
     assert_eq!(ex.owner, SYSTEM);
@@ -117,7 +135,10 @@ fn heartbeat_gated_dig_deploys_through_ore() {
     );
     // ORE saw the Executor PDA as the signer (its own DeployEvent is emitted
     // through a self-CPI into ORE's Log instruction).
-    assert!(meta.logs.iter().any(|l| l.contains("deploying 0.0001 SOL to 10 squares")));
+    assert!(meta
+        .logs
+        .iter()
+        .any(|l| l.contains("deploying 0.0001 SOL to 10 squares")));
 }
 
 #[test]

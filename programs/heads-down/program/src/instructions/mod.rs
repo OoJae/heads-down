@@ -18,8 +18,7 @@ use pinocchio::{AccountView, Address};
 
 use crate::{
     error::HdError,
-    logic,
-    message,
+    logic, message,
     state::{rig_state, Rig},
 };
 

@@ -3,8 +3,8 @@
 //! state, spoofed ORE accounts, another user's Automation, the executor,
 //! an uninitialized or paused Config.
 
-use heads_down_tests::*;
 use hd::{error::HdError, state::break_reason};
+use heads_down_tests::*;
 
 fn setup_with(seed: u8, caps: Caps, plan: hd::message::Plan) -> (Env, User) {
     let mut env = Env::new();
@@ -30,7 +30,11 @@ fn dig_ixs(env: &Env, user: &mut User) -> Vec<Instruction> {
     vec![
         compute_limit(1_400_000),
         secp_ix_for(&[hb]),
-        ix_dig(&env.cranker.pubkey(), &env.round, &[DigRig::new(user, entry_for(&hb, 1, 0))]),
+        ix_dig(
+            &env.cranker.pubkey(),
+            &env.round,
+            &[DigRig::new(user, entry_for(&hb, 1, 0))],
+        ),
     ]
 }
 
@@ -88,16 +92,25 @@ fn caps_expired_and_outside_window() {
     caps.expiry = T0 + 60;
     let (mut env, mut u) = setup_with(5, caps, standard_plan());
     env.advance_time(61);
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::CapsExpired.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::CapsExpired.code())
+    );
 
     let (mut env, mut u) = setup(6);
     env.advance_time(8 * 3_600 + 1); // past window_end (caps still valid)
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::OutsideWindow.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::OutsideWindow.code())
+    );
 
     let mut plan = standard_plan();
     plan.window_start = T0 + 600;
     let (mut env, mut u) = setup_with(7, Caps::standard(), plan);
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::OutsideWindow.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::OutsideWindow.code())
+    );
 }
 
 #[test]
@@ -106,13 +119,19 @@ fn budget_exhausted_by_shift_or_week_cap() {
     let mut caps = Caps::standard();
     caps.shift = EXECUTOR_FEE + 9; // budget = 9 lamports < 10 tiles
     let (mut env, mut u) = setup_with(8, caps, standard_plan());
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::BudgetExhausted.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::BudgetExhausted.code())
+    );
 
     // Week cap: 1 lamport of headroom left after the fee.
     let mut caps = Caps::standard();
     caps.week = EXECUTOR_FEE + 1;
     let (mut env, mut u) = setup_with(9, caps, standard_plan());
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::BudgetExhausted.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::BudgetExhausted.code())
+    );
 
     // A tight but sufficient round cap shrinks the per-tile amount so the
     // whole debit (tiles + fee) stays inside the cap.
@@ -136,28 +155,64 @@ fn strategy_or_fee_mismatch_is_skipped() {
     ok(env.send_as(
         &w,
         &[
-            ore_automate(&w.pubkey(), &EXECUTOR, TILE_CAP, SOL / 20, EXECUTOR_FEE + 1, 2, 0, u16::MAX),
+            ore_automate(
+                &w.pubkey(),
+                &EXECUTOR,
+                TILE_CAP,
+                SOL / 20,
+                EXECUTOR_FEE + 1,
+                2,
+                0,
+                u16::MAX,
+            ),
             ix_register_rig(&w.pubkey(), &a.p256(), None),
             ix_set_caps(&w.pubkey(), Caps::standard()),
             ix_arm_wallet(&w.pubkey(), &standard_plan()),
         ],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut a), Some(HdError::StrategyMismatch.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut a),
+        Some(HdError::StrategyMismatch.code())
+    );
     // A zero fee (would drain the pool through reimbursements) is refused too.
     ok(env.send_as(
         &w,
-        &[ore_automate(&w.pubkey(), &EXECUTOR, TILE_CAP, 0, 0, 2, 0, u16::MAX)],
+        &[ore_automate(
+            &w.pubkey(),
+            &EXECUTOR,
+            TILE_CAP,
+            0,
+            0,
+            2,
+            0,
+            u16::MAX,
+        )],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut a), Some(HdError::StrategyMismatch.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut a),
+        Some(HdError::StrategyMismatch.code())
+    );
     // Strategy Preferred (1) instead of Discretionary (2).
     ok(env.send_as(
         &w,
-        &[ore_automate(&w.pubkey(), &EXECUTOR, TILE_CAP, 0, EXECUTOR_FEE, 1, 0, u16::MAX)],
+        &[ore_automate(
+            &w.pubkey(),
+            &EXECUTOR,
+            TILE_CAP,
+            0,
+            EXECUTOR_FEE,
+            1,
+            0,
+            u16::MAX,
+        )],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut a), Some(HdError::StrategyMismatch.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut a),
+        Some(HdError::StrategyMismatch.code())
+    );
     // Nothing was ever deployed.
     assert_eq!(env.rig(&a.rig).spent_shift.get(), 0);
 }
@@ -171,14 +226,26 @@ fn motherlode_conditions_would_no_op_so_they_are_skipped() {
     ok(env.send_as(
         &w,
         &[
-            ore_automate(&w.pubkey(), &EXECUTOR, TILE_CAP, SOL / 20, EXECUTOR_FEE, 2, 60_000, u16::MAX),
+            ore_automate(
+                &w.pubkey(),
+                &EXECUTOR,
+                TILE_CAP,
+                SOL / 20,
+                EXECUTOR_FEE,
+                2,
+                60_000,
+                u16::MAX,
+            ),
             ix_register_rig(&w.pubkey(), &a.p256(), None),
             ix_set_caps(&w.pubkey(), Caps::standard()),
             ix_arm_wallet(&w.pubkey(), &standard_plan()),
         ],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut a), Some(HdError::MotherlodeCondition.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut a),
+        Some(HdError::MotherlodeCondition.code())
+    );
 }
 
 #[test]
@@ -186,7 +253,10 @@ fn round_window_closed_is_skipped() {
     let (mut env, mut u) = setup(13);
     let end = u64_at(&env.account(&BOARD).data, 24);
     env.set_clock(end, T0); // slot == end_slot: ORE's deploy window is closed
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::RoundNotActive.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::RoundNotActive.code())
+    );
 }
 
 #[test]
@@ -199,7 +269,10 @@ fn executor_underfunded_for_a_checkpoint_top_up_is_skipped() {
     let mut ex = env.account(&EXECUTOR);
     ex.lamports = rent + CHECKPOINT_FEE - 1;
     env.svm.set_account(EXECUTOR, ex).unwrap();
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::ExecutorUnderfunded.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::ExecutorUnderfunded.code())
+    );
 }
 
 #[test]
@@ -211,8 +284,15 @@ fn frozen_broken_and_idle_rigs_are_skipped() {
 
     let (mut env, mut u) = setup(16);
     let w = u.wallet.insecure_clone();
-    ok(env.send_as(&w, &[ix_break_wallet(&w.pubkey(), break_reason::MANUAL)], &[]));
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::RigNotArmed.code()));
+    ok(env.send_as(
+        &w,
+        &[ix_break_wallet(&w.pubkey(), break_reason::MANUAL)],
+        &[],
+    ));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::RigNotArmed.code())
+    );
 
     // Registered but never armed.
     let mut env = Env::new();
@@ -226,7 +306,10 @@ fn frozen_broken_and_idle_rigs_are_skipped() {
         ],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::RigNotArmed.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::RigNotArmed.code())
+    );
 }
 
 #[test]
@@ -345,14 +428,26 @@ fn executor_not_configured_on_the_automation_is_skipped() {
     ok(env.send_as(
         &w,
         &[
-            ore_automate(&w.pubkey(), &someone, TILE_CAP, SOL / 20, EXECUTOR_FEE, 2, 0, u16::MAX),
+            ore_automate(
+                &w.pubkey(),
+                &someone,
+                TILE_CAP,
+                SOL / 20,
+                EXECUTOR_FEE,
+                2,
+                0,
+                u16::MAX,
+            ),
             ix_register_rig(&w.pubkey(), &u.p256(), None),
             ix_set_caps(&w.pubkey(), Caps::standard()),
             ix_arm_wallet(&w.pubkey(), &standard_plan()),
         ],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut u), Some(HdError::InvalidExecutor.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut u),
+        Some(HdError::InvalidExecutor.code())
+    );
 
     // No Automation at all.
     let mut v = User::new(&mut env, 28);
@@ -366,7 +461,10 @@ fn executor_not_configured_on_the_automation_is_skipped() {
         ],
         &[],
     ));
-    assert_eq!(dig_once(&mut env, &mut v), Some(HdError::InvalidExecutor.code()));
+    assert_eq!(
+        dig_once(&mut env, &mut v),
+        Some(HdError::InvalidExecutor.code())
+    );
 }
 
 #[test]
@@ -386,7 +484,11 @@ fn paused_config_fails_dig() {
     let (mut env, mut u) = setup(30);
     let gov = env.governance.insecure_clone();
     let registrar = env.registrar.pubkey();
-    ok(env.send_as(&gov, &[ix_propose(&gov.pubkey(), &registrar, CRANK_FEE, 0, 1)], &[]));
+    ok(env.send_as(
+        &gov,
+        &[ix_propose(&gov.pubkey(), &registrar, CRANK_FEE, 0, 1)],
+        &[],
+    ));
     assert_eq!(env.config().paused, 1, "pausing is immediate");
     let ixs = dig_ixs(&env, &mut u);
     assert_hd(&env.send(&ixs, &[]), 2, HdError::Paused);
@@ -413,5 +515,9 @@ fn malformed_dig_data_and_account_counts_fail() {
     let mut ixs = dig_ixs(&env, &mut u);
     let stranger = Keypair::new().pubkey();
     ixs[2].accounts[0] = AccountMeta::new(stranger, false);
-    assert_ix_err(&env.send(&ixs, &[]), 2, InstructionError::MissingRequiredSignature);
+    assert_ix_err(
+        &env.send(&ixs, &[]),
+        2,
+        InstructionError::MissingRequiredSignature,
+    );
 }

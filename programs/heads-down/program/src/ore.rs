@@ -290,7 +290,9 @@ pub fn read_board(account: &AccountView) -> Result<Board, HdError> {
         return Err(HdError::InvalidOreAccount);
     }
     check(account, layout::BOARD_DISC, layout::BOARD_LEN)?;
-    let d = account.try_borrow().map_err(|_| HdError::InvalidOreAccount)?;
+    let d = account
+        .try_borrow()
+        .map_err(|_| HdError::InvalidOreAccount)?;
     let b = Board {
         round_id: rd_u64(&d, layout::BOARD_ROUND_ID)?,
         start_slot: rd_u64(&d, layout::BOARD_START_SLOT)?,
@@ -309,7 +311,9 @@ pub fn read_motherlode(account: &AccountView) -> Result<u64, HdError> {
         return Err(HdError::InvalidOreAccount);
     }
     check(account, layout::TREASURY_DISC, layout::TREASURY_LEN)?;
-    let d = account.try_borrow().map_err(|_| HdError::InvalidOreAccount)?;
+    let d = account
+        .try_borrow()
+        .map_err(|_| HdError::InvalidOreAccount)?;
     rd_u64(&d, layout::TREASURY_MOTHERLODE)
 }
 
@@ -326,7 +330,9 @@ pub fn check_config(account: &AccountView) -> Result<(), HdError> {
 pub fn check_round(account: &AccountView, round_id: u64) -> Result<(), HdError> {
     check(account, layout::ROUND_DISC, layout::ROUND_LEN)?;
     {
-        let d = account.try_borrow().map_err(|_| HdError::InvalidOreAccount)?;
+        let d = account
+            .try_borrow()
+            .map_err(|_| HdError::InvalidOreAccount)?;
         if rd_u64(&d, layout::ROUND_ID)? != round_id {
             return Err(HdError::InvalidOreAccount);
         }
@@ -343,7 +349,9 @@ pub fn check_round(account: &AccountView, round_id: u64) -> Result<(), HdError> 
 /// every deploy).
 pub fn read_round_deployed(account: &AccountView) -> Result<[u64; SQUARES], HdError> {
     check(account, layout::ROUND_DISC, layout::ROUND_LEN)?;
-    let d = account.try_borrow().map_err(|_| HdError::InvalidOreAccount)?;
+    let d = account
+        .try_borrow()
+        .map_err(|_| HdError::InvalidOreAccount)?;
     rd_u64x25(&d, layout::ROUND_DEPLOYED)
 }
 
@@ -374,7 +382,9 @@ pub fn read_automation(account: &AccountView) -> Result<Option<Automation>, HdEr
     if !is_ore_account(account, layout::AUTOMATION_DISC, layout::AUTOMATION_LEN) {
         return Ok(None);
     }
-    let d = account.try_borrow().map_err(|_| HdError::InvalidOreAccount)?;
+    let d = account
+        .try_borrow()
+        .map_err(|_| HdError::InvalidOreAccount)?;
     Ok(Some(Automation {
         amount: rd_u64(&d, layout::AUTOMATION_AMOUNT)?,
         authority: rd_addr(&d, layout::AUTOMATION_AUTHORITY)?,
@@ -428,7 +438,9 @@ pub fn read_miner(account: &AccountView) -> Result<Option<Miner>, HdError> {
     if !is_ore_account(account, layout::MINER_DISC, layout::MINER_LEN) {
         return Ok(None);
     }
-    let d = account.try_borrow().map_err(|_| HdError::InvalidOreAccount)?;
+    let d = account
+        .try_borrow()
+        .map_err(|_| HdError::InvalidOreAccount)?;
     Ok(Some(Miner {
         authority: rd_addr(&d, layout::MINER_AUTHORITY)?,
         checkpoint_id: rd_u64(&d, layout::MINER_CHECKPOINT_ID)?,

@@ -2,8 +2,8 @@
 //! are skipped with an event while the others deploy; account-level
 //! problems (duplicate rig) fail the whole transaction.
 
-use heads_down_tests::*;
 use hd::{error::HdError, state::rig_state};
+use heads_down_tests::*;
 
 #[test]
 fn failing_rigs_are_skipped_and_the_rest_deploy() {
@@ -32,10 +32,16 @@ fn failing_rigs_are_skipped_and_the_rest_deploy() {
     env.poke_u64(&m, 48, env.board_round - 6); // miner.checkpoint_id
 
     let r = env.board_round;
-    let hbs: Vec<Heartbeat> = [&mut good, &mut gated, &mut unchecked, &mut broke, &mut good2]
-        .into_iter()
-        .map(|u| u.heartbeat(1, r, 3))
-        .collect();
+    let hbs: Vec<Heartbeat> = [
+        &mut good,
+        &mut gated,
+        &mut unchecked,
+        &mut broke,
+        &mut good2,
+    ]
+    .into_iter()
+    .map(|u| u.heartbeat(1, r, 3))
+    .collect();
     let rigs = vec![
         DigRig::new(&good, entry_for(&hbs[0], 1, 0)),
         DigRig::new(&gated, entry_for(&hbs[1], 1, 1)),
@@ -47,13 +53,22 @@ fn failing_rigs_are_skipped_and_the_rest_deploy() {
     let exec_before = env.lamports(&EXECUTOR);
     let crank_before = env.lamports(&env.cranker.pubkey());
     let meta = ok(env.dig_with(&hbs, &rigs));
-    println!("batch of 6 (2 dug, 4 skipped): {} CU", meta.compute_units_consumed);
+    println!(
+        "batch of 6 (2 dug, 4 skipped): {} CU",
+        meta.compute_units_consumed
+    );
     let evs = events(&meta.logs);
 
     assert!(dug(&evs, &good.rig).is_some());
     assert!(dug(&evs, &good2.rig).is_some());
-    assert_eq!(skipped_code(&evs, &gated.rig), Some(HdError::CostGate.code()));
-    assert_eq!(skipped_code(&evs, &no_lease.rig), Some(HdError::LeaseExpired.code()));
+    assert_eq!(
+        skipped_code(&evs, &gated.rig),
+        Some(HdError::CostGate.code())
+    );
+    assert_eq!(
+        skipped_code(&evs, &no_lease.rig),
+        Some(HdError::LeaseExpired.code())
+    );
     assert_eq!(
         skipped_code(&evs, &unchecked.rig),
         Some(HdError::MinerNotCheckpointed.code())
@@ -70,7 +85,10 @@ fn failing_rigs_are_skipped_and_the_rest_deploy() {
         assert_eq!(rig.spent_shift.get(), 0);
         assert_eq!(rig.last_dug_round.get(), 0);
     }
-    assert_eq!(env.automation(&broke.automation()).unwrap().balance, 600_000);
+    assert_eq!(
+        env.automation(&broke.automation()).unwrap().balance,
+        600_000
+    );
     // ...but a verified heartbeat is still consumed and grants its lease.
     let g = env.rig(&gated.rig);
     assert_eq!(g.hb_counter.get(), 1);
@@ -119,13 +137,25 @@ fn a_rig_revoking_its_executor_mid_flight_only_skips_itself() {
     let w = b.wallet.insecure_clone();
     ok(env.send_as(
         &w,
-        &[ore_automate(&w.pubkey(), &other, TILE_CAP, 0, EXECUTOR_FEE, 2, 0, u16::MAX)],
+        &[ore_automate(
+            &w.pubkey(),
+            &other,
+            TILE_CAP,
+            0,
+            EXECUTOR_FEE,
+            2,
+            0,
+            u16::MAX,
+        )],
         &[],
     ));
     let meta = ok(env.dig_fresh(&mut [&mut a, &mut b]));
     let evs = events(&meta.logs);
     assert!(dug(&evs, &a.rig).is_some());
-    assert_eq!(skipped_code(&evs, &b.rig), Some(HdError::InvalidExecutor.code()));
+    assert_eq!(
+        skipped_code(&evs, &b.rig),
+        Some(HdError::InvalidExecutor.code())
+    );
 
     // Fully revoked (ORE closes the Automation back to the user): also a skip.
     let mut c = User::new(&mut env, 10);
@@ -133,7 +163,16 @@ fn a_rig_revoking_its_executor_mid_flight_only_skips_itself() {
     let wc = c.wallet.insecure_clone();
     ok(env.send_as(
         &wc,
-        &[ore_automate(&wc.pubkey(), &Address::default(), 0, 0, 0, 2, 0, u16::MAX)],
+        &[ore_automate(
+            &wc.pubkey(),
+            &Address::default(),
+            0,
+            0,
+            0,
+            2,
+            0,
+            u16::MAX,
+        )],
         &[],
     ));
     assert!(env.automation(&c.automation()).is_none());

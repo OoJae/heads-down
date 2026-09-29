@@ -42,7 +42,11 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     let v = g.plan_dig_lamports.get().min(cap_round);
     g.plan_dig_lamports.set(v);
 
-    let (ws, sw) = logic::roll_week(g.week_start_ts.get(), g.spent_week.get(), clock()?.unix_timestamp);
+    let (ws, sw) = logic::roll_week(
+        g.week_start_ts.get(),
+        g.spent_week.get(),
+        clock()?.unix_timestamp,
+    );
     g.week_start_ts.set(ws);
     g.spent_week.set(sw);
     Ok(())

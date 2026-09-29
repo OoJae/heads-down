@@ -136,7 +136,9 @@ pub fn grant_lease(
     hb_round: u64,
     lease: u8,
 ) -> Result<LeaseGrant, HdError> {
-    let span = u64::from(lease).checked_sub(1).ok_or(HdError::InvalidHeartbeat)?;
+    let span = u64::from(lease)
+        .checked_sub(1)
+        .ok_or(HdError::InvalidHeartbeat)?;
     let new_to = hb_round.checked_add(span).ok_or(HdError::MathOverflow)?;
     if cur_to != 0 && new_to <= cur_to {
         return Ok(LeaseGrant {
@@ -210,7 +212,8 @@ pub fn update_streak(
     qualifies: bool,
 ) -> (u32, u8, i64) {
     let mut freezes = freezes_left;
-    if last_day == 0 || today.div_euclid(FREEZE_PERIOD_DAYS) != last_day.div_euclid(FREEZE_PERIOD_DAYS)
+    if last_day == 0
+        || today.div_euclid(FREEZE_PERIOD_DAYS) != last_day.div_euclid(FREEZE_PERIOD_DAYS)
     {
         freezes = FREEZES_PER_PERIOD;
     }
@@ -230,7 +233,11 @@ pub fn update_streak(
     if missed <= i64::from(freezes) {
         // missed <= freezes <= 255
         let used = u8::try_from(missed).unwrap_or(u8::MAX);
-        return (streak.saturating_add(1), freezes.saturating_sub(used), today);
+        return (
+            streak.saturating_add(1),
+            freezes.saturating_sub(used),
+            today,
+        );
     }
     (1, freezes, today)
 }
@@ -299,8 +306,14 @@ mod tests {
         // Spent above cap (caps lowered mid-shift) saturates to 0.
         assert_eq!(dig_budget(10_000, 10_000, 1_000, 5_000, 10_000, 0, 5), 0);
         // Max values.
-        assert_eq!(dig_budget(u64::MAX, u64::MAX, u64::MAX, 0, u64::MAX, 0, u64::MAX), 0);
-        assert_eq!(dig_budget(u64::MAX, u64::MAX, u64::MAX, 0, u64::MAX, 0, 0), u64::MAX);
+        assert_eq!(
+            dig_budget(u64::MAX, u64::MAX, u64::MAX, 0, u64::MAX, 0, u64::MAX),
+            0
+        );
+        assert_eq!(
+            dig_budget(u64::MAX, u64::MAX, u64::MAX, 0, u64::MAX, 0, 0),
+            u64::MAX
+        );
     }
 
     #[test]
@@ -312,18 +325,30 @@ mod tests {
         deployed[20] = 1;
         let solo_mask = (1 << 20) | (1 << 21) | (1 << 22);
         // 2 split tiles: 3 and 7 (tie at 5, lowest index first... both chosen).
-        assert_eq!(select_tiles(&deployed, solo_mask, 0, 2, 0), (1 << 3) | (1 << 7));
+        assert_eq!(
+            select_tiles(&deployed, solo_mask, 0, 2, 0),
+            (1 << 3) | (1 << 7)
+        );
         // 3 split: then 1 (50).
-        assert_eq!(select_tiles(&deployed, solo_mask, 0, 3, 0), (1 << 3) | (1 << 7) | (1 << 1));
+        assert_eq!(
+            select_tiles(&deployed, solo_mask, 0, 3, 0),
+            (1 << 3) | (1 << 7) | (1 << 1)
+        );
         // 1 solo: 20 (least crowded solo).
         assert_eq!(select_tiles(&deployed, solo_mask, 0, 0, 1), 1 << 20);
         // Ties among equal tiles resolve to the lowest index.
         assert_eq!(select_tiles(&[9; SQUARES], 0, 0, 2, 0), 0b11);
         // Excluded squares are skipped.
-        assert_eq!(select_tiles(&deployed, solo_mask, 1 << 3, 2, 0), (1 << 7) | (1 << 1));
+        assert_eq!(
+            select_tiles(&deployed, solo_mask, 1 << 3, 2, 0),
+            (1 << 7) | (1 << 1)
+        );
         // Asking for more than exists returns what exists.
         assert_eq!(select_tiles(&deployed, solo_mask, 0, 0, 10).count_ones(), 3);
-        assert_eq!(select_tiles(&deployed, solo_mask, 0, 255, 255).count_ones(), 25);
+        assert_eq!(
+            select_tiles(&deployed, solo_mask, 0, 255, 255).count_ones(),
+            25
+        );
         assert_eq!(select_tiles(&deployed, solo_mask, 0, 0, 0), 0);
     }
 
@@ -331,25 +356,76 @@ mod tests {
     fn leases_extend_forward_and_count_dark_rounds_and_gaps() {
         // First heartbeat at the shift's first round, lease 3: rounds 100..=102.
         let g = grant_lease(0, 0, 100, 100, 3).unwrap();
-        assert_eq!(g, LeaseGrant { from: 100, to: 102, dark_added: 3, gap_added: 0 });
+        assert_eq!(
+            g,
+            LeaseGrant {
+                from: 100,
+                to: 102,
+                dark_added: 3,
+                gap_added: 0
+            }
+        );
         // Overlapping renewal at 101 (lease 3 → 103): one new round.
         let g2 = grant_lease(g.from, g.to, 100, 101, 3).unwrap();
-        assert_eq!(g2, LeaseGrant { from: 101, to: 103, dark_added: 1, gap_added: 0 });
+        assert_eq!(
+            g2,
+            LeaseGrant {
+                from: 101,
+                to: 103,
+                dark_added: 1,
+                gap_added: 0
+            }
+        );
         // A stale heartbeat that does not extend: nothing changes.
         let g3 = grant_lease(g2.from, g2.to, 100, 99, 3).unwrap();
-        assert_eq!(g3, LeaseGrant { from: 101, to: 103, dark_added: 0, gap_added: 0 });
+        assert_eq!(
+            g3,
+            LeaseGrant {
+                from: 101,
+                to: 103,
+                dark_added: 0,
+                gap_added: 0
+            }
+        );
         // After a gap (104..=106 uncovered) a heartbeat at 107, lease 1.
         let g4 = grant_lease(g2.from, g2.to, 100, 107, 1).unwrap();
-        assert_eq!(g4, LeaseGrant { from: 107, to: 107, dark_added: 1, gap_added: 3 });
+        assert_eq!(
+            g4,
+            LeaseGrant {
+                from: 107,
+                to: 107,
+                dark_added: 1,
+                gap_added: 3
+            }
+        );
         // First heartbeat after arming comes late: gap from shift start.
         let g5 = grant_lease(0, 0, 100, 104, 1).unwrap();
-        assert_eq!(g5, LeaseGrant { from: 104, to: 104, dark_added: 1, gap_added: 4 });
+        assert_eq!(
+            g5,
+            LeaseGrant {
+                from: 104,
+                to: 104,
+                dark_added: 1,
+                gap_added: 4
+            }
+        );
         // A heartbeat signed before the shift started only counts from the start.
         let g6 = grant_lease(0, 0, 100, 98, 3).unwrap();
-        assert_eq!(g6, LeaseGrant { from: 98, to: 100, dark_added: 1, gap_added: 0 });
+        assert_eq!(
+            g6,
+            LeaseGrant {
+                from: 98,
+                to: 100,
+                dark_added: 1,
+                gap_added: 0
+            }
+        );
         // Zero lease is invalid; overflow is an error, not a panic.
         assert_eq!(grant_lease(0, 0, 1, 5, 0), Err(HdError::InvalidHeartbeat));
-        assert_eq!(grant_lease(0, 0, 1, u64::MAX, 3), Err(HdError::MathOverflow));
+        assert_eq!(
+            grant_lease(0, 0, 1, u64::MAX, 3),
+            Err(HdError::MathOverflow)
+        );
     }
 
     #[test]
@@ -388,6 +464,9 @@ mod tests {
     fn week_rolls_after_seven_days() {
         assert_eq!(roll_week(0, 99, 1_000), (1_000, 0));
         assert_eq!(roll_week(1_000, 99, 1_000 + WEEK_SECONDS - 1), (1_000, 99));
-        assert_eq!(roll_week(1_000, 99, 1_000 + WEEK_SECONDS), (1_000 + WEEK_SECONDS, 0));
+        assert_eq!(
+            roll_week(1_000, 99, 1_000 + WEEK_SECONDS),
+            (1_000 + WEEK_SECONDS, 0)
+        );
     }
 }
