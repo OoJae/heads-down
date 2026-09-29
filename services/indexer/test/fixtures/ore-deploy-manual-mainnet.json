@@ -1,0 +1,108 @@
+{
+ "_source": "mainnet-beta getTransaction(encoding=json, maxSupportedTransactionVersion=1), fetched 2026-09-29; balances dropped",
+ "slot": 451727379,
+ "blockTime": 1790707842,
+ "version": "legacy",
+ "transaction": {
+  "signatures": [
+   "5uZWBsNQamLCRqmLrCpf5G78U1G3eK2wY8qVaQQBvk1Zk4sjNaz56JDZi4VAoBMSDv6YS5vUcnejYJHsGD24MjfQ"
+  ],
+  "message": {
+   "accountKeys": [
+    "9FsGp26UkKndmewwV5sNTPXfBoNP1BxywifBrpWrxpVP",
+    "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+    "64UnovF4VQBELGKNtCWC4QYv5EPU8LEdK5w24rA9MU4B",
+    "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy",
+    "9k5RLKLdAio21Xr3dKfahtQ1dVzhWyGFB2s8fg8QCA1B",
+    "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E",
+    "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+    "FNrZ8F7JuKzgXBtJrm9TVJwsTZPxkihhhw9Jad9pmykR",
+    "11111111111111111111111111111111",
+    "ComputeBudget111111111111111111111111111111",
+    "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+    "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X"
+   ],
+   "instructions": [
+    {
+     "accounts": [],
+     "data": "GZk52X",
+     "programIdIndex": 9,
+     "stackHeight": 1
+    },
+    {
+     "accounts": [],
+     "data": "3GAG5eogvTjV",
+     "programIdIndex": 9,
+     "stackHeight": 1
+    },
+    {
+     "accounts": [
+      0,
+      0,
+      7,
+      6,
+      3,
+      2,
+      4,
+      1,
+      8,
+      10,
+      5,
+      11
+     ],
+     "data": "Xi6BofGWP4pZyRdo5",
+     "programIdIndex": 10,
+     "stackHeight": 1
+    }
+   ]
+  }
+ },
+ "meta": {
+  "err": null,
+  "logMessages": [
+   "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+   "Program ComputeBudget111111111111111111111111111111 success",
+   "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+   "Program ComputeBudget111111111111111111111111111111 success",
+   "Program oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv invoke [1]",
+   "Program log: Ore accounts: 10",
+   "Program log: Entropy accounts: 2",
+   "Program 11111111111111111111111111111111 invoke [2]",
+   "Program 11111111111111111111111111111111 success",
+   "Program oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv invoke [2]",
+   "Program oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv consumed 443 of 35939 compute units",
+   "Program oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv success",
+   "Program log: Round #422675: deploying 0.004213595 SOL to 1 squares",
+   "Program oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv consumed 26696 of 59700 compute units",
+   "Program oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv success"
+  ],
+  "innerInstructions": [
+   {
+    "index": 2,
+    "instructions": [
+     {
+      "accounts": [
+       0,
+       4
+      ],
+      "data": "3Bxs4G8KremD2wUb",
+      "programIdIndex": 8,
+      "stackHeight": 2
+     },
+     {
+      "accounts": [
+       6
+      ],
+      "data": "5u9ffikrRy9iwFiTtv6h2QXV1dGQ2c1pcfPS5VCAbMiBGb1t3z1Ymx4ynUxvM8u8nXxs3mPKAMBShBySNPvyXQfDV8qRsb9jevUEtjtSPyBoiz4xxTCVYnW3dtnEQ61R5fAJwweTpqyBNpTnkq87oVcZsRWpDUsrTxGqm",
+      "programIdIndex": 10,
+      "stackHeight": 2
+     }
+    ]
+   }
+  ],
+  "loadedAddresses": {
+   "readonly": [],
+   "writable": []
+  }
+ }
+}
