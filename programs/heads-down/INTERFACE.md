@@ -5,8 +5,9 @@ all build against, in parallel. Change it only via a commit that updates every c
 All integers are **little-endian**. Byte offsets are from the start of account data.
 Addresses are 32 bytes. `Option<Address>` is encoded as 32 zero bytes = None.
 
-Program ID: **TBD** — fixed when `programs/heads-down` is created (`target/deploy/heads_down-keypair.json`);
-exported as `heads_down::ID` (Rust) and `HeadsDownProgram.ID` (Kotlin).
+Program ID: **`HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`** — exported as `heads_down::ID` (Rust) and
+`HeadsDownProgram.ID` (Kotlin). The deploy keypair lives **outside the repo** at
+`~/.config/heads-down/heads_down-program-keypair.json` (never commit keypairs).
 
 ## External programs and accounts (pinned)
 | Name | Address |
