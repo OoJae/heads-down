@@ -1,0 +1,16 @@
+[package]
+name = "p256-spike"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Spike 1(b): verify an Android-Keystore-style P-256 heartbeat via the secp256r1 precompile"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false, features = ["copy"] }
+p256-introspect = { path = "../../../crates/p256-introspect" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

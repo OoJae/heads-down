@@ -1,0 +1,26 @@
+[package]
+name = "p256-spike-tests"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+# `precompiles` loads agave-precompiles (ed25519, secp256k1, secp256r1) into
+# the VM. Without it the Secp256r1SigVerify program id is not executable.
+litesvm = { version = "0.17.0", features = ["precompiles"] }
+p256-introspect = { path = "../../../crates/p256-introspect", features = ["client"] }
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std", "pkcs8"] }
+# Versions matched to what litesvm 0.17.0 itself links against.
+solana-account = "4"
+solana-address = { version = "~2.7", features = ["decode"] }
+solana-instruction = "~3.5"
+solana-instruction-error = "~2.5"
+solana-keypair = "3"
+solana-message = "4"
+solana-signer = "3"
+solana-transaction = { version = "4", features = ["wincode"] }
+solana-transaction-error = "~3.4"
+# Wire serialization of (versioned) transactions, to measure sizes.
+wincode = "0.6"

@@ -1,0 +1,4 @@
+# Optional native accelerators pulled in by web3.js's websocket client; not needed.
+allowBuilds:
+  bufferutil: false
+  utf-8-validate: false

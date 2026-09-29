@@ -1,0 +1,38 @@
+[package]
+name = "p256-introspect"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.84"
+license = "Apache-2.0"
+description = "no_std, Pinocchio-compatible introspection of the Solana secp256r1 (P-256) precompile, plus host helpers for Android Keystore signatures"
+keywords = ["solana", "secp256r1", "p256", "pinocchio", "android"]
+categories = ["no-std", "cryptography"]
+publish = false
+
+# Standalone workspace: this crate is consumed by path from programs and spikes
+# elsewhere in the monorepo without a root Cargo.toml.
+[workspace]
+
+[features]
+default = []
+# Enables `std` (Error impls). Implied by `client`.
+std = []
+# Host-side helpers: DER -> raw r||s, low-S normalization, SEC1/SPKI -> compressed
+# pubkey, precompile instruction-data builder. Never enable this in an SBF program.
+client = ["std", "dep:p256"]
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false, features = ["copy"] }
+p256 = { version = "0.14", optional = true, default-features = false, features = ["ecdsa", "std", "pkcs8"] }
+
+[dev-dependencies]
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std", "pkcs8", "getrandom"] }
+# base58 decoding, only to cross-check the hard-coded program ids in tests.
+solana-address = { version = "2.7", features = ["decode"] }
+
+[[test]]
+name = "client"
+required-features = ["client"]
+
+[profile.release]
+overflow-checks = true
