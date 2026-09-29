@@ -17,9 +17,14 @@ The user's SOL never leaves ORE custody.
 - Executor PDA: `By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge` (bump 249).
 - Config PDA: `inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW` (bump 253).
 - Pinocchio 0.11, `no_std`, no allocator. There is **one** `unsafe` block, the
-  `sol_log_data` syscall in `events.rs`. The build is about 106 KB.
-- Contract: [`INTERFACE.md`](INTERFACE.md). Every extension and deviation, with exact
-  account lists and data layouts: [`INTERFACE-NOTES.md`](INTERFACE-NOTES.md).
+  `sol_log_data` syscall in `events.rs`. The build is about 109 KB.
+- Contract: [`INTERFACE.md`](INTERFACE.md) **v1.1**, frozen from this code: every
+  instruction's data and account list, every event, errors 0..31, the Rig field
+  usage, the dig budget, pause and state-machine semantics, and measured
+  transaction limits. `INTERFACE-NOTES.md` is superseded.
+- Machine-checked contract: [`vectors/`](vectors/) (golden instructions, messages,
+  events and registrar voucher, all generated from LiteSVM runs; see "Golden
+  vectors" below). Where each consumer disagrees: [`vectors/CROSSCHECK.md`](vectors/CROSSCHECK.md).
 
 ```
 program/            the SBF program (crate `heads-down`, lib `heads_down`)
@@ -34,7 +39,9 @@ tests/              LiteSVM fork suite + reference client (tests/src/lib.rs)
   fixtures/           fetch-fixtures.sh → live ORE bytecode + accounts (gitignored)
   mock-ore/           TEST ONLY: misbehaving ORE stand-in for the invariant tests
 scripts/build.sh    both SBF variants (+ mock)
-scripts/test.sh     fixtures → build → unit + fork tests → clippy -D warnings
+scripts/test.sh     fixtures → build → unit + fork tests (incl. the golden-vector drift test) → clippy -D warnings
+scripts/vectors.sh  regenerate vectors/ after an intentional contract change
+vectors/            golden vectors (JSON), CROSSCHECK.md, crosscheck/ (reproducible consumer checks)
 ```
 
 ## Build
@@ -102,12 +109,12 @@ program, and the Board, Config, Treasury, Var and current Round (round 422,685).
 heads_down is loaded at its real program id through the upgradeable loader, with a
 test upgrade authority written into its ProgramData.
 
-Last run, `bash scripts/test.sh`: **76 passed, 0 failed**. `cargo +1.97.1 clippy
+Last run, `bash scripts/test.sh`: **88 passed, 0 failed, 1 ignored** (15 unit + 73 fork; the ignored one is `crosscheck`). `cargo +1.97.1 clippy
 --workspace --all-targets -- -D warnings` is clean.
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| unit (`program/src`) | 14 | program id / PDAs vs base58 and `find_program_address`; `distribution_mask` equals a verbatim transcription of ORE's over 20k round ids; gate matches `ml/forecaster` (incl. the live fixture); budget reserves the fee; tile choice; leases; streak; overflow edges |
+| unit (`program/src`) | 15 | program id / PDAs vs base58 and `find_program_address`; `distribution_mask` equals a verbatim transcription of ORE's over 20k round ids; gate matches `ml/forecaster` (incl. the live fixture); budget reserves the fee; tile choice; leases; streak; overflow edges; every event encoder fills its exact length |
 | `lifecycle` | 3 | one-transaction onboarding: ORE `automate` (Discretionary, fee = `executor_fee`, executor = PDA) + `register_rig` + `set_caps` + `arm_shift`; a real P-256 heartbeat dig through the gate credits the 10 least-crowded split tiles, debits tiles + fee, reimburses the crank and emits `RigDug`; ShiftLog; close |
 | `batch` | 3 | 6 rigs: gate-closed, lease-less, un-checkpointed Miner and underfunded rigs are skipped with exact codes while 2 dig (one reimbursement each); duplicate rig fails; a user re-pointing or revoking its executor skips only itself |
 | `heartbeat` | 9 | stale counter; exact replay; future / old / mismatched round; wrong `shift_id`; another rig's key; offsets smuggled into a foreign instruction; forged instructions sysvar; high-S; bad precompile indices; entries swapped between rigs |
@@ -118,6 +125,39 @@ Last run, `bash scripts/test.sh`: **76 passed, 0 failed**. `cargo +1.97.1 clippy
 | `ore_semantics` | 4 | live ORE closing the Automation mid-CPI is accounted; a TEST-ONLY mock ORE that drains the Executor float (reverted), no-ops (skipped, no reimbursement) or over-debits (reverted) |
 | `fuzz_no_panic` | 2 | 3,000 random + 2,000 mutated instructions on the SBF binary: only clean errors, no aborts |
 | `capacity` | 2 | the measurements below |
+| `events_v11` | 5 | v1.1: BREAK 7 unplugged → Cooling (a fresh heartbeat resumes), 8 unlocked → Broken and sealed with reason 8; ShiftBroken on BREAK and on a shift-interrupting FREEZE only; HeartbeatsRecorded reports only the rounds added; ShiftEndedV2 mode; every reason code → state |
+| `registrar_voucher` | 3 | a voucher built exactly like `registrar/src/voucher.rs` (111-byte HDreg, 223-byte Ed25519SigVerify, `IX_HEADER`) is accepted by `register_rig` and `rotate_key`; level 0, level 3, expired, another wallet, a non-registrar key and a mismatched level are refused |
+| `vectors` | 3 | the committed golden vectors are byte-identical to a fresh LiteSVM generation; generation is deterministic; INTERFACE.md's event, error and instruction tables match the program |
+| `crosscheck` | (ignored) | executes the Android and crank vectors and the consumer assumptions (`vectors/CROSSCHECK.md`); run with `-- --ignored` |
+
+## Golden vectors
+
+`vectors/` is the contract in machine-checked form. `tests/src/vectors.rs`
+generates it from one deterministic scenario on a **pinned** fork: the live ORE
+and entropy bytecode, fixed public test keys, and the ORE Board, Treasury and
+Round pinned to round 422,700, EMA 918,782,720 and a 344 ORE pot.
+
+| File | Contents |
+|---|---|
+| `instructions.json` | All 15 tags, both auth paths (25 vectors). Each has data hex with a per-field layout, the ordered account metas (role, signer, writable, PDA seeds and bump), the full transaction including precompile and compute-budget companions, and the executed LiteSVM result with its raw events. Every vector must succeed |
+| `messages.json` | HEARTBEAT (94 B), BREAK and FREEZE (86 B) and PLAN (113 B) preimages, SHA-256 digests, RFC 6979 and low-S signatures from the RFC 6979 A.2.5 test key, and the 145-byte Secp256r1SigVerify data. Each was verified by the real precompile, and a tampered copy was rejected |
+| `events.json` | Tags 1..10 with layouts and bytes captured from runs, plus `RigSkipped` captured for 20 skip codes, including every ORE pre-flight code 25..31 |
+| `registrar.json` | The 111-byte HDreg preimage and the 223-byte Ed25519SigVerify instruction in `registrar/src/voucher.rs` format, accepted by `register_rig` (level 2). Level 0 and expired vouchers are rejected |
+
+These tests guard the vectors:
+
+- `tests/tests/vectors.rs` fails if a committed file drifts by one byte, if
+  generation is not deterministic, or if INTERFACE.md's event, error or
+  instruction tables disagree with the program.
+- The output does not change when the fixtures are re-fetched at a newer ORE
+  round (checked 422,755 → 422,769).
+
+To regenerate after an intentional change, run `bash scripts/vectors.sh`, review
+the diff, and update INTERFACE.md in the same commit.
+
+`vectors/CROSSCHECK.md` records where the Android, crank, indexer and registrar
+assumptions match or differ. Every item was executed; reproduce all of them with
+`bash vectors/crosscheck/run.sh`.
 
 ## Measurements (live ORE fork, `tests/tests/capacity.rs`)
 
@@ -209,10 +249,12 @@ removed. Test paths are relative to `tests/tests/`.
 
 ## Known limitations
 
-See `INTERFACE-NOTES.md` §10. Two more:
+See `INTERFACE.md` §10. Two more:
 
-- The Android `HeartbeatMessage` in `android/core/keys` still uses the old 101-byte raw
-  format. It must switch to `SHA-256` of the 94-byte `HDv1` preimage
-  (`message::heartbeat_preimage`).
+- The consumers do not yet all match v1.1. The Android instruction layouts, the
+  crank's `RigDug.lamports` and skip-code assumptions, and the indexer's names for
+  the new codes and events are listed with exact bytes in `vectors/CROSSCHECK.md`.
+  Android's signed messages are byte-exact; it now uses the 94-byte `HDv1`
+  digest.
 - No physical device was available. Keystore signatures are simulated with p256 in
   Keystore's format (DER, then low-S raw).
