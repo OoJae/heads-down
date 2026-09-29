@@ -25,5 +25,7 @@ pub mod clock;
 pub mod nonce;
 pub mod session;
 pub mod siws;
+pub mod slot;
+pub mod translog;
 pub mod util;
 pub mod voucher;
