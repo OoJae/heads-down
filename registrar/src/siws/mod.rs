@@ -153,7 +153,7 @@ pub fn verify_signed_message(
         return Err(SiwsError::UnsupportedVersion);
     }
     let chain_id = msg.chain_id.clone().ok_or(SiwsError::ChainNotAllowed)?;
-    if !policy.chains.iter().any(|c| *c == chain_id) {
+    if !policy.chains.contains(&chain_id) {
         return Err(SiwsError::ChainNotAllowed);
     }
     let nonce = msg.nonce.clone().ok_or(SiwsError::MissingNonce)?;
@@ -337,15 +337,9 @@ mod tests {
     fn claimed_address_and_encoding() {
         let (bytes, sig) = signed(&message(&signer()), &signer());
         let other = bs58::encode([1u8; 32]).into_string();
-        assert_eq!(
-            verify_signed_message(&policy(), &bytes, &sig, Some(&other), NOW),
-            Err(SiwsError::AddressMismatch)
-        );
+        assert_eq!(verify_signed_message(&policy(), &bytes, &sig, Some(&other), NOW), Err(SiwsError::AddressMismatch));
         assert_eq!(verify_signed_message(&policy(), &[0xff, 0xfe], &sig, None, NOW), Err(SiwsError::NotUtf8));
-        assert_eq!(
-            verify_signed_message(&policy(), &vec![b'a'; 4096], &sig, None, NOW),
-            Err(SiwsError::TooLarge)
-        );
+        assert_eq!(verify_signed_message(&policy(), &vec![b'a'; 4096], &sig, None, NOW), Err(SiwsError::TooLarge));
         let mut m = message(&signer());
         m.address = "not-base58-0OIl".into();
         assert_eq!(check(&m, NOW), Err(SiwsError::InvalidAddress));

@@ -16,23 +16,11 @@ pub const GOOGLE_RSA_ROOT_SPKI_SHA256: &str = "feb2ea7551ee316ed4bb443c8293b884d
 pub const GOOGLE_P384_ROOT_SPKI_SHA256: &str = "3ee44512a1af2beb39c889490c60ea3f82e43f5d5a5532f5ab9419f676cd07ec";
 
 const GOOGLE_ROOT_PEMS: &[(&str, &str)] = &[
-    (
-        "google-rsa4096-2022",
-        include_str!("../../roots/google_hardware_attestation_root_rsa4096_2022.pem"),
-    ),
+    ("google-rsa4096-2022", include_str!("../../roots/google_hardware_attestation_root_rsa4096_2022.pem")),
     ("google-key-attestation-ca1-p384", include_str!("../../roots/google_key_attestation_ca1_p384_2025.pem")),
-    (
-        "google-rsa4096-2016",
-        include_str!("../../roots/google_hardware_attestation_root_rsa4096_2016.pem"),
-    ),
-    (
-        "google-rsa4096-2019",
-        include_str!("../../roots/google_hardware_attestation_root_rsa4096_2019.pem"),
-    ),
-    (
-        "google-rsa4096-2021",
-        include_str!("../../roots/google_hardware_attestation_root_rsa4096_2021.pem"),
-    ),
+    ("google-rsa4096-2016", include_str!("../../roots/google_hardware_attestation_root_rsa4096_2016.pem")),
+    ("google-rsa4096-2019", include_str!("../../roots/google_hardware_attestation_root_rsa4096_2019.pem")),
+    ("google-rsa4096-2021", include_str!("../../roots/google_hardware_attestation_root_rsa4096_2021.pem")),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]

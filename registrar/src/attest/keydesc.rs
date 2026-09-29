@@ -392,15 +392,20 @@ pub fn parse(ext_value: &[u8]) -> Result<KeyDescription> {
     })
 }
 
+/// Both authorization lists carry an `attestationApplicationId`, and they differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("conflicting attestationApplicationId in software- and hardware-enforced lists")]
+pub struct ConflictingApplicationId;
+
 impl KeyDescription {
     /// `attestationApplicationId` is populated by keystore2, normally in `softwareEnforced`.
     /// If both lists carry one they must agree.
-    pub fn application_id(&self) -> std::result::Result<Option<&AttestationApplicationId>, ()> {
+    pub fn application_id(&self) -> std::result::Result<Option<&AttestationApplicationId>, ConflictingApplicationId> {
         match (
             self.software_enforced.attestation_application_id.as_ref(),
             self.hardware_enforced.attestation_application_id.as_ref(),
         ) {
-            (Some(a), Some(b)) if a != b => Err(()),
+            (Some(a), Some(b)) if a != b => Err(ConflictingApplicationId),
             (Some(a), _) | (None, Some(a)) => Ok(Some(a)),
             (None, None) => Ok(None),
         }
@@ -561,7 +566,8 @@ mod tests {
             seq(&[int(300), enumerated(7), int(300), enumerated(1), octets(b""), octets(b""), seq(&[]), seq(&[])]);
         assert_eq!(parse(&bad_level), Err(E::UnknownEnum("attestationSecurityLevel")));
         // Security level as INTEGER instead of ENUMERATED.
-        let wrong_type = seq(&[int(300), int(1), int(300), enumerated(1), octets(b""), octets(b""), seq(&[]), seq(&[])]);
+        let wrong_type =
+            seq(&[int(300), int(1), int(300), enumerated(1), octets(b""), octets(b""), seq(&[]), seq(&[])]);
         assert_eq!(parse(&wrong_type), Err(E::UnexpectedType("attestationSecurityLevel")));
         // Non-minimal integer.
         let hw = seq(&[tlv(&[0xa2], &tlv(&[0x02], &[0x00, 0x03]))]);

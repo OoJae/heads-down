@@ -273,7 +273,10 @@ Expiration Time: 2026-09-29T12:10:00Z";
             (format!("{good}\n"), ParseError::UnexpectedLine),
             (format!("{good}\u{0}"), ParseError::ForbiddenCharacter),
             (good.replace("Nonce: ", "Nonce:\u{1b}[8m "), ParseError::ForbiddenCharacter),
-            (good.replace("headsdown.xyz wants", "evil.xyz\u{2028}headsdown.xyz wants"), ParseError::ForbiddenCharacter),
+            (
+                good.replace("headsdown.xyz wants", "evil.xyz\u{2028}headsdown.xyz wants"),
+                ParseError::ForbiddenCharacter,
+            ),
             (good.replace(" wants you to sign in", " wants to sign in"), ParseError::BadHeader),
             (good.replace("headsdown.xyz wants", " wants"), ParseError::BadHeader),
             (good.replace("headsdown.xyz wants", "heads down.xyz wants"), ParseError::BadHeader),

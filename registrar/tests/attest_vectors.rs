@@ -243,7 +243,8 @@ fn offset_in(outer: &[u8], inner: &[u8]) -> usize {
 fn tampered_certificates_are_rejected() {
     let v = vector("frankel_sdk37_TEE_EC_2026");
     let key = v.leaf_key(T_2026_09_10);
-    let run = |chain: &[Vec<u8>]| verifier(v.policy()).verify(chain, &key, &v.challenge(), &no_revocations(), T_2026_09_10);
+    let run =
+        |chain: &[Vec<u8>]| verifier(v.policy()).verify(chain, &key, &v.challenge(), &no_revocations(), T_2026_09_10);
 
     // Flip the last byte of the leaf (inside its signature).
     let mut chain = v.chain.clone();
@@ -303,7 +304,8 @@ fn chain_to_unknown_root_is_rejected() {
 fn malformed_chain_shapes_are_rejected() {
     let v = vector("frankel_sdk37_TEE_EC_2026");
     let key = v.leaf_key(T_2026_09_10);
-    let run = |chain: &[Vec<u8>]| verifier(v.policy()).verify(chain, &key, &v.challenge(), &no_revocations(), T_2026_09_10);
+    let run =
+        |chain: &[Vec<u8>]| verifier(v.policy()).verify(chain, &key, &v.challenge(), &no_revocations(), T_2026_09_10);
 
     // Root omitted.
     assert_eq!(chain_err(run(&v.chain[..4])), ChainError::RootNotSelfIssued);
@@ -366,7 +368,8 @@ fn wrong_challenge_is_rejected() {
     let v = vector("caiman_sdk36_TEE_EC_RKP");
     let mut challenge = v.challenge();
     challenge[0] ^= 1;
-    let r = verifier(v.policy()).verify(&v.chain, &v.leaf_key(T_2025_09_28), &challenge, &no_revocations(), T_2025_09_28);
+    let r =
+        verifier(v.policy()).verify(&v.chain, &v.leaf_key(T_2025_09_28), &challenge, &no_revocations(), T_2025_09_28);
     assert_eq!(policy_err(r), PolicyError::ChallengeMismatch);
     let r = verifier(v.policy()).verify(&v.chain, &v.leaf_key(T_2025_09_28), &[], &no_revocations(), T_2025_09_28);
     assert_eq!(policy_err(r), PolicyError::ChallengeMismatch);
@@ -377,7 +380,8 @@ fn wrong_package_is_rejected() {
     let v = vector("caiman_sdk36_TEE_EC_RKP");
     let mut policy = v.policy();
     policy.package_name = "xyz.headsdown".into();
-    let r = verifier(policy).verify(&v.chain, &v.leaf_key(T_2025_09_28), &v.challenge(), &no_revocations(), T_2025_09_28);
+    let r =
+        verifier(policy).verify(&v.chain, &v.leaf_key(T_2025_09_28), &v.challenge(), &no_revocations(), T_2025_09_28);
     assert_eq!(policy_err(r), PolicyError::WrongPackage);
 }
 

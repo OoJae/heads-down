@@ -110,9 +110,10 @@ impl PolicyError {
 }
 
 fn key_parameters_ok(list: &AuthorizationList) -> bool {
-    let purposes_ok = list.purposes.as_ref().is_some_and(|p| {
-        p.contains(&PURPOSE_SIGN) && p.iter().all(|x| *x == PURPOSE_SIGN || *x == PURPOSE_VERIFY)
-    });
+    let purposes_ok = list
+        .purposes
+        .as_ref()
+        .is_some_and(|p| p.contains(&PURPOSE_SIGN) && p.iter().all(|x| *x == PURPOSE_SIGN || *x == PURPOSE_VERIFY));
     purposes_ok
         && list.algorithm == Some(ALGORITHM_EC)
         && list.ec_curve == Some(EC_CURVE_P256)
@@ -139,7 +140,8 @@ pub fn assess(
     }
 
     // 3. The app.
-    let app = kd.application_id().map_err(|()| PolicyError::MissingApplicationId)?.ok_or(PolicyError::MissingApplicationId)?;
+    let app =
+        kd.application_id().map_err(|_| PolicyError::MissingApplicationId)?.ok_or(PolicyError::MissingApplicationId)?;
     match app.packages.as_slice() {
         [only] if only.name == policy.package_name => {}
         _ => return Err(PolicyError::WrongPackage),

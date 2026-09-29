@@ -138,7 +138,9 @@ impl std::fmt::Debug for RegistrarKey {
 
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
-    #[error("registrar key must be a Solana keypair JSON array of 64 bytes, or base58 of a 32-byte seed / 64-byte keypair")]
+    #[error(
+        "registrar key must be a Solana keypair JSON array of 64 bytes, or base58 of a 32-byte seed / 64-byte keypair"
+    )]
     Format,
     #[error("registrar keypair's public half does not match its secret")]
     Inconsistent,

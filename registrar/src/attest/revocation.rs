@@ -178,7 +178,10 @@ impl StatusListProvider {
                 let cached = self.cached().await;
                 match cached {
                     Some(list) if now.saturating_sub(list.fetched_at) < self.max_stale_secs => {
-                        tracing::warn!(age_secs = now.saturating_sub(list.fetched_at), "status list refresh failed; serving cached copy");
+                        tracing::warn!(
+                            age_secs = now.saturating_sub(list.fetched_at),
+                            "status list refresh failed; serving cached copy"
+                        );
                         Ok(list)
                     }
                     _ => {

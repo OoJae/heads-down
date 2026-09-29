@@ -32,9 +32,7 @@ impl ManualClock {
     }
 
     pub fn advance(&self, secs: i64) {
-        let _ = self
-            .0
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |t| Some(t.saturating_add(secs)));
+        let _ = self.0.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |t| Some(t.saturating_add(secs)));
     }
 }
 
@@ -47,16 +45,13 @@ impl Clock for ManualClock {
 /// Formats a Unix timestamp as RFC 3339 (UTC, `Z`). Out-of-range values fall back to the epoch.
 pub fn rfc3339(ts: i64) -> String {
     let dt = time::OffsetDateTime::from_unix_timestamp(ts).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    dt.format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| String::from("1970-01-01T00:00:00Z"))
+    dt.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| String::from("1970-01-01T00:00:00Z"))
 }
 
 /// Parses an RFC 3339 / ISO 8601 date-time with offset (as produced by JavaScript's
 /// `Date.toISOString()` and by the MWA clients) into Unix seconds.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
-    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339)
-        .ok()
-        .map(|dt| dt.unix_timestamp())
+    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok().map(|dt| dt.unix_timestamp())
 }
 
 #[cfg(test)]

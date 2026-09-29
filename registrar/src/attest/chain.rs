@@ -202,7 +202,11 @@ fn verification_algorithm(
     })
 }
 
-fn verify_signature(index: usize, cert: &X509Certificate<'_>, issuer: &SubjectPublicKeyInfo<'_>) -> Result<(), ChainError> {
+fn verify_signature(
+    index: usize,
+    cert: &X509Certificate<'_>,
+    issuer: &SubjectPublicKeyInfo<'_>,
+) -> Result<(), ChainError> {
     if cert.signature_algorithm != cert.tbs_certificate.signature {
         return Err(ChainError::AlgorithmMismatch(index));
     }

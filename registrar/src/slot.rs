@@ -12,7 +12,11 @@ use tokio::sync::Mutex;
 const CACHE_FOR: Duration = Duration::from_secs(5);
 
 pub enum SlotSource {
-    Rpc { url: String, client: reqwest::Client, cache: Mutex<Option<(u64, Instant)>> },
+    Rpc {
+        url: String,
+        client: reqwest::Client,
+        cache: Mutex<Option<(u64, Instant)>>,
+    },
     /// Tests and offline development.
     Fixed(u64),
 }

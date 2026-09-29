@@ -164,11 +164,21 @@ pub struct TransparencyLog {
     inner: Mutex<Inner>,
 }
 
+/// State recovered by replaying a log file.
+struct Replayed {
+    offsets: Vec<u64>,
+    by_key: HashMap<(String, String), u64>,
+    head: [u8; 32],
+    len_bytes: u64,
+}
+
 /// Reads and fully verifies a log file. Returns the entries' offsets and the chain head.
-fn replay(path: &Path) -> Result<(Vec<u64>, HashMap<(String, String), u64>, [u8; 32], u64), LogError> {
+fn replay(path: &Path) -> Result<Replayed, LogError> {
     let file = match File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), HashMap::new(), [0; 32], 0)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Replayed { offsets: Vec::new(), by_key: HashMap::new(), head: [0; 32], len_bytes: 0 })
+        }
         Err(e) => return Err(io(e)),
     };
     let mut reader = BufReader::new(file);
@@ -198,7 +208,7 @@ fn replay(path: &Path) -> Result<(Vec<u64>, HashMap<(String, String), u64>, [u8;
         pos = pos.saturating_add(n as u64);
         index = index.saturating_add(1);
     }
-    Ok((offsets, by_key, prev, pos))
+    Ok(Replayed { offsets, by_key, head: prev, len_bytes: pos })
 }
 
 impl TransparencyLog {
@@ -209,17 +219,17 @@ impl TransparencyLog {
                 std::fs::create_dir_all(parent).map_err(io)?;
             }
         }
-        let (offsets, by_key, prev_hash, len_bytes) = replay(path)?;
+        let r = replay(path)?;
         let file = OpenOptions::new().create(true).append(true).open(path).map_err(io)?;
         Ok(Self {
             path: path.to_owned(),
             inner: Mutex::new(Inner {
                 file,
-                next_index: offsets.len() as u64,
-                prev_hash,
-                offsets,
-                by_key,
-                len_bytes,
+                next_index: r.offsets.len() as u64,
+                prev_hash: r.head,
+                offsets: r.offsets,
+                by_key: r.by_key,
+                len_bytes: r.len_bytes,
             }),
         })
     }
@@ -229,14 +239,8 @@ impl TransparencyLog {
         let mut inner = self.inner.lock().await;
         let index = inner.next_index;
         let v = Voucher::from_preimage(&new.message).ok_or(LogError::Invalid { line: index, reason: "preimage" })?;
-        let hash = entry_hash(
-            &inner.prev_hash,
-            index,
-            &new.message,
-            &new.signature,
-            &new.nonce,
-            &chain_hash(&new.chain_der),
-        );
+        let hash =
+            entry_hash(&inner.prev_hash, index, &new.message, &new.signature, &new.nonce, &chain_hash(&new.chain_der));
         let entry = LogEntry {
             v: 1,
             index,
@@ -299,10 +303,8 @@ impl TransparencyLog {
             let mut out = Vec::new();
             for (i, line) in BufReader::new(file).lines().take(limit).enumerate() {
                 let line = line.map_err(io)?;
-                let e: LogEntry = serde_json::from_str(&line).map_err(|_| LogError::Invalid {
-                    line: from.saturating_add(i as u64),
-                    reason: "json",
-                })?;
+                let e: LogEntry = serde_json::from_str(&line)
+                    .map_err(|_| LogError::Invalid { line: from.saturating_add(i as u64), reason: "json" })?;
                 out.push(e);
             }
             Ok(out)
@@ -408,8 +410,12 @@ mod tests {
         assert!(TransparencyLog::open(&path).is_err());
 
         // Raise a level in the JSON (not in the signed preimage).
-        std::fs::write(&path, original.replacen("\"level\":1,\"expiry_slot\"", "\"level\":2,\"expiry_slot\"", 1)).unwrap();
-        assert!(matches!(TransparencyLog::open(&path), Err(LogError::Invalid { reason: "fields disagree with the signed preimage", .. })));
+        std::fs::write(&path, original.replacen("\"level\":1,\"expiry_slot\"", "\"level\":2,\"expiry_slot\"", 1))
+            .unwrap();
+        assert!(matches!(
+            TransparencyLog::open(&path),
+            Err(LogError::Invalid { reason: "fields disagree with the signed preimage", .. })
+        ));
 
         // Swap a certificate in the published chain.
         std::fs::write(&path, original.replacen("MAA=", "MAE=", 1)).unwrap();

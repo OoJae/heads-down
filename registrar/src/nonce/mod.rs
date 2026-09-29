@@ -185,33 +185,21 @@ pub(crate) mod conformance {
         assert!(is_well_formed(&n));
         assert_eq!(exp, 1_600);
         consume(store, &n, NoncePurpose::Siws, None, 1_001).unwrap();
-        assert!(matches!(
-            consume(store, &n, NoncePurpose::Siws, None, 1_002),
-            Err(ConsumeError::NotFound)
-        ));
+        assert!(matches!(consume(store, &n, NoncePurpose::Siws, None, 1_002), Err(ConsumeError::NotFound)));
         // Never issued.
         assert!(matches!(
             consume(store, &"0".repeat(32), NoncePurpose::Siws, None, 1_002),
             Err(ConsumeError::NotFound)
         ));
         // Malformed never reaches the store.
-        assert!(matches!(
-            consume(store, "not-a-nonce", NoncePurpose::Siws, None, 1_002),
-            Err(ConsumeError::NotFound)
-        ));
+        assert!(matches!(consume(store, "not-a-nonce", NoncePurpose::Siws, None, 1_002), Err(ConsumeError::NotFound)));
     }
 
     fn expiry_and_purge(store: &dyn NonceStore) {
         let (n, _) = issue(store, NoncePurpose::Siws, None, 1_000, 600).unwrap();
-        assert!(matches!(
-            consume(store, &n, NoncePurpose::Siws, None, 1_600),
-            Err(ConsumeError::Expired)
-        ));
+        assert!(matches!(consume(store, &n, NoncePurpose::Siws, None, 1_600), Err(ConsumeError::Expired)));
         // Burned even though it failed.
-        assert!(matches!(
-            consume(store, &n, NoncePurpose::Siws, None, 1_001),
-            Err(ConsumeError::NotFound)
-        ));
+        assert!(matches!(consume(store, &n, NoncePurpose::Siws, None, 1_001), Err(ConsumeError::NotFound)));
         let (a, _) = issue(store, NoncePurpose::Siws, None, 1_000, 10).unwrap();
         let (b, _) = issue(store, NoncePurpose::Siws, None, 1_000, 1_000).unwrap();
         assert_eq!(store.purge_expired(1_010).unwrap(), 1);
@@ -228,10 +216,7 @@ pub(crate) mod conformance {
             consume(store, &n, NoncePurpose::Attest, Some("mallory"), 1),
             Err(ConsumeError::WrongSubject)
         ));
-        assert!(matches!(
-            consume(store, &n, NoncePurpose::Attest, Some("alice"), 1),
-            Err(ConsumeError::NotFound)
-        ));
+        assert!(matches!(consume(store, &n, NoncePurpose::Attest, Some("alice"), 1), Err(ConsumeError::NotFound)));
         let (n, _) = issue(store, NoncePurpose::Attest, Some("alice".into()), 0, 600).unwrap();
         consume(store, &n, NoncePurpose::Attest, Some("alice"), 1).unwrap();
     }
@@ -240,10 +225,7 @@ pub(crate) mod conformance {
         for _ in 0..3 {
             issue(store, NoncePurpose::Siws, None, 0, 10).unwrap();
         }
-        assert!(matches!(
-            issue(store, NoncePurpose::Siws, None, 0, 10),
-            Err(IssueError::Store(StoreError::Full))
-        ));
+        assert!(matches!(issue(store, NoncePurpose::Siws, None, 0, 10), Err(IssueError::Store(StoreError::Full))));
         // Expired entries are purged to make room.
         issue(store, NoncePurpose::Siws, None, 10, 10).unwrap();
         assert_eq!(store.len().unwrap(), 1);
