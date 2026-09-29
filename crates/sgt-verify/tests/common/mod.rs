@@ -237,8 +237,8 @@ impl HostAccount {
                 is_writable: 0,
                 executable: 0,
                 padding: [0; 4],
-                address: address.clone(),
-                owner: owner.clone(),
+                address: *address,
+                owner: *owner,
                 lamports,
                 data_len: data.len() as u64,
             });

@@ -24,7 +24,6 @@ default = []
 # byte-exact synthetic SGT accounts, and an AccountView harness.
 std = [
     "dep:solana-instruction",
-    "dep:solana-system-interface",
     "solana-address/curve25519",
     "solana-address/std",
 ]
@@ -39,9 +38,8 @@ mainnet = []
 
 [dependencies]
 pinocchio = { version = "0.11.2", default-features = false }
-solana-address = { version = "2.7", default-features = false, features = ["decode"] }
+solana-address = { version = "2.7", default-features = false, features = ["decode", "copy"] }
 solana-instruction = { version = "3", optional = true }
-solana-system-interface = { version = "2", optional = true }
 
 [dev-dependencies]
 base64 = "0.22"

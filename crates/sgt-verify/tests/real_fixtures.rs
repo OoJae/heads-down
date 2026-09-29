@@ -35,7 +35,7 @@ fn every_real_sgt_verifies() {
         assert_eq!(
             info,
             SgtInfo {
-                mint: sgt.mint.address.clone(),
+                mint: sgt.mint.address,
                 member_number: sgt.member_number,
                 frozen: sgt.state == "frozen",
             },

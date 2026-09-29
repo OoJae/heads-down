@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// A verified SGT holding.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SgtInfo {
     /// The SGT mint. One per Seeker device: key seats and rigs by this, never
     /// by the holder wallet (SGTs can be moved between a user's Seed Vault
@@ -119,7 +119,7 @@ pub fn verify_sgt_raw(
     )?;
 
     Ok(SgtInfo {
-        mint: mint.address.clone(),
+        mint: *mint.address,
         member_number,
         frozen,
     })

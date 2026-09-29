@@ -545,7 +545,7 @@ fn native_token_account() {
 fn same_account_for_both_roles() {
     let case = Case::new();
     let mut ta = case.token_account.clone();
-    ta.address = case.mint.address.clone();
+    ta.address = case.mint.address;
     assert_eq!(
         case.sgt.verify_with(&ta, &case.mint),
         Err(SgtError::DuplicateAccount)
@@ -556,7 +556,7 @@ fn same_account_for_both_roles() {
 fn type_cosplay_mint_as_token_account() {
     let case = Case::new();
     let mut fake_ta = case.mint.clone();
-    fake_ta.address = ATTACKER.clone();
+    fake_ta.address = ATTACKER;
     assert_eq!(
         case.sgt.verify_with(&fake_ta, &case.mint),
         Err(SgtError::TokenAccountTypeMismatch)
@@ -571,7 +571,7 @@ fn type_cosplay_token_account_as_mint() {
     // the state byte zeroed, the account-type byte (2) gives it away.
     let case = Case::new();
     let mut fake_mint = case.token_account.clone();
-    fake_mint.address = ATTACKER.clone();
+    fake_mint.address = ATTACKER;
     let mut ta = case.token_account.clone();
     set(&mut ta.data, account::MINT, ATTACKER.as_ref());
     assert_eq!(

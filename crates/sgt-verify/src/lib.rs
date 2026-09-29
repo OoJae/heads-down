@@ -60,6 +60,9 @@ pub mod parse;
 pub mod tlv;
 mod verify;
 
+#[cfg(feature = "std")]
+pub mod testkit;
+
 pub use anchors::{SGT_AUTHORITY, SGT_GROUP, TOKEN_2022_PROGRAM_ID};
 pub use error::SgtError;
 pub use verify::{verify_sgt, verify_sgt_raw, RawAccount, SgtInfo};
