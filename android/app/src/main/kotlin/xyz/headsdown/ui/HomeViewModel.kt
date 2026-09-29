@@ -1,9 +1,11 @@
 package xyz.headsdown.ui
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,9 +32,12 @@ import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.surface.tile.TileAddOutcome
 import xyz.headsdown.surface.tile.TilePrompt
+import xyz.headsdown.surface.widget.RigWidgetReceiver
 import javax.inject.Inject
 
 data class OnboardingState(
+    /** The user read "your phone's night shift" (the ritual intro) at least once. */
+    val introSeen: Boolean = false,
     val notificationsGranted: Boolean = false,
     val exactAlarmsAllowed: Boolean = false,
     val oem: OemProfile? = null,
@@ -49,7 +54,7 @@ data class OnboardingState(
     val rigKeyReady: Boolean get() = rigKey is RigKeyStatus.Ready
 
     val allDone: Boolean
-        get() = notificationsGranted && exactAlarmsAllowed && keepAliveDone && tileAdded && rigKeyReady
+        get() = introSeen && notificationsGranted && exactAlarmsAllowed && keepAliveDone && tileAdded && rigKeyReady
 }
 
 @HiltViewModel
@@ -67,7 +72,8 @@ class HomeViewModel @Inject constructor(
 
     val shift: StateFlow<ShiftSnapshot> = shiftStatus.snapshot
 
-    private val _onboarding = MutableStateFlow(OnboardingState())
+    // introSeen is read synchronously so a returning user never sees the intro flash by.
+    private val _onboarding = MutableStateFlow(OnboardingState(introSeen = prefs.getBoolean(K_INTRO, false)))
     val onboarding: StateFlow<OnboardingState> = _onboarding.asStateFlow()
 
     private val _health = MutableStateFlow<ShiftHealth>(ShiftHealth.NoRecentShift)
@@ -85,6 +91,7 @@ class HomeViewModel @Inject constructor(
             val key = withContext(Dispatchers.Default) { rigKeys.status() }
             val oem = withContext(Dispatchers.Default) { keepAlive.profile }
             _onboarding.value = _onboarding.value.copy(
+                introSeen = prefs.getBoolean(K_INTRO, false),
                 notificationsGranted = NotificationManagerCompat.from(context).areNotificationsEnabled(),
                 exactAlarmsAllowed = reveal.canScheduleExactAlarms(),
                 oem = oem,
@@ -99,6 +106,22 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onNotificationPermissionAsked() = prefs.edit { putBoolean(K_NOTIF_ASKED, true) }
+
+    fun markIntroSeen() {
+        prefs.edit { putBoolean(K_INTRO, true) }
+        _onboarding.value = _onboarding.value.copy(introSeen = true)
+    }
+
+    /** True where the launcher supports pinning a widget from inside the app. */
+    val widgetPinSupported: Boolean
+        get() = context.getSystemService(AppWidgetManager::class.java)?.isRequestPinAppWidgetSupported == true
+
+    /** Asks the launcher to place the Rig widget (the launcher shows its own confirmation). */
+    fun requestRigWidget() {
+        viewModelScope.launch {
+            runCatching { GlanceAppWidgetManager(context).requestPinGlanceAppWidget(RigWidgetReceiver::class.java) }
+        }
+    }
 
     fun openKeepAlive(step: KeepAliveStep) {
         keepAlive.open(step, appLabel = "Heads Down")
@@ -161,5 +184,6 @@ class HomeViewModel @Inject constructor(
         private const val K_AUTOSTART = "autostart_confirmed"
         private const val K_AUTOSTART_OPENED = "autostart_opened"
         private const val K_TILE = "tile_added"
+        private const val K_INTRO = "intro_seen"
     }
 }

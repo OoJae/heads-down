@@ -133,7 +133,6 @@ dependencies {
 
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation("androidx.compose.ui:ui-test-junit4")
-    testImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("org.robolectric:robolectric:$robolectric")
     testImplementation("androidx.test:core:$androidxTestCore")
 }
