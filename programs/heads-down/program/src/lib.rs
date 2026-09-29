@@ -8,8 +8,9 @@
 //! wallet-signed caps and the Motherlode-aware production-cost gate.
 //!
 //! The contract (PDAs, byte layouts, preimages, instruction formats, dig
-//! semantics, errors, events) is `INTERFACE.md`; deviations and extensions
-//! are listed in `INTERFACE-NOTES.md`; the audit checklist is in `README.md`.
+//! semantics, errors, events) is `INTERFACE.md` v1.1, frozen from this code;
+//! `vectors/` is its machine-checked form (generated from LiteSVM runs); the
+//! audit checklist is in `README.md`.
 //!
 //! Pinocchio 0.11, `no_std` on SBF, no allocator, one audited `unsafe`
 //! block (`events::log_data`, the `sol_log_data` syscall).

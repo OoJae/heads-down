@@ -35,10 +35,18 @@ fn onboarding_is_one_wallet_transaction() {
     let evs = events(&meta.logs);
     assert_eq!(
         evs,
-        vec![Event::ShiftArmed {
-            rig: user.rig,
-            shift_id: 1
-        }]
+        vec![
+            Event::RigRegistered {
+                rig: user.rig,
+                authority: user.pubkey(),
+                tier: 0,
+                attestation_level: 0,
+            },
+            Event::ShiftArmed {
+                rig: user.rig,
+                shift_id: 1
+            }
+        ]
     );
 }
 
@@ -168,14 +176,27 @@ fn shift_ends_into_a_shift_log_and_the_rig_closes() {
     assert_eq!(l.end_ts.get(), T0);
     assert_eq!(
         events(&meta.logs),
-        vec![Event::ShiftEnded {
-            rig: user.rig,
-            shift_id: 1,
-            dark_rounds: 1,
-            rounds_dug: 1,
-            lamports: 1_000_000 + EXECUTOR_FEE,
-            reason: break_reason::MANUAL,
-        }]
+        vec![
+            Event::ShiftEnded {
+                rig: user.rig,
+                shift_id: 1,
+                dark_rounds: 1,
+                rounds_dug: 1,
+                lamports: 1_000_000 + EXECUTOR_FEE,
+                reason: break_reason::MANUAL,
+            },
+            Event::ShiftEndedV2 {
+                rig: user.rig,
+                shift_id: 1,
+                dark_rounds: 1,
+                rounds_dug: 1,
+                lamports: 1_000_000 + EXECUTOR_FEE,
+                reason: break_reason::MANUAL,
+                start_round: env.board_round,
+                end_round: env.board_round,
+                mode: 0,
+            }
+        ]
     );
     let rig = env.rig(&user.rig);
     assert_eq!(rig.state, rig_state::IDLE);
@@ -194,4 +215,5 @@ fn shift_ends_into_a_shift_log_and_the_rig_closes() {
     let meta = ok(env.send_as(&w, &[ix_close_rig(&w.pubkey(), None)], &[]));
     assert_eq!(env.lamports(&w.pubkey()), before + rent - meta.fee);
     assert!(env.svm.get_account(&user.rig).is_none(), "rig closed");
+    assert_eq!(events(&meta.logs), vec![Event::RigClosed { rig: user.rig }]);
 }

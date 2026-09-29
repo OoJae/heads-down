@@ -1,8 +1,8 @@
 //! Program errors (`ProgramError::Custom(code)`).
 //!
-//! Codes 0..=23 are fixed by `INTERFACE.md`. Codes 24.. are extensions used
-//! for `dig` pre-flight skips and state-machine violations; they are listed in
-//! `INTERFACE-NOTES.md`. Errors raised inside the shared crates keep their own
+//! Codes 0..=31 are fixed by `INTERFACE.md` §8 (24..=31 were added for the
+//! `dig` pre-flight skips and state-machine violations; they are frozen in
+//! v1.1). Errors raised inside the shared crates keep their own
 //! namespaces: `p256-introspect` = `0x2560_00xx`, `sgt-verify` = `0x5347_00xx`.
 
 use pinocchio::error::ProgramError;
@@ -64,7 +64,7 @@ pub enum HdError {
     /// `config.executor_fee`.
     StrategyMismatch = 23,
 
-    // ---- extensions (INTERFACE-NOTES.md) ---------------------------------
+    // ---- added after v1, frozen in INTERFACE.md v1.1 ----------------------
     /// The instruction is not valid in the rig's current state (arm while a
     /// shift is open, end a shift that is not open, unfreeze a live rig, ...).
     InvalidRigState = 24,

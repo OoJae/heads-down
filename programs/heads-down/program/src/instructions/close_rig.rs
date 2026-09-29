@@ -10,12 +10,13 @@
 //!
 //! The rig (and its seat, if the seat still points at this rig) is zeroed,
 //! drained to the authority stored in state, and handed back to System.
+//! Emits `RigClosed{rig}`.
 
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     error::HdError,
-    pda,
+    events, pda,
     state::{self, rig_state, Rig, SeekerSeat},
     util::require_rig_authority,
     ID, SEEKER_SEED,
@@ -53,5 +54,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             pda::close_account(seat, authority)?;
         }
     }
-    pda::close_account(rig, authority)
+    let rig_address = *rig.address();
+    pda::close_account(rig, authority)?;
+    events::rig_closed(&rig_address);
+    Ok(())
 }

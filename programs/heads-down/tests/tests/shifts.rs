@@ -263,7 +263,7 @@ fn pickup_cools_the_rig_and_a_fresh_heartbeat_resumes_it() {
     );
     // Invalid reasons are malformed data (checked before state).
     let w = u.wallet.insecure_clone();
-    for reason in [0, 3, 7] {
+    for reason in [0, 3, 9, 255] {
         assert_hd(
             &env.send_as(&w, &[ix_break_wallet(&w.pubkey(), reason)], &[]),
             0,
@@ -374,11 +374,19 @@ fn anyone_may_end_a_shift_only_after_the_window_and_the_lease() {
     assert_eq!(rig.state, rig_state::IDLE);
     assert!(matches!(
         events(&meta.logs)[..],
-        [Event::ShiftEnded {
-            reason: 0,
-            dark_rounds: 3,
-            ..
-        }]
+        [
+            Event::ShiftEnded {
+                reason: 0,
+                dark_rounds: 3,
+                ..
+            },
+            Event::ShiftEndedV2 {
+                reason: 0,
+                dark_rounds: 3,
+                mode: 0,
+                ..
+            }
+        ]
     ));
 }
 
@@ -437,7 +445,21 @@ fn record_heartbeats_counts_dark_rounds_without_deploying() {
         ],
         &[],
     ));
-    assert!(events(&meta.logs).is_empty());
+    assert_eq!(
+        events(&meta.logs),
+        vec![
+            Event::HeartbeatsRecorded {
+                rig: a.rig,
+                round_id: r,
+                dark_rounds_added: 2
+            },
+            Event::HeartbeatsRecorded {
+                rig: b.rig,
+                round_id: r,
+                dark_rounds_added: 3
+            }
+        ]
+    );
     // Focus-only plans are still limited by their own lease cap (2 here).
     assert_eq!(env.rig(&a.rig).shift_dark_rounds.get(), 2);
     assert_eq!(env.rig(&b.rig).shift_dark_rounds.get(), 3);

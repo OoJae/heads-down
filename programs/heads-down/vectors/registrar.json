@@ -1,0 +1,118 @@
+{
+  "format": "heads-down/golden-registrar",
+  "interface_version": "1.1",
+  "generated_by": "programs/heads-down/tests/src/vectors.rs",
+  "notes": [
+    "The registrar signs the raw 111-byte HDreg preimage with Ed25519 (not SHA-256 first). This matches registrar/INTERFACE-NOTES.md N2 byte for byte.",
+    "The Ed25519SigVerify instruction is 223 bytes and starts with the constant 16-byte header (registrar/INTERFACE-NOTES.md N3, `hd_registrar::voucher::IX_HEADER`); it is byte-identical to solana_ed25519_program::new_ed25519_instruction_with_signature.",
+    "The program does not require that fixed header: it accepts any Ed25519SigVerify layout whose every offsets record points only into the precompile's own instruction (0xFFFF or its own index), located by (ed25519_ix, ed25519_sig_index) from the register_rig / rotate_key data. The registrar's format is one such layout.",
+    "On-chain checks: config.registrar == the voucher pubkey; the verified message == the preimage rebuilt from (crate::ID, the signing authority, the p256 key in the instruction data, level, expiry_slot); level in {1, 2}; expiry_slot > Clock.slot. Every failure is InvalidAttestation (21).",
+    "Verified in LiteSVM: the voucher below is ACCEPTED by register_rig (attestation_level 2); the same format with level 0, or with expiry_slot <= the current slot, is REJECTED with InvalidAttestation."
+  ],
+  "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+  "registrar_key": {
+    "pubkey": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+    "pubkey_hex": "6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1",
+    "seed": "[0x05; 32] (public test seed; RegistrarKey::from_seed(&[5u8; 32]) in registrar/src/voucher.rs tests)"
+  },
+  "voucher": {
+    "authority": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+    "p256_pubkey_hex": "0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d",
+    "level": 2,
+    "expiry_slot": "458180000",
+    "preimage_len": 111,
+    "preimage_layout": [
+      {
+        "name": "domain \"HDreg\"",
+        "type": "[u8;5]",
+        "offset": 0,
+        "size": 5
+      },
+      {
+        "name": "program_id",
+        "type": "pubkey",
+        "offset": 5,
+        "size": 32
+      },
+      {
+        "name": "authority",
+        "type": "pubkey",
+        "offset": 37,
+        "size": 32
+      },
+      {
+        "name": "p256_pubkey",
+        "type": "[u8;33] SEC1 compressed",
+        "offset": 69,
+        "size": 33
+      },
+      {
+        "name": "level",
+        "type": "u8 (1 TEE, 2 StrongBox; 0 is refused on-chain)",
+        "offset": 102,
+        "size": 1
+      },
+      {
+        "name": "expiry_slot",
+        "type": "u64",
+        "offset": 103,
+        "size": 8
+      }
+    ],
+    "preimage_hex": "4844726567f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d02a0454f1b00000000",
+    "ed25519_signature_hex": "dd83ce5ad696cdd16b5fa27cbd2268e54ff6f2dc5661ca884bf68bc10f6beb83bad9404cf70f3ae5dc16ef4194b40af56025179f849db70be796dadb8c86af02"
+  },
+  "ed25519_instruction": {
+    "program_id": "Ed25519SigVerify111111111111111111111111111",
+    "accounts": [],
+    "data_len": 223,
+    "header_hex": "01003000ffff1000ffff70006f00ffff",
+    "layout": "[1, 0] | sig_off 48 | sig_ix 0xFFFF | pk_off 16 | pk_ix 0xFFFF | msg_off 112 | msg_len 111 | msg_ix 0xFFFF | pubkey[32] @16 | signature[64] @48 | message[111] @112",
+    "data_hex": "01003000ffff1000ffff70006f00ffff6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1dd83ce5ad696cdd16b5fa27cbd2268e54ff6f2dc5661ca884bf68bc10f6beb83bad9404cf70f3ae5dc16ef4194b40af56025179f849db70be796dadb8c86af024844726567f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d02a0454f1b00000000"
+  },
+  "register_rig": {
+    "transaction": [
+      {
+        "index": 0,
+        "role": "ed25519 voucher",
+        "program_id": "Ed25519SigVerify111111111111111111111111111"
+      },
+      {
+        "index": 1,
+        "role": "register_rig",
+        "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+        "data_hex": "010351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d01000002a0454f1b00000000",
+        "data_len": 46
+      }
+    ],
+    "litesvm": {
+      "result": "success",
+      "attestation_level": 2,
+      "attestation_expiry_slot": "458180000",
+      "events": [
+        {
+          "tag": 6,
+          "event": "RigRegistered",
+          "hex": "0602194b8f070fcf77ff926171ea09d8b1c6da0e02da1375ec45159269509e0f4ed404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf0002",
+          "fields": {
+            "tag": 6,
+            "rig": "9CBpaD4PGumMM95TfoNpSxoFSENqjV4pMnjCPEsN4s7",
+            "authority": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+            "tier": 0,
+            "attestation_level": 2
+          }
+        }
+      ]
+    }
+  },
+  "rejections": [
+    {
+      "case": "level 0 voucher",
+      "result": "InvalidAttestation (21) at instruction 1"
+    },
+    {
+      "case": "expiry_slot <= Clock.slot",
+      "result": "InvalidAttestation (21) at instruction 1"
+    }
+  ]
+}

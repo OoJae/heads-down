@@ -38,6 +38,8 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 pub use solana_transaction_error::TransactionError;
 
+pub mod vectors;
+
 // ---- ids --------------------------------------------------------------------
 
 /// heads_down program id.
@@ -281,6 +283,61 @@ pub enum Event {
         /// Member number.
         member_number: u64,
     },
+    /// RigRegistered (v1.1).
+    RigRegistered {
+        /// Rig.
+        rig: Address,
+        /// Wallet.
+        authority: Address,
+        /// Tier (0 at registration).
+        tier: u8,
+        /// Registrar attestation level (0 none, 1 TEE, 2 StrongBox).
+        attestation_level: u8,
+    },
+    /// RigClosed (v1.1).
+    RigClosed {
+        /// Rig.
+        rig: Address,
+    },
+    /// HeartbeatsRecorded (v1.1).
+    HeartbeatsRecorded {
+        /// Rig.
+        rig: Address,
+        /// Board round the heartbeat was recorded in.
+        round_id: u64,
+        /// Dark rounds the lease added.
+        dark_rounds_added: u64,
+    },
+    /// ShiftBroken (v1.1).
+    ShiftBroken {
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// Break reason.
+        reason: u8,
+    },
+    /// ShiftEndedV2 (v1.1): ShiftEnded plus rounds and mode.
+    ShiftEndedV2 {
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// Dark rounds.
+        dark_rounds: u64,
+        /// Rounds dug.
+        rounds_dug: u64,
+        /// Lamports.
+        lamports: u64,
+        /// Reason.
+        reason: u8,
+        /// Round at arm.
+        start_round: u64,
+        /// Round at end.
+        end_round: u64,
+        /// 0 night, 1 day, 2 focus-only.
+        mode: u8,
+    },
 }
 
 fn addr_at(d: &[u8], off: usize) -> Address {
@@ -319,13 +376,42 @@ fn decode_event(d: &[u8]) -> Option<Event> {
             sgt_mint: addr_at(d, 33),
             member_number: u64_at(d, 65),
         },
+        (&tag::RIG_REGISTERED, 67) => Event::RigRegistered {
+            rig: addr_at(d, 1),
+            authority: addr_at(d, 33),
+            tier: d[65],
+            attestation_level: d[66],
+        },
+        (&tag::RIG_CLOSED, 33) => Event::RigClosed { rig: addr_at(d, 1) },
+        (&tag::HEARTBEATS_RECORDED, 49) => Event::HeartbeatsRecorded {
+            rig: addr_at(d, 1),
+            round_id: u64_at(d, 33),
+            dark_rounds_added: u64_at(d, 41),
+        },
+        (&tag::SHIFT_BROKEN, 42) => Event::ShiftBroken {
+            rig: addr_at(d, 1),
+            shift_id: u64_at(d, 33),
+            reason: d[41],
+        },
+        (&tag::SHIFT_ENDED_V2, 83) => Event::ShiftEndedV2 {
+            rig: addr_at(d, 1),
+            shift_id: u64_at(d, 33),
+            dark_rounds: u64_at(d, 41),
+            rounds_dug: u64_at(d, 49),
+            lamports: u64_at(d, 57),
+            reason: d[65],
+            start_round: u64_at(d, 66),
+            end_round: u64_at(d, 74),
+            mode: d[82],
+        },
         _ => return None,
     })
 }
 
-/// heads_down events in `logs`, attributing `Program data:` lines to the
-/// innermost executing program so ORE's or anyone else's are ignored.
-pub fn events(logs: &[String]) -> Vec<Event> {
+/// Raw heads_down `sol_log_data` payloads in `logs` (one per `Program
+/// data:` line, its base64 segments concatenated), attributing each line to
+/// the innermost executing program so ORE's or anyone else's are ignored.
+pub fn raw_events(logs: &[String]) -> Vec<Vec<u8>> {
     let hd_id = HD.to_string();
     let mut stack: Vec<String> = Vec::new();
     let mut out = Vec::new();
@@ -341,19 +427,28 @@ pub fn events(logs: &[String]) -> Vec<Event> {
             }
             if let Some(b64) = rest.strip_prefix("data: ") {
                 if stack.last() == Some(&hd_id) {
+                    let mut d = Vec::new();
                     for part in b64.split(' ') {
-                        let d = base64::engine::general_purpose::STANDARD
-                            .decode(part)
-                            .unwrap();
-                        if let Some(e) = decode_event(&d) {
-                            out.push(e);
-                        }
+                        d.extend(
+                            base64::engine::general_purpose::STANDARD
+                                .decode(part)
+                                .unwrap(),
+                        );
                     }
+                    out.push(d);
                 }
             }
         }
     }
     out
+}
+
+/// heads_down events in `logs` (see [`raw_events`]).
+pub fn events(logs: &[String]) -> Vec<Event> {
+    raw_events(logs)
+        .iter()
+        .filter_map(|d| decode_event(d))
+        .collect()
 }
 
 /// `RigSkipped` error code for `rig`, if any.
@@ -378,6 +473,95 @@ pub fn dug(evs: &[Event], rig: &Address) -> Option<(u64, u32)> {
 }
 
 // ---- the fork -------------------------------------------------------------------
+
+/// The four keys an [`Env`] is built with.
+pub struct EnvKeys {
+    /// heads_down upgrade authority.
+    pub upgrade_authority: Keypair,
+    /// Crank key (default fee payer).
+    pub cranker: Keypair,
+    /// Config governance.
+    pub governance: Keypair,
+    /// Registrar (Ed25519 attestation key).
+    pub registrar: Keypair,
+}
+
+impl EnvKeys {
+    /// Fresh random keys (the regular suite).
+    pub fn random() -> Self {
+        Self {
+            upgrade_authority: Keypair::new(),
+            cranker: Keypair::new(),
+            governance: Keypair::new(),
+            registrar: Keypair::new(),
+        }
+    }
+
+    /// Fixed keys for the golden vectors (public test material only).
+    /// The registrar seed is `[5; 32]`, the key `registrar/src/voucher.rs`
+    /// uses in its own tests.
+    pub fn golden() -> Self {
+        Self {
+            upgrade_authority: Keypair::new_from_array([0x0A; 32]),
+            cranker: Keypair::new_from_array([0x0C; 32]),
+            governance: Keypair::new_from_array([0x06; 32]),
+            registrar: Keypair::new_from_array([0x05; 32]),
+        }
+    }
+}
+
+/// Fixed ORE values for the golden-vector fork ([`Env::golden`]).
+pub mod golden {
+    use super::*;
+
+    /// `Board.round_id` (and the Round's `id`).
+    pub const ROUND_ID: u64 = 422_700;
+    /// `Board.start_slot`.
+    pub const START_SLOT: u64 = 451_700_000;
+    /// `Board.end_slot` (ORE Config `round_slots` = 240).
+    pub const END_SLOT: u64 = START_SLOT + 240;
+    /// `Board.production_cost_ema`, lamports per ORE (the docs/ORE.md example).
+    pub const EMA: u64 = 918_782_720;
+    /// `Treasury.motherlode`, ORE base units (344 ORE).
+    pub const MOTHERLODE: u64 = 34_400_000_000_000;
+    /// The pinned `ema_ev` (lamports per ORE) the gate compares against.
+    pub const EMA_EV: u64 = 653_163_071;
+
+    /// `Round.deployed[i]` = 0.370 + ((11 i) mod 25) / 1000 SOL: 25 distinct
+    /// values near the live board's ~0.39 SOL per square, so the
+    /// least-crowded square order has no ties.
+    pub fn round_deployed() -> [u64; 25] {
+        std::array::from_fn(|i| 370_000_000 + ((i as u64 * 11) % 25) * 1_000_000)
+    }
+
+    /// Rewrite the fixture Board, Treasury and Round to the pinned values and
+    /// move the Round to the PDA of [`ROUND_ID`]. Returns the Round address.
+    pub fn pin(svm: &mut LiteSVM, fixture_round: &Address) -> Address {
+        let poke = |d: &mut Vec<u8>, off: usize, v: u64| {
+            d[off..off + 8].copy_from_slice(&v.to_le_bytes());
+        };
+        let mut board = svm.get_account(&BOARD).unwrap();
+        poke(&mut board.data, 8, ROUND_ID);
+        poke(&mut board.data, 16, START_SLOT);
+        poke(&mut board.data, 24, END_SLOT);
+        poke(&mut board.data, 32, EMA);
+        svm.set_account(BOARD, board).unwrap();
+        let mut treasury = svm.get_account(&TREASURY).unwrap();
+        poke(&mut treasury.data, 8, MOTHERLODE);
+        svm.set_account(TREASURY, treasury).unwrap();
+        let mut round = svm.get_account(fixture_round).unwrap();
+        poke(&mut round.data, 8, ROUND_ID);
+        for (i, v) in round_deployed().iter().enumerate() {
+            poke(&mut round.data, 16 + 8 * i, *v);
+        }
+        let address = round_pda(ROUND_ID);
+        svm.set_account(address, round).unwrap();
+        if &address != fixture_round {
+            svm.set_account(*fixture_round, Account::default()).unwrap();
+        }
+        address
+    }
+}
 
 /// A mainnet fork with heads_down loaded.
 pub struct Env {
@@ -413,8 +597,28 @@ impl Env {
         Self::build(Build::Mainnet, true, true)
     }
 
-    /// Full control.
+    /// Full control (random keys, the live fixture as fetched).
     pub fn build(build: Build, sigverify: bool, init: bool) -> Self {
+        Self::build_with(build, sigverify, init, EnvKeys::random(), false)
+    }
+
+    /// The golden-vector fork: fixed keys ([`EnvKeys::golden`]) and the ORE
+    /// Board / Treasury / Round pinned to [`golden`] values, so every
+    /// address, instruction byte and event is independent of when the
+    /// fixtures were fetched. Only ORE's bytecode and the untouched ORE
+    /// fields come from mainnet.
+    pub fn golden(build: Build) -> Self {
+        Self::build_with(build, true, true, EnvKeys::golden(), true)
+    }
+
+    /// Full control over keys and whether the fork is pinned.
+    pub fn build_with(
+        build: Build,
+        sigverify: bool,
+        init: bool,
+        keys: EnvKeys,
+        pinned: bool,
+    ) -> Self {
         let mut svm = LiteSVM::new().with_sigverify(sigverify);
         let f = fixtures();
         svm.add_program(
@@ -433,18 +637,23 @@ impl Env {
         .unwrap();
 
         let round_addr = std::fs::read_to_string(f.join("round_address.txt")).unwrap();
-        let round = Address::from_str(round_addr.trim()).unwrap();
+        let mut round = Address::from_str(round_addr.trim()).unwrap();
         for a in [BOARD, ORE_CONFIG, TREASURY, VAR, round] {
             svm.set_account(a, load_fixture_account(&f.join(format!("{a}.json"))))
                 .unwrap();
         }
+        if pinned {
+            round = golden::pin(&mut svm, &round);
+        }
         let board = svm.get_account(&BOARD).unwrap().data;
         let treasury = svm.get_account(&TREASURY).unwrap().data;
 
-        let upgrade_authority = Keypair::new();
-        let cranker = Keypair::new();
-        let governance = Keypair::new();
-        let registrar = Keypair::new();
+        let EnvKeys {
+            upgrade_authority,
+            cranker,
+            governance,
+            registrar,
+        } = keys;
         for k in [&upgrade_authority, &cranker, &governance] {
             svm.airdrop(&k.pubkey(), 100 * SOL).unwrap();
         }
@@ -636,6 +845,21 @@ impl User {
         let wallet = Keypair::new();
         env.svm.airdrop(&wallet.pubkey(), 10 * SOL).unwrap();
         Self::from_wallet(wallet, seed)
+    }
+
+    /// A funded user with a fixed wallet seed and an explicit P-256 scalar
+    /// (golden vectors).
+    pub fn with_keys(env: &mut Env, wallet_seed: [u8; 32], p256_scalar: [u8; 32]) -> Self {
+        let wallet = Keypair::new_from_array(wallet_seed);
+        env.svm.airdrop(&wallet.pubkey(), 10 * SOL).unwrap();
+        let key = SigningKey::from_slice(&p256_scalar).unwrap();
+        let rig = rig_pda(&wallet.pubkey());
+        Self {
+            wallet,
+            key,
+            rig,
+            counter: 0,
+        }
     }
 
     /// Wrap an existing wallet.

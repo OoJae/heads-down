@@ -1,0 +1,758 @@
+{
+  "format": "heads-down/golden-events",
+  "interface_version": "1.1",
+  "generated_by": "programs/heads-down/tests/src/vectors.rs",
+  "notes": [
+    "One `Program data: <base64>` log line per event: a single sol_log_data slice, byte 0 = tag, fields little-endian, no padding. Only lines emitted while heads_down is the innermost executing program are heads_down events.",
+    "Every sample was captured from a real transaction on the pinned LiteSVM fork (samples come from instructions.json vectors unless noted).",
+    "Lengths are exact and never change for a tag; new fields get a new tag. end_shift emits ShiftEnded (4) and then ShiftEndedV2 (10), its superset: a consumer that knows tag 10 should ignore tag 4.",
+    "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it."
+  ],
+  "events": [
+    {
+      "tag": 1,
+      "event": "RigDug",
+      "length": 61,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "round_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        },
+        {
+          "name": "mask",
+          "type": "u32",
+          "offset": 49,
+          "size": 4
+        },
+        {
+          "name": "ema_ev",
+          "type": "u64",
+          "offset": 53,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "dig_fresh_heartbeat",
+        "hex": "016c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e2c7306000000000040420f0000000000ab048b003f7aee2600000000",
+        "base64": "AWxpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OLHMGAAAAAABAQg8AAAAAAKsEiwA/eu4mAAAAAA==",
+        "fields": {
+          "tag": 1,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "round_id": "422700",
+          "lamports": "1000000",
+          "mask": 9110699,
+          "ema_ev": "653163071"
+        }
+      }
+    },
+    {
+      "tag": 2,
+      "event": "RigSkipped",
+      "length": 45,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "round_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "error",
+          "type": "u32",
+          "offset": 41,
+          "size": 4
+        }
+      ],
+      "sample": {
+        "captured_from": "skip_codes[0]",
+        "hex": "0210dd9ba3a43b97faa9eaa30a927b897b099237b35af5a855f0fb9089e0bd2b682c7306000000000001000000",
+        "base64": "AhDdm6OkO5f6qeqjCpJ7iXsJkjezWvWoVfD7kIngvStoLHMGAAAAAAABAAAA",
+        "fields": {
+          "tag": 2,
+          "rig": "28qWqMF6yQaU5ZogSMUSeG9oVErzeR3cgpZsWR7oaHDh",
+          "round_id": "422700",
+          "error": 1
+        }
+      }
+    },
+    {
+      "tag": 3,
+      "event": "ShiftArmed",
+      "length": 41,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "arm_shift_wallet",
+        "hex": "036c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e0100000000000000",
+        "base64": "A2xpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OAQAAAAAAAAA=",
+        "fields": {
+          "tag": 3,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "shift_id": "1"
+        }
+      }
+    },
+    {
+      "tag": 4,
+      "event": "ShiftEnded",
+      "length": 66,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "dark_rounds",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        },
+        {
+          "name": "rounds_dug",
+          "type": "u64",
+          "offset": 49,
+          "size": 8
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 57,
+          "size": 8
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 65,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "end_shift_authority",
+        "hex": "046c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000001000000000000000100000000000000c8550f000000000006",
+        "base64": "BGxpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OAQAAAAAAAAABAAAAAAAAAAEAAAAAAAAAyFUPAAAAAAAG",
+        "fields": {
+          "tag": 4,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "shift_id": "1",
+          "dark_rounds": "1",
+          "rounds_dug": "1",
+          "lamports": "1005000",
+          "reason": 6
+        }
+      }
+    },
+    {
+      "tag": 5,
+      "event": "SeekerVerified",
+      "length": 73,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "sgt_mint",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "member_number",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "verify_seeker",
+        "hex": "055bf70b9f3f1e399fd526a6037bfcc6148bcfba3b2ec8e646da6079c175b57d2e46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b81400000000000000",
+        "base64": "BVv3C58/Hjmf1SamA3v8xhSLz7o7LsjmRtpgecF1tX0uRtbm56e2Wpp6IcN4mzsGGaAfQo0zuMd+o6vhmFUcUrgUAAAAAAAAAA==",
+        "fields": {
+          "tag": 5,
+          "rig": "7Bzb9PHK9gZeyDVFtrDk48Rdqmk2YF66KFqjBdgP9N6R",
+          "sgt_mint": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+          "member_number": "20"
+        }
+      }
+    },
+    {
+      "tag": 6,
+      "event": "RigRegistered",
+      "length": 67,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "authority",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "tier",
+          "type": "u8",
+          "offset": 65,
+          "size": 1
+        },
+        {
+          "name": "attestation_level",
+          "type": "u8",
+          "offset": 66,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "register_rig_guest",
+        "hex": "066c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4ebc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a50000",
+        "base64": "BmxpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OvHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaUAAA==",
+        "fields": {
+          "tag": 6,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "tier": 0,
+          "attestation_level": 0
+        }
+      }
+    },
+    {
+      "tag": 7,
+      "event": "RigClosed",
+      "length": 33,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        }
+      ],
+      "sample": {
+        "captured_from": "close_rig_seeker",
+        "hex": "079a21cf3d8d8480cb5391a06ad6e475e1823b8428df71912ffe5745f1f5fdbe92",
+        "base64": "B5ohzz2NhIDLU5GgatbkdeGCO4Qo33GRL/5XRfH1/b6S",
+        "fields": {
+          "tag": 7,
+          "rig": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb"
+        }
+      }
+    },
+    {
+      "tag": 8,
+      "event": "HeartbeatsRecorded",
+      "length": 49,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "round_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "dark_rounds_added",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "record_heartbeats",
+        "hex": "086c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e2c730600000000000100000000000000",
+        "base64": "CGxpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OLHMGAAAAAAABAAAAAAAAAA==",
+        "fields": {
+          "tag": 8,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "round_id": "422700",
+          "dark_rounds_added": "1"
+        }
+      }
+    },
+    {
+      "tag": 9,
+      "event": "ShiftBroken",
+      "length": 42,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 41,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "break_shift_wallet",
+        "hex": "096c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000006",
+        "base64": "CWxpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OAQAAAAAAAAAG",
+        "fields": {
+          "tag": 9,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "shift_id": "1",
+          "reason": 6
+        }
+      }
+    },
+    {
+      "tag": 10,
+      "event": "ShiftEndedV2",
+      "length": 83,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "dark_rounds",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        },
+        {
+          "name": "rounds_dug",
+          "type": "u64",
+          "offset": 49,
+          "size": 8
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 57,
+          "size": 8
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 65,
+          "size": 1
+        },
+        {
+          "name": "start_round",
+          "type": "u64",
+          "offset": 66,
+          "size": 8
+        },
+        {
+          "name": "end_round",
+          "type": "u64",
+          "offset": 74,
+          "size": 8
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 82,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "end_shift_authority",
+        "hex": "0a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000001000000000000000100000000000000c8550f0000000000062c730600000000002c7306000000000000",
+        "base64": "CmxpcidOU/XQhub3rUReuIgjaiwf8gTFW+PPxqSLXI5OAQAAAAAAAAABAAAAAAAAAAEAAAAAAAAAyFUPAAAAAAAGLHMGAAAAAAAscwYAAAAAAAA=",
+        "fields": {
+          "tag": 10,
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "shift_id": "1",
+          "dark_rounds": "1",
+          "rounds_dug": "1",
+          "lamports": "1005000",
+          "reason": 6,
+          "start_round": "422700",
+          "end_round": "422700",
+          "mode": 0
+        }
+      }
+    }
+  ],
+  "skip_codes": [
+    {
+      "error": 1,
+      "error_hex": "0x00000001",
+      "name": "CostGate",
+      "trigger": "plan max_ev_cost = ema_ev - 1",
+      "hex": "0210dd9ba3a43b97faa9eaa30a927b897b099237b35af5a855f0fb9089e0bd2b682c7306000000000001000000",
+      "fields": {
+        "tag": 2,
+        "rig": "28qWqMF6yQaU5ZogSMUSeG9oVErzeR3cgpZsWR7oaHDh",
+        "round_id": "422700",
+        "error": 1
+      }
+    },
+    {
+      "error": 2,
+      "error_hex": "0x00000002",
+      "name": "InvalidExecutor",
+      "trigger": "the user revoked the Automation (ORE automate with executor = default)",
+      "hex": "02630fa85b30e8940577570da1ec32a5bdc7a77885378ef978491ad4f86835720b2c7306000000000002000000",
+      "fields": {
+        "tag": 2,
+        "rig": "7fhDAgnZjiouDi3hbjzMbT7aoPsTfqA6s6pJpoony9jQ",
+        "round_id": "422700",
+        "error": 2
+      }
+    },
+    {
+      "error": 6,
+      "error_hex": "0x00000006",
+      "name": "InvalidHeartbeat",
+      "trigger": "heartbeat round_id = Board.round_id + 1",
+      "hex": "02f894e925f724b3ba51acf292187ec8f520a42175ff033d523adfe7a42a6535b02c7306000000000006000000",
+      "fields": {
+        "tag": 2,
+        "rig": "HjMomutjYqLnPRPe4gT2oeRbG95j6AdvEw1heHSuc5hy",
+        "round_id": "422700",
+        "error": 6
+      }
+    },
+    {
+      "error": 7,
+      "error_hex": "0x00000007",
+      "name": "StaleHeartbeat",
+      "trigger": "counter not above rig.hb_counter",
+      "hex": "0249b2d0afb284f7a4a83a82999eb678c4dc2e224110995be3d3dd69d0618a5b032c7306000000000007000000",
+      "fields": {
+        "tag": 2,
+        "rig": "5xguc7T9K3JidS36vocPjwFFsBtTgMhhNNcussVrpBhc",
+        "round_id": "422700",
+        "error": 7
+      }
+    },
+    {
+      "error": 8,
+      "error_hex": "0x00000008",
+      "name": "LeaseExpired",
+      "trigger": "hb_ix = 0xFF with no lease in this shift",
+      "hex": "024e7b202064cf5471706759f2630cc0bdc3ff04ce9bdb122649136338fb895f682c7306000000000008000000",
+      "fields": {
+        "tag": 2,
+        "rig": "6HMhD3oK7sRNX5gXeazRSjPsupz7pMWZ4h2afbQKjg71",
+        "round_id": "422700",
+        "error": 8
+      }
+    },
+    {
+      "error": 9,
+      "error_hex": "0x00000009",
+      "name": "AlreadyDugRound",
+      "trigger": "second dig in the same ORE round",
+      "hex": "02b3c608c73a49e754a12311973b3a6dbf4919b15bbdb0cdcb0c6f630b92b046142c7306000000000009000000",
+      "fields": {
+        "tag": 2,
+        "rig": "D6m7z8Bs7pSVDVyZssCmYkV4bsjqnb8S8B3VCuSN5HHd",
+        "round_id": "422700",
+        "error": 9
+      }
+    },
+    {
+      "error": 10,
+      "error_hex": "0x0000000a",
+      "name": "CapsExpired",
+      "trigger": "now > caps_expiry_ts",
+      "hex": "02350d395af6e75bd771a96d5fb688e807c7bfa5131688c0434582f6265616539e2c730600000000000a000000",
+      "fields": {
+        "tag": 2,
+        "rig": "4a6Jbce6AB72ovsW8BHL9LY3ZoeZXE4LxEvjmst9cnqK",
+        "round_id": "422700",
+        "error": 10
+      }
+    },
+    {
+      "error": 11,
+      "error_hex": "0x0000000b",
+      "name": "OutsideWindow",
+      "trigger": "now < plan_window_start_ts",
+      "hex": "0268ec74297b52d2550c35da41ce790a042ebeb9138447522300dd6158d68ca0ae2c730600000000000b000000",
+      "fields": {
+        "tag": 2,
+        "rig": "84aXFDwCnq4uNWKxZaRXWJWeQXRzvqj3Wn4gNKfGDKCR",
+        "round_id": "422700",
+        "error": 11
+      }
+    },
+    {
+      "error": 12,
+      "error_hex": "0x0000000c",
+      "name": "BudgetExhausted",
+      "trigger": "cap_shift - spent_shift - fee = 9 lamports < 10 squares",
+      "hex": "0270e28fd37f14b37155e2ecbbfa0898df8a00cd999f2e2aa7c818b18b344f6c852c730600000000000c000000",
+      "fields": {
+        "tag": 2,
+        "rig": "8bf31JTMu7qZ5mxfbCM9zEEfpMMtEVZzNgGneWskefSC",
+        "round_id": "422700",
+        "error": 12
+      }
+    },
+    {
+      "error": 13,
+      "error_hex": "0x0000000d",
+      "name": "RigNotArmed",
+      "trigger": "rig Broken (wallet BREAK reason 6)",
+      "hex": "024bfd9a135b7449e55960a99833611aa5afc435bac694b1aba0783aaa36f885bd2c730600000000000d000000",
+      "fields": {
+        "tag": 2,
+        "rig": "67ds7qSCtonHPmwLLUUb64d8XR3MDcMrvfRExerzQWzx",
+        "round_id": "422700",
+        "error": 13
+      }
+    },
+    {
+      "error": 14,
+      "error_hex": "0x0000000e",
+      "name": "RigFrozen",
+      "trigger": "rig Frozen",
+      "hex": "025a1ef04b739aab32ad38f3043e935097fe16ef5b10b9d4a4f8d97edb1b45de302c730600000000000e000000",
+      "fields": {
+        "tag": 2,
+        "rig": "74o4CMPeoxZGmJvSzxcaLaDMZdeqL1sTe1MiQDWAay5H",
+        "round_id": "422700",
+        "error": 14
+      }
+    },
+    {
+      "error": 23,
+      "error_hex": "0x00000017",
+      "name": "StrategyMismatch",
+      "trigger": "automation.fee = executor_fee + 1",
+      "hex": "02f639041f5346c7cbc14d38a8d38a21133ec608b0c850697c9dc0a82a679ed2932c7306000000000017000000",
+      "fields": {
+        "tag": 2,
+        "rig": "Ha9ihearU8dh98pdtAXhd1fdVZ9zy8UsmuVTfLnuJxYA",
+        "round_id": "422700",
+        "error": 23
+      }
+    },
+    {
+      "error": 25,
+      "error_hex": "0x00000019",
+      "name": "RoundNotActive",
+      "trigger": "clock slot = Board.end_slot",
+      "hex": "0261a292db96708c8058e023f95fd964ff84492eb6134152031a5824a694a8c6272c7306000000000019000000",
+      "fields": {
+        "tag": 2,
+        "rig": "7a8L1EMn3oNDsfbysX1Rt6FG1hrPa425XEV8YxsRSdvn",
+        "round_id": "422700",
+        "error": 25
+      }
+    },
+    {
+      "error": 26,
+      "error_hex": "0x0000001a",
+      "name": "MinerNotCheckpointed",
+      "trigger": "miner.round_id = r-5, checkpoint_id = r-6",
+      "hex": "02cbfa6a669759aab7fa2e363957bd84e0e5c10b6528adf717f04abda37b864a652c730600000000001a000000",
+      "fields": {
+        "tag": 2,
+        "rig": "EjFERki8b7QKk1na3o2HFEQJ8D3nV7rsM4JtqoZ6XsDe",
+        "round_id": "422700",
+        "error": 26
+      }
+    },
+    {
+      "error": 27,
+      "error_hex": "0x0000001b",
+      "name": "MotherlodeCondition",
+      "trigger": "automation min_motherlode 60000 ORE > pot",
+      "hex": "026942e3ce34f0bd491c4bc5cad710299943085f051dbec2e68a15b8c967d03d222c730600000000001b000000",
+      "fields": {
+        "tag": 2,
+        "rig": "85ty2dMPxrVJnXVmxDUDh5sKtUDoiCC9BWRX7BZ9EHpu",
+        "round_id": "422700",
+        "error": 27
+      }
+    },
+    {
+      "error": 28,
+      "error_hex": "0x0000001c",
+      "name": "InsufficientAutomationBalance",
+      "trigger": "balance 600000 < 10 x 100000 + 5000",
+      "hex": "02d8f71db6da8bafeed6375e5b86bd04e9ffa3904e11ac676117bfcc14ddd5d2d92c730600000000001c000000",
+      "fields": {
+        "tag": 2,
+        "rig": "FbwcaZ8JVgfvKXwoZFhvNJQcggudN3vCVDjFyvHicZ1J",
+        "round_id": "422700",
+        "error": 28
+      }
+    },
+    {
+      "error": 29,
+      "error_hex": "0x0000001d",
+      "name": "OreNoOp",
+      "trigger": "TEST-ONLY mock ORE returns Ok without deploying",
+      "hex": "0298579265444b8d66eacdf6ea81e2513f34575bd5636eb2c64348c050922159af2c730600000000001d000000",
+      "fields": {
+        "tag": 2,
+        "rig": "BFgRJhajDoEgcBPzWskqPoRFVPJgNLfNjk3GcDiyiK5x",
+        "round_id": "422700",
+        "error": 29
+      }
+    },
+    {
+      "error": 30,
+      "error_hex": "0x0000001e",
+      "name": "FocusOnly",
+      "trigger": "plan_flags bit0",
+      "hex": "0236967ad1fdbe655a56aa14f077c6604250960fc8872b525c80b5dfa9501f50b52c730600000000001e000000",
+      "fields": {
+        "tag": 2,
+        "rig": "4g66qv578EEt4jvTwAUWGAuutWCKmvdJqNq2hpua2jwS",
+        "round_id": "422700",
+        "error": 30
+      }
+    },
+    {
+      "error": 31,
+      "error_hex": "0x0000001f",
+      "name": "ExecutorUnderfunded",
+      "trigger": "miner.checkpoint_fee = 0 and Executor < rent + 10000",
+      "hex": "02ba29077a0a5c6174bd9d160cb41b59e125b2b9777ca86daf47d51d2b05eb10272c730600000000001f000000",
+      "fields": {
+        "tag": 2,
+        "rig": "DXh7rhQ5BLLjZPdKFedbV6sKXHkRTggiUWrVvFfRWaD4",
+        "round_id": "422700",
+        "error": 31
+      }
+    },
+    {
+      "error": 627048462,
+      "error_hex": "0x2560000e",
+      "name": "p256-introspect MessageMismatch (0x2560000e)",
+      "trigger": "heartbeat signed over shift_id 7 while rig.shift_id = 1",
+      "hex": "0298c02308b0a2e8f53aa320f0be7980b659fe8882b3b6c1c424a4fd27978891972c730600000000000e006025",
+      "fields": {
+        "tag": 2,
+        "rig": "BHGu248qG2khkZu8X5XEUrcLjSbGpXQWRmdLipQujLRC",
+        "round_id": "422700",
+        "error": 627048462
+      }
+    }
+  ]
+}
