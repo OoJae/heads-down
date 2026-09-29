@@ -18,7 +18,7 @@ Needs JDK 17+ (21 used) and an Android SDK with `platforms;android-37` (point `l
 `sdk.dir` at it). The wrapper pins Gradle 9.8.0 by SHA-256.
 
 Toolchain: AGP 9.4.1 (built-in Kotlin) with KGP 2.4.20, Compose BOM 2026.09.00, KSP 2.3.12,
-Hilt 2.60.1, androidx.core 1.19.1, MWA clientlib-ktx 2.0.3. Shared config lives in the
+Hilt 2.60.1, androidx.core 1.19.1, MWA clientlib-ktx 2.2.0. Shared config lives in the
 `build-logic` convention plugins.
 
 ## Modules
@@ -81,5 +81,6 @@ while the rig is DOWN and a posture sample is less than 5 s old. The service is
   to an error.
 - The rig key needs no user authentication per use, because heartbeats are signed with the
   screen off. The on-chain caps bound what that key can do (see `RigKeyManager` KDoc).
-- `android.uniquePackageNames=false` is needed only because MWA clientlib-ktx 2.0.3 and
-  clientlib 2.0.3 share a namespace. clientlib-ktx 2.2.0 fixes that.
+- MWA clientlib-ktx 2.2.0 has its own namespace (`...clientlib.ktx`), so the
+  `android.uniquePackageNames=false` workaround needed by 2.0.3 is gone. Its POM still leaks
+  `androidx.test.ext:junit-ktx` at runtime; `core/wallet` excludes it.

@@ -48,7 +48,7 @@ object HeadsDownIdentity {
 }
 
 /**
- * Mobile Wallet Adapter (clientlib-ktx 2.0.3) for Heads Down.
+ * Mobile Wallet Adapter (clientlib-ktx 2.2.0) for Heads Down.
  *
  * - One wallet confirmation per user action; all calls need an [ActivityResultSender] made
  *   in `Activity.onCreate` (MWA cannot run from a Service: see the tile's trampoline).
@@ -81,8 +81,9 @@ class HeadsDownWallet(
      */
     suspend fun signIn(sender: ActivityResultSender, nonce: String, statement: String): WalletResult<SignInProof> {
         restoreToken()
+        // 2.2.0 added a String-address overload, so the null address must be typed.
         val payload = SignInWithSolana.Payload(
-            HeadsDownIdentity.SIWS_DOMAIN, null, statement, null, "1", chain.fullName, nonce,
+            HeadsDownIdentity.SIWS_DOMAIN, null as ByteArray?, statement, null, "1", chain.fullName, nonce,
             null, null, null, null, null,
         )
         return when (val result = adapter.signIn(sender, payload)) {
