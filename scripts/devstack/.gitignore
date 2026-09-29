@@ -1,0 +1,15 @@
+# Build output of the devstack tool.
+tool/target/
+# Runtime state and keys live outside the repo (~/.local/share/heads-down/devstack,
+# ~/.config/heads-down/devstack). Belt and braces in case HD_DEVSTACK_HOME/KEYS point here:
+*.json
+!tool/**/*.json
+entropy-secret
+*-secret
+ledger/
+logs/
+run/
+fixtures/
+genesis/
+bin/
+.surfpool/

@@ -1,0 +1,5 @@
+[toolchain]
+# hd-crank (a path dependency) declares rust-version 1.97.1.
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy"]
