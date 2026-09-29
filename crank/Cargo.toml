@@ -1,0 +1,92 @@
+[package]
+name = "hd-crank"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+description = "Permissionless dig crank for the Heads Down ORE rig: chain watcher, heartbeat intake, planner and batched dig transactions"
+publish = false
+
+# Standalone workspace, like every other Rust package in this monorepo (no root Cargo.toml).
+[workspace]
+
+[lib]
+name = "hd_crank"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hd-crank"
+path = "src/main.rs"
+
+[features]
+default = []
+# LiteSVM fork tests against the live mainnet ORE binary (spikes/ore-executor/fetch-fixtures.sh)
+# and the mock heads_down program in test-fixtures/mock-heads-down (cargo build-sbf first).
+fork = []
+# Same fork suite, but loading the real programs/heads-down build instead of the mock.
+# Wire once the program lands: HD_PROGRAM_SO=../programs/heads-down/target/deploy/heads_down.so
+real-program = ["fork"]
+# End-to-end: solana-test-validator + live ORE binary + mock program + the real app::run wiring.
+e2e = ["fork"]
+# Helius LaserStream gRPC behind the ChainSource trait (stub; see README).
+laserstream = []
+# Helius Sender (sender.helius-rpc.com) as an alternative submit path, with a Jito tip.
+helius-sender = []
+# Mirror verified heartbeats to a Nostr relay (stub; see README).
+nostr = []
+
+[dependencies]
+# Async runtime, HTTP/WebSocket server and client.
+tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+axum = { version = "0.8", default-features = false, features = ["ws", "tokio", "http1", "json", "query"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+# Serialization and config.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+clap = { version = "4.5", features = ["derive", "env"] }
+base64 = "0.22"
+bs58 = "0.5"
+hex = "0.4"
+
+# Errors and logging.
+thiserror = "2"
+anyhow = "1"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+
+# Cryptography. p256 hashes the 32-byte message with SHA-256 internally, exactly like the precompile.
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
+sha2 = "0.10"
+sha3 = "0.10"
+p256-introspect = { path = "../crates/p256-introspect", features = ["client"] }
+
+# Solana types (versions matched to what litesvm 0.17 links against).
+solana-address = { version = "2.7", features = ["curve25519", "decode"] }
+solana-hash = "4"
+solana-instruction = "3"
+solana-message = "4"
+solana-transaction = { version = "4", features = ["wincode"] }
+solana-keypair = "3"
+solana-signer = "3"
+solana-signature = "3"
+wincode = "0.6"
+
+[dev-dependencies]
+litesvm = { version = "0.17.0", features = ["precompiles"] }
+solana-account = "4"
+solana-clock = "~3.2"
+solana-slot-hashes = "~3.2"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std", "getrandom"] }
+tempfile = "3"
+
+[profile.release]
+overflow-checks = true
+
+[profile.dev]
+overflow-checks = true

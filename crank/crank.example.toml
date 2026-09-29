@@ -1,0 +1,73 @@
+# hd-crank configuration. Every field is optional; these are the defaults unless noted.
+# Secrets never go here: the keypair is a path (or HD_CRANK_KEYPAIR), and the Helius key
+# comes only from the HELIUS_API_KEY environment variable via the {HELIUS_API_KEY} placeholder.
+# A URL with a literal api-key= value is refused.
+
+rpc_url = "https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"   # default: api.mainnet-beta.solana.com
+# ws_url = "wss://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"   # default: derived from rpc_url
+commitment = "confirmed"
+# keypair_path = "/home/crank/.config/hd-crank/id.json"                # chmod 600; or --keypair / HD_CRANK_KEYPAIR
+program_id = "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+listen = "0.0.0.0:8787"            # /ws (heartbeats), /healthz, /metrics
+state_dir = ".hd-crank"           # remembers the crank's lookup tables
+log_json = false
+
+[dig]
+enabled = true
+tx_format = "v0"                   # "v0" (with lookup tables), "v1" (4096 bytes, no tables) or "legacy"
+deploy_margin_slots = 20           # submit when end_slot - slot <= 20 (deploy late in the round)
+min_slots_left = 3                 # ...and stop when fewer than 3 slots remain
+retry_after_slots = 6              # re-plan and re-sign if still unconfirmed after 6 slots
+max_attempts_per_round = 2         # per (rig, round); the program skips a duplicate anyway
+max_rigs_per_tx = 16
+max_account_locks = 64
+cu_price_micro_lamports = 1000     # priority fee
+dynamic_priority_fee = false       # true: percentile of getRecentPrioritizationFees on Board + Round
+priority_fee_percentile = 75
+max_cu_price_micro_lamports = 200000
+simulate = true                    # size the CU limit and bisect failing batches
+cu_margin_percent = 15
+loaded_accounts_data_size_limit = 4194304   # v1 only
+clock_margin_secs = 5              # caps expiry / plan window safety margin
+start_rounds = false               # never make the crank's dig the round's first deploy
+executor_reserve_lamports = 0
+checkpoint_sweep = true            # settle idle miners before ORE's 12 h bot window
+checkpoint_sweep_after_rounds = 400
+checkpoint_sweep_interval_rounds = 20
+checkpoints_per_tx = 8
+ore_programdata_slot = 450496378   # ORE upgrade pin (docs/ORE.md); 0 disables. A mismatch trips the breaker.
+config_poll_secs = 30
+
+[dig.cu_estimate]                  # used before simulation / when simulate = false
+base = 10000
+per_rig = 60000
+per_checkpoint = 30000
+
+[intake]
+max_message_bytes = 2048
+max_connections = 10000
+max_connections_per_ip = 16        # IPv6 counted per /64
+ip_burst = 30
+ip_per_second = 2.0
+rig_burst = 6
+rig_per_second = 0.2               # a phone heartbeats once per ~78 s round
+max_concurrent_verifications = 64
+idle_timeout_secs = 300
+trust_forwarded_for = false        # true only behind a proxy you control
+max_heartbeat_rigs = 100000
+rig_cache_ttl_secs = 60
+rig_fetches_per_second = 50.0
+
+[alt]
+enabled = true
+tables = []                        # extra tables to use (read-only unless the crank is their authority)
+auto_create = true
+auto_extend = true
+max_tables = 8                     # ~500 heartbeating rigs; the operator pays ~0.00089 SOL of rent per rig
+
+[sender]
+# Requires a build with --features helius-sender. No default tip accounts on purpose:
+# copy them from Helius' current docs.
+# helius_sender_url = "https://sender.helius-rpc.com/fast"
+# tip_accounts = ["..."]
+# tip_lamports = 200000
