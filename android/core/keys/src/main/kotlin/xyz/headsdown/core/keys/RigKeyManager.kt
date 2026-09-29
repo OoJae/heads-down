@@ -127,7 +127,11 @@ class RigKeyManager(
         }
     }
 
-    /** A [DerSigner] bound to the Keystore key. Each call runs one `SHA256withECDSA` op. */
+    /**
+     * A [DerSigner] bound to the Keystore key. Each call runs one `SHA256withECDSA` op. Rig
+     * messages pass their 32-byte digest here, so Keystore signs `SHA-256(digest)`, which is
+     * exactly what the secp256r1 precompile verifies for a 32-byte message.
+     */
     fun signer(alias: String): DerSigner {
         val key = privateKey(alias)
         return DerSigner { message ->
@@ -139,8 +143,9 @@ class RigKeyManager(
         }
     }
 
-    fun heartbeatSigner(alias: String): HeartbeatSigner =
-        HeartbeatSigner(signer(alias), compressedPublicKey(alias))
+    /** Signs HEARTBEAT / BREAK / FREEZE / PLAN digests with this key and the shared [counter]. */
+    fun messageSigner(alias: String, counter: RigCounter): RigMessageSigner =
+        RigMessageSigner(signer(alias), compressedPublicKey(alias), counter)
 
     fun deleteKey(alias: String) {
         if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)

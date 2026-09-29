@@ -1,0 +1,15 @@
+{
+  "address": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+  "slot": 451729320,
+  "value": {
+    "data": [
+      "aQAAAAAAAAAacwYAAAAAAAzX7BoAAAAA/NfsGgAAAADTjAY2AAAAAA==",
+      "base64"
+    ],
+    "executable": false,
+    "lamports": 3205636,
+    "owner": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+    "rentEpoch": 18446744073709551615,
+    "space": 40
+  }
+}

@@ -37,7 +37,7 @@ sealed interface ShiftEvent {
 }
 
 sealed interface ShiftEffect {
-    /** Sign and relay a P-256 BREAK (`RigSignalState.BROKEN`) so the chain stops digging now. */
+    /** Sign and relay a P-256 BREAK (kind 2) so the chain stops digging now. */
     data class SignBreak(val spec: ShiftSpec, val reason: BreakReason) : ShiftEffect
 
     /** Sign and relay a P-256 FREEZE. */

@@ -26,11 +26,12 @@ import androidx.core.content.getSystemService
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import xyz.headsdown.core.keys.RigSignalState
-import xyz.headsdown.core.keys.SignedHeartbeat
+import xyz.headsdown.core.keys.SignedShiftSignal
 import xyz.headsdown.surface.notification.NotificationChannels
 import xyz.headsdown.surface.notification.ShiftNotificationFactory
 import javax.inject.Inject
@@ -59,7 +60,6 @@ class ShiftForegroundService : LifecycleService() {
     @Inject lateinit var bindingProvider: RigBindingProvider
     @Inject lateinit var roundSource: OreRoundSource
     @Inject lateinit var sink: HeartbeatSink
-    @Inject lateinit var counter: HeartbeatCounter
     @Inject lateinit var journal: ShiftJournal
 
     private val clock = MonotonicClock { SystemClock.elapsedRealtime() }
@@ -163,7 +163,7 @@ class ShiftForegroundService : LifecycleService() {
 
     private fun startTicker() {
         tickerJob?.cancel()
-        val signer = signerProvider.heartbeatSigner()
+        val signer = signerProvider.messageSigner()
         snapshot = snapshot.copy(signing = signer != null, localOnly = !bindingProvider.current().isRegistered)
         if (signer == null) {
             publish()
@@ -174,11 +174,11 @@ class ShiftForegroundService : LifecycleService() {
             eligibleSpec = ::eligibleSpec,
             binding = bindingProvider::current,
             signer = signer,
-            counter = counter,
             sink = sink,
             onResult = { _, result -> mainHandler.post { onTick(result) } },
         )
         ticker = t
+        runCatching { sink.open() } // uplink connects in the background; never blocks the shift
         tickerJob = lifecycleScope.launch(Dispatchers.Default) { t.run() }
         publish()
     }
@@ -228,17 +228,24 @@ class ShiftForegroundService : LifecycleService() {
                 val delay = (effect.atMillis - clock.nowMillis()).coerceAtLeast(0)
                 mainHandler.postDelayed({ dispatch(ShiftEvent.Tick) }, delay)
             }
-            is ShiftEffect.SignBreak -> relaySignal(RigSignalState.BROKEN, effect.spec.shiftId)
-            is ShiftEffect.SignFreeze -> relaySignal(RigSignalState.FROZEN, effect.shiftId)
+            is ShiftEffect.SignBreak ->
+                relaySignal { it.signBreak(effect.spec.shiftId, effect.reason.wireReason) }
+            // The FREEZE preimage carries the rig's on-chain shift_id; with no shift running
+            // that is the last one armed (journaled), or 0 before any.
+            is ShiftEffect.SignFreeze ->
+                relaySignal { it.signFreeze(effect.shiftId ?: journal.last()?.shiftId) }
             is ShiftEffect.CoolingStarted, ShiftEffect.WentDark, ShiftEffect.ShiftEnded -> Unit
         }
     }
 
     /** Best-effort BREAK/FREEZE. Liveness only: without heartbeats the rig is cold anyway. */
-    private fun relaySignal(state: RigSignalState, shiftId: Long?) {
+    @OptIn(DelicateCoroutinesApi::class) // CoroutineStart.ATOMIC, reason below
+    private fun relaySignal(sign: (HeartbeatTicker) -> SignedShiftSignal) {
         val t = ticker ?: return
-        lifecycleScope.launch(Dispatchers.Default) {
-            val signed: SignedHeartbeat? = runCatching { t.signSignal(state, shiftId) }.getOrNull()
+        // ATOMIC: the shift is ending and the service may be destroyed right after this; the
+        // relay must still run (it has no suspension point before the hand-off to the sink).
+        lifecycleScope.launch(Dispatchers.Default, start = CoroutineStart.ATOMIC) {
+            val signed = runCatching { sign(t) }.getOrNull()
             if (signed != null) runCatching { sink.deliver(signed) }
         }
     }
@@ -247,6 +254,9 @@ class ShiftForegroundService : LifecycleService() {
     private fun finishShift(reason: String?) {
         tickerJob?.cancel()
         tickerJob = null
+        // The sink closes its uplink after a short grace period on its own scope, so a
+        // BREAK/FREEZE relayed a moment ago still goes out.
+        runCatching { sink.close() }
         hotSpec = null
         mainHandler.removeCallbacksAndMessages(null)
         releaseWakeLock()

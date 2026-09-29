@@ -10,33 +10,47 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
 import xyz.headsdown.BuildConfig
+import xyz.headsdown.core.chain.Ore
+import xyz.headsdown.core.chain.accounts.OreAccounts
+import xyz.headsdown.core.chain.clockin.ClockInService
+import xyz.headsdown.core.chain.rpc.OkHttpJsonRpcTransport
+import xyz.headsdown.core.chain.rpc.RpcProtocolException
+import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
+import xyz.headsdown.core.chain.uplink.CrankUplink
+import xyz.headsdown.core.keys.PrefsCounterStore
+import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.keys.RigKeyManager
-import xyz.headsdown.core.keys.SignedHeartbeat
 import xyz.headsdown.core.wallet.AuthTokenVault
 import xyz.headsdown.core.wallet.ConfirmationPoller
 import xyz.headsdown.core.wallet.HeadsDownIdentity
 import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.core.wallet.KeystoreAesGcmCipher
 import xyz.headsdown.core.wallet.SharedPreferencesSecretStore
-import xyz.headsdown.core.wallet.UnconfiguredSolanaRpc
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
 import xyz.headsdown.feature.reveal.RevealScheduler
-import xyz.headsdown.feature.shift.HeartbeatCounter
+import xyz.headsdown.feature.shift.BoardRoundSource
+import xyz.headsdown.feature.shift.CrankHeartbeatSink
 import xyz.headsdown.feature.shift.HeartbeatSink
 import xyz.headsdown.feature.shift.OreRoundSource
-import xyz.headsdown.feature.shift.PrefsHeartbeatCounter
-import xyz.headsdown.feature.shift.RigBinding
 import xyz.headsdown.feature.shift.RigBindingProvider
 import xyz.headsdown.feature.shift.RigSignerProvider
 import xyz.headsdown.feature.shift.ShiftJournal
-import xyz.headsdown.feature.shift.StubOreRoundSource
+import xyz.headsdown.rig.ChainClockIn
+import xyz.headsdown.rig.FileHeartbeatLog
+import xyz.headsdown.rig.RigBindingStore
 import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.surface.tile.ClockInTransactions
-import java.util.concurrent.atomic.AtomicInteger
-import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * The production graph. Endpoints come from BuildConfig (see app/build.gradle.kts: HTTPS/WSS
+ * only, no query strings or credentials, so no provider key can be baked into the APK).
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
@@ -44,29 +58,56 @@ object AppModule {
     @Provides @Singleton
     fun rigKeyManager(@ApplicationContext context: Context) = RigKeyManager(context)
 
+    /** One OkHttp stack (connection pool, timeouts, no redirects, no logging interceptors). */
     @Provides @Singleton
-    fun wallet(@ApplicationContext context: Context): HeadsDownWallet = HeadsDownWallet(
+    fun okHttp(): OkHttpClient = OkHttpJsonRpcTransport.defaultClient()
+
+    @Provides @Singleton
+    fun solanaRpc(client: OkHttpClient): SolanaJsonRpc =
+        SolanaJsonRpc(OkHttpJsonRpcTransport(BuildConfig.SOLANA_RPC_URL, client))
+
+    @Provides @Singleton
+    fun wallet(@ApplicationContext context: Context, rpc: SolanaJsonRpc): HeadsDownWallet = HeadsDownWallet(
         adapter = MobileWalletAdapter(HeadsDownIdentity.connectionIdentity),
         vault = AuthTokenVault(KeystoreAesGcmCipher(), SharedPreferencesSecretStore(context)),
-        // STUB: no RPC endpoint ships in the APK; the poller fails closed (never "success").
-        poller = ConfirmationPoller(UnconfiguredSolanaRpc),
+        // Success is only ever "confirmed with err == null" as seen by this RPC.
+        poller = ConfirmationPoller(rpc),
         chain = if (BuildConfig.SOLANA_CHAIN == "solana:mainnet") Solana.Mainnet else Solana.Devnet,
     )
 
-    /** STUB: the refuel + arm_shift transaction builder arrives with hd-client. */
     @Provides @Singleton
-    fun clockInTransactions(): ClockInTransactions = ClockInTransactions { null }
+    fun clockInService(rpc: SolanaJsonRpc): ClockInService = ClockInService(rpc)
 
-    /** STUB: synthetic ~78 s rounds until the Board.round_id feed is wired. */
+    /** ORE `Board.round_id`, read through the owner/size/address-checked decoder. */
     @Provides @Singleton
-    fun oreRounds(): OreRoundSource = StubOreRoundSource(clock = { SystemClock.elapsedRealtime() })
+    fun oreRounds(rpc: SolanaJsonRpc): OreRoundSource = BoardRoundSource(
+        readRoundId = {
+            val account = rpc.getAccountInfo(Ore.BOARD) ?: throw RpcProtocolException("no ORE Board on this cluster")
+            OreAccounts.board(Ore.BOARD, account).roundId
+        },
+        clock = { SystemClock.elapsedRealtime() },
+    )
 
-    /** Unregistered until register_rig confirms: heartbeats bind to an all-zero rig. */
+    /**
+     * Crank uplink (WSS) with the local log as fallback. An empty CRANK_WS_URL builds a
+     * local-only app: heartbeats stay on the device and are reported undelivered (no digs).
+     */
     @Provides @Singleton
-    fun rigBinding(): RigBindingProvider = RigBindingProvider { RigBinding.UNREGISTERED }
+    fun heartbeatSink(client: OkHttpClient, log: FileHeartbeatLog): HeartbeatSink {
+        // Outlives any one shift service, so the sink's graceful close can finish.
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val url = BuildConfig.CRANK_WS_URL
+        return CrankHeartbeatSink(
+            uplinkFactory = if (url.isEmpty()) null else { onConnected -> CrankUplink(url, client, scope, onConnected = onConnected) },
+            log = log,
+            clock = { SystemClock.elapsedRealtime() },
+            scope = scope,
+        )
+    }
 
+    /** The rig's one write-ahead message counter (HEARTBEAT, BREAK, FREEZE, PLAN). */
     @Provides @Singleton
-    fun heartbeatCounter(@ApplicationContext context: Context): HeartbeatCounter = PrefsHeartbeatCounter(context)
+    fun rigCounter(@ApplicationContext context: Context): RigCounter = RigCounter(PrefsCounterStore(context))
 
     @Provides @Singleton
     fun shiftJournal(@ApplicationContext context: Context) = ShiftJournal(context)
@@ -82,25 +123,6 @@ object AppModule {
 @InstallIn(SingletonComponent::class)
 abstract class BindingsModule {
     @Binds abstract fun rigSigner(impl: RigKeyRepository): RigSignerProvider
-    @Binds abstract fun heartbeatSink(impl: LocalHeartbeatSink): HeartbeatSink
-}
-
-/**
- * STUB heartbeat intake: keeps heartbeats on the device (count + last one). The production
- * sink is the SIWS-authenticated WebSocket intake mirrored to Nostr, so any cranker can dig.
- */
-@Singleton
-class LocalHeartbeatSink @Inject constructor() : HeartbeatSink {
-    private val count = AtomicInteger()
-
-    @Volatile
-    var last: SignedHeartbeat? = null
-        private set
-
-    val delivered: Int get() = count.get()
-
-    override suspend fun deliver(heartbeat: SignedHeartbeat) {
-        last = heartbeat
-        count.incrementAndGet()
-    }
+    @Binds abstract fun rigBinding(impl: RigBindingStore): RigBindingProvider
+    @Binds abstract fun clockIn(impl: ChainClockIn): ClockInTransactions
 }

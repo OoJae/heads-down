@@ -4,27 +4,30 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import xyz.headsdown.core.keys.HeartbeatMessage
-import xyz.headsdown.core.keys.HeartbeatSigner
-import xyz.headsdown.core.keys.RigSignalState
+import xyz.headsdown.core.keys.RigMessageFormat
+import xyz.headsdown.core.keys.RigMessageKind
+import xyz.headsdown.core.keys.RigMessageSigner
+import xyz.headsdown.core.keys.ShiftEndReason
 import xyz.headsdown.core.keys.SignedHeartbeat
+import xyz.headsdown.core.keys.SignedRigMessage
+import xyz.headsdown.core.keys.SignedShiftSignal
 
 /** An ORE round (~78 s: 60 s of deploys + the reset window). */
 data class OreRound(val id: ULong, val observedAtMillis: Long)
 
 /**
  * Source of ORE round boundaries. The production implementation follows the owner-checked
- * ORE `Board.round_id` (via the heartbeat intake / RPC); the id **must** be the real one, or
- * the on-chain `dig` rejects the heartbeat (`ore_round_id == Board.round_id`).
+ * ORE `Board.round_id` over RPC ([BoardRoundSource]); the id **must** be the real one, or the
+ * on-chain `dig` rejects the heartbeat (its lease must cover `Board.round_id`).
  */
 fun interface OreRoundSource {
     fun rounds(): Flow<OreRound>
 }
 
 /**
- * DEVELOPMENT STUB. Emits synthetic round ids on a fixed ~78 s cadence so the device loop can
- * be exercised end to end without a network. These ids are not ORE's: heartbeats signed for
- * them will never verify against a real Board and so can never cause a dig.
+ * TEST / DEVELOPMENT STUB. Emits synthetic round ids on a fixed ~78 s cadence so the device
+ * loop can be exercised without a network. These ids are not ORE's: heartbeats signed for them
+ * will never cover a real Board round and so can never cause a dig.
  */
 class StubOreRoundSource(
     private val clock: MonotonicClock,
@@ -45,7 +48,7 @@ class StubOreRoundSource(
     }
 }
 
-/** Program + Rig account the heartbeat is bound to. */
+/** Program + Rig account the signed messages are bound to. */
 class RigBinding(programId: ByteArray, rigAddress: ByteArray) {
     val programId: ByteArray = programId.copyOf()
     val rigAddress: ByteArray = rigAddress.copyOf()
@@ -63,14 +66,19 @@ class RigBinding(programId: ByteArray, rigAddress: ByteArray) {
     }
 }
 
-/** Strictly increasing per-rig counter. Must persist (write-ahead) so it never repeats. */
-fun interface HeartbeatCounter {
-    fun next(): ULong
-}
-
-/** Where signed heartbeats go: the intake WebSocket (and its Nostr mirror) in production. */
+/**
+ * Where signed rig messages go: the crank uplink (WebSocket) in production, with a local
+ * record as the fallback. Must return promptly (it runs on the shift loop) and must throw when
+ * the message was not handed to an uplink, so the tick is reported as not delivered.
+ */
 fun interface HeartbeatSink {
-    suspend fun deliver(heartbeat: SignedHeartbeat)
+    suspend fun deliver(message: SignedRigMessage<*>)
+
+    /** A shift started: connect whatever the sink needs. */
+    fun open() {}
+
+    /** The shift ended: release connections so nothing runs between shifts. */
+    fun close() {}
 }
 
 sealed interface TickResult {
@@ -80,25 +88,34 @@ sealed interface TickResult {
     data class SigningFailed(val cause: String) : TickResult
 }
 
+/** The `ShiftLog.break_reason` a device-side break is reported with (INTERFACE codes 0..6). */
+val BreakReason.wireReason: ShiftEndReason
+    get() = when (this) {
+        BreakReason.LIFTED -> ShiftEndReason.PICKUP
+        BreakReason.SCREEN_ON, BreakReason.UNLOCKED -> ShiftEndReason.SCREEN_ON
+        // No INTERFACE code for "unplugged": the user chose to end the charger shift.
+        BreakReason.UNPLUGGED -> ShiftEndReason.MANUAL
+    }
+
 /**
- * Once per ORE round: if the rig is hot, sign a DOWN heartbeat with the Keystore key and hand
- * it to the sink. Anything short of that (not hot, stale posture, key error, network error)
- * simply produces no heartbeat, and no heartbeat means no dig: the failure mode is always
- * "rig goes cold", never "funds move without the phone".
+ * Once per ORE round: if the rig is hot, sign a HEARTBEAT (the 32-byte digest of the 94-byte
+ * preimage) with the Keystore key and hand it to the sink. Anything short of that (not hot,
+ * stale posture, key error, uplink down) produces no delivered heartbeat, and no heartbeat
+ * means no dig: the failure mode is always "rig goes cold", never "funds move without the
+ * phone".
  */
 class HeartbeatTicker(
     private val rounds: OreRoundSource,
     /** The armed spec if a heartbeat is allowed right now (DOWN + fresh posture), else null. */
     private val eligibleSpec: () -> ShiftSpec?,
     private val binding: () -> RigBinding,
-    private val signer: HeartbeatSigner,
-    private val counter: HeartbeatCounter,
+    private val signer: RigMessageSigner,
     private val sink: HeartbeatSink,
     private val leaseRounds: Int = 1,
     private val onResult: (OreRound, TickResult) -> Unit = { _, _ -> },
 ) {
     init {
-        require(leaseRounds in 1..HeartbeatMessage.MAX_LEASE_ROUNDS)
+        require(leaseRounds in 1..RigMessageFormat.MAX_LEASE_ROUNDS)
     }
 
     @Volatile
@@ -116,7 +133,8 @@ class HeartbeatTicker(
         lastRound = round
         val spec = eligibleSpec() ?: return TickResult.NotEligible
         val signed = try {
-            sign(RigSignalState.DOWN, spec.shiftId, round.id, leaseEnd = round.id + (leaseRounds - 1).toULong())
+            val bound = binding()
+            signer.heartbeat(bound.programId, bound.rigAddress, spec.shiftId.toULong(), round.id, leaseRounds)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -132,25 +150,17 @@ class HeartbeatTicker(
         }
     }
 
-    /** Signs a BREAK / FREEZE / COOLING signal for the latest known round. */
-    fun signSignal(state: RigSignalState, shiftId: Long?): SignedHeartbeat? {
-        require(state != RigSignalState.DOWN) { "DOWN heartbeats come from tick()" }
-        val round = lastRound ?: return null
-        return sign(state, shiftId ?: 0L, round.id, leaseEnd = round.id)
-    }
+    /** Signs a BREAK for [shiftId] with [reason]. BREAK/FREEZE carry no round id. */
+    fun signBreak(shiftId: Long, reason: ShiftEndReason): SignedShiftSignal =
+        signSignal(RigMessageKind.BREAK, shiftId, reason)
 
-    private fun sign(state: RigSignalState, shiftId: Long, roundId: ULong, leaseEnd: ULong): SignedHeartbeat {
+    /** Signs a FREEZE. With no shift running, `shift_id` is the rig's current (0 before any). */
+    fun signFreeze(shiftId: Long?): SignedShiftSignal =
+        signSignal(RigMessageKind.FREEZE, shiftId ?: 0L, ShiftEndReason.FREEZE)
+
+    private fun signSignal(kind: RigMessageKind, shiftId: Long, reason: ShiftEndReason): SignedShiftSignal {
         require(shiftId >= 0) { "negative shift id" }
         val bound = binding()
-        val message = HeartbeatMessage(
-            programId = bound.programId,
-            rig = bound.rigAddress,
-            oreRoundId = roundId,
-            counter = counter.next(),
-            state = state,
-            shiftId = shiftId.toULong(),
-            leaseEnd = leaseEnd,
-        )
-        return signer.sign(message)
+        return signer.shiftSignal(bound.programId, bound.rigAddress, kind, shiftId.toULong(), reason)
     }
 }

@@ -1,0 +1,15 @@
+{
+  "address": "2fB1ocfUAstKvnXeUGQnzH4WK85oLc2VWC1Cv6DDTpuv",
+  "slot": null,
+  "value": {
+    "data": [
+      "ZAAAAAAAAABAQg8AAAAAABb3tItti88GVPTvM2kbI5TI5FaxKZFwB4xJKpgaDVruAlhXJgAAAAA+fuJAUbXt/upKUIo26DjTwI4iywGhGO9KIyoBohVOMuAuAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAeGysUCgAAABazmP09wEAAP//////////AAD//wAAAAAAAAAAAAAAAA==",
+      "base64"
+    ],
+    "executable": false,
+    "lamports": 645262850,
+    "owner": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+    "rentEpoch": 18446744073709551615,
+    "space": 160
+  }
+}

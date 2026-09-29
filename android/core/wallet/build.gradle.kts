@@ -8,8 +8,8 @@ android {
 
 dependencies {
     api(libs.mwa.clientlib.ktx) {
-        // clientlib-ktx 2.0.3's POM leaks its test stack (junit-ktx, mockito) as *runtime*
-        // dependencies. Exclude them so test libraries never ship inside the APK.
+        // clientlib-ktx (2.0.3 and still 2.2.0) leaks its test stack (junit-ktx, and in 2.0.3
+        // mockito) as *runtime* dependencies. Exclude them so test libraries never ship in the APK.
         exclude(group = "org.mockito")
         exclude(group = "org.mockito.kotlin")
         exclude(group = "androidx.test.ext")

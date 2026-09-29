@@ -1,0 +1,102 @@
+{
+  "format": "heads-down/rig-message-vectors",
+  "version": 1,
+  "spec": "programs/heads-down/INTERFACE.md, Signed P-256 messages",
+  "notes": [
+    "All integers little-endian. u64/i64 values are decimal strings; u8 values are JSON numbers.",
+    "message = SHA-256(preimage) (32 bytes); the secp256r1 precompile verifies ECDSA-P256 over SHA-256(message).",
+    "signature_rfc6979_hex: raw r||s from RFC 6979 (HMAC-SHA256 nonce) over message; may be high-S.",
+    "signature_hex: the same signature normalized to low-S (s <= n/2), the only form the precompile accepts.",
+    "The key is the RFC 6979 A.2.5 test key: public test material only."
+  ],
+  "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+  "program_id_hex": "f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7",
+  "rig": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco",
+  "rig_hex": "18f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008",
+  "key": {
+    "private_scalar_hex": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+    "public_key_compressed_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+  },
+  "vectors": [
+    {
+      "name": "heartbeat_lease_1",
+      "kind": 1,
+      "fields": {"counter": "42", "shift_id": "7", "round_id": "422593", "lease_rounds": 1},
+      "preimage_len": 94,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008012a000000000000000700000000000000c17206000000000001",
+      "message_hex": "0cfc657a572349b521fef0ff0e099806cd24b67ae09dc6b2e7994e20b33a2f0f",
+      "signature_rfc6979_hex": "e05bcbcb1b10e208d263ce0d0ca94554e0dfff989a7800bff1ec60d9d4b1d00831f1a28820ac1f57ef827b7f4b9db4a07ae51cecc3e01ac5a5cef6c329a1becd",
+      "signature_hex": "e05bcbcb1b10e208d263ce0d0ca94554e0dfff989a7800bff1ec60d9d4b1d00831f1a28820ac1f57ef827b7f4b9db4a07ae51cecc3e01ac5a5cef6c329a1becd"
+    },
+    {
+      "name": "heartbeat_lease_3",
+      "kind": 1,
+      "fields": {"counter": "43", "shift_id": "7", "round_id": "422594", "lease_rounds": 3},
+      "preimage_len": 94,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008012b000000000000000700000000000000c27206000000000003",
+      "message_hex": "7a21ae31271e0e194f0da1b1dcd422321b1808f583dc1a5d41bf3c35b0f66b62",
+      "signature_rfc6979_hex": "cb990f67b0f12e32a6206d9657f02727192c6f9965e86841765bf14297830baed1ce201ea703ba0364ab4fb3e8fb9bffd8dc941058e36e505cd097783c6ceddc",
+      "signature_hex": "cb990f67b0f12e32a6206d9657f02727192c6f9965e86841765bf14297830bae2e31dfe058fc45fd9b54b04c170463ffe40a669d4e34303496e9334abff63775"
+    },
+    {
+      "name": "heartbeat_u64_max",
+      "kind": 1,
+      "fields": {"counter": "18446744073709551615", "shift_id": "18446744073709551615", "round_id": "18446744073709551615", "lease_rounds": 2},
+      "preimage_len": 94,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb200801ffffffffffffffffffffffffffffffffffffffffffffffff02",
+      "message_hex": "be5ba802bc5ef3272ed406d4c172dd3018ef9061d5277ef72f4d7ae28e0ee2c7",
+      "signature_rfc6979_hex": "0ad1c320db73ae2ab0150a6164d75d5d24c83320d4f7cba4d38296f1615d4a4a39e8a440c8bf1189d116ee7b4bc71f0dbdc26f4fb15b25d35b69a0dcd482fd13",
+      "signature_hex": "0ad1c320db73ae2ab0150a6164d75d5d24c83320d4f7cba4d38296f1615d4a4a39e8a440c8bf1189d116ee7b4bc71f0dbdc26f4fb15b25d35b69a0dcd482fd13"
+    },
+    {
+      "name": "break_pickup",
+      "kind": 2,
+      "fields": {"counter": "44", "shift_id": "7", "reason": 1},
+      "preimage_len": 86,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008022c00000000000000070000000000000001",
+      "message_hex": "75272503164d6b02daddf2dd1472f73fe6f58719beac1a4d542bf58121b5573c",
+      "signature_rfc6979_hex": "d0de825946fa405050b146c412be69562e8b807e2947fbdb12a04be178d209f4ef786a2611334443add08299287ec2d469eaf77fabc1ab8026a2109b58192341",
+      "signature_hex": "d0de825946fa405050b146c412be69562e8b807e2947fbdb12a04be178d209f4108795d8eeccbbbd522f7d66d7813d2b52fc032dfb55f304cd17ba27a44a0210"
+    },
+    {
+      "name": "break_screen_on",
+      "kind": 2,
+      "fields": {"counter": "45", "shift_id": "7", "reason": 2},
+      "preimage_len": 86,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008022d00000000000000070000000000000002",
+      "message_hex": "47ba3808805688c805611f55f38cb699fbbfc83be5170ab9928194a88b0be3a4",
+      "signature_rfc6979_hex": "7bc217fd839236f524ab93366288c281d827eb0320ecee5d93dd713b7616774d42ad06c8f0e0acaf4922779fcd50a9e3409ca8e1156614221775bfd7be6f73f2",
+      "signature_hex": "7bc217fd839236f524ab93366288c281d827eb0320ecee5d93dd713b7616774d42ad06c8f0e0acaf4922779fcd50a9e3409ca8e1156614221775bfd7be6f73f2"
+    },
+    {
+      "name": "freeze",
+      "kind": 3,
+      "fields": {"counter": "46", "shift_id": "7", "reason": 3},
+      "preimage_len": 86,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008032e00000000000000070000000000000003",
+      "message_hex": "a1d46c4d38bb96c92f231da6ab945c6092c490a3271f0eeb143172f5c0995cd2",
+      "signature_rfc6979_hex": "4e767a7c0b10c25bcaa5c394d9b2bde6477a4c3c21c1bc12949d3d3f1fb4177dc2dc1a0c482ac90d09c1f64551c2237724dde80754c91afb8f5179306676924d",
+      "signature_hex": "4e767a7c0b10c25bcaa5c394d9b2bde6477a4c3c21c1bc12949d3d3f1fb4177d3d23e5f2b7d536f3f63e09baae3ddc88980912a6524e83896468519295ec9304"
+    },
+    {
+      "name": "plan_steady",
+      "kind": 4,
+      "fields": {"counter": "41", "max_ev_cost": "530000000", "dig_lamports": "1000000", "split": 4, "solo": 0, "lease": 1, "flags": 0, "window_start": "1790000000", "window_end": "1790028800"},
+      "preimage_len": 113,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb20080429000000000000008028971f0000000040420f000000000004000100803bb16a0000000000acb16a00000000",
+      "message_hex": "2ddadb4e403a99e1b55c22a214e7594f441423657cde958f32164b478f911af0",
+      "signature_rfc6979_hex": "55f4fda77c9fbd31d11053eb76861a88f315f5d877d7cc94f52fe13a08de1b873092c332bd24037645b4342f962dc6ce5438576100edf921ed04e0b0cc0197ea",
+      "signature_hex": "55f4fda77c9fbd31d11053eb76861a88f315f5d877d7cc94f52fe13a08de1b873092c332bd24037645b4342f962dc6ce5438576100edf921ed04e0b0cc0197ea"
+    },
+    {
+      "name": "plan_focus_only",
+      "kind": 4,
+      "fields": {"counter": "47", "max_ev_cost": "0", "dig_lamports": "0", "split": 0, "solo": 0, "lease": 3, "flags": 1, "window_start": "1790000000", "window_end": "1790005400"},
+      "preimage_len": 113,
+      "preimage_hex": "48447631f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d718f445b07a01168952b970d006ba762ca18bffda6d6465b970157f917fbb2008042f000000000000000000000000000000000000000000000000000301803bb16a000000009850b16a00000000",
+      "message_hex": "4444ce9dc9a1b56330b66825bf1e090ae52bbffb775704dcc167b4297c7b4ea6",
+      "signature_rfc6979_hex": "6689bdd6e9a2fc1db16158695b4f1e563d1c0b7849bb0f294841bedfc83a5cb019f2203c2bfc1cef0d27a0978870ac2302199e289e33c9c0eb9117742866c521",
+      "signature_hex": "6689bdd6e9a2fc1db16158695b4f1e563d1c0b7849bb0f294841bedfc83a5cb019f2203c2bfc1cef0d27a0978870ac2302199e289e33c9c0eb9117742866c521"
+    }
+  ]
+}

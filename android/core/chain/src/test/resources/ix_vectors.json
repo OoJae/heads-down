@@ -1,0 +1,253 @@
+{
+  "format": "heads-down/instruction-vectors",
+  "version": 1,
+  "spec": "programs/heads-down/INTERFACE.md + android/INTERFACE-NOTES.md (instruction data layouts)",
+  "notes": [
+    "All integers little-endian. u64/i64 args are decimal strings; u8/u16/bool args are JSON values.",
+    "accounts are in instruction order; role names map each meta to the program's account list.",
+    "secp256r1_heartbeat signs core/keys vectors.json heartbeat_lease_1 with the RFC 6979 test key (low-S)."
+  ],
+  "program_ids": {"heads_down": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p", "ore": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv", "compute_budget": "ComputeBudget111111111111111111111111111111", "secp256r1": "Secp256r1SigVerify1111111111111111111111111"},
+  "pdas": {"config": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW", "executor": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge", "rig": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "automation": "B5BGeWCGiYUuNq6Dm5qc5V8rMCRmVxWQWWXTadNGdak9", "miner": "BoKSEj39JhfQZma5UFrexuFHRCoyrmnVH3ZurpvCjJFG", "shift_log_7": "tL14hr8oScrfitG2iksFmE8mgkFcEyzR2LterWHQ7rF", "seeker_seat": "GGPSmiHSSrFsQdYoN6AZ5w6PKCGKvxwYuSQFKaxSJJjB"},
+  "instructions": [
+    {
+      "name": "ore_automate_heads_down",
+      "program_id": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "amount_per_tile": "250000", "deposit": "20000000", "executor_fee": "10000", "strategy": 2, "reload": true},
+      "roles_count": 5,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "automation", "pubkey": "B5BGeWCGiYUuNq6Dm5qc5V8rMCRmVxWQWWXTadNGdak9", "signer": false, "writable": true},
+        {"role": "executor", "pubkey": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge", "signer": false, "writable": true},
+        {"role": "miner", "pubkey": "BoKSEj39JhfQZma5UFrexuFHRCoyrmnVH3ZurpvCjJFG", "signer": false, "writable": true},
+        {"role": "system_program", "pubkey": "11111111111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 66,
+      "data_hex": "0090d0030000000000002d31010000000010270000000000000000000000000000020100000000000000ffffffffffffffff0000ffff000000000000000000000000"
+    },
+    {
+      "name": "ore_revoke",
+      "program_id": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"},
+      "roles_count": 5,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "automation", "pubkey": "B5BGeWCGiYUuNq6Dm5qc5V8rMCRmVxWQWWXTadNGdak9", "signer": false, "writable": true},
+        {"role": "executor_default", "pubkey": "11111111111111111111111111111111", "signer": false, "writable": true},
+        {"role": "miner", "pubkey": "BoKSEj39JhfQZma5UFrexuFHRCoyrmnVH3ZurpvCjJFG", "signer": false, "writable": true},
+        {"role": "system_program", "pubkey": "11111111111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 66,
+      "data_hex": "000000000000000000000000000000000000000000000000000000000000000000020000000000000000ffffffffffffffff0000ffff000000000000000000000000"
+    },
+    {
+      "name": "compute_unit_limit",
+      "program_id": "ComputeBudget111111111111111111111111111111",
+      "args": {"units": 300000},
+      "roles_count": 0,
+      "accounts": [],
+      "data_len": 5,
+      "data_hex": "02e0930400"
+    },
+    {
+      "name": "compute_unit_price",
+      "program_id": "ComputeBudget111111111111111111111111111111",
+      "args": {"micro_lamports": "5000"},
+      "roles_count": 0,
+      "accounts": [],
+      "data_len": 9,
+      "data_hex": "038813000000000000"
+    },
+    {
+      "name": "register_rig_guest",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"},
+      "roles_count": 5,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "config", "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW", "signer": false, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "system_program", "pubkey": "11111111111111111111111111111111", "signer": false, "writable": false},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 44,
+      "data_hex": "010360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6ff000000000000000000"
+    },
+    {
+      "name": "register_rig_attested",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6", "attestation_ix": 0, "attestation_level": 1, "attestation_expiry_slot": "451800000"},
+      "roles_count": 5,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "config", "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW", "signer": false, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "system_program", "pubkey": "11111111111111111111111111111111", "signer": false, "writable": false},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 44,
+      "data_hex": "010360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb60001c0ebed1a00000000"
+    },
+    {
+      "name": "rotate_key",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"},
+      "roles_count": 4,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "config", "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW", "signer": false, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 44,
+      "data_hex": "040360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6ff000000000000000000"
+    },
+    {
+      "name": "set_caps",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "cap_week": "500000000", "cap_shift": "120000000", "cap_round": "2000000", "cap_max_cost": "670000000", "caps_expiry_ts": "1790600000"},
+      "roles_count": 2,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true}
+      ],
+      "data_len": 41,
+      "data_hex": "030065cd1d00000000000e27070000000080841e00000000008063ef27000000004063ba6a00000000"
+    },
+    {
+      "name": "arm_shift_wallet",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "max_ev_cost": "530000000", "dig_lamports": "1000000", "split": 4, "solo": 0, "lease": 1, "flags": 0, "window_start": "1790000000", "window_end": "1790028800"},
+      "roles_count": 2,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true}
+      ],
+      "data_len": 38,
+      "data_hex": "05008028971f0000000040420f000000000004000100803bb16a0000000000acb16a00000000"
+    },
+    {
+      "name": "arm_shift_p256",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"payer": "9qQk3i73uAiWs1Wv7jDj4diVmwcbCa1FpokjPz7y5MwQ", "rig": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "max_ev_cost": "530000000", "dig_lamports": "1000000", "split": 4, "solo": 0, "lease": 1, "flags": 0, "window_start": "1790000000", "window_end": "1790028800", "counter": "41", "precompile_ix": 0, "sig_index": 0},
+      "roles_count": 3,
+      "accounts": [
+        {"role": "payer", "pubkey": "9qQk3i73uAiWs1Wv7jDj4diVmwcbCa1FpokjPz7y5MwQ", "signer": true, "writable": true},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 48,
+      "data_hex": "05018028971f0000000040420f000000000004000100803bb16a0000000000acb16a0000000000002900000000000000"
+    },
+    {
+      "name": "break_shift_wallet",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "reason": 6},
+      "roles_count": 2,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true}
+      ],
+      "data_len": 3,
+      "data_hex": "080006"
+    },
+    {
+      "name": "break_shift_p256",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"payer": "9qQk3i73uAiWs1Wv7jDj4diVmwcbCa1FpokjPz7y5MwQ", "rig": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "reason": 1, "counter": "44", "precompile_ix": 1, "sig_index": 0},
+      "roles_count": 3,
+      "accounts": [
+        {"role": "payer", "pubkey": "9qQk3i73uAiWs1Wv7jDj4diVmwcbCa1FpokjPz7y5MwQ", "signer": true, "writable": true},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 13,
+      "data_hex": "08010101002c00000000000000"
+    },
+    {
+      "name": "freeze_rig_wallet",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "reason": 3},
+      "roles_count": 2,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true}
+      ],
+      "data_len": 3,
+      "data_hex": "090003"
+    },
+    {
+      "name": "freeze_rig_p256",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"payer": "9qQk3i73uAiWs1Wv7jDj4diVmwcbCa1FpokjPz7y5MwQ", "rig": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "reason": 3, "counter": "46", "precompile_ix": 0, "sig_index": 2},
+      "roles_count": 3,
+      "accounts": [
+        {"role": "payer", "pubkey": "9qQk3i73uAiWs1Wv7jDj4diVmwcbCa1FpokjPz7y5MwQ", "signer": true, "writable": true},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "instructions_sysvar", "pubkey": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 13,
+      "data_hex": "09010300022e00000000000000"
+    },
+    {
+      "name": "unfreeze_rig",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"},
+      "roles_count": 2,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": false},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true}
+      ],
+      "data_len": 1,
+      "data_hex": "0a"
+    },
+    {
+      "name": "end_shift",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"caller": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "rig": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "shift_id": "7"},
+      "roles_count": 4,
+      "accounts": [
+        {"role": "caller", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "shift_log", "pubkey": "tL14hr8oScrfitG2iksFmE8mgkFcEyzR2LterWHQ7rF", "signer": false, "writable": true},
+        {"role": "system_program", "pubkey": "11111111111111111111111111111111", "signer": false, "writable": false}
+      ],
+      "data_len": 1,
+      "data_hex": "0b"
+    },
+    {
+      "name": "close_rig_guest",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"},
+      "roles_count": 2,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true}
+      ],
+      "data_len": 1,
+      "data_hex": "0e"
+    },
+    {
+      "name": "close_rig_seeker",
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "args": {"authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "sgt_mint": "FkvYJJx5Yk8bFLYauyex51fX614dBt3KAgutSHnJBiSh"},
+      "roles_count": 3,
+      "accounts": [
+        {"role": "authority", "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "signer": true, "writable": true},
+        {"role": "rig", "pubkey": "2gQpad6BYLts9d8qHbRRoeYRJnBLUftiFmMM38cW4zco", "signer": false, "writable": true},
+        {"role": "seeker_seat", "pubkey": "GGPSmiHSSrFsQdYoN6AZ5w6PKCGKvxwYuSQFKaxSJJjB", "signer": false, "writable": true}
+      ],
+      "data_len": 1,
+      "data_hex": "0e"
+    },
+    {
+      "name": "secp256r1_heartbeat",
+      "program_id": "Secp256r1SigVerify1111111111111111111111111",
+      "args": {"vector": "core/keys vectors.json heartbeat_lease_1", "public_key_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"},
+      "roles_count": 0,
+      "accounts": [],
+      "data_len": 145,
+      "data_hex": "01003100ffff1000ffff71002000ffff0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6e05bcbcb1b10e208d263ce0d0ca94554e0dfff989a7800bff1ec60d9d4b1d00831f1a28820ac1f57ef827b7f4b9db4a07ae51cecc3e01ac5a5cef6c329a1becd0cfc657a572349b521fef0ff0e099806cd24b67ae09dc6b2e7994e20b33a2f0f"
+    }
+  ]
+}

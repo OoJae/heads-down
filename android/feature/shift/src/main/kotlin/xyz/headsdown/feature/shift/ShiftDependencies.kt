@@ -1,12 +1,15 @@
 package xyz.headsdown.feature.shift
 
-import xyz.headsdown.core.keys.HeartbeatSigner
+import xyz.headsdown.core.keys.RigMessageSigner
 import xyz.headsdown.surface.notification.RigNotificationState
 import xyz.headsdown.surface.notification.RigPhase
 
-/** Supplies the Keystore-backed signer, or null when no rig key has been created yet. */
+/**
+ * Supplies the Keystore-backed signer (with the rig's shared write-ahead counter), or null
+ * when no rig key has been created yet.
+ */
 fun interface RigSignerProvider {
-    fun heartbeatSigner(): HeartbeatSigner?
+    fun messageSigner(): RigMessageSigner?
 }
 
 /** Supplies the program + Rig account binding (all-zero until `register_rig` confirms). */

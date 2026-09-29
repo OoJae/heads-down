@@ -1,8 +1,9 @@
 package xyz.headsdown.rig
 
-import xyz.headsdown.core.keys.HeartbeatSigner
 import xyz.headsdown.core.keys.KeySecurityLevel
+import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.keys.RigKeyManager
+import xyz.headsdown.core.keys.RigMessageSigner
 import xyz.headsdown.feature.shift.RigSignerProvider
 import java.security.SecureRandom
 import javax.inject.Inject
@@ -24,12 +25,14 @@ sealed interface RigKeyStatus {
  *
  * The attestation challenge is generated locally for now. Once the Key Attestation
  * registrar is live, it issues a single-use challenge bound to the user's SIWS session and
- * verifies the returned chain; until then the attestation is informational only and the
- * rig is unregistered (heartbeats bind to an all-zero rig and can never dig).
+ * verifies the returned chain; until then the attestation is informational only and the Rig
+ * registers as a guest (`attestation_level` 0). Every message this key signs goes through one
+ * shared, write-ahead [RigCounter].
  */
 @Singleton
 class RigKeyRepository @Inject constructor(
     private val keys: RigKeyManager,
+    private val counter: RigCounter,
 ) : RigSignerProvider {
     private val alias = keys.aliasFor("primary")
 
@@ -55,6 +58,10 @@ class RigKeyRepository @Inject constructor(
         RigKeyStatus.Failed(e.javaClass.simpleName)
     }
 
-    override fun heartbeatSigner(): HeartbeatSigner? =
-        if (!keys.hasKey(alias)) null else runCatching { keys.heartbeatSigner(alias) }.getOrNull()
+    /** The 33-byte compressed rig key, or null when none exists yet. */
+    fun compressedPublicKey(): ByteArray? =
+        if (!keys.hasKey(alias)) null else runCatching { keys.compressedPublicKey(alias) }.getOrNull()
+
+    override fun messageSigner(): RigMessageSigner? =
+        if (!keys.hasKey(alias)) null else runCatching { keys.messageSigner(alias, counter) }.getOrNull()
 }
