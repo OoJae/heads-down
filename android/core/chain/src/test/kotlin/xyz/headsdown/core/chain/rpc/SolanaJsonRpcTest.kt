@@ -178,6 +178,16 @@ class SolanaJsonRpcTest {
     }
 
     @Test
+    fun `an oversized base58 field is refused before decoding`() = runTest {
+        // Base58 decoding is quadratic; a hostile node must not be able to stall the client.
+        val huge = "2".repeat(200_000)
+        val started = System.nanoTime()
+        val e = runCatching { SolanaJsonRpc(FakeTransport.result("\"$huge\"")).sendTransaction(byteArrayOf(1)) }.exceptionOrNull()
+        assertTrue("$e", e is RpcProtocolException)
+        assertTrue("fails fast", System.nanoTime() - started < 2_000_000_000L)
+    }
+
+    @Test
     fun `request ids increase so replies cannot be cross-wired`() = runTest {
         val transport = FakeTransport.result("1")
         val rpc = SolanaJsonRpc(transport)

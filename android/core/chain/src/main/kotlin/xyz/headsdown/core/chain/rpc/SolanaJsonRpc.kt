@@ -265,6 +265,9 @@ class SolanaJsonRpc(
     }
 
     private fun decodeBase58(text: String, size: Int, what: String): ByteArray {
+        // Base58 decoding is quadratic: bound the input first so a hostile node cannot stall
+        // us with a megabyte "address". 64 bytes encode to at most 88 characters.
+        if (text.length > MAX_BASE58_CHARS) throw RpcProtocolException("$what is too long")
         val bytes = try {
             Base58.decode(text)
         } catch (_: IllegalArgumentException) {
@@ -279,6 +282,7 @@ class SolanaJsonRpc(
         const val MAX_SIGNATURE_STATUSES = 256
         const val MAX_FILTERS = 4
         private const val MAX_ERROR_DETAIL = 200
+        private const val MAX_BASE58_CHARS = 90
     }
 }
 
