@@ -23,6 +23,20 @@
         <receiver
             android:name=".RevealAlarmReceiver"
             android:exported="false" />
+
+        <!--
+            Serves only the spoiler-free share image from cache/reveal_share, and only to the app
+            the user picks in the share sheet (a one-off read grant). Not exported.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.reveal.share"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/reveal_share_paths" />
+        </provider>
     </application>
 
 </manifest>

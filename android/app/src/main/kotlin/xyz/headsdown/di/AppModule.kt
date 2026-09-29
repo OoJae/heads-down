@@ -33,6 +33,8 @@ import xyz.headsdown.core.wallet.KeystoreAesGcmCipher
 import xyz.headsdown.core.wallet.SharedPreferencesSecretStore
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
 import xyz.headsdown.feature.reveal.RevealScheduler
+import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
+import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.shift.BoardRoundSource
 import xyz.headsdown.feature.shift.CrankHeartbeatSink
 import xyz.headsdown.feature.shift.HeartbeatSink
@@ -44,6 +46,7 @@ import xyz.headsdown.rig.ChainClockIn
 import xyz.headsdown.rig.FileHeartbeatLog
 import xyz.headsdown.rig.RigBindingStore
 import xyz.headsdown.rig.RigKeyRepository
+import xyz.headsdown.surface.haptics.Haptics
 import xyz.headsdown.surface.tile.ClockInTransactions
 import javax.inject.Singleton
 
@@ -117,6 +120,17 @@ object AppModule {
 
     @Provides @Singleton
     fun keepAlive(@ApplicationContext context: Context) = KeepAlive(context)
+
+    /** One haptics engine (and at most one SoundPool) for the whole app. */
+    @Provides @Singleton
+    fun haptics(@ApplicationContext context: Context) = Haptics(context)
+
+    /**
+     * The morning haul. SAMPLE data until the indexer serves real ShiftLogs: the reveal labels
+     * it "not your data", and it is never pushed to the widget.
+     */
+    @Provides @Singleton
+    fun haulRepository(): HaulRepository = FakeHaulRepository()
 }
 
 @Module

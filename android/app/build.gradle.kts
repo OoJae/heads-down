@@ -80,6 +80,7 @@ dependencies {
     implementation(projects.feature.oemKeepalive)
     implementation(projects.surface.tile)
     implementation(projects.surface.notification)
+    implementation(projects.surface.haptics)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
