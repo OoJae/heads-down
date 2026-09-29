@@ -281,34 +281,28 @@ impl Round {
     }
 }
 
-/// ORE `Config` (`state/config.rs`): protocol fields at `intermission_slots @152`,
-/// `round_slots @160`, `entropy_var_address @168`, `entropy_program_id @200`.
+/// ORE `Config`: `intermission_slots @152`, `round_slots @160` (docs/ORE.md pins these).
+///
+/// The pinned source declares `entropy_var_address @168` and `entropy_program_id @200`, but
+/// the live account (read 2026-09-29) holds `64` then zeros there, and `deploy` uses the
+/// compile-time `VAR_ADDRESS` / `entropy_api::ID`, not these fields. So they are not read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OreConfig {
     /// Slots between `end_slot` and the earliest `reset`.
     pub intermission_slots: u64,
     /// Slots per round.
     pub round_slots: u64,
-    /// Entropy Var ORE expects in `deploy`.
-    pub entropy_var: Address,
-    /// Entropy program ORE expects in `deploy`.
-    pub entropy_program: Address,
 }
 
 impl OreConfig {
-    /// Decode with the layout pin; the entropy addresses must match the pinned constants.
+    /// Decode with the layout pin.
     pub fn decode(owner: &Address, data: &[u8]) -> Result<Self, LayoutError> {
         const K: OreKind = OreKind::Config;
         check_layout(K, owner, data)?;
         let c = OreConfig {
             intermission_slots: read_u64(data, 152).ok_or_else(|| field_err(K))?,
             round_slots: read_u64(data, 160).ok_or_else(|| field_err(K))?,
-            entropy_var: read_address(data, 168).ok_or_else(|| field_err(K))?,
-            entropy_program: read_address(data, 200).ok_or_else(|| field_err(K))?,
         };
-        if c.entropy_var != VAR_ADDRESS || c.entropy_program != ENTROPY_PROGRAM_ID {
-            return Err(LayoutError::Insane { kind: K, reason: "entropy accounts moved" });
-        }
         if c.round_slots == 0 {
             return Err(LayoutError::Insane { kind: K, reason: "round_slots == 0" });
         }

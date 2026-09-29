@@ -115,8 +115,6 @@ fn live_view(slot: u64) -> ChainView {
         ore_config: Some(OreConfig {
             intermission_slots: 48,
             round_slots: 240,
-            entropy_var: hd_crank::ore::VAR_ADDRESS,
-            entropy_program: hd_crank::ore::ENTROPY_PROGRAM_ID,
         }),
         last_account_update: Some(Instant::now()),
         last_slot_update: Some(Instant::now()),
