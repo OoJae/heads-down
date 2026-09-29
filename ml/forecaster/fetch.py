@@ -501,10 +501,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         g = Fetcher(sleep=max(args.sleep, 2.5))
         fetch_gecko(g, since, "token")
         fetch_gecko(g, since, "usd")
+    if "chain" in only:
+        # Snapshot the chain first: the reset page fetched right after then already holds the
+        # rounds the Board's EMA and the Treasury's pot were computed from.
+        fetch_chain(f, args.rpc)
     if "resets" in only:
         fetch_resets(f, since, args.max_pages)
-    if "chain" in only:
-        fetch_chain(f, args.rpc)
     if "miners" in only or args.miners_sample:
         fetch_round_miners(f, args.miners_sample)
     log(f"done: {f.requests} requests in {time.time() - t0:.0f}s")
