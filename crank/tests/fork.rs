@@ -489,8 +489,8 @@ fn crank_digs_through_live_ore() {
             }
         }
     }
-    for i in 0..25 {
-        assert_eq!(after_round.deployed[i] - before_round.deployed[i], expected_delta[i], "square {i}");
+    for (i, delta) in expected_delta.iter().enumerate() {
+        assert_eq!(after_round.deployed[i] - before_round.deployed[i], *delta, "square {i}");
     }
     for (k, u) in [a, b, c].into_iter().enumerate() {
         let dec = plan.digs.iter().find(|x| x.dig.accounts.rig == f.users[u].rig).unwrap();

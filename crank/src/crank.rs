@@ -236,9 +236,8 @@ impl Crank {
         let mut current_round = 0u64;
         let mut last_pass_slot: Option<u64> = None;
         loop {
-            match tokio::time::timeout(Duration::from_millis(400), chain.changed()).await {
-                Ok(Err(_)) => anyhow::bail!("chain watcher stopped"),
-                Ok(Ok(())) | Err(_) => {}
+            if let Ok(Err(_)) = tokio::time::timeout(Duration::from_millis(400), chain.changed()).await {
+                anyhow::bail!("chain watcher stopped");
             }
             let view = chain.borrow().clone();
             let Some(board) = view.board.filter(|_| view.ready()) else { continue };
@@ -361,7 +360,7 @@ impl Crank {
             }
         }
         let d = &self.cfg.dig;
-        if d.checkpoint_sweep && round_id % d.checkpoint_sweep_interval_rounds.max(1) == 0 {
+        if d.checkpoint_sweep && round_id.is_multiple_of(d.checkpoint_sweep_interval_rounds.max(1)) {
             if let Err(e) = self.checkpoint_sweep(round_id).await {
                 tracing::warn!(error = %e, "checkpoint sweep failed");
             }
@@ -461,6 +460,7 @@ impl Crank {
             p.tip = self.submitter.tip_for(self.nonce.fetch_add(1, Ordering::Relaxed));
             if d.simulate {
                 sims += 1;
+                #[allow(clippy::clone_on_copy)] // Hash is Copy only with solana-hash's `copy` feature
                 let t = tx::sign_batch(&p, &batch, &alts, blockhash.clone(), self.key.keypair())?;
                 match self.rpc.simulate_transaction(&tx::serialize(&t)?).await {
                     Ok(sim) if sim.err.is_none() => {

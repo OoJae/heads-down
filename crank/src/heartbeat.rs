@@ -339,7 +339,7 @@ pub trait RigSource: Send + Sync + 'static {
 
 #[derive(Clone, Debug)]
 enum Cached {
-    Present(Rig, Instant),
+    Present(Box<Rig>, Instant),
     Absent(Instant),
 }
 
@@ -391,7 +391,7 @@ impl<S: RigSource> RigCache<S> {
                 return;
             }
         }
-        m.insert(addr, Cached::Present(rig, Instant::now()));
+        m.insert(addr, Cached::Present(Box::new(rig), Instant::now()));
     }
 
     /// The rig, from cache when fresh (unless `refresh`), else from the source.
@@ -401,7 +401,7 @@ impl<S: RigSource> RigCache<S> {
         if let Some(c) = self.lock().get(addr).cloned() {
             match c {
                 Cached::Present(r, at) if !refresh && now.saturating_duration_since(at) < self.ttl => {
-                    return Ok(Some(r))
+                    return Ok(Some(*r))
                 }
                 // Negative entries are honored even on refresh: that is the anti-spray bound.
                 Cached::Absent(at) if now.saturating_duration_since(at) < self.negative_ttl => return Ok(None),
@@ -414,7 +414,7 @@ impl<S: RigSource> RigCache<S> {
         let _permit = self.fetch_permits.acquire().await.map_err(|_| Reject::Unavailable)?;
         let fetched = self.source.fetch_rig(addr).await.map_err(|_| Reject::Unavailable)?;
         let entry = match &fetched {
-            Some(r) => Cached::Present(r.clone(), Instant::now()),
+            Some(r) => Cached::Present(Box::new(r.clone()), Instant::now()),
             None => Cached::Absent(Instant::now()),
         };
         {

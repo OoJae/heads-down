@@ -162,6 +162,7 @@ fn precompile_instructions_verify_in_the_real_precompile() {
     let ixs = tx::build_instructions(&p, &rigs).unwrap();
     // Everything except the dig itself (no heads_down program in this test).
     let without_dig = &ixs[..ixs.len() - 1];
+    #[allow(clippy::result_large_err)]
     let run = |svm: &mut LiteSVM, ixs: &[solana_instruction::Instruction]| {
         let msg = tx::compile_message(&p, ixs, svm.latest_blockhash(), &[], 200_000).unwrap();
         let t = tx::make_transaction(msg, Some(&payer)).unwrap();
