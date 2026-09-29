@@ -1,0 +1,11 @@
+target/
+data/
+tests/
+testdata/
+.env
+.env.*
+*keypair*.json
+registrar-key*
+*.db
+*.db-*
+*.jsonl
