@@ -42,6 +42,13 @@ pub const IX_SIGNATURE_OFFSET: usize = IX_PUBKEY_OFFSET + 32;
 pub const IX_MESSAGE_OFFSET: usize = IX_SIGNATURE_OFFSET + 64;
 pub const IX_LEN: usize = IX_MESSAGE_OFFSET + HDREG_LEN;
 
+/// The first 16 bytes of every voucher instruction: `num_signatures=1, padding=0`, then
+/// `sig_off=48, sig_ix=0xFFFF, pk_off=16, pk_ix=0xFFFF, msg_off=112, msg_len=111, msg_ix=0xFFFF`
+/// (u16 LE). A program can require `data.len() == 223 && data[..16] == IX_HEADER` and then
+/// read `pubkey = data[16..48]`, `message = data[112..223]` with no further offset parsing.
+pub const IX_HEADER: [u8; IX_HEADER_LEN] =
+    [0x01, 0x00, 0x30, 0x00, 0xff, 0xff, 0x10, 0x00, 0xff, 0xff, 0x70, 0x00, 0x6f, 0x00, 0xff, 0xff];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Voucher {
     pub program_id: [u8; 32],
@@ -287,6 +294,9 @@ mod tests {
         assert_eq!(ours, sdk.data);
         assert_eq!(ours.len(), IX_LEN);
         assert_eq!(IX_LEN, 223);
+        assert_eq!(ours[..IX_HEADER_LEN], IX_HEADER);
+        assert_eq!(ours[IX_PUBKEY_OFFSET..IX_SIGNATURE_OFFSET], signed.registrar);
+        assert_eq!(ours[IX_MESSAGE_OFFSET..], signed.message);
         assert_eq!(sdk.program_id.to_string(), ED25519_PROGRAM_ID);
         assert!(sdk.accounts.is_empty());
     }
