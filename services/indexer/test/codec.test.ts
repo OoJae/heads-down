@@ -68,6 +68,28 @@ describe("base58 / base64", () => {
     expect(() => decodeBase58("0OIl", 32)).toThrow(/BAD_ENCODING/);
   });
 
+  it("is byte-for-byte equivalent to Anza's @solana/codecs-strings (fuzz)", async () => {
+    const { getBase58Decoder, getBase58Encoder } = await import("@solana/codecs-strings");
+    const ref = { enc: getBase58Decoder(), dec: getBase58Encoder() };
+    let seed = 99;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) >>> 16) & 0xff;
+    for (let i = 0; i < 3000; i++) {
+      const len = rnd() % 130;
+      const b = Uint8Array.from({ length: len }, rnd);
+      // Bias toward leading zeros, the classic base58 edge case.
+      for (let z = 0; z < len && rnd() < 40; z++) b[z] = 0;
+      const s = encodeBase58(b);
+      expect(s).toBe(ref.enc.decode(b));
+      expect(decodeBase58(s, 200)).toEqual(new Uint8Array(ref.dec.encode(s)));
+    }
+    expect(encodeBase58(new Uint8Array())).toBe("");
+    expect(decodeBase58("", 1)).toEqual(new Uint8Array());
+  });
+
+  it("rejects non-ASCII input", () => {
+    expect(() => decodeBase58("abcé", 32)).toThrow(/BAD_ENCODING/);
+  });
+
   it("bounds input length before decoding", () => {
     expect(() => decodeBase58("2".repeat(10_000), 64)).toThrow(/BAD_LENGTH/);
   });

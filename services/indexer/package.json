@@ -22,10 +22,10 @@
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
     "@solana/addresses": "8.4.0",
-    "@solana/codecs-strings": "8.4.0",
     "pg": "8.23.0"
   },
   "devDependencies": {
+    "@solana/codecs-strings": "8.4.0",
     "@types/node": "26.6.3",
     "@types/pg": "8.23.1",
     "typescript": "5.9.3",

@@ -14,13 +14,13 @@ importers:
       '@solana/addresses':
         specifier: 8.4.0
         version: 8.4.0(typescript@5.9.3)
-      '@solana/codecs-strings':
-        specifier: 8.4.0
-        version: 8.4.0(typescript@5.9.3)
       pg:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
+      '@solana/codecs-strings':
+        specifier: 8.4.0
+        version: 8.4.0(typescript@5.9.3)
       '@types/node':
         specifier: 26.6.3
         version: 26.6.3

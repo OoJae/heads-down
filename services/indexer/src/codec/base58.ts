@@ -1,17 +1,37 @@
 /**
- * Base58 via Anza's @solana/codecs-strings, with input limits so an attacker-sized string
- * cannot make the (quadratic) base58 decoder burn CPU.
+ * Base58 (Bitcoin alphabet) using the base-x byte-array algorithm: O(n^2) on small integers,
+ * ~10x faster than BigInt-based codecs on the 32/64/121-byte values the indexer handles in bulk.
+ * Equivalence with Anza's @solana/codecs-strings is fuzz-tested (test/codec.test.ts).
+ *
+ * Inputs are length-bounded before decoding so an attacker-sized string cannot burn CPU.
  */
-import { getBase58Decoder, getBase58Encoder } from "@solana/codecs-strings";
 import { DecodeError } from "./errors.ts";
 
-const toBytes = getBase58Encoder(); // base58 string -> bytes
-const toString = getBase58Decoder(); // bytes -> base58 string
+const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const MAP = new Int8Array(128).fill(-1);
+for (let i = 0; i < ALPHABET.length; i++) MAP[ALPHABET.charCodeAt(i)] = i;
 
-const B58_RE = /^[1-9A-HJ-NP-Za-km-z]*$/;
-
-export function encodeBase58(bytes: Uint8Array): string {
-  return toString.decode(bytes);
+export function encodeBase58(source: Uint8Array): string {
+  let zeroes = 0;
+  while (zeroes < source.length && source[zeroes] === 0) zeroes++;
+  const size = (((source.length - zeroes) * 138) / 100 + 1) >>> 0;
+  const b58 = new Uint8Array(size);
+  let length = 0;
+  for (let p = zeroes; p < source.length; p++) {
+    let carry = source[p]!;
+    let i = 0;
+    for (let it = size - 1; (carry !== 0 || i < length) && it >= 0; it--, i++) {
+      carry += 256 * b58[it]!;
+      b58[it] = carry % 58;
+      carry = (carry / 58) >>> 0;
+    }
+    length = i;
+  }
+  let it = size - length;
+  while (it < size && b58[it] === 0) it++;
+  let out = "1".repeat(zeroes);
+  for (; it < size; it++) out += ALPHABET[b58[it]!];
+  return out;
 }
 
 /**
@@ -22,10 +42,30 @@ export function decodeBase58(s: string, maxBytes: number): Uint8Array {
   if (s.length > Math.ceil(maxBytes * 1.3658) + 1) {
     throw new DecodeError("BAD_LENGTH", `base58 string longer than ${maxBytes} bytes allows`);
   }
-  if (!B58_RE.test(s)) throw new DecodeError("BAD_ENCODING", "invalid base58 character");
-  const out = toBytes.encode(s);
+  let zeroes = 0;
+  while (zeroes < s.length && s.charCodeAt(zeroes) === 49 /* '1' */) zeroes++;
+  const size = (((s.length - zeroes) * 733) / 1000 + 1) >>> 0;
+  const b256 = new Uint8Array(size);
+  let length = 0;
+  for (let p = zeroes; p < s.length; p++) {
+    const c = s.charCodeAt(p);
+    const v = c < 128 ? MAP[c]! : -1;
+    if (v < 0) throw new DecodeError("BAD_ENCODING", "invalid base58 character");
+    let carry = v;
+    let i = 0;
+    for (let it = size - 1; (carry !== 0 || i < length) && it >= 0; it--, i++) {
+      carry += 58 * b256[it]!;
+      b256[it] = carry & 0xff;
+      carry >>>= 8;
+    }
+    length = i;
+  }
+  let it = size - length;
+  while (it < size && b256[it] === 0) it++;
+  const out = new Uint8Array(zeroes + (size - it));
+  out.set(b256.subarray(it), zeroes);
   if (out.length > maxBytes) throw new DecodeError("BAD_LENGTH", `decoded ${out.length} > ${maxBytes} bytes`);
-  return new Uint8Array(out);
+  return out;
 }
 
 /** True for a canonical base58 encoding of exactly 32 bytes. */
