@@ -249,11 +249,13 @@ pub struct AltConfig {
     pub auto_create: bool,
     /// Extend tables with shared and per-rig accounts as rigs appear.
     pub auto_extend: bool,
+    /// Tables the crank will create at most (256 addresses each; the operator pays the rent).
+    pub max_tables: usize,
 }
 
 impl Default for AltConfig {
     fn default() -> Self {
-        AltConfig { enabled: true, tables: vec![], auto_create: true, auto_extend: true }
+        AltConfig { enabled: true, tables: vec![], auto_create: true, auto_extend: true, max_tables: 8 }
     }
 }
 

@@ -651,6 +651,18 @@ impl Crank {
         }
     }
 
+    /// Rigs worth a lookup-table slot: the operator pays the table rent (890,880 lamports
+    /// per rig), so only rigs that are actually heartbeating (a verified heartbeat is held) or
+    /// hold a covering lease qualify. Arming throwaway rigs therefore costs an attacker a Rig
+    /// account and a live P-256 key per slot, not just a registration.
+    fn rigs_for_alt(&self, rigs: &[(Address, Rig)]) -> Vec<(Address, Rig)> {
+        let round = self.chain.borrow().board.map_or(0, |b| b.round_id);
+        rigs.iter()
+            .filter(|(a, r)| self.store.get(a).is_some() || (round > 0 && r.lease_covers(round)))
+            .cloned()
+            .collect()
+    }
+
     /// Make sure the crank's tables hold the shared accounts and every known rig's four.
     async fn sync_alts(&self) -> anyhow::Result<()> {
         // The poller and new-round maintenance both sync; never interleave (double creates).
@@ -666,8 +678,9 @@ impl Crank {
             return Ok(());
         }
         let mut wanted = alt::shared_addresses(&self.program_id);
-        for (a, r) in lock(&self.known_rigs).iter() {
-            wanted.extend(alt::rig_addresses(&RigAccounts::derive(*a, r.authority)));
+        let known = lock(&self.known_rigs).clone();
+        for (a, r) in self.rigs_for_alt(&known) {
+            wanted.extend(alt::rig_addresses(&RigAccounts::derive(a, r.authority)));
         }
         let tables = lock(&self.alts).clone();
         let missing = alt::missing(&tables, &wanted);
@@ -683,8 +696,13 @@ impl Crank {
                 other => tracing::warn!(%table, outcome = ?other, "extend failed"),
             }
         }
+        let owned = lock(&self.alts).iter().filter(|t| t.authority == Some(me)).count();
         if !overflow.is_empty() && self.cfg.alt.auto_create {
-            self.create_alt().await?;
+            if owned < self.cfg.alt.max_tables {
+                self.create_alt().await?;
+            } else {
+                tracing::warn!(owned, max = self.cfg.alt.max_tables, "lookup tables full; new rigs use static keys");
+            }
         }
         self.load_alts().await
     }

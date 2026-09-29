@@ -63,6 +63,7 @@ enabled = true
 tables = []                        # extra tables to use (read-only unless the crank is their authority)
 auto_create = true
 auto_extend = true
+max_tables = 8                     # ~500 heartbeating rigs; the operator pays ~0.00089 SOL of rent per rig
 
 [sender]
 # Requires a build with --features helius-sender. No default tip accounts on purpose:
