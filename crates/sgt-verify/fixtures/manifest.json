@@ -1,0 +1,52 @@
+{
+  "rpc": "https://api.mainnet-beta.solana.com",
+  "group": "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te",
+  "sgts": [
+    {
+      "label": "member-20",
+      "mint": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+      "token_account": "BLJGXXKnNdZEaXTGqZaaNoZ1UkkbD1dXht8DjVz2eeZV",
+      "holder": "D2ehKLUQApN8ZxcANjwuTJC7bk7BMJn2voofXy17tCrs",
+      "member_number": 20,
+      "member_group": "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te",
+      "token_account_state": "frozen",
+      "token_account_extensions": [
+        "immutableOwner"
+      ],
+      "mint_extensions": [
+        "metadataPointer",
+        "permanentDelegate",
+        "mintCloseAuthority",
+        "groupMemberPointer",
+        "tokenGroupMember"
+      ],
+      "mint_authority": "GT2zuHVaZQYZSyQMgJPLzvkmyztfyXg2NJunqFp4p3A4",
+      "freeze_authority": "GT2zuHVaZQYZSyQMgJPLzvkmyztfyXg2NJunqFp4p3A4",
+      "supply": "1",
+      "decimals": 0
+    },
+    {
+      "label": "member-121035",
+      "mint": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+      "token_account": "2Tb27DLTzbGKQsru4i7X9gwL6NXuZYSDZNfS4KMhHTLa",
+      "holder": "BRq4fHQPyu7LWhYkre8qKGZsVDs3oJ4xrV1k8D42yuNp",
+      "member_number": 121035,
+      "member_group": "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te",
+      "token_account_state": "frozen",
+      "token_account_extensions": [
+        "immutableOwner"
+      ],
+      "mint_extensions": [
+        "metadataPointer",
+        "permanentDelegate",
+        "mintCloseAuthority",
+        "groupMemberPointer",
+        "tokenGroupMember"
+      ],
+      "mint_authority": "GT2zuHVaZQYZSyQMgJPLzvkmyztfyXg2NJunqFp4p3A4",
+      "freeze_authority": "GT2zuHVaZQYZSyQMgJPLzvkmyztfyXg2NJunqFp4p3A4",
+      "supply": "1",
+      "decimals": 0
+    }
+  ]
+}
