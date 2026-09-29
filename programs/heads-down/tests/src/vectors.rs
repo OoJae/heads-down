@@ -282,7 +282,8 @@ struct Spec {
     harness: Option<Instruction>,
 }
 
-fn event_name(tag: u8) -> &'static str {
+/// The event name for `tag` (INTERFACE.md §7).
+pub fn event_name(tag: u8) -> &'static str {
     match tag {
         ev::tag::RIG_DUG => "RigDug",
         ev::tag::RIG_SKIPPED => "RigSkipped",

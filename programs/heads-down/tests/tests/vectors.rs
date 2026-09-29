@@ -40,6 +40,111 @@ fn golden_vectors_match_the_committed_files() {
     );
 }
 
+/// Table rows (`| a | b | ... |`, header and separator skipped) of the
+/// INTERFACE.md section whose heading starts with `heading`.
+fn table_rows(doc: &str, heading: &str) -> Vec<Vec<String>> {
+    let start = doc
+        .find(heading)
+        .unwrap_or_else(|| panic!("{heading} missing"));
+    let body = &doc[start + heading.len()..];
+    let end = body.find("\n## ").unwrap_or(body.len());
+    body[..end]
+        .lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| ---") && !l.starts_with("|---"))
+        .map(|l| {
+            l.trim_matches('|')
+                .split('|')
+                .map(|c| c.trim().to_string())
+                .collect()
+        })
+        .filter(|cells: &Vec<String>| cells[0].parse::<u32>().is_ok())
+        .collect()
+}
+
+#[test]
+fn interface_md_tables_match_the_program() {
+    use heads_down_tests::hd::{error::HdError, events};
+    let doc = std::fs::read_to_string(root().join("INTERFACE.md")).unwrap();
+
+    // §7 events: tag, name and exact length.
+    let rows = table_rows(&doc, "## 7. Events");
+    assert_eq!(rows.len(), 10, "one row per event tag");
+    for r in &rows {
+        let tag: usize = r[0].parse().unwrap();
+        let len: usize = r[3].parse().unwrap();
+        assert_eq!(len, events::LEN[tag], "INTERFACE.md event tag {tag} length");
+        assert_eq!(r[1], vectors::event_name(tag as u8), "event tag {tag} name");
+    }
+
+    // §8 errors: every code 0..=31 with the program's variant name.
+    let all = [
+        HdError::InvalidInstruction,
+        HdError::CostGate,
+        HdError::InvalidExecutor,
+        HdError::InvalidOreAccount,
+        HdError::InvalidAccountTag,
+        HdError::Unauthorized,
+        HdError::InvalidHeartbeat,
+        HdError::StaleHeartbeat,
+        HdError::LeaseExpired,
+        HdError::AlreadyDugRound,
+        HdError::CapsExpired,
+        HdError::OutsideWindow,
+        HdError::BudgetExhausted,
+        HdError::RigNotArmed,
+        HdError::RigFrozen,
+        HdError::PlanExceedsCaps,
+        HdError::InvalidSgt,
+        HdError::SeatTaken,
+        HdError::Paused,
+        HdError::TimelockNotElapsed,
+        HdError::MathOverflow,
+        HdError::InvalidAttestation,
+        HdError::DuplicateRig,
+        HdError::StrategyMismatch,
+        HdError::InvalidRigState,
+        HdError::RoundNotActive,
+        HdError::MinerNotCheckpointed,
+        HdError::MotherlodeCondition,
+        HdError::InsufficientAutomationBalance,
+        HdError::OreNoOp,
+        HdError::FocusOnly,
+        HdError::ExecutorUnderfunded,
+    ];
+    let rows = table_rows(&doc, "## 8. Errors");
+    assert_eq!(rows.len(), all.len(), "one row per error code");
+    for (e, r) in all.iter().zip(&rows) {
+        assert_eq!(r[0].parse::<u32>().unwrap(), e.code());
+        assert_eq!(r[1], format!("{e:?}"), "error {}", e.code());
+    }
+
+    // §5 instruction table: name and data lengths vs the executed vectors.
+    let ix: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("vectors/instructions.json")).unwrap(),
+    )
+    .unwrap();
+    let vectors = ix["instructions"].as_array().unwrap();
+    let rows = table_rows(&doc, "## 5. Instructions");
+    assert_eq!(rows.len(), 15, "one row per instruction tag");
+    for r in &rows {
+        let tag: u64 = r[0].parse().unwrap();
+        let name = r[1].trim_matches('`');
+        let mine: Vec<&serde_json::Value> = vectors.iter().filter(|v| v["tag"] == tag).collect();
+        assert!(!mine.is_empty(), "tag {tag} has vectors");
+        for v in &mine {
+            assert_eq!(v["instruction"], name, "tag {tag} name");
+            let len = v["data_len"].as_u64().unwrap();
+            if r[3] == "2 + 20n" {
+                assert_eq!(len, 2 + 20 * v["args"]["n"].as_u64().unwrap(), "{name}");
+            } else {
+                let allowed: Vec<u64> =
+                    r[3].split('/').map(|x| x.trim().parse().unwrap()).collect();
+                assert!(allowed.contains(&len), "{name}: {len} not in {allowed:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn generation_is_deterministic() {
     let a = vectors::generate();

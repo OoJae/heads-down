@@ -39,7 +39,7 @@ pub fn gate_open(ema_ev: u128, plan_max_ev_cost: u64, cap_max_cost: u64) -> bool
 ///
 /// The Automation's fixed fee is debited on the round's first deploy on top
 /// of the tile amount, and `spent_*` count the whole debit, so the fee is
-/// reserved out of the remaining cap first (`INTERFACE-NOTES.md`): the total
+/// reserved out of the remaining cap first (`INTERFACE.md` §6.4): the total
 /// debit can then never exceed a wallet-signed cap.
 pub fn dig_budget(
     plan_dig: u64,
