@@ -182,7 +182,7 @@ Wording rule: "bond", "forfeit", "gift", "fuel", "bury". Never "stake", "staking
 
 ## 8. Draft of the submission's `skrIntegration` field
 
-**Full version (953 characters):**
+**Full version (953 characters — over the 950 limit; use the 941-character version A in [pitch/SUBMISSION.md](pitch/SUBMISSION.md)):**
 
 > SKR is Heads Down's commitment collateral and gifting currency. In Stack, Seekers bond SKR on keeping their phones face-down through the night, at a real table (phones paired over Nearby) or in a regional room. Settlement is permissionless and on-chain: each phone's hardware-key heartbeat is checked by Solana's secp256r1 precompile, and a pickup or missed heartbeats beyond the table's grace forfeit the bond. Finishers take back their bond plus 80% of the forfeits. The other 20% is sold in a no-oracle Dutch auction for ORE, which ORE's own bury instruction burns. Focus Bonds do the same for a solo shift, with every forfeit going to that auction. Gift a Rig turns SKR sent to any .skr name into a live ORE rig, escrowed against the recipient's Seeker Genesis Token so only that Seeker can claim it. SKR can also fuel a night's mining inside the same signature. Heads Down never locks SKR for a return, never emits SKR, and takes no SKR from users.
 

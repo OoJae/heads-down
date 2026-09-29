@@ -13,10 +13,12 @@
   ([spikes/secp256r1](spikes/secp256r1/README.md), 16/16 LiteSVM, 9/9 on a real validator).
 - **Unforgeable Seeker check:** in-program Seeker Genesis Token verification anchored on Token-2022 group
   membership, tested against real mainnet SGTs and a forgery that fooled prior art ([crates/sgt-verify](crates/sgt-verify/README.md)).
+- **End to end on a local mainnet fork:** clock-in, crank dig, on-chain `StaleHeartbeat` rejection of a replayed
+  heartbeat and indexer ingestion, in one scripted run ([scripts/devstack](docs/DEVSTACK.md)).
 - **Honest economics:** a backtest over 58,801 real ORE rounds decides *when* to dig
   ([ml/forecaster/RESULTS.md](ml/forecaster/RESULTS.md)).
 - **Android app:** native Kotlin/Compose, accelerometer-only face-down detection (works on phones without a
-  gyroscope), Keystore rig key, Quick Settings tile, shift service, HyperOS keep-alive onboarding, 138 unit tests
+  gyroscope), Keystore rig key, Quick Settings tile, shift service, HyperOS keep-alive onboarding, home-screen widget, haptics, morning reveal, 379 unit tests
   ([android/README.md](android/README.md)).
 
 ## How it works (one paragraph)

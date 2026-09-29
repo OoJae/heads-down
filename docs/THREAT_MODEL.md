@@ -1,6 +1,6 @@
 # Heads Down threat model
 
-> **Status.** This document states the security requirements and the bound on each key. At this commit the on-chain code consists of the specification ([SPEC.md](SPEC.md)) and one spike (`spikes/ore-executor`). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
+> **Status.** This document states the security requirements and the bound on each key. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.1](../programs/heads-down/INTERFACE.md); 88 tests on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
 >
 > ORE facts are cited as `file:line` at ORE commit `b92c5043`, which verify.osec.io reports as the deployed program ([ORE.md](ORE.md), section 1).
 
