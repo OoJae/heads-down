@@ -75,6 +75,8 @@ pub mod constants;
 pub mod error;
 pub mod precompile;
 pub mod sysvar;
+mod verify;
+
 
 pub use constants::*;
 pub use error::{IntrospectError, ERROR_CODE_BASE};
@@ -83,3 +85,7 @@ pub use precompile::{
     Secp256r1Entry, Secp256r1Instruction, Secp256r1SignatureOffsets,
 };
 pub use sysvar::{InstructionsSysvar, IntrospectedInstruction};
+pub use verify::{
+    check_instructions_sysvar, load_secp256r1_instruction, verify_secp256r1_signature,
+    with_secp256r1_instruction,
+};
