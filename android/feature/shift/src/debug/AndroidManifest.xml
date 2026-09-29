@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    DEBUG BUILDS ONLY: merged into debug (and localdev) APKs, absent from release.
+    The sensor lab records accelerometer windows and screen events for the pickup/bump
+    classifier. Nothing here is exported.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name=".devlog.SensorLabActivity"
+            android:exported="false"
+            android:label="Sensor lab (debug)"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <service
+            android:name=".devlog.SensorLabService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Debug builds only: records accelerometer data around user-performed test motions to train the pickup detector." />
+        </service>
+
+        <provider
+            android:name=".devlog.SensorLabExportProvider"
+            android:authorities="${applicationId}.sensorlab"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/sensorlab_export_paths" />
+        </provider>
+    </application>
+
+</manifest>
