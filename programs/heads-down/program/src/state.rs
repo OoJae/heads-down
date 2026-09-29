@@ -135,6 +135,10 @@ pub mod break_reason {
     pub const BUDGET: u8 = 5;
     /// Ended early by the wallet, or a manual break.
     pub const MANUAL: u8 = 6;
+    /// Charger unplugged during a charger shift (soft: → Cooling). v1.1.
+    pub const UNPLUGGED: u8 = 7;
+    /// Device unlocked (`ACTION_USER_PRESENT`; hard: → Broken). v1.1.
+    pub const UNLOCKED: u8 = 8;
 }
 
 /// Global configuration, PDA `[b"config"]`, 256 bytes.

@@ -10,8 +10,10 @@
 //! 1. `[]` Instructions sysvar
 //! 2. `[writable]` rig_0, then rig_1, ... (one per entry)
 //!
-//! A rig whose heartbeat fails is skipped with `RigSkipped`; a malformed
-//! account list or a duplicate rig fails the transaction.
+//! A rig whose heartbeat is accepted emits `HeartbeatsRecorded{rig,
+//! round_id = Board.round_id, dark_rounds_added}`; a rig whose heartbeat
+//! fails is skipped with `RigSkipped`; a malformed account list or a
+//! duplicate rig fails the transaction.
 
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
@@ -75,8 +77,9 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             _ => Err(HdError::RigNotArmed.code()),
         };
         drop(g);
-        if let Err(code) = outcome {
-            events::rig_skipped(&rig_address, board_round, code);
+        match outcome {
+            Ok(dark_added) => events::heartbeats_recorded(&rig_address, board_round, dark_added),
+            Err(code) => events::rig_skipped(&rig_address, board_round, code),
         }
     }
     Ok(())

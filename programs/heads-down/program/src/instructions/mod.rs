@@ -61,16 +61,17 @@ impl HeartbeatEntry {
     }
 }
 
-/// Verify `entry`'s HEARTBEAT for `rig` and grant its lease. Returns
-/// `Err(code)` to skip the rig; nothing is written unless every check
-/// passes. `board_round` is the live `Board.round_id`.
+/// Verify `entry`'s HEARTBEAT for `rig` and grant its lease. Returns the
+/// dark rounds the lease added, or `Err(code)` to skip the rig; nothing is
+/// written unless every check passes. `board_round` is the live
+/// `Board.round_id`.
 pub fn apply_heartbeat(
     rig: &mut Rig,
     rig_address: &Address,
     instructions_sysvar: &AccountView,
     entry: &HeartbeatEntry,
     board_round: u64,
-) -> Result<(), u32> {
+) -> Result<u64, u32> {
     if entry.round_id > board_round || entry.lease_rounds == 0 {
         return Err(HdError::InvalidHeartbeat.code());
     }
@@ -114,7 +115,7 @@ pub fn apply_heartbeat(
     if rig.state == rig_state::ARMED || rig.state == rig_state::COOLING {
         rig.state = rig_state::DOWN;
     }
-    Ok(())
+    Ok(grant.dark_added)
 }
 
 /// `true` when a lease granted in this shift covers `round`.

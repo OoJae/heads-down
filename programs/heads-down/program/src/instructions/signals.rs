@@ -10,10 +10,14 @@
 //! P-256 message is BREAK (kind 2) / FREEZE (kind 3) over
 //! `(rig, counter, rig.shift_id, reason)`.
 //!
-//! * BREAK reasons: 1 pickup and 2 screen_on → Cooling (a fresh heartbeat
-//!   resumes the shift); 4 lease_lapse, 5 budget, 6 manual → Broken (only
-//!   `end_shift` moves on). Allowed from Armed / Down / Cooling.
-//! * FREEZE: any state → Frozen; only the wallet can unfreeze.
+//! * BREAK reasons: 1 pickup, 2 screen_on and 7 unplugged → Cooling (a fresh
+//!   heartbeat resumes the shift); 4 lease_lapse, 5 budget, 6 manual and
+//!   8 unlocked → Broken (only `end_shift` moves on). 0 and 3 are refused.
+//!   Allowed from Armed / Down / Cooling. Emits `ShiftBroken{rig, shift_id,
+//!   reason}`.
+//! * FREEZE: any state → Frozen; only the wallet can unfreeze. When it
+//!   interrupts an open shift (the rig was not already Frozen) it records
+//!   reason 3 (freeze) and emits `ShiftBroken{rig, shift_id, 3}`.
 //!
 //! `unfreeze_rig` accounts: 0 `[writable]` Rig, 1 `[signer]` authority.
 //! Data: empty. Frozen → Idle, or → Broken if a shift is still open (so
@@ -23,6 +27,7 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     error::HdError,
+    events,
     message::{self, kind},
     state::{self, break_reason, rig_state, Rig},
     util::{authorize_signal, require_rig_authority, Preimage, Reader, SignalAuth},
@@ -48,10 +53,13 @@ pub fn process_break(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult
     };
     let (auth, reason) = read_signal(data)?;
     let next_state = match reason {
-        break_reason::PICKUP | break_reason::SCREEN_ON => rig_state::COOLING,
-        break_reason::LEASE_LAPSE | break_reason::BUDGET | break_reason::MANUAL => {
-            rig_state::BROKEN
+        break_reason::PICKUP | break_reason::SCREEN_ON | break_reason::UNPLUGGED => {
+            rig_state::COOLING
         }
+        break_reason::LEASE_LAPSE
+        | break_reason::BUDGET
+        | break_reason::MANUAL
+        | break_reason::UNLOCKED => rig_state::BROKEN,
         _ => return Err(HdError::InvalidInstruction.into()),
     };
     let rig_address = *rig.address();
@@ -76,6 +84,8 @@ pub fn process_break(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult
     })?;
     g.state = next_state;
     g.break_reason = reason;
+    drop(g);
+    events::shift_broken(&rig_address, shift_id, reason);
     Ok(())
 }
 
@@ -97,10 +107,15 @@ pub fn process_freeze(accounts: &mut [AccountView], data: &[u8]) -> ProgramResul
             reason,
         ))
     })?;
-    if g.state != rig_state::FROZEN && g.shift_open == 1 {
+    let interrupts_shift = g.state != rig_state::FROZEN && g.shift_open == 1;
+    if interrupts_shift {
         g.break_reason = break_reason::FREEZE;
     }
     g.state = rig_state::FROZEN;
+    drop(g);
+    if interrupts_shift {
+        events::shift_broken(&rig_address, shift_id, break_reason::FREEZE);
+    }
     Ok(())
 }
 

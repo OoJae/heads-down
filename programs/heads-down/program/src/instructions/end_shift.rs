@@ -10,6 +10,9 @@
 //!
 //! Data: empty.
 //!
+//! Emits `ShiftEnded` (tag 4, v1) and then `ShiftEndedV2` (tag 10), which
+//! adds `start_round`, `end_round` and `mode`.
+//!
 //! The rig's authority may end its shift at any time. Anyone else may end it
 //! only once `now > plan_window_end_ts` **and** the heartbeat lease has
 //! expired (`lease_to_round < board.round_id`).
@@ -143,6 +146,18 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     }
     drop(g);
 
-    events::shift_ended(&rig_address, shift_id, dark, rounds_dug, lamports, reason);
+    events::shift_ended(
+        &rig_address,
+        &events::ShiftSummary {
+            shift_id,
+            dark_rounds: dark,
+            rounds_dug,
+            lamports,
+            reason,
+            start_round,
+            end_round,
+            mode,
+        },
+    );
     Ok(())
 }

@@ -14,13 +14,15 @@
 //! The optional attestation is an Ed25519 signature by `config.registrar`
 //! over `"HDreg" | program | authority | p256 | level | expiry_slot`, carried
 //! by an `Ed25519SigVerify` instruction in the same transaction.
+//!
+//! Emits `RigRegistered{rig, authority, tier = 0, attestation_level}`.
 
 use pinocchio::{error::ProgramError, instruction::seeds, AccountView, ProgramResult};
 
 use crate::{
     ed25519,
     error::HdError,
-    message, ore, pda,
+    events, message, ore, pda,
     state::{self, rig_state, Config, Header, Rig},
     util::{clock, load_config, require_signer, Reader},
     ID, RIG_SEED,
@@ -128,6 +130,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     );
 
     let now = clock()?.unix_timestamp;
+    let rig_address = *rig.address();
     let mut g = state::load_uninit_mut::<Rig>(rig)?;
     g.ore_automation_bump = auto_bump;
     g.ore_miner_bump = miner_bump;
@@ -140,5 +143,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     g.state = rig_state::IDLE;
     g.freezes_left = crate::logic::FREEZES_PER_PERIOD;
     g.week_start_ts.set(now);
+    drop(g);
+    events::rig_registered(&rig_address, authority.address(), 0, level);
     Ok(())
 }
