@@ -1,6 +1,7 @@
 package xyz.headsdown.feature.reveal
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -22,6 +23,10 @@ import xyz.headsdown.surface.notification.R as NotificationR
  * arrives as a heads-up: graceful, not broken.
  */
 class RevealAlarmReceiver : BroadcastReceiver() {
+    // POST_NOTIFICATIONS is checked explicitly below for API 33+ (it does not exist on 31/32,
+    // where an unconditional check would always fail) and notify() is guarded against
+    // SecurityException. Lint cannot model the SDK-gated check, hence the suppression.
+    @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_REVEAL) return
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -46,7 +51,11 @@ class RevealAlarmReceiver : BroadcastReceiver() {
             .setContentIntent(open)
             .setFullScreenIntent(open, true)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+            // Permission revoked between the check and the post: no reveal tonight, no crash.
+        }
     }
 
     companion object {

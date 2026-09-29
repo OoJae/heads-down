@@ -4,9 +4,9 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.getSystemService
+import androidx.core.net.toUri
 import java.time.ZoneId
 
 data class ScheduledReveal(val plan: RevealPlan, val exact: Boolean)
@@ -48,7 +48,7 @@ class RevealScheduler(private val context: Context) {
 
     /** Android 12/12L: lets the user grant exact alarms (no-op screen on 13+ with USE_EXACT_ALARM). */
     fun exactAlarmSettingsIntent(): Intent =
-        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
+        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, "package:${context.packageName}".toUri())
 
     private fun alarmIntent(): PendingIntent = PendingIntent.getBroadcast(
         context,

@@ -4,6 +4,7 @@ import android.app.StatusBarManager
 import android.content.Context
 import android.graphics.drawable.Icon
 import android.os.Build
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
 
 enum class TileAddOutcome { ADDED, ALREADY_ADDED, NOT_ADDED, UNSUPPORTED, ERROR }
@@ -20,7 +21,8 @@ object TileAddResult {
 
 /** Onboarding helper: the system "Add Heads Down to Quick Settings?" prompt (Android 13+). */
 object TilePrompt {
-    val supported: Boolean get() = Build.VERSION.SDK_INT >= 33
+    @get:ChecksSdkIntAtLeast(api = Build.VERSION_CODES.TIRAMISU)
+    val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
     /** Must be called while our app is in the foreground. Android 12 users add the tile by hand. */
     fun request(context: Context, onResult: (TileAddOutcome) -> Unit) {

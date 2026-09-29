@@ -1,11 +1,13 @@
 package xyz.headsdown.surface.notification
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.net.toUri
 
 /** What the onboarding screen should do next about POST_NOTIFICATIONS. */
 enum class NotificationPermissionStep {
@@ -27,6 +29,8 @@ enum class NotificationPermissionStep {
  * its notification, and the morning reveal needs one, so the shift is gated on this.
  */
 object NotificationPermissionPolicy {
+    /** Only ever requested on API 33+, where it exists ([nextStep] never asks below that). */
+    @SuppressLint("InlinedApi")
     const val PERMISSION = Manifest.permission.POST_NOTIFICATIONS
 
     /**
@@ -74,7 +78,7 @@ object NotificationAccess {
     fun fullScreenIntentSettings(context: Context): Intent =
         if (Build.VERSION.SDK_INT >= 34) {
             Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
-                .setData(android.net.Uri.parse("package:${context.packageName}"))
+                .setData("package:${context.packageName}".toUri())
         } else {
             appNotificationSettings(context)
         }

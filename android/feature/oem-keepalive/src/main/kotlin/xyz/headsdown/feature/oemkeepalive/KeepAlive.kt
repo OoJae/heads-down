@@ -7,10 +7,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.content.getSystemService
+import androidx.core.net.toUri
 import java.util.concurrent.TimeUnit
 
 sealed interface LaunchResult {
@@ -69,7 +69,7 @@ class KeepAlive(private val context: Context) {
     private fun IntentSpec.toIntent(): Intent = Intent().also { intent ->
         action?.let(intent::setAction)
         if (packageName != null && className != null) intent.component = ComponentName(packageName, className)
-        dataUri?.let { intent.data = Uri.parse(it) }
+        dataUri?.let { intent.data = it.toUri() }
         extras.forEach { (k, v) -> intent.putExtra(k, v) }
     }
 

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
         Backups: allowBackup=false stops cloud backup, but on Android 12+ it does not stop
@@ -17,7 +18,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.HeadsDown"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        tools:targetApi="33">
 
         <!-- The only exported component besides the system-bound tile service. -->
         <activity
