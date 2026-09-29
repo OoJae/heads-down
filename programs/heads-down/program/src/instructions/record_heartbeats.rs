@@ -8,7 +8,7 @@
 //! Accounts:
 //! 0. `[]` ORE Board
 //! 1. `[]` Instructions sysvar
-//! 2.. `[writable]` rig_i
+//! 2. `[writable]` rig_0, then rig_1, ... (one per entry)
 //!
 //! A rig whose heartbeat fails is skipped with `RigSkipped`; a malformed
 //! account list or a duplicate rig fails the transaction.

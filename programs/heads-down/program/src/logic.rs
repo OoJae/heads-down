@@ -67,22 +67,19 @@ pub fn select_tiles(
     split: u8,
     solo: u8,
 ) -> u32 {
-    // Stable insertion sort of the 25 indices by (deployed, index).
-    let mut order = [0u8; SQUARES];
-    for (i, o) in order.iter_mut().enumerate() {
-        *o = i as u8;
-    }
-    let key = |i: u8| deployed.get(i as usize).copied().unwrap_or(u64::MAX);
+    // Stable insertion sort of the 25 indices by (deployed, index): a strict
+    // `>` never moves equal keys past each other, so ties keep index order.
+    let mut order = crate::ore::SQUARE_INDICES;
+    let key = |i: u8| deployed.get(usize::from(i)).copied().unwrap_or(u64::MAX);
     for i in 1..SQUARES {
         let mut j = i;
-        while j > 0 {
-            let (a, b) = match (order.get(j - 1), order.get(j)) {
-                (Some(&a), Some(&b)) => (a, b),
-                _ => break,
+        while let Some(prev) = j.checked_sub(1) {
+            let (Some(&a), Some(&b)) = (order.get(prev), order.get(j)) else {
+                break;
             };
             if key(a) > key(b) {
-                order.swap(j - 1, j);
-                j -= 1;
+                order.swap(prev, j);
+                j = prev;
             } else {
                 break;
             }
@@ -91,18 +88,18 @@ pub fn select_tiles(
     let (mut want_split, mut want_solo) = (split, solo);
     let mut mask = 0u32;
     for &i in order.iter() {
-        let bit = 1u32 << (i as u32 & 31);
+        let bit = 1u32.wrapping_shl(u32::from(i));
         if exclude & bit != 0 {
             continue;
         }
         if solo_mask & bit != 0 {
             if want_solo > 0 {
                 mask |= bit;
-                want_solo -= 1;
+                want_solo = want_solo.saturating_sub(1);
             }
         } else if want_split > 0 {
             mask |= bit;
-            want_split -= 1;
+            want_split = want_split.saturating_sub(1);
         }
         if want_split == 0 && want_solo == 0 {
             break;
@@ -157,7 +154,7 @@ pub fn grant_lease(
     let start = hb_round.max(shift_start);
     let first_new = start.max(covered_end.saturating_add(1));
     let dark_added = if new_to >= first_new {
-        new_to - first_new + 1
+        new_to.saturating_sub(first_new).saturating_add(1)
     } else {
         0
     };

@@ -65,6 +65,10 @@ pub const STRATEGY_DISCRETIONARY: u64 = 2;
 pub const DEPLOY_TAG: u8 = 6;
 /// Number of board squares.
 pub const SQUARES: usize = 25;
+/// `0..25` as bytes (the unshuffled square order).
+pub const SQUARE_INDICES: [u8; SQUARES] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+];
 
 /// Steel discriminators and exact sizes (`state/mod.rs:21-28`, verified
 /// against live mainnet accounts in `docs/ORE.md` section 1).
@@ -144,6 +148,13 @@ pub mod layout {
 /// Format: `"heads_down/ore-layout/v1"` then `(disc u8, len u16 LE)` for
 /// Automation, Config, Miner, Treasury, Board, Round, then every field offset
 /// read, as u16 LE, in the order of [`layout`].
+// Evaluated at compile time: an out-of-bounds index or a truncating cast here
+// is a build error, never a runtime panic.
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation
+)]
 pub const LAYOUT_PREIMAGE: [u8; 24 + 6 * 3 + 2 * 18] = {
     use layout::*;
     let mut out = [0u8; 24 + 6 * 3 + 2 * 18];
@@ -424,10 +435,12 @@ impl Miner {
     /// Mask of squares with SOL in `deployed`.
     pub fn deployed_mask(&self) -> u32 {
         let mut m = 0u32;
-        for (i, v) in self.deployed.iter().enumerate() {
+        let mut bit = 1u32;
+        for v in self.deployed.iter() {
             if *v > 0 {
-                m |= 1u32 << (i as u32 & 31);
+                m |= bit;
             }
+            bit = bit.wrapping_shl(1);
         }
         m
     }
@@ -456,31 +469,28 @@ pub fn read_miner(account: &AccountView) -> Result<Option<Miner>, HdError> {
 /// (bit set = solo, bit clear = split).
 pub fn distribution_mask(round_id: u64) -> u32 {
     const BITS: usize = 10;
-    let mut indices = [0u8; SQUARES];
-    for (i, v) in indices.iter_mut().enumerate() {
-        *v = i as u8;
-    }
+    let mut indices = SQUARE_INDICES;
     let mut randomness = crate::hash::keccak256(&[&round_id.to_le_bytes()]);
     let mut offset = 0usize;
-    // for i in (1..25).rev()
-    let mut i = SQUARES - 1;
-    while i >= 1 {
-        if offset + 2 > randomness.len() {
+    // ORE: `for i in (1..25).rev()`, 2 bytes per draw, rehash when the 32
+    // bytes run out (after 16 draws).
+    for i in (1..SQUARES).rev() {
+        if offset.saturating_add(2) > randomness.len() {
             randomness = crate::hash::keccak256(&[&randomness]);
             offset = 0;
         }
-        let r = match randomness.get(offset..offset + 2) {
+        let r = match randomness.get(offset..offset.saturating_add(2)) {
             Some(&[a, b]) => u16::from_le_bytes([a, b]),
             _ => 0,
         };
-        let j = (r as usize) % (i + 1);
+        // i + 1 is in 2..=25, never zero.
+        let j = usize::from(r).checked_rem(i.saturating_add(1)).unwrap_or(0);
         indices.swap(i, j);
-        offset += 2;
-        i -= 1;
+        offset = offset.saturating_add(2);
     }
     let mut mask = 0u32;
     for &idx in indices.iter().take(BITS) {
-        mask |= 1u32 << (idx as u32 & 31);
+        mask |= 1u32.wrapping_shl(u32::from(idx));
     }
     mask
 }
