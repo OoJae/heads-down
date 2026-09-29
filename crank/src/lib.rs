@@ -26,6 +26,7 @@
 
 pub mod account;
 pub mod alt;
+pub mod app;
 pub mod breaker;
 pub mod bytes;
 pub mod chain;
