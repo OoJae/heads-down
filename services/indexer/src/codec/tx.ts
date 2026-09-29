@@ -61,6 +61,8 @@ export interface ExtractedTx {
   signature: string;
   slot: number;
   blockTime: number | null;
+  /** accountKeys[0]. */
+  feePayer: string;
   failed: boolean;
   logsTruncated: boolean;
   hdEvents: Located<HdEvent>[];
@@ -105,10 +107,15 @@ export function extractTransaction(tx: RawTransaction, opts: ExtractOptions): Ex
   const meta = tx.meta;
   if (meta === null || typeof meta !== "object") throw new TxShapeError("missing meta");
 
+  const staticKeys = tx.transaction.message?.accountKeys;
+  if (!Array.isArray(staticKeys) || staticKeys.length === 0 || staticKeys.length > MAX_ACCOUNT_KEYS) {
+    throw new TxShapeError("invalid accountKeys");
+  }
   const out: ExtractedTx = {
     signature: sig,
     slot: tx.slot,
     blockTime,
+    feePayer: keyOf(staticKeys[0]),
     failed: meta.err !== null && meta.err !== undefined,
     logsTruncated: false,
     hdEvents: [],
@@ -144,10 +151,6 @@ export function extractTransaction(tx: RawTransaction, opts: ExtractOptions): Ex
   }
 
   // ---- ORE events from inner instructions ------------------------------------------------
-  const staticKeys = tx.transaction.message?.accountKeys;
-  if (!Array.isArray(staticKeys) || staticKeys.length > MAX_ACCOUNT_KEYS) {
-    throw new TxShapeError("invalid accountKeys");
-  }
   const loaded = meta.loadedAddresses ?? {};
   const keys = [
     ...staticKeys.map(keyOf),

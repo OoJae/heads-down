@@ -34,6 +34,8 @@ CREATE TABLE txs (
   signature       tx_signature NOT NULL,
   slot            BIGINT NOT NULL CHECK (slot >= 0),
   block_time      BIGINT,
+  -- accountKeys[0]: who paid for (and, for digs, cranked) the transaction.
+  fee_payer       sol_address NOT NULL,
   failed          BOOLEAN NOT NULL,
   logs_truncated  BOOLEAN NOT NULL DEFAULT FALSE,
   source          TEXT NOT NULL,

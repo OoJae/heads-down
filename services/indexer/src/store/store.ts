@@ -130,8 +130,8 @@ export class Store {
       await insertMany(
         db,
         "txs",
-        ["dataset", "signature", "slot", "block_time", "failed", "logs_truncated", "source"],
-        fresh.map((x) => [d, x.signature, x.slot, x.blockTime, x.failed, x.logsTruncated, source]),
+        ["dataset", "signature", "slot", "block_time", "fee_payer", "failed", "logs_truncated", "source"],
+        fresh.map((x) => [d, x.signature, x.slot, x.blockTime, x.feePayer, x.failed, x.logsTruncated, source]),
       );
       const dug: Param[][] = [];
       const skipped: Param[][] = [];
@@ -314,8 +314,10 @@ export class Store {
     const q = <T>(sql: string) => this.db.query<Record<string, unknown>>(sql, d).then((rows) => rows as T);
     const [digs, skips, arms, ends, seekers, deploys, rounds, rigs, seats, config] = await Promise.all([
       q<Record<string, unknown>[]>(
-        `SELECT signature, idx, slot, block_time, rig, round_id::text AS round_id, lamports::text AS lamports, mask, ema_ev::text AS ema_ev
-         FROM ev_rig_dug WHERE dataset = $1 ORDER BY slot, signature, idx`,
+        `SELECT d.signature, d.idx, d.slot, d.block_time, d.rig, d.round_id::text AS round_id, d.lamports::text AS lamports, d.mask,
+                d.ema_ev::text AS ema_ev, t.fee_payer
+         FROM ev_rig_dug d JOIN txs t ON t.dataset = d.dataset AND t.signature = d.signature
+         WHERE d.dataset = $1 ORDER BY d.slot, d.signature, d.idx`,
       ),
       q<Record<string, unknown>[]>(
         `SELECT signature, block_time, rig, round_id::text AS round_id, error_code FROM ev_rig_skipped WHERE dataset = $1 ORDER BY slot, signature, idx`,
@@ -366,6 +368,7 @@ export class Store {
           lamports: big(r.lamports),
           mask: num(r.mask),
           emaEv: big(r.ema_ev),
+          feePayer: r.fee_payer as string,
         }),
       ),
       skips: skips.map(

@@ -17,6 +17,8 @@ export interface DigRow {
   lamports: bigint;
   mask: number;
   emaEv: bigint;
+  /** Fee payer of the dig transaction = the crank that landed it. */
+  feePayer: string;
 }
 
 export interface SkipRow {
