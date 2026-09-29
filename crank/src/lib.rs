@@ -4,5 +4,6 @@
 #![deny(missing_docs)]
 
 pub mod bytes;
+pub mod gate;
 pub mod hd;
 pub mod ore;
