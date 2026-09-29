@@ -11,8 +11,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import xyz.headsdown.BuildConfig
+import xyz.headsdown.core.keys.PrefsCounterStore
+import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.keys.RigKeyManager
-import xyz.headsdown.core.keys.SignedHeartbeat
+import xyz.headsdown.core.keys.SignedRigMessage
 import xyz.headsdown.core.wallet.AuthTokenVault
 import xyz.headsdown.core.wallet.ConfirmationPoller
 import xyz.headsdown.core.wallet.HeadsDownIdentity
@@ -22,10 +24,8 @@ import xyz.headsdown.core.wallet.SharedPreferencesSecretStore
 import xyz.headsdown.core.wallet.UnconfiguredSolanaRpc
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
 import xyz.headsdown.feature.reveal.RevealScheduler
-import xyz.headsdown.feature.shift.HeartbeatCounter
 import xyz.headsdown.feature.shift.HeartbeatSink
 import xyz.headsdown.feature.shift.OreRoundSource
-import xyz.headsdown.feature.shift.PrefsHeartbeatCounter
 import xyz.headsdown.feature.shift.RigBinding
 import xyz.headsdown.feature.shift.RigBindingProvider
 import xyz.headsdown.feature.shift.RigSignerProvider
@@ -65,8 +65,9 @@ object AppModule {
     @Provides @Singleton
     fun rigBinding(): RigBindingProvider = RigBindingProvider { RigBinding.UNREGISTERED }
 
+    /** The rig's one write-ahead message counter (HEARTBEAT, BREAK, FREEZE, PLAN). */
     @Provides @Singleton
-    fun heartbeatCounter(@ApplicationContext context: Context): HeartbeatCounter = PrefsHeartbeatCounter(context)
+    fun rigCounter(@ApplicationContext context: Context): RigCounter = RigCounter(PrefsCounterStore(context))
 
     @Provides @Singleton
     fun shiftJournal(@ApplicationContext context: Context) = ShiftJournal(context)
@@ -94,13 +95,13 @@ class LocalHeartbeatSink @Inject constructor() : HeartbeatSink {
     private val count = AtomicInteger()
 
     @Volatile
-    var last: SignedHeartbeat? = null
+    var last: SignedRigMessage<*>? = null
         private set
 
     val delivered: Int get() = count.get()
 
-    override suspend fun deliver(heartbeat: SignedHeartbeat) {
-        last = heartbeat
+    override suspend fun deliver(message: SignedRigMessage<*>) {
+        last = message
         count.incrementAndGet()
     }
 }

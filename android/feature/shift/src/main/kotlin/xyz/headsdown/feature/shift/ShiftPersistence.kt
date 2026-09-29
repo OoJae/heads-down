@@ -1,41 +1,11 @@
 package xyz.headsdown.feature.shift
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 
-/**
- * Write-ahead heartbeat counter. `commit()` (synchronous) runs before the signature exists,
- * so a crash can skip a value but can never reuse one: the on-chain rule is
- * `counter > rig.counter`.
- */
-// commit() is deliberate throughout: the result must be known before a signature exists.
-@SuppressLint("ApplySharedPref", "UseKtx")
-class PrefsHeartbeatCounter(context: Context) : HeartbeatCounter {
-    private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-
-    @Synchronized
-    override fun next(): ULong {
-        val next = current() + 1uL
-        check(next != 0uL) { "counter exhausted" } // u64 wrap would reuse values
-        check(prefs.edit().putLong(KEY, next.toLong()).commit()) { "counter not persisted" }
-        return next
-    }
-
-    /** Raise the floor after reading `Rig.counter` from chain (e.g. after app data was cleared). */
-    @Synchronized
-    fun ensureAtLeast(floor: ULong) {
-        if (current() < floor) check(prefs.edit().putLong(KEY, floor.toLong()).commit())
-    }
-
-    private fun current(): ULong = prefs.getLong(KEY, 0L).toULong()
-
-    private companion object {
-        const val FILE = "hd_heartbeat_counter"
-        const val KEY = "counter"
-    }
-}
+// The write-ahead message counter lives in core/keys (RigCounter + PrefsCounterStore): one
+// sequence shared by HEARTBEAT, BREAK, FREEZE and PLAN, with the same prefs file as before.
 
 /** Last shift, as recorded by the service. Read by the "killed by the OS" health check. */
 data class ShiftRecord(
