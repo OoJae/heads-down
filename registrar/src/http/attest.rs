@@ -13,7 +13,7 @@ use super::{blocking, App};
 use crate::attest::chain::{MAX_CERT_BYTES, MAX_CHAIN_LEN};
 use crate::attest::{challenge as derive_challenge, AttestationSummary};
 use crate::clock::rfc3339;
-use crate::nonce::{self, NoncePurpose, NonceRecord, NONCE_BYTES};
+use crate::nonce::{self, NoncePurpose, NONCE_BYTES};
 use crate::session::SessionClaims;
 use crate::translog::{LogEntry, NewEntry};
 use crate::util::{b64_decode, b64_encode, decode_address, decode_hex_exact, encode_address};
@@ -176,7 +176,8 @@ pub async fn attest(
     // 5. Consume the nonce (atomic, bound to this authority). Only now is it spent.
     let store = Arc::clone(&app.nonces);
     let (n, subject) = (req.nonce.clone(), req.authority.clone());
-    blocking(move || nonce::consume(store.as_ref(), &n, NoncePurpose::Attest, Some(&subject), now)).await??;
+    let consumed =
+        blocking(move || nonce::consume(store.as_ref(), &n, NoncePurpose::Attest, Some(&subject), now)).await??;
 
     // 6. Sign, log (fsync), respond.
     let signed = app.registrar.sign(Voucher {
@@ -203,17 +204,13 @@ pub async fn attest(
     {
         Ok(e) => e,
         Err(e) => {
-            // Nothing was handed out. Give the nonce back so the client can retry with the same
-            // key (its challenge is fixed in the key's certificate).
+            // Nothing was handed out. Put back exactly the record we took (same subject, same
+            // expiry) so the client can retry with the same key, whose challenge is fixed in its
+            // certificate.
             tracing::error!(error = %e, "transparency log append failed; voucher withheld");
             let store = Arc::clone(&app.nonces);
-            let (n, subject) = (req.nonce.clone(), req.authority.clone());
-            let restore = NonceRecord {
-                purpose: NoncePurpose::Attest,
-                subject: Some(subject),
-                expires_at: now.saturating_add(app.config.nonce_ttl_secs),
-            };
-            let _ = blocking(move || store.insert(&n, &restore, now)).await;
+            let n = req.nonce.clone();
+            let _ = blocking(move || store.insert(&n, &consumed, now)).await;
             return Err(ApiError::internal());
         }
     };

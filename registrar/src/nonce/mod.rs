@@ -141,7 +141,7 @@ pub fn consume(
     purpose: NoncePurpose,
     subject: Option<&str>,
     now: i64,
-) -> Result<(), ConsumeError> {
+) -> Result<NonceRecord, ConsumeError> {
     if !is_well_formed(nonce) {
         return Err(ConsumeError::NotFound);
     }
@@ -155,7 +155,9 @@ pub fn consume(
     if record.subject.as_deref() != subject {
         return Err(ConsumeError::WrongSubject);
     }
-    Ok(())
+    // Returned so a caller that fails *after* consuming (e.g. a storage error) can put back
+    // exactly what it took, without extending the nonce's lifetime.
+    Ok(record)
 }
 
 /// Our nonces are exactly 32 lowercase hex characters. Anything else is rejected before it
@@ -184,7 +186,8 @@ pub(crate) mod conformance {
         let (n, exp) = issue(store, NoncePurpose::Siws, None, 1_000, 600).unwrap();
         assert!(is_well_formed(&n));
         assert_eq!(exp, 1_600);
-        consume(store, &n, NoncePurpose::Siws, None, 1_001).unwrap();
+        let taken = consume(store, &n, NoncePurpose::Siws, None, 1_001).unwrap();
+        assert_eq!(taken, NonceRecord { purpose: NoncePurpose::Siws, subject: None, expires_at: 1_600 });
         assert!(matches!(consume(store, &n, NoncePurpose::Siws, None, 1_002), Err(ConsumeError::NotFound)));
         // Never issued.
         assert!(matches!(
