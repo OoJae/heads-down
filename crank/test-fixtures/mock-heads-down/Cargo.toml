@@ -1,0 +1,28 @@
+[package]
+name = "mock-heads-down"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Test-only mock of heads_down::dig built from programs/heads-down/INTERFACE.md, so the crank's transactions can run against live ORE in LiteSVM before the real program lands"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+# Standalone workspace: built with `cargo build-sbf --manifest-path test-fixtures/mock-heads-down/Cargo.toml`.
+[workspace]
+
+[dependencies]
+pinocchio = { version = "0.11.2", default-features = false, features = ["cpi", "copy"] }
+pinocchio-system = "0.6.1"
+p256-introspect = { path = "../../../crates/p256-introspect" }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-address = { version = "2.7", features = ["curve25519"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
