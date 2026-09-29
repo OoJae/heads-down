@@ -1,0 +1,90 @@
+# Heads Down traction dashboard
+
+The public, verifiable traction site for Heads Down. It is a **fully static** Next.js (App Router)
+build. Every number is fetched in the browser from the [indexer's public API](../services/indexer),
+and each tile links to the on-chain transactions or accounts behind it.
+
+## Run it
+
+```bash
+# 1. API (no Docker needed): simulated dataset on http://127.0.0.1:8787
+cd services/indexer && pnpm install && pnpm demo
+
+# 2. Dashboard
+cd dashboard && pnpm install
+NEXT_PUBLIC_HD_API_BASE=http://127.0.0.1:8787 pnpm dev      # http://localhost:3000
+NEXT_PUBLIC_HD_API_BASE=https://api.example.org pnpm build   # static site in out/
+pnpm start                                                   # serves out/ locally
+```
+
+`NEXT_PUBLIC_HD_API_BASE` is the only configuration. It is inlined at build time and is public by
+design: the app has no secrets. A value that is not http(s), or that embeds credentials, is
+rejected. Without it the pages explain how to connect one and show no numbers.
+
+## Pages
+
+| Route | What it shows |
+|---|---|
+| `/` | Headline tiles: rigs (total, Seeker-verified, guest), nightly active rigs, dark hours, rounds dug, SOL deployed into ORE, ORE mined, ORE bought and buried (**"Not shipped" placeholders, never 0**), gate-open rate, cranks. Also a 30-night active-rigs chart (Seeker vs guest) and a public integrity-check table. |
+| `/cohorts/` | D1/D7/D14 retention by first-shift night: average tiles plus a cohort heatmap table (unfinished cells are hatched and say "not yet") |
+| `/share/` | Heads Down share of unique ORE miners per round, by hour of day (time zone and 1/7/30-day window selectable), with the 00:00–06:00 milestone window emphasised, plus a "check it yourself" table of each hour's peak round with its ORE reset tx and a dig tx |
+| `/digs/` | Recent digs feed: rig, tier, ORE round, SOL, squares, gate cost, with Solscan links for the tx and the rig |
+| `/milestones/` | ORE matched-prize milestones (docs/ORE.md §9) as meters against targets, the items only a human can check, and CSV downloads (per-round shares, digs, monthly report) |
+| `/method/` | Sources, exact definitions, what is not shown and why |
+
+**Rigs by region is omitted on purpose.** The app collects no location, and no opt-in region
+data exists, so there is nothing honest to plot. Milestone "regions" are time-zone windows.
+
+## Honesty and safety
+
+- **Simulated data cannot pass as real.** The API envelope carries `dataset.simulated`. When it is
+  true, every page shows a striped **SIMULATED DATA** banner with the seed, every tile carries a
+  **SIM** badge, no explorer links are rendered (the ids exist on no chain), and CSV buttons are
+  badged. The client **pins the first dataset it sees** and rejects any later response from another
+  dataset (`DatasetMismatchError`), so a misconfigured deploy cannot show simulated and real numbers
+  side by side. It also rejects an envelope whose `simulated` flag contradicts its name.
+- **Links are allowlisted.** Evidence URLs from the API are rendered only if they match Solscan or
+  Solana Explorer patterns for a base58 id (`safeExplorerUrl`). A compromised API cannot inject
+  `javascript:` or look-alike domains. External links use `rel="noopener noreferrer"`.
+- **CSP** ships as a meta tag (static hosting cannot set headers). Data may only be fetched from
+  this origin and the configured API origin, with `object-src 'none'`, `base-uri 'none'` and
+  `form-action 'none'`. Requests go out with `credentials: "omit"`.
+- **No banned wording.** `test/honesty.test.ts` scans every source file and every built page for
+  earn / yield / stake / APY / passive income. Heads Down accumulates ORE by the cheaper route; it
+  is not a return on capital.
+- **u64 stays exact.** Amounts arrive as decimal strings and are formatted with BigInt. Non-zero
+  dust shows as `<0.001`, never as `0`.
+
+## Design
+
+- **Palette.** The Heads Down palette from the Android theme: charcoal background, **ember orange =
+  rig hot**, **ORE gold = hauls**. Dark by default; a light theme is opt-in (remembered in
+  localStorage, with try/catch). Chart marks use steps checked with the dataviz palette validator.
+  Every check passes in both modes: lightness band, chroma floor, CVD ΔE ≥ 26, normal-vision ΔE ≥ 29,
+  and ≥ 3:1 contrast. Dark: guest `#E8590F`, Seeker `#3987E5`, haul `#C98500` on `#1C1D20`. Light:
+  `#C2410C`, `#2A78D6`, `#B07A00` on white. Text always uses text colors. Color marks identity only
+  through swatches.
+- **Charts** are hand-built SVG. They render at the container's measured pixel width, so tick text
+  stays 11 px on a phone. Columns are ≤ 24 px with a rounded data end, there is a 2 px surface gap
+  between stacked segments, and grids are solid hairlines. Every column is keyboard-focusable with an
+  `aria-label` and a tooltip on hover or focus, and every chart has a "Show as table" view. The
+  cohort heatmap is a real `<table>` whose cells print their values (one hue: sequential).
+- **Mobile-first.** Two-column tiles on phones and four on desktop, a horizontally scrollable nav,
+  and wide tables scroll inside their cards.
+
+## Tests
+
+```bash
+pnpm test        # vitest + jsdom + Testing Library
+pnpm typecheck   # tsc --noEmit (strict)
+pnpm build       # static export must succeed
+```
+
+- `test/components.test.tsx` renders every component against **real API responses captured from
+  the indexer's simulated dataset** (`test/fixtures/*.json`). It covers the SIMULATED banner, SIM
+  badges, the absence of links for simulated ids, allowlisted links on real data, "Not shipped"
+  placeholders, integrity flags, chart accessibility (focusable labelled marks, tooltip on focus,
+  table view, ≤ 24 px bars), cohort "not yet" cells, the digs feed and milestone meters.
+- `test/lib.test.ts` covers BigInt formatting (including u64::MAX), dataset pinning and mismatch
+  rejection, envelope validation, API base validation and the explorer allowlist.
+- `test/honesty.test.ts` scans the sources and the `out/` build for banned wording.
