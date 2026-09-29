@@ -262,8 +262,12 @@ impl TransparencyLog {
         };
         let mut line = serde_json::to_vec(&entry).map_err(|_| LogError::Io("serialize".into()))?;
         line.push(b'\n');
-        inner.file.write_all(&line).map_err(io)?;
-        inner.file.sync_data().map_err(io)?;
+        if let Err(e) = inner.file.write_all(&line).and_then(|()| inner.file.sync_data()) {
+            // Never leave a torn line behind: later appends would follow it and the replay at
+            // the next start would (rightly) refuse the whole log.
+            let _ = inner.file.set_len(inner.len_bytes);
+            return Err(io(e));
+        }
         let offset = inner.len_bytes;
         inner.offsets.push(offset);
         inner.len_bytes = offset.saturating_add(line.len() as u64);
@@ -286,22 +290,26 @@ impl TransparencyLog {
         (inner.next_index, hex::encode(inner.prev_hash))
     }
 
-    /// Entries `[from, from + limit)`.
+    /// Entries `[from, from + limit)`. Reads only the byte range of lines that were fully
+    /// written and synced when the call started, so a concurrent append is never half-read.
     pub async fn read_range(&self, from: u64, limit: usize) -> Result<Vec<LogEntry>, LogError> {
-        let start = {
+        let (start, end) = {
             let inner = self.inner.lock().await;
-            match inner.offsets.get(usize::try_from(from).unwrap_or(usize::MAX)) {
-                Some(o) => *o,
-                None => return Ok(Vec::new()),
-            }
+            let first = usize::try_from(from).unwrap_or(usize::MAX);
+            let Some(start) = inner.offsets.get(first).copied() else {
+                return Ok(Vec::new());
+            };
+            let end = first.checked_add(limit).and_then(|i| inner.offsets.get(i)).copied().unwrap_or(inner.len_bytes);
+            (start, end)
         };
         let path = self.path.clone();
         tokio::task::spawn_blocking(move || -> Result<Vec<LogEntry>, LogError> {
-            use std::io::{Seek, SeekFrom};
+            use std::io::{Read, Seek, SeekFrom};
             let mut file = File::open(&path).map_err(io)?;
             file.seek(SeekFrom::Start(start)).map_err(io)?;
+            let reader = BufReader::new(file.take(end.saturating_sub(start)));
             let mut out = Vec::new();
-            for (i, line) in BufReader::new(file).lines().take(limit).enumerate() {
+            for (i, line) in reader.lines().take(limit).enumerate() {
                 let line = line.map_err(io)?;
                 let e: LogEntry = serde_json::from_str(&line)
                     .map_err(|_| LogError::Invalid { line: from.saturating_add(i as u64), reason: "json" })?;
