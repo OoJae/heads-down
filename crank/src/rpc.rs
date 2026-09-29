@@ -55,6 +55,18 @@ pub fn redact_url(url: &str) -> String {
     }
 }
 
+/// Remove `secret_url` (and any `api-key=` value) from an error message before logging it:
+/// some transport errors echo the request URL.
+pub fn scrub(message: &str, secret_url: &str) -> String {
+    let mut s = if secret_url.is_empty() { message.to_string() } else { message.replace(secret_url, &redact_url(secret_url)) };
+    while let Some(i) = s.to_ascii_lowercase().find("api-key=") {
+        let start = i + "api-key=".len();
+        let end = s[start..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map_or(s.len(), |j| start + j);
+        s.replace_range(i..end, "<redacted>");
+    }
+    s
+}
+
 /// A getProgramAccounts filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Filter {
@@ -436,6 +448,11 @@ mod tests {
         assert_eq!(redact_url("http://127.0.0.1:8899"), "http://127.0.0.1:8899");
         assert_eq!(redact_url("https://api.mainnet-beta.solana.com/"), "https://api.mainnet-beta.solana.com/");
         assert_eq!(redact_url("garbage"), "<redacted>");
+        let url = "wss://mainnet.helius-rpc.com/?api-key=abc-123";
+        let msg = format!("connect to {url} failed; retry api-key=abc-123&x=1");
+        let s = scrub(&msg, url);
+        assert!(!s.contains("abc-123"), "{s}");
+        assert!(s.contains("mainnet.helius-rpc.com"));
         assert!(!format!("{:?}", RpcClient::new("https://x/?api-key=S", "confirmed", Duration::from_secs(1)).unwrap()).contains('S'));
     }
 

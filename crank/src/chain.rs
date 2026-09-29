@@ -292,7 +292,7 @@ impl ChainSource for WsChainSource {
             let (ws, _) = match conn {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!(url = %redact_url(&self.url), error = %e, "ws connect failed");
+                    tracing::warn!(url = %redact_url(&self.url), error = %rpc::scrub(&e.to_string(), &self.url), "ws connect failed");
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(Duration::from_secs(30));
                     // Keep draining commands while disconnected.

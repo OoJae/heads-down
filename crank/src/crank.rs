@@ -465,7 +465,7 @@ impl Crank {
                 match self.rpc.simulate_transaction(&tx::serialize(&t)?).await {
                     Ok(sim) if sim.err.is_none() => {
                         if let Some(u) = sim.units_consumed {
-                            let with_margin = u.saturating_mul(100 + u64::from(d.cu_margin_percent)) / 100 + 1_000;
+                            let with_margin = (u.saturating_mul(100u64.saturating_add(u64::from(d.cu_margin_percent))) / 100).saturating_add(1_000);
                             p.cu_limit = Some(u32::try_from(with_margin).unwrap_or(tx::MAX_COMPUTE_UNITS).min(tx::MAX_COMPUTE_UNITS));
                         }
                     }
