@@ -25,8 +25,9 @@ sealed interface RigKeyStatus {
  *
  * The attestation challenge is generated locally for now. Once the Key Attestation
  * registrar is live, it issues a single-use challenge bound to the user's SIWS session and
- * verifies the returned chain; until then the attestation is informational only and the
- * rig is unregistered (heartbeats bind to an all-zero rig and can never dig).
+ * verifies the returned chain; until then the attestation is informational only and the Rig
+ * registers as a guest (`attestation_level` 0). Every message this key signs goes through one
+ * shared, write-ahead [RigCounter].
  */
 @Singleton
 class RigKeyRepository @Inject constructor(
