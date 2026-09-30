@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 TOOLCHAIN="${HD_TOOLCHAIN:-+1.97.1}"
 
-[[ -f tests/fixtures/ore.so ]] || bash tests/fixtures/fetch-fixtures.sh
+[[ -f tests/fixtures/ore.so && -f tests/fixtures/ore_stake.so ]] || bash tests/fixtures/fetch-fixtures.sh
 [[ -f target/deploy/heads_down.so && -f target/deploy-mock/mock_ore.so ]] || bash scripts/build.sh
 HD_WRITE_VECTORS=1 cargo "$TOOLCHAIN" test -p heads-down-tests --test vectors
 git -C .. diff --stat -- heads-down/vectors || true
