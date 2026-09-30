@@ -210,6 +210,7 @@ class ShiftForegroundService : LifecycleService() {
             snapshot = snapshot.copy(darkSinceWallMillis = System.currentTimeMillis() - (clock.nowMillis() - to.firstDownAt))
         }
         snapshot = snapshot.copy(state = to)
+        if (t.isPickup) journal.onPickup(System.currentTimeMillis())
         publish()
         // Every exit from a running shift is journaled, so the health check can tell an
         // ended shift from one the OS killed (which never reaches this code).
