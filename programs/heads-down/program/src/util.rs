@@ -48,6 +48,11 @@ impl<'a> Reader<'a> {
         Ok(u16::from_le_bytes(self.array()?))
     }
 
+    /// Next u32 LE.
+    pub fn u32(&mut self) -> Result<u32, HdError> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
     /// Next u64 LE.
     pub fn u64(&mut self) -> Result<u64, HdError> {
         Ok(u64::from_le_bytes(self.array()?))

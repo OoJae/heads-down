@@ -2,9 +2,12 @@
 //! data layout (after the tag byte).
 
 pub mod arm_shift;
+pub mod bury;
 pub mod close_rig;
 pub mod dig;
 pub mod end_shift;
+pub mod focus_bond;
+pub mod gift;
 pub mod governance;
 pub mod initialize_config;
 pub mod record_heartbeats;
@@ -12,6 +15,7 @@ pub mod register_rig;
 pub mod rotate_key;
 pub mod set_caps;
 pub mod signals;
+pub mod stack;
 pub mod verify_seeker;
 
 use pinocchio::{AccountView, Address};
