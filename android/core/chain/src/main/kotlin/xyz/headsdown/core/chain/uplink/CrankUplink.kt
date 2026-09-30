@@ -55,7 +55,8 @@ class Backoff(
 }
 
 /**
- * A long-lived WebSocket to the crank's heartbeat intake.
+ * A long-lived WebSocket to the crank's heartbeat intake (contract A: `/ws`, or its alias
+ * `/v1/heartbeats`).
  *
  * - **WSS only**; the endpoint is never logged or put in an exception.
  * - **Never blocks the caller**: [send] hands text to an open socket (OkHttp queues and writes
@@ -63,8 +64,9 @@ class Backoff(
  * - **Reconnects forever** with jittered backoff while started; [stop] ends it.
  * - **Fail-safe**: every failure path is "not connected", which the heartbeat sink reports as
  *   an undelivered heartbeat; nothing here throws into the shift loop.
- * - Incoming frames are ignored (the intake has nothing to tell the phone yet), so a hostile
- *   server can send nothing that is parsed or acted upon.
+ * - Incoming text frames of at most [CrankReply.MAX_FRAME_CHARS] characters go to [onText]
+ *   (the sink parses only acks, see [CrankReply]); binary and oversized frames are dropped, and
+ *   a throwing handler cannot break the socket.
  */
 class CrankUplink(
     endpoint: String,
@@ -73,6 +75,8 @@ class CrankUplink(
     private val backoff: Backoff = Backoff(),
     /** Called on OkHttp's thread each time a socket opens (e.g. to flush fresh pending frames). */
     private val onConnected: () -> Unit = {},
+    /** Called on OkHttp's thread with each crank text frame (acks). */
+    private val onText: (String) -> Unit = {},
 ) : MessageUplink {
     private val request: Request
     private val client: OkHttpClient = client.newBuilder()
@@ -140,6 +144,10 @@ class CrankUplink(
                     _state.value = UplinkState.CONNECTED
                     opened.complete(true)
                     runCatching(onConnected)
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (text.length <= CrankReply.MAX_FRAME_CHARS) runCatching { onText(text) }
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

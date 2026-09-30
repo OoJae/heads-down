@@ -61,11 +61,12 @@ class CrankUplinkTest {
     private val rig = HeadsDownProgram.rig(Pubkey.fromBase58("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")).address
 
     @Test
-    fun `heartbeat JSON carries exactly the six contract fields`() {
+    fun `heartbeat frame carries exactly the contract A fields`() {
         counter = ULong.MAX_VALUE - 1uL
         val hb = signer.heartbeat(HeadsDownProgram.ID.bytes, rig.bytes, 7uL, 422_593uL, 1)
         val o = Json.parseToJsonElement(HeartbeatJson.encode(hb)).jsonObject
-        assertEquals(setOf("rig", "counter", "shift_id", "round_id", "lease_rounds", "sig"), o.keys)
+        assertEquals(setOf("type", "rig", "counter", "shift_id", "round_id", "lease_rounds", "sig64"), o.keys)
+        assertEquals("heartbeat", (o["type"] as JsonPrimitive).content)
         assertEquals(rig.toBase58(), (o["rig"] as JsonPrimitive).content)
         // u64::MAX survives as an exact, unquoted JSON number.
         assertEquals("18446744073709551615", (o["counter"] as JsonPrimitive).content)
@@ -73,21 +74,61 @@ class CrankUplinkTest {
         assertEquals("7", (o["shift_id"] as JsonPrimitive).content)
         assertEquals("422593", (o["round_id"] as JsonPrimitive).content)
         assertEquals("1", (o["lease_rounds"] as JsonPrimitive).content)
-        val sig = Base64.getDecoder().decode((o["sig"] as JsonPrimitive).content)
+        val sig = Base64.getDecoder().decode((o["sig64"] as JsonPrimitive).content)
         assertEquals(64, sig.size)
         assertTrue(P256.isLowS(sig))
         assertTrue(sig.contentEquals(hb.signature))
+        assertEquals("heartbeat", HeartbeatJson.typeOf(hb))
     }
 
     @Test
-    fun `break and freeze JSON are tagged, plans are never sent`() {
-        val brk = Json.parseToJsonElement(HeartbeatJson.encode(signer.shiftSignal(HeadsDownProgram.ID.bytes, rig.bytes, RigMessageKind.BREAK, 7uL, ShiftEndReason.PICKUP))).jsonObject
-        assertEquals("break", (brk["kind"] as JsonPrimitive).content)
-        assertEquals("1", (brk["reason"] as JsonPrimitive).content)
+    fun `break and freeze frames carry their type and reason, plans are never sent`() {
+        for (reason in listOf(ShiftEndReason.PICKUP, ShiftEndReason.SCREEN_ON, ShiftEndReason.UNPLUGGED, ShiftEndReason.UNLOCKED, ShiftEndReason.MANUAL)) {
+            val signed = signer.shiftSignal(HeadsDownProgram.ID.bytes, rig.bytes, RigMessageKind.BREAK, 7uL, reason)
+            val brk = Json.parseToJsonElement(HeartbeatJson.encode(signed)).jsonObject
+            assertEquals(setOf("type", "rig", "counter", "shift_id", "reason", "sig64"), brk.keys)
+            assertEquals("break", (brk["type"] as JsonPrimitive).content)
+            assertEquals("${reason.wire}", (brk["reason"] as JsonPrimitive).content)
+            assertEquals("7", (brk["shift_id"] as JsonPrimitive).content)
+        }
         val frz = Json.parseToJsonElement(HeartbeatJson.encode(signer.shiftSignal(HeadsDownProgram.ID.bytes, rig.bytes, RigMessageKind.FREEZE, 7uL, ShiftEndReason.FREEZE))).jsonObject
-        assertEquals("freeze", (frz["kind"] as JsonPrimitive).content)
+        assertEquals(setOf("type", "rig", "counter", "shift_id", "reason", "sig64"), frz.keys)
+        assertEquals("freeze", (frz["type"] as JsonPrimitive).content)
+        assertEquals("3", (frz["reason"] as JsonPrimitive).content)
+        // Reasons the program refuses never leave the phone.
+        assertThrows(IllegalArgumentException::class.java) {
+            HeartbeatJson.encode(signer.shiftSignal(HeadsDownProgram.ID.bytes, rig.bytes, RigMessageKind.BREAK, 7uL, ShiftEndReason.COMPLETED))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HeartbeatJson.encode(signer.shiftSignal(HeadsDownProgram.ID.bytes, rig.bytes, RigMessageKind.FREEZE, 7uL, ShiftEndReason.PICKUP))
+        }
         val plan = signer.plan(HeadsDownProgram.ID.bytes, rig.bytes, ShiftPlan(1uL, 1_000_000uL, 1, 0, 1, 0, 1, 2))
         assertThrows(IllegalArgumentException::class.java) { HeartbeatJson.encode(plan) }
+    }
+
+    @Test
+    fun `crank acks parse per contract A and anything else is ignored`() {
+        assertEquals(CrankReply.Ack(42uL, true, AckReason.ACCEPTED), CrankReply.parse("""{"type":"ack","counter":42,"ok":true,"reason":"accepted"}"""))
+        // Integers may also be decimal strings; unknown fields are ignored.
+        assertEquals(
+            CrankReply.Ack(18446744073709551615uL, false, AckReason.STALE_COUNTER),
+            CrankReply.parse("""{"type":"ack","counter":"18446744073709551615","ok":false,"reason":"stale_counter","rig":"x","extra":{"a":1}}"""),
+        )
+        for (code in listOf("bad_signature", "stale_counter", "unknown_rig", "rate_limited", "malformed", "lease_invalid")) {
+            val ack = CrankReply.parse("""{"type":"ack","counter":1,"ok":false,"reason":"$code"}""") as CrankReply.Ack
+            assertEquals(code, ack.reason.wire)
+        }
+        // A code from a newer crank, or none at all.
+        assertEquals(AckReason.UNKNOWN, (CrankReply.parse("""{"type":"ack","counter":1,"ok":false,"reason":"brand_new"}""") as CrankReply.Ack).reason)
+        assertEquals(AckReason.ACCEPTED, (CrankReply.parse("""{"type":"ack","counter":1,"ok":true}""") as CrankReply.Ack).reason)
+        assertEquals(CrankReply.Other("status"), CrankReply.parse("""{"type":"status","round_id":422771}"""))
+        // Malformed: not JSON, no type, no boolean ok, negative / fractional / oversized counters, too long.
+        listOf(
+            "not json", "[]", """{"counter":1,"ok":true}""", """{"type":"ack","counter":1,"ok":"true"}""",
+            """{"type":"ack","counter":-1,"ok":true}""", """{"type":"ack","counter":1.5,"ok":true}""",
+            """{"type":"ack","counter":"18446744073709551616","ok":true}""", """{"type":"ack","ok":true}""",
+            """{"type":"ack","counter":1,"ok":true,"pad":"""" + "x".repeat(5_000) + """"}""",
+        ).forEach { assertEquals(it.take(40), null, CrankReply.parse(it)) }
     }
 
     // ------------------------------------------------------------------ backoff
@@ -116,9 +157,10 @@ class CrankUplinkTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val received = LinkedBlockingQueue<String>()
 
-    private fun upgrade(closeAfterFirst: Boolean = false) = MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+    private fun upgrade(closeAfterFirst: Boolean = false, reply: ((String) -> String?)? = null) = MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
         override fun onMessage(webSocket: WebSocket, text: String) {
             received.put(text)
+            reply?.invoke(text)?.let { webSocket.send(it) }
             if (closeAfterFirst) webSocket.close(1001, "going away")
         }
         override fun onOpen(webSocket: WebSocket, response: Response) = Unit
@@ -141,8 +183,8 @@ class CrankUplinkTest {
 
     private fun endpoint() = "wss://localhost:${server.port}/v1/heartbeats"
 
-    private fun uplink(onConnected: () -> Unit = {}) =
-        CrankUplink(endpoint(), client, scope, Backoff(baseMillis = 20, maxMillis = 100), onConnected)
+    private fun uplink(onConnected: () -> Unit = {}, onText: (String) -> Unit = {}) =
+        CrankUplink(endpoint(), client, scope, Backoff(baseMillis = 20, maxMillis = 100), onConnected, onText)
 
     @Test
     fun `refuses cleartext and invalid endpoints`() {
@@ -182,6 +224,40 @@ class CrankUplinkTest {
         u.stop()
         assertEquals(UplinkState.STOPPED, u.state.value)
         assertFalse(u.send("{}"))
+    }
+
+    @Test
+    fun `crank acks come back through onText, oversized frames and throwing handlers are dropped`() = runBlocking {
+        val frames = LinkedBlockingQueue<String>()
+        server.enqueue(
+            upgrade(reply = { text ->
+                val counter = Json.parseToJsonElement(text).jsonObject["counter"].toString()
+                when (counter) {
+                    "1" -> """{"type":"ack","counter":1,"ok":true,"reason":"accepted"}"""
+                    "2" -> "x".repeat(CrankReply.MAX_FRAME_CHARS + 1)
+                    else -> """{"type":"ack","counter":$counter,"ok":false,"reason":"bad_signature"}"""
+                }
+            }),
+        )
+        var throwOnce = true
+        val u = uplink(onText = { text ->
+            if (throwOnce && text.contains("accepted")) {
+                throwOnce = false
+                frames.put(text)
+                throw IllegalStateException("handler bug")
+            }
+            frames.put(text)
+        })
+        u.start()
+        withTimeout(10_000) { u.state.first { it == UplinkState.CONNECTED } }
+        assertTrue(u.send("""{"counter":1}"""))
+        assertEquals(CrankReply.Ack(1uL, true, AckReason.ACCEPTED), CrankReply.parse(frames.poll(5, TimeUnit.SECONDS)!!))
+        assertTrue(u.send("""{"counter":2}""")) // answered with an oversized frame: dropped
+        assertTrue(u.send("""{"counter":3}"""))
+        assertEquals(CrankReply.Ack(3uL, false, AckReason.BAD_SIGNATURE), CrankReply.parse(frames.poll(5, TimeUnit.SECONDS)!!))
+        assertEquals(null, frames.poll(200, TimeUnit.MILLISECONDS))
+        assertEquals("the socket survived the throwing handler", UplinkState.CONNECTED, u.state.value)
+        u.stop()
     }
 
     @Test
