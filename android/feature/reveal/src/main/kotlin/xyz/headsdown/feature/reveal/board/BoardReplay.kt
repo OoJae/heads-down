@@ -67,7 +67,8 @@ class BoardReplay(
                     r.hit -> FlashKind.HIT
                     else -> FlashKind.WINNER
                 }
-                flashes += TileFlash(r.winningTile, kind, (1.0 - age.coerceAtLeast(0.0) / flashMillis).toFloat())
+                // A round whose winner is not known yet has nothing to flash.
+                r.winningTile?.let { flashes += TileFlash(it, kind, (1.0 - age.coerceAtLeast(0.0) / flashMillis).toFloat()) }
                 i--
             }
         }
@@ -79,7 +80,7 @@ class BoardReplay(
     fun finalFrame(): BoardFrame = frameAt(durationMillis + flashMillis + 1)
 
     /** Tiles of the rig that won at least once (outlined on the final board). */
-    val hitTiles: Set<Int> = rounds.filter { it.hit }.map { it.winningTile }.toSet()
+    val hitTiles: Set<Int> = rounds.filter { it.hit }.mapNotNull { it.winningTile }.toSet()
 
     companion object {
         const val FLASH_MILLIS = 160L

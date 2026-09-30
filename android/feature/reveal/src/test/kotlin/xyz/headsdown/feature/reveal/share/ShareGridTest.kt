@@ -26,7 +26,7 @@ class ShareGridTest {
     fun `outcomes cannot leak into the grid or its text`() {
         val base = ShareGrid.from(night)
         val rerolled = night.copy(
-            rounds = night.rounds.map { it.copy(winningTile = (it.winningTile + 7) % 25, motherlode = true) },
+            rounds = night.rounds.map { it.copy(winningTile = (it.winningTile!! + 7) % 25, motherlode = true) },
             oreMinedAtoms = 99_999_999_999L,
             effectiveLamportsPerOre = 1L,
             marketLamportsPerOre = 2L,

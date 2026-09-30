@@ -138,6 +138,40 @@ class RevealScreenTest {
     }
 
     @Test
+    fun `an on-chain haul links to its record, a sample does not`() {
+        val opened = mutableListOf<String>()
+        rule.setContent {
+            RevealTheme {
+                RevealScreen(
+                    night.copy(provenance = HaulProvenance.ON_CHAIN, explorerUrl = "https://explorer.solana.com/address/x"),
+                    zone, animate = false, onOpenExplorer = { opened += it },
+                )
+            }
+        }
+        rule.onNodeWithTag(RevealTags.EXPLORER).performScrollTo().performClick()
+        assertEquals(listOf("https://explorer.solana.com/address/x"), opened)
+    }
+
+    @Test
+    fun `no haul offers the labelled sample only when asked for`() {
+        var samples = 0
+        var withOffer by mutableStateOf(true)
+        rule.setContent {
+            RevealRoute(
+                state = RevealUiState.NoHaul, zone = zone, animate = false,
+                onReplayStarted = {}, onReplayFinished = {}, onBuyRest = {}, onShare = {}, onDone = {},
+                onShowSample = if (withOffer) ({ samples++ }) else null,
+            )
+        }
+        rule.onNodeWithText("No haul yet").assertIsDisplayed()
+        rule.onNodeWithTag(RevealTags.SHOW_SAMPLE).performClick()
+        assertEquals(1, samples)
+        withOffer = false
+        rule.waitForIdle()
+        rule.onAllNodesWithTag(RevealTags.SHOW_SAMPLE).assertCountEquals(0)
+    }
+
+    @Test
     fun `nothing on screen breaks the honesty rules`() {
         var shown by mutableStateOf(night)
         rule.setContent { RevealTheme { RevealScreen(shown, zone, animate = false) } }
