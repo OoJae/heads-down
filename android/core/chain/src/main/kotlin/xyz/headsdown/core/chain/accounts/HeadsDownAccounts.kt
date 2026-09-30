@@ -69,6 +69,12 @@ data class RigAccount(
     val streak: Long,
     val freezesLeft: Int,
     val lastShiftDay: Long,
+    /** v1.1 @336: a shift is open from `arm_shift` to `end_shift` (a Frozen rig can be in one). */
+    val shiftOpen: Boolean = false,
+    /** v1.1 @337: the BREAK / FREEZE reason `end_shift` will write into the ShiftLog. */
+    val breakReason: Int = 0,
+    /** v1.1 @344: unix time of the last `arm_shift`. */
+    val shiftStartTs: Long = 0,
 )
 
 /**
@@ -159,6 +165,9 @@ object HeadsDownAccounts {
             streak = b.u32(320),
             freezesLeft = b.u8(324),
             lastShiftDay = b.i64(328),
+            shiftOpen = flag(b.u8(336), "shift_open"),
+            breakReason = b.u8(337),
+            shiftStartTs = b.i64(344),
         )
     }
 

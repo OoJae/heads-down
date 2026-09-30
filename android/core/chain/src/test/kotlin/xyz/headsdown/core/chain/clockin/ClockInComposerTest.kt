@@ -12,13 +12,17 @@ import xyz.headsdown.core.chain.HeadsDownProgram
 import xyz.headsdown.core.chain.Ore
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.TestAccounts
+import xyz.headsdown.core.chain.TestVouchers
 import xyz.headsdown.core.chain.WellKnown
+import xyz.headsdown.core.chain.accounts.HdConfig
 import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.hex
 import xyz.headsdown.core.chain.hexBytes
 import xyz.headsdown.core.chain.ix.HeadsDownInstructions
 import xyz.headsdown.core.chain.ix.OreInstructions
+import xyz.headsdown.core.chain.ix.RegistrarAttestation
+import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
 import xyz.headsdown.core.chain.tx.Instruction
 import xyz.headsdown.core.chain.tx.TransactionBuilder
@@ -36,35 +40,65 @@ class ClockInComposerTest {
     private val key = hexBytes("0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6")
     private val otherKey = hexBytes("036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
     private val now = 1_790_000_000L
+    private val slot = 451_700_010uL
 
     private val request = ClockInRequest(
-        shiftBudgetLamports = 20_000_000uL, // 0.02 SOL: 20 digs of 0.001
+        shiftBudgetLamports = 20_000_000uL, // 0.02 SOL placed: 20 digs of 0.001
         weeklyBudgetLamports = 140_000_000uL,
         capMaxCostPerOre = 670_000_000uL,
         planMaxEvCostPerOre = 530_000_000uL,
         windowSeconds = 8 * 3600,
     )
 
-    private val config = HeadsDownAccounts.config(
+    private val registrarKey = TestVouchers.registrarKey()
+
+    private fun configWith(executorFee: Long = 10_000, registrar: ByteArray = registrarKey.bytes): HdConfig = HeadsDownAccounts.config(
         HeadsDownProgram.config.address,
-        TestAccounts.info(HeadsDownProgram.ID, TestAccounts.configBytes(executorFee = 10_000)),
+        TestAccounts.info(HeadsDownProgram.ID, TestAccounts.configBytes(executorFee = executorFee, registrar = registrar)),
     )
 
-    private fun rig(state: RigSignalState = RigSignalState.IDLE, shiftId: Long = 0, hb: Long = 0, p256: ByteArray = key) =
-        HeadsDownAccounts.rig(rigAddress, TestAccounts.info(HeadsDownProgram.ID, TestAccounts.rigBytes(authority, p256, state, shiftId, hb)))
+    private val config: HdConfig = configWith()
+
+    private fun rig(
+        state: RigSignalState = RigSignalState.IDLE,
+        shiftId: Long = 0,
+        hb: Long = 0,
+        p256: ByteArray = key,
+        level: Int = 0,
+        attestationExpiry: Long = 0,
+        shiftOpen: Boolean? = null,
+    ) = HeadsDownAccounts.rig(
+        rigAddress,
+        TestAccounts.info(
+            HeadsDownProgram.ID,
+            if (shiftOpen == null) {
+                TestAccounts.rigBytes(authority, p256, state, shiftId, hb, attestationLevel = level, attestationExpirySlot = attestationExpiry)
+            } else {
+                TestAccounts.rigBytes(authority, p256, state, shiftId, hb, shiftOpen, level, attestationExpiry)
+            },
+        ),
+    )
 
     private fun automation(balance: Long, amount: Long = 250_000, executor: Pubkey = HeadsDownProgram.executor.address, fee: Long = 10_000) =
         OreAccounts.automation(automationAddress, TestAccounts.info(Ore.PROGRAM_ID, TestAccounts.automationBytes(authority, amount, balance, executor, fee)))
 
-    private fun compose(state: ClockInChainState, req: ClockInRequest = request) = ClockInComposer.compose(authority, key, req, state, now)
+    private fun voucher(level: Int = 2, expiry: ULong = slot + 6_480_000uL, p256: ByteArray = key, seed: ByteArray = TestVouchers.DEFAULT_SEED) =
+        RegistrarVoucher.verify(TestVouchers.instructionData(authority, p256, level, expiry, seed), authority, p256, level, expiry)
+
+    private fun compose(state: ClockInChainState, req: ClockInRequest = request, voucher: RegistrarVoucher? = null) =
+        ClockInComposer.compose(authority, key, req, state, now, voucher)
 
     private fun List<Instruction>.tags(): List<String> = map {
         when (it.programId) {
             Ore.PROGRAM_ID -> "ore:${it.data[0]}"
             WellKnown.COMPUTE_BUDGET -> "cb:${it.data[0]}"
+            WellKnown.ED25519_SIG_VERIFY -> "ed25519"
             else -> "hd:${it.data[0]}"
         }
     }
+
+    /** ORE AutomateV2 `fee` u64 at data offset 17. */
+    private fun Instruction.automateFee(): ULong = data.copyOfRange(17, 25).reversed().fold(0uL) { acc, b -> (acc shl 8) or b.toUByte().toULong() }
 
     @Test
     fun `first clock-in is automate, register_rig, set_caps, arm_shift in one transaction`() {
@@ -79,13 +113,40 @@ class ClockInComposerTest {
         )
         assertEquals(HeadsDownInstructions.registerRig(authority, key), out.instructions[1])
         assertEquals(ShiftPlan(530_000_000uL, 1_000_000uL, 4, 0, 1, 0, now, now + 8 * 3600), out.plan)
+        assertEquals(HeadsDownInstructions.setCaps(authority, out.caps), out.instructions[2])
         assertEquals(HeadsDownInstructions.armShift(authority, out.plan), out.instructions[3])
-        assertEquals(1_000_000uL, out.caps.capRound)
-        assertEquals(20_000_000uL, out.caps.capShift)
         assertEquals(now + 7 * 24 * 3600, out.caps.capsExpiryTs)
         assertEquals(1uL, out.expectedShiftId)
         assertEquals(0uL, out.hbCounterFloor)
         assertEquals(rigAddress, out.rig)
+        assertEquals(VoucherUse.NONE, out.voucher)
+    }
+
+    @Test
+    fun `the executor fee sits inside every cap`() {
+        val out = compose(ClockInChainState(config, rig = null, automation = null))
+        // INTERFACE v1.1 §6.4: budget = min(plan_dig, min(cap_round, ...) - fee), so the round cap
+        // must be dig + fee for a full 0.001 SOL dig, and shift/week carry one fee per dig round.
+        assertEquals(1_000_000uL + 10_000uL, out.caps.capRound)
+        assertEquals(20_000_000uL + 20uL * 10_000uL, out.caps.capShift)
+        assertEquals(140_000_000uL + 140uL * 10_000uL, out.caps.capWeek)
+        assertEquals(out.caps.capShift, out.deposit)
+        // What dig would place per round with these caps: the whole plan.
+        val budget = minOf(out.plan.digLamports, out.caps.capRound - 10_000uL)
+        assertEquals(out.plan.digLamports, budget)
+        // A budget that is not a whole number of digs still gets a fee for its last, partial dig.
+        val partial = compose(ClockInChainState(config, null, null), request.copy(shiftBudgetLamports = 2_500_000uL))
+        assertEquals(2_500_000uL + 3uL * 10_000uL, partial.caps.capShift)
+    }
+
+    @Test
+    fun `the automate fee is Config executor_fee read at offset 80`() {
+        for (fee in listOf(5_000L, 7_777L, 10_000L)) {
+            val out = compose(ClockInChainState(configWith(executorFee = fee), null, null))
+            assertEquals(fee.toULong(), configWith(executorFee = fee).executorFee)
+            assertEquals(fee.toULong(), out.instructions.first { it.programId == Ore.PROGRAM_ID }.automateFee())
+            assertEquals(1_000_000uL + fee.toULong(), out.caps.capRound)
+        }
     }
 
     @Test
@@ -112,6 +173,7 @@ class ClockInComposerTest {
         assertEquals(0uL, elsewhere.deposit)
         val staleFee = compose(ClockInChainState(config, rig(), automation(balance = 50_000_000, fee = 5_000)))
         assertTrue(staleFee.includesAutomate)
+        assertEquals(10_000uL, staleFee.instructions[0].automateFee())
         val staleAmount = compose(ClockInChainState(config, rig(), automation(balance = 50_000_000, amount = 1_000_000)))
         assertTrue(staleAmount.includesAutomate)
     }
@@ -121,9 +183,20 @@ class ClockInComposerTest {
         for (open in listOf(RigSignalState.ARMED, RigSignalState.DOWN, RigSignalState.COOLING, RigSignalState.BROKEN)) {
             val out = compose(ClockInChainState(config, rig(state = open, shiftId = 12), automation(balance = 25_000_000)))
             assertEquals("$open", listOf("hd:11", "hd:3", "hd:5"), out.instructions.tags())
+            assertEquals(HeadsDownInstructions.endShift(authority, rigAddress, 12uL), out.instructions[0])
             assertEquals(HeadsDownProgram.shiftLog(rigAddress, 12uL).address, out.instructions[0].accounts[2].pubkey)
+            assertEquals(Ore.BOARD, out.instructions[0].accounts[3].pubkey)
             assertEquals(13uL, out.expectedShiftId)
         }
+    }
+
+    @Test
+    fun `a rig that cannot be armed is refused instead of failing on-chain`() {
+        // A live state without an open shift cannot be ended nor armed (INTERFACE v1.1 §6.7).
+        val e = assertThrows(ClockInRefusedException::class.java) {
+            compose(ClockInChainState(config, rig(state = RigSignalState.ARMED, shiftOpen = false), null))
+        }
+        assertEquals(ClockInRefusedException.Reason.RIG_BUSY, e.reason)
     }
 
     @Test
@@ -142,13 +215,104 @@ class ClockInComposerTest {
     }
 
     @Test
-    fun `focus-only never deposits and signs a focus-only plan`() {
+    fun `focus-only never deposits, grants no spending and signs a focus-only plan`() {
         val focus = request.copy(focusOnly = true)
         val out = compose(ClockInChainState(config, rig = null, automation = null), focus)
         assertEquals(listOf("hd:1", "hd:3", "hd:5"), out.instructions.tags())
         assertTrue(out.plan.focusOnly)
+        assertEquals(ShiftPlan.FLAG_FOCUS_ONLY, out.plan.flags)
         assertEquals(0uL, out.plan.digLamports)
         assertEquals(0uL, out.deposit)
+        assertEquals(listOf(0uL, 0uL, 0uL, 0uL), listOf(out.caps.capWeek, out.caps.capShift, out.caps.capRound, out.caps.capMaxCost))
+    }
+
+    @Test
+    fun `a day shift sets plan_flags bit1`() {
+        val day = compose(ClockInChainState(config, null, null), request.copy(day = true, windowSeconds = 50 * 60))
+        assertEquals(ShiftPlan.FLAG_DAY, day.plan.flags)
+        assertTrue(day.plan.day)
+        // arm_shift data: tag, mode, max_ev_cost(8), dig(8), split, solo, lease, flags @21.
+        assertEquals(0x02, day.instructions.last().data[21].toInt())
+        val focusDay = compose(ClockInChainState(config, null, null), request.copy(day = true, focusOnly = true))
+        assertEquals(ShiftPlan.FLAG_FOCUS_ONLY or ShiftPlan.FLAG_DAY, focusDay.plan.flags)
+        assertEquals(0, compose(ClockInChainState(config, null, null)).plan.flags)
+    }
+
+    @Test
+    fun `lease rounds, tiles and dig size are carried into the plan and caps`() {
+        val out = compose(
+            ClockInChainState(config, null, null),
+            request.copy(leaseRounds = 3, splitTiles = 10, soloTiles = 2, digLamports = 2_000_000uL, planMaxEvCostPerOre = 600_000_000uL),
+        )
+        assertEquals(3, out.plan.leaseRounds)
+        assertEquals(10, out.plan.splitTiles)
+        assertEquals(2, out.plan.soloTiles)
+        assertEquals(2_000_000uL, out.plan.digLamports)
+        assertEquals(600_000_000uL, out.plan.maxEvCost)
+        assertEquals(2_010_000uL, out.caps.capRound)
+        // Per-tile ORE cap = dig / tiles, floored: 2_000_000 / 12 = 166_666.
+        assertEquals(OreInstructions.automateHeadsDown(authority, 166_666uL, out.deposit, 10_000uL), out.instructions[0])
+    }
+
+    // ------------------------------------------------------------------ registrar voucher
+
+    @Test
+    fun `a first clock-in with a voucher registers attested, referencing the voucher's index`() {
+        val v = voucher()
+        val out = compose(ClockInChainState(config, null, null, slot), voucher = v)
+        assertEquals(listOf("ore:0", "ed25519", "hd:1", "hd:3", "hd:5"), out.instructions.tags())
+        assertEquals(VoucherUse.INCLUDED, out.voucher)
+        assertEquals(v.instruction, out.instructions[1])
+        assertEquals(HeadsDownInstructions.registerRig(authority, key, RegistrarAttestation(1, 0, 2, v.expirySlot)), out.instructions[2])
+        // With compute budget first, the absolute index moves with it.
+        val cb = compose(ClockInChainState(config, null, null, slot), request.copy(priorityMicroLamports = 1uL), v)
+        assertEquals(listOf("cb:2", "cb:3", "ore:0", "ed25519", "hd:1", "hd:3", "hd:5"), cb.instructions.tags())
+        assertEquals(46, cb.instructions[4].dataSize)
+        assertEquals(3, cb.instructions[4].data[35].toInt()) // ed25519_ix
+        assertEquals(WellKnown.INSTRUCTIONS_SYSVAR, cb.instructions[4].accounts.last().pubkey)
+    }
+
+    @Test
+    fun `a new key with a voucher rotates attested`() {
+        val v = voucher(level = 1)
+        val out = compose(ClockInChainState(config, rig(p256 = otherKey), automation(balance = 25_000_000), slot), voucher = v)
+        assertEquals(listOf("ed25519", "hd:4", "hd:3", "hd:5"), out.instructions.tags())
+        assertEquals(HeadsDownInstructions.rotateKey(authority, key, RegistrarAttestation(0, 0, 1, v.expirySlot)), out.instructions[1])
+        assertTrue(out.rotatesKey)
+    }
+
+    @Test
+    fun `a guest rig with the same key is upgraded once, then left alone`() {
+        val v = voucher(level = 2)
+        val guest = compose(ClockInChainState(config, rig(level = 0), automation(balance = 25_000_000), slot), voucher = v)
+        assertEquals(listOf("ed25519", "hd:4", "hd:3", "hd:5"), guest.instructions.tags())
+        assertEquals(VoucherUse.INCLUDED, guest.voucher)
+        val attested = compose(
+            ClockInChainState(config, rig(level = 2, attestationExpiry = v.expirySlot.toLong()), automation(balance = 25_000_000), slot),
+            voucher = v,
+        )
+        assertEquals(listOf("hd:3", "hd:5"), attested.instructions.tags())
+        assertEquals(VoucherUse.ALREADY_ATTESTED, attested.voucher)
+    }
+
+    @Test
+    fun `an unusable voucher never reaches the transaction and the rig registers as a guest`() {
+        val cases = mapOf(
+            // signed by a key that is not Config.registrar
+            voucher(seed = ByteArray(32) { 6 }) to VoucherUse.SKIPPED_WRONG_REGISTRAR,
+            // expiring before the transaction can land
+            voucher(expiry = slot + 100uL) to VoucherUse.SKIPPED_EXPIRED,
+            // for another key
+            voucher(p256 = otherKey) to VoucherUse.SKIPPED_OTHER_KEY,
+        )
+        for ((v, use) in cases) {
+            val out = compose(ClockInChainState(config, null, null, slot), voucher = v)
+            assertEquals("$use", use, out.voucher)
+            assertEquals(listOf("ore:0", "hd:1", "hd:3", "hd:5"), out.instructions.tags())
+            assertEquals(HeadsDownInstructions.registerRig(authority, key), out.instructions[1])
+        }
+        // No slot to date the expiry against: not used.
+        assertEquals(VoucherUse.SKIPPED_EXPIRED, compose(ClockInChainState(config, null, null, slot = null), voucher = voucher()).voucher)
     }
 
     @Test
@@ -158,12 +322,13 @@ class ClockInComposerTest {
     }
 
     @Test
-    fun `the largest composition fits one legacy packet`() {
+    fun `the largest composition fits one legacy packet, voucher included`() {
         val worst = compose(
-            ClockInChainState(config, rig(state = RigSignalState.DOWN, shiftId = 3, p256 = otherKey), null),
+            ClockInChainState(config, rig(state = RigSignalState.DOWN, shiftId = 3, p256 = otherKey), null, slot),
             request.copy(priorityMicroLamports = 5_000uL),
+            voucher(),
         )
-        assertEquals(listOf("cb:2", "cb:3", "hd:11", "hd:4", "ore:0", "hd:3", "hd:5"), worst.instructions.tags())
+        assertEquals(listOf("cb:2", "cb:3", "hd:11", "ed25519", "hd:4", "ore:0", "hd:3", "hd:5"), worst.instructions.tags())
         for (v in TxVersion.entries) {
             val tx = TransactionBuilder.unsignedTransaction(TransactionBuilder.compile(authority, worst.instructions, ByteArray(32), v))
             assertTrue("$v: ${tx.size}", tx.size <= TransactionBuilder.PACKET_DATA_SIZE)
@@ -178,6 +343,11 @@ class ClockInComposerTest {
         assertThrows(IllegalArgumentException::class.java) { request.copy(planMaxEvCostPerOre = 700_000_000uL) }
         assertThrows(IllegalArgumentException::class.java) { request.copy(windowSeconds = 30) }
         assertThrows(IllegalArgumentException::class.java) { request.copy(windowSeconds = 25 * 3600) }
+        assertThrows(IllegalArgumentException::class.java) { request.copy(leaseRounds = 0) }
+        assertThrows(IllegalArgumentException::class.java) { request.copy(leaseRounds = 4) }
+        assertThrows(IllegalArgumentException::class.java) { request.copy(splitTiles = 0, soloTiles = 0) }
+        assertThrows(IllegalArgumentException::class.java) { request.copy(splitTiles = 16) }
+        assertThrows(IllegalArgumentException::class.java) { request.copy(soloTiles = 11) }
         // 1_000_000 over 3 tiles floors to 333_333 per tile: still > 0, fine.
         val three = compose(ClockInChainState(config, null, null), request.copy(splitTiles = 3))
         assertEquals("1516050000000000", three.instructions[0].data.copyOfRange(1, 9).hex()) // 333_333 = 0x051615
@@ -185,13 +355,13 @@ class ClockInComposerTest {
 
     // ------------------------------------------------------------------ service over RPC
 
-    private fun rpcFor(vararg accounts: String?): SolanaJsonRpc {
+    private fun rpcFor(vararg accounts: String?, contextSlot: Long = 2): SolanaJsonRpc {
         val list = accounts.joinToString(",") { it ?: "null" }
         val hash = Base58.encode(ByteArray(32) { 7 })
         return SolanaJsonRpc(
             FakeTransport.results(
                 """{"context":{"slot":1},"value":[$list]}""",
-                """{"context":{"slot":2},"value":{"blockhash":"$hash","lastValidBlockHeight":5000}}""",
+                """{"context":{"slot":$contextSlot},"value":{"blockhash":"$hash","lastValidBlockHeight":5000}}""",
             ),
         )
     }
@@ -209,6 +379,18 @@ class ClockInComposerTest {
             assertEquals(version == TxVersion.V0, (tx[65].toInt() and 0x80) != 0)
             assertEquals(4, prepared.plan.instructions.size)
         }
+    }
+
+    @Test
+    fun `service dates the voucher with the blockhash slot`() = runTest {
+        val config = TestAccounts.json(HeadsDownProgram.ID, TestAccounts.configBytes(registrar = registrarKey.bytes))
+        val v = voucher(expiry = slot + 6_480_000uL)
+        val fresh = ClockInService(rpcFor(config, null, null, contextSlot = slot.toLong()), nowUnix = { now })
+            .prepare(authority, key, request, WalletCapabilities.LEGACY_ONLY, v)!!
+        assertEquals(VoucherUse.INCLUDED, fresh.plan.voucher)
+        val late = ClockInService(rpcFor(config, null, null, contextSlot = (slot + 6_480_000uL).toLong()), nowUnix = { now })
+            .prepare(authority, key, request, WalletCapabilities.LEGACY_ONLY, v)!!
+        assertEquals(VoucherUse.SKIPPED_EXPIRED, late.plan.voucher)
     }
 
     @Test

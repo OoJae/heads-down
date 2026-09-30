@@ -8,14 +8,16 @@ import java.util.Base64
 
 /** heads_down / ORE accounts laid out per INTERFACE / docs/ORE.md, for composer and service tests. */
 object TestAccounts {
-    fun configBytes(executorFee: Long = 10_000, paused: Boolean = false): ByteArray =
+    fun configBytes(executorFee: Long = 10_000, paused: Boolean = false, registrar: ByteArray = ByteArray(32) { 2 }): ByteArray =
         ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN).apply {
             put(0, 1); put(1, 1); put(2, HeadsDownProgram.config.bump.toByte())
             position(8); put(ByteArray(32) { 1 })
-            position(40); put(ByteArray(32) { 2 })
+            position(40); put(registrar)
             putLong(72, 7_000); putLong(80, executorFee); putShort(88, 2_000); put(90, if (paused) 1 else 0)
             put(91, HeadsDownProgram.executor.bump.toByte())
         }.array()
+
+    private val OPEN_STATES = setOf(RigSignalState.ARMED, RigSignalState.DOWN, RigSignalState.COOLING, RigSignalState.BROKEN)
 
     fun rigBytes(
         authority: Pubkey,
@@ -23,12 +25,21 @@ object TestAccounts {
         state: RigSignalState = RigSignalState.IDLE,
         shiftId: Long = 0,
         hbCounter: Long = 0,
+        /** v1.1 @336: open from arm_shift to end_shift, as the program keeps it. */
+        shiftOpen: Boolean = state in OPEN_STATES,
+        attestationLevel: Int = 0,
+        attestationExpirySlot: Long = 0,
+        streak: Int = 0,
     ): ByteArray = ByteBuffer.allocate(384).order(ByteOrder.LITTLE_ENDIAN).apply {
         put(0, 2); put(1, 1); put(2, HeadsDownProgram.rig(authority).bump.toByte())
         position(8); put(authority.bytes)
         position(40); put(p256)
+        put(73, attestationLevel.toByte())
         put(75, state.wire.toByte())
+        putLong(112, attestationExpirySlot)
         putLong(200, shiftId); putLong(208, hbCounter)
+        putInt(320, streak)
+        put(336, if (shiftOpen) 1 else 0)
     }.array()
 
     fun automationBytes(
