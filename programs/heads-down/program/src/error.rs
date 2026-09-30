@@ -2,8 +2,9 @@
 //!
 //! Codes 0..=31 are fixed by `INTERFACE.md` §8 (24..=31 were added for the
 //! `dig` pre-flight skips and state-machine violations; they are frozen in
-//! v1.1). Errors raised inside the shared crates keep their own
-//! namespaces: `p256-introspect` = `0x2560_00xx`, `sgt-verify` = `0x5347_00xx`.
+//! v1.1). Codes 32..=48 are the additive v1.2 SKR codes (§11.7). Errors
+//! raised inside the shared crates keep their own namespaces:
+//! `p256-introspect` = `0x2560_00xx`, `sgt-verify` = `0x5347_00xx`.
 
 use pinocchio::error::ProgramError;
 
@@ -85,6 +86,50 @@ pub enum HdError {
     /// Pre-flight: the Executor PDA cannot fund ORE's CHECKPOINT_FEE top-up
     /// and stay rent-exempt.
     ExecutorUnderfunded = 31,
+
+    // ---- added in INTERFACE.md v1.2 (SKR), additive ------------------------
+    /// An SKR / ORE token account is not a classic SPL Token account (for
+    /// example Token-2022), has the wrong length, mint, owner field or
+    /// state, is not the canonical ATA where one is required, or carries a
+    /// delegate / close authority.
+    InvalidTokenAccount = 32,
+    /// A bond, gift or purchase amount is zero or above its cap.
+    AmountOutOfRange = 33,
+    /// `open_stack` parameters are invalid (window, grace, seats, flags).
+    InvalidStackParams = 34,
+    /// The table does not take joins: it started, is full, or is not open.
+    StackJoinClosed = 35,
+    /// The rig does not meet the table's tier / attestation / SGT rule.
+    StackIneligible = 36,
+    /// `settle_stack` before `Board.round_id > end_round`.
+    StackNotEnded = 37,
+    /// The table is not in the state the instruction needs.
+    InvalidStackState = 38,
+    /// A seat does not belong to this table or rig, a seat is missing or
+    /// repeated at settle, or the seat address is not canonical.
+    StackSeatMismatch = 39,
+    /// Check-in skip: the rig is in another shift than the one the seat is
+    /// bound to.
+    StackShiftMismatch = 40,
+    /// Check-in skip: the rig's plan allows leases longer than one round.
+    StackLeaseTooLong = 41,
+    /// Check-in result: the bound shift recorded a BREAK or FREEZE; the seat
+    /// is broken for good.
+    StackSeatBroken = 42,
+    /// The bonded shift's ShiftLog does not allow this release / forfeit
+    /// (not sealed yet, or sealed with the other outcome).
+    BondNotResolvable = 43,
+    /// The claimer is not the gift's recipient (or its SGT's holder).
+    GiftNotClaimable = 44,
+    /// `refund_gift` before expiry, or `claim_gift` at or after it.
+    GiftExpiry = 45,
+    /// The Bury lot is empty or smaller than the requested amount.
+    AuctionEmpty = 46,
+    /// The current price exceeds the buyer's `max_ore` (slippage guard).
+    PriceAboveMax = 47,
+    /// After the ORE `bury` CPI, the vault did not lose exactly the paid ORE
+    /// or the ORE supply did not drop by the burned 90%.
+    BuryMismatch = 48,
 }
 
 impl HdError {

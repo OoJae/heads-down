@@ -62,6 +62,16 @@ pub mod tag {
     pub const SEEKER_SEAT: u8 = 3;
     /// [`super::ShiftLog`].
     pub const SHIFT_LOG: u8 = 4;
+    /// [`super::StackTable`] (v1.2, SKR).
+    pub const STACK_TABLE: u8 = 5;
+    /// [`super::StackSeat`] (v1.2, SKR).
+    pub const STACK_SEAT: u8 = 6;
+    /// [`super::FocusBond`] (v1.2, SKR).
+    pub const FOCUS_BOND: u8 = 7;
+    /// [`super::GiftEscrow`] (v1.2).
+    pub const GIFT_ESCROW: u8 = 8;
+    /// [`super::BuryVault`] (v1.2, SKR).
+    pub const BURY_VAULT: u8 = 9;
 }
 
 /// Layout version written into every header.
@@ -345,6 +355,242 @@ pub struct ShiftLog {
     pub reserved: [u8; 16],
 }
 
+// ---- v1.2 (SKR): additive accounts ------------------------------------------
+
+/// `StackTable::flags` bits (`open_stack`).
+pub mod stack_flags {
+    /// Remote "honor-plus" table: Seeker rigs only (SGT re-verified at join),
+    /// attested keys only, lower bond cap, one seat per SGT.
+    pub const REMOTE: u8 = 0b001;
+    /// Every forfeit goes to Bury (no finisher share).
+    pub const BURY_ONLY: u8 = 0b010;
+    /// Attested keys only (level >= 1, unexpired). Always on for remote tables.
+    pub const ATTESTED_ONLY: u8 = 0b100;
+    /// Every defined bit.
+    pub const ALL: u8 = REMOTE | BURY_ONLY | ATTESTED_ONLY;
+}
+
+/// `StackTable::status`.
+pub mod stack_status {
+    /// Accepting joins before `start_round`, check-ins inside the window.
+    pub const OPEN: u8 = 0;
+    /// `settle_stack` ran: every seat has an outcome and a payout.
+    pub const SETTLED: u8 = 1;
+    /// Never settled before `refund_after_ts`: every seat may take its own
+    /// bond back.
+    pub const REFUNDING: u8 = 2;
+}
+
+/// `StackSeat::outcome`.
+pub mod seat_outcome {
+    /// Not settled yet.
+    pub const PENDING: u8 = 0;
+    /// Held out: bond back plus a share of the forfeits.
+    pub const FINISHED: u8 = 1;
+    /// Broke, or missed the end round, or more gaps than grace: bond forfeited.
+    pub const FORFEITED: u8 = 2;
+}
+
+/// `GiftEscrow::recipient_kind`.
+pub mod gift_kind {
+    /// `recipient` is a wallet; that wallet claims.
+    pub const WALLET: u8 = 0;
+    /// `recipient` is an SGT mint; its current holder claims (verified in
+    /// program with `sgt-verify`).
+    pub const SGT_MINT: u8 = 1;
+}
+
+/// An SKR-bonded self-control contest, PDA `[b"stack", host, table_id u64 LE]`,
+/// 208 bytes. Its SKR vault is the canonical SPL Token ATA owned by this PDA.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
+pub struct StackTable {
+    /// Header (tag 5).
+    pub header: Header,
+    /// Wallet that opened the table (paid the rent).
+    pub host: [u8; 32],
+    /// `ATA(this PDA, SKR mint)`, checked at open.
+    pub vault: [u8; 32],
+    /// Host-chosen id (seed).
+    pub table_id: U64,
+    /// SKR base units every seat bonds.
+    pub bond: U64,
+    /// First ORE round of the window.
+    pub start_round: U64,
+    /// Last ORE round of the window (inclusive).
+    pub end_round: U64,
+    /// Window rounds a seat may miss and still finish.
+    pub grace_gaps: U32,
+    /// See [`stack_flags`].
+    pub flags: u8,
+    /// 2..=8.
+    pub max_seats: u8,
+    /// See [`stack_status`].
+    pub status: u8,
+    /// Seats joined.
+    pub seat_count: u8,
+    /// Seats that finished (at settle).
+    pub finishers: u8,
+    /// Seats that claimed.
+    pub claimed_count: u8,
+    /// Padding.
+    pub _pad0: [u8; 6],
+    /// Sum of every seat's bond (`B`).
+    pub total_bonds: U64,
+    /// Sum of the finishers' bonds (`W`, at settle).
+    pub finisher_bonds: U64,
+    /// Sum of every seat's payout (at settle).
+    pub payouts_total: U64,
+    /// SKR moved to the Bury lot at settle (`B - payouts_total`).
+    pub bury_amount: U64,
+    /// SKR paid out by claims so far.
+    pub claimed_total: U64,
+    /// Unix time after which an unsettled table refunds every bond.
+    pub refund_after_ts: I64,
+    /// Unix time of `open_stack`.
+    pub opened_ts: I64,
+    /// `Board.round_id` at `open_stack`.
+    pub opened_round: U64,
+    /// Reserved, zero.
+    pub reserved: [u8; 24],
+}
+
+/// One seat at a table, PDA `[b"stackseat", table, key]` where `key` is the
+/// SGT mint at remote tables (one seat per Seeker) and the rig address at
+/// in-person tables (one seat per rig), 200 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
+pub struct StackSeat {
+    /// Header (tag 6).
+    pub header: Header,
+    /// The table.
+    pub table: [u8; 32],
+    /// The seated rig.
+    pub rig: [u8; 32],
+    /// `rig.authority` at join: payouts and the seat rent go only here.
+    pub authority: [u8; 32],
+    /// SGT mint re-verified at join (zero when the join was not SGT-verified).
+    pub sgt_mint: [u8; 32],
+    /// SKR bonded.
+    pub bond: U64,
+    /// The rig's shift this seat is bound to (0 until the first check-in).
+    pub shift_id: U64,
+    /// Window rounds with a heartbeat that landed in that round.
+    pub checked_rounds: U64,
+    /// Last round checked in (0 = none).
+    pub last_round: U64,
+    /// SKR this seat receives at claim (at settle).
+    pub payout: U64,
+    /// Join order (0-based).
+    pub seat_index: u8,
+    /// 1 once a check-in saw a BREAK / FREEZE recorded in the bound shift.
+    pub broken: u8,
+    /// See [`seat_outcome`].
+    pub outcome: u8,
+    /// 1 when the SGT was re-verified at join.
+    pub sgt_verified: u8,
+    /// Padding.
+    pub _pad0: [u8; 4],
+    /// Reserved, zero.
+    pub reserved: [u8; 16],
+}
+
+/// A solo commitment on one shift, PDA `[b"bond", rig, shift_id u64 LE]`,
+/// 160 bytes. Its SKR vault is the canonical SPL Token ATA owned by this PDA.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
+pub struct FocusBond {
+    /// Header (tag 7).
+    pub header: Header,
+    /// The rig.
+    pub rig: [u8; 32],
+    /// `rig.authority` at lock: release and rent go only here.
+    pub authority: [u8; 32],
+    /// `ATA(this PDA, SKR mint)`.
+    pub vault: [u8; 32],
+    /// The bonded shift.
+    pub shift_id: U64,
+    /// SKR base units locked.
+    pub amount: U64,
+    /// `rig.shift_start_round` of the bonded shift (== its ShiftLog.start_round).
+    pub shift_start_round: U64,
+    /// `rig.shift_start_ts` of the bonded shift (== its ShiftLog.start_ts).
+    pub shift_start_ts: I64,
+    /// Unix time of the lock.
+    pub locked_ts: I64,
+    /// Reserved, zero.
+    pub reserved: [u8; 16],
+}
+
+/// Escrowed lamports for a recipient wallet or SGT mint, PDA
+/// `[b"gift", sender, nonce u64 LE]`, 128 bytes. The lamports sit in this
+/// account on top of its rent.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
+pub struct GiftEscrow {
+    /// Header (tag 8).
+    pub header: Header,
+    /// Who paid; the rent and any refund go only here.
+    pub sender: [u8; 32],
+    /// A wallet or an SGT mint (see `recipient_kind`).
+    pub recipient: [u8; 32],
+    /// Sender-chosen nonce (seed).
+    pub nonce: U64,
+    /// Lamports for the recipient.
+    pub lamports: U64,
+    /// Unix time of `create_gift`.
+    pub created_ts: I64,
+    /// `created_ts + 30 days`: claims before, refunds from.
+    pub expiry_ts: I64,
+    /// See [`gift_kind`].
+    pub recipient_kind: u8,
+    /// Padding.
+    pub _pad0: [u8; 7],
+    /// Reserved, zero.
+    pub reserved: [u8; 16],
+}
+
+/// The singleton Bury auction, PDA `[b"bury"]`, 192 bytes. It owns an SKR ATA
+/// (the lot) and an ORE ATA (the `bury` sender).
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
+pub struct BuryVault {
+    /// Header (tag 9).
+    pub header: Header,
+    /// `ATA(this PDA, SKR mint)`.
+    pub skr_vault: [u8; 32],
+    /// `ATA(this PDA, ORE mint)`.
+    pub ore_vault: [u8; 32],
+    /// SKR base units for sale (deposits minus sales).
+    pub lot_skr: U64,
+    /// Slot the current price decay started (a new lot restarts it).
+    pub auction_start_slot: U64,
+    /// ORE atoms per whole SKR at `auction_start_slot`.
+    pub start_price: U64,
+    /// ORE atoms per whole SKR at the end of the window and after.
+    pub floor_price: U64,
+    /// Slots from `start_price` to `floor_price`.
+    pub window_slots: U64,
+    /// Price of the last sale (0 = none yet); anchors the next start price.
+    pub last_clear_price: U64,
+    /// Lifetime SKR deposited (Stack and Focus Bond forfeits).
+    pub total_skr_in: U64,
+    /// Lifetime SKR sold.
+    pub total_skr_sold: U64,
+    /// Lifetime ORE paid by buyers (all of it went through ORE `bury`).
+    pub total_ore_paid: U64,
+    /// Lifetime ORE burned by `bury` (90%).
+    pub total_ore_burned: U64,
+    /// Lifetime ORE `bury` sent to ORE stakers (10%).
+    pub total_ore_shared: U64,
+    /// Deposits (each restarts the auction).
+    pub lots: U64,
+    /// Sales.
+    pub sales: U64,
+    /// Reserved, zero.
+    pub reserved: [u8; 16],
+}
+
 // ---- layout pins (INTERFACE.md) --------------------------------------------
 
 const _: () = {
@@ -439,6 +685,92 @@ const _: () = {
     assert!(offset_of!(ShiftLog, start_ts) == 96);
     assert!(offset_of!(ShiftLog, end_ts) == 104);
     assert!(offset_of!(ShiftLog, reserved) == 112);
+
+    // v1.2 (SKR), additive.
+    assert!(core::mem::align_of::<StackTable>() == 1);
+    assert!(core::mem::align_of::<StackSeat>() == 1);
+    assert!(core::mem::align_of::<FocusBond>() == 1);
+    assert!(core::mem::align_of::<GiftEscrow>() == 1);
+    assert!(core::mem::align_of::<BuryVault>() == 1);
+
+    assert!(size_of::<StackTable>() == 208);
+    assert!(offset_of!(StackTable, host) == 8);
+    assert!(offset_of!(StackTable, vault) == 40);
+    assert!(offset_of!(StackTable, table_id) == 72);
+    assert!(offset_of!(StackTable, bond) == 80);
+    assert!(offset_of!(StackTable, start_round) == 88);
+    assert!(offset_of!(StackTable, end_round) == 96);
+    assert!(offset_of!(StackTable, grace_gaps) == 104);
+    assert!(offset_of!(StackTable, flags) == 108);
+    assert!(offset_of!(StackTable, max_seats) == 109);
+    assert!(offset_of!(StackTable, status) == 110);
+    assert!(offset_of!(StackTable, seat_count) == 111);
+    assert!(offset_of!(StackTable, finishers) == 112);
+    assert!(offset_of!(StackTable, claimed_count) == 113);
+    assert!(offset_of!(StackTable, total_bonds) == 120);
+    assert!(offset_of!(StackTable, finisher_bonds) == 128);
+    assert!(offset_of!(StackTable, payouts_total) == 136);
+    assert!(offset_of!(StackTable, bury_amount) == 144);
+    assert!(offset_of!(StackTable, claimed_total) == 152);
+    assert!(offset_of!(StackTable, refund_after_ts) == 160);
+    assert!(offset_of!(StackTable, opened_ts) == 168);
+    assert!(offset_of!(StackTable, opened_round) == 176);
+    assert!(offset_of!(StackTable, reserved) == 184);
+
+    assert!(size_of::<StackSeat>() == 200);
+    assert!(offset_of!(StackSeat, table) == 8);
+    assert!(offset_of!(StackSeat, rig) == 40);
+    assert!(offset_of!(StackSeat, authority) == 72);
+    assert!(offset_of!(StackSeat, sgt_mint) == 104);
+    assert!(offset_of!(StackSeat, bond) == 136);
+    assert!(offset_of!(StackSeat, shift_id) == 144);
+    assert!(offset_of!(StackSeat, checked_rounds) == 152);
+    assert!(offset_of!(StackSeat, last_round) == 160);
+    assert!(offset_of!(StackSeat, payout) == 168);
+    assert!(offset_of!(StackSeat, seat_index) == 176);
+    assert!(offset_of!(StackSeat, broken) == 177);
+    assert!(offset_of!(StackSeat, outcome) == 178);
+    assert!(offset_of!(StackSeat, sgt_verified) == 179);
+    assert!(offset_of!(StackSeat, reserved) == 184);
+
+    assert!(size_of::<FocusBond>() == 160);
+    assert!(offset_of!(FocusBond, rig) == 8);
+    assert!(offset_of!(FocusBond, authority) == 40);
+    assert!(offset_of!(FocusBond, vault) == 72);
+    assert!(offset_of!(FocusBond, shift_id) == 104);
+    assert!(offset_of!(FocusBond, amount) == 112);
+    assert!(offset_of!(FocusBond, shift_start_round) == 120);
+    assert!(offset_of!(FocusBond, shift_start_ts) == 128);
+    assert!(offset_of!(FocusBond, locked_ts) == 136);
+    assert!(offset_of!(FocusBond, reserved) == 144);
+
+    assert!(size_of::<GiftEscrow>() == 128);
+    assert!(offset_of!(GiftEscrow, sender) == 8);
+    assert!(offset_of!(GiftEscrow, recipient) == 40);
+    assert!(offset_of!(GiftEscrow, nonce) == 72);
+    assert!(offset_of!(GiftEscrow, lamports) == 80);
+    assert!(offset_of!(GiftEscrow, created_ts) == 88);
+    assert!(offset_of!(GiftEscrow, expiry_ts) == 96);
+    assert!(offset_of!(GiftEscrow, recipient_kind) == 104);
+    assert!(offset_of!(GiftEscrow, reserved) == 112);
+
+    assert!(size_of::<BuryVault>() == 192);
+    assert!(offset_of!(BuryVault, skr_vault) == 8);
+    assert!(offset_of!(BuryVault, ore_vault) == 40);
+    assert!(offset_of!(BuryVault, lot_skr) == 72);
+    assert!(offset_of!(BuryVault, auction_start_slot) == 80);
+    assert!(offset_of!(BuryVault, start_price) == 88);
+    assert!(offset_of!(BuryVault, floor_price) == 96);
+    assert!(offset_of!(BuryVault, window_slots) == 104);
+    assert!(offset_of!(BuryVault, last_clear_price) == 112);
+    assert!(offset_of!(BuryVault, total_skr_in) == 120);
+    assert!(offset_of!(BuryVault, total_skr_sold) == 128);
+    assert!(offset_of!(BuryVault, total_ore_paid) == 136);
+    assert!(offset_of!(BuryVault, total_ore_burned) == 144);
+    assert!(offset_of!(BuryVault, total_ore_shared) == 152);
+    assert!(offset_of!(BuryVault, lots) == 160);
+    assert!(offset_of!(BuryVault, sales) == 168);
+    assert!(offset_of!(BuryVault, reserved) == 176);
 };
 
 /// A heads_down account type.
@@ -471,6 +803,36 @@ impl Account for SeekerSeat {
 }
 impl Account for ShiftLog {
     const TAG: u8 = tag::SHIFT_LOG;
+    fn header(&self) -> &Header {
+        &self.header
+    }
+}
+impl Account for StackTable {
+    const TAG: u8 = tag::STACK_TABLE;
+    fn header(&self) -> &Header {
+        &self.header
+    }
+}
+impl Account for StackSeat {
+    const TAG: u8 = tag::STACK_SEAT;
+    fn header(&self) -> &Header {
+        &self.header
+    }
+}
+impl Account for FocusBond {
+    const TAG: u8 = tag::FOCUS_BOND;
+    fn header(&self) -> &Header {
+        &self.header
+    }
+}
+impl Account for GiftEscrow {
+    const TAG: u8 = tag::GIFT_ESCROW;
+    fn header(&self) -> &Header {
+        &self.header
+    }
+}
+impl Account for BuryVault {
+    const TAG: u8 = tag::BURY_VAULT;
     fn header(&self) -> &Header {
         &self.header
     }
