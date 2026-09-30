@@ -143,11 +143,13 @@ class HeartbeatTickerTest {
     }
 
     @Test
-    fun `device break reasons map onto ShiftLog codes`() {
-        assertEquals(ShiftEndReason.PICKUP, BreakReason.LIFTED.wireReason)
-        assertEquals(ShiftEndReason.SCREEN_ON, BreakReason.SCREEN_ON.wireReason)
-        assertEquals(ShiftEndReason.SCREEN_ON, BreakReason.UNLOCKED.wireReason)
-        assertEquals(ShiftEndReason.MANUAL, BreakReason.UNPLUGGED.wireReason)
+    fun `device break reasons map onto the v1_1 ShiftLog codes`() {
+        assertEquals(1, BreakReason.LIFTED.wireReason.wire)
+        assertEquals(2, BreakReason.SCREEN_ON.wireReason.wire)
+        assertEquals(7, BreakReason.UNPLUGGED.wireReason.wire)
+        assertEquals(8, BreakReason.UNLOCKED.wireReason.wire)
+        // Every device break is a reason break_shift accepts.
+        BreakReason.entries.forEach { assertTrue("$it", it.wireReason.isBreakReason) }
     }
 
     @Test
