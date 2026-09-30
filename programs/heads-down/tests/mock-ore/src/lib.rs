@@ -10,11 +10,54 @@
 //!   and lamports) without crediting any tile.
 //!
 //! Accounts are ORE deploy's 12 (signer, authority, automation, board, ...).
+//!
+//! ORE `bury` (tag 24, v1.2 Bury auction), mode from byte 1 of the Board
+//! (account 2 of bury's 12):
+//!
+//! * `2` NO-OP: return Ok without taking any ORE.
+//! * `4` TAKE-NO-BURN: take the ORE to the Treasury's ORE ATA with the
+//!   BuryVault's propagated signer privilege, but burn nothing.
 #![cfg_attr(target_os = "solana", no_std)]
 #![allow(clippy::indexing_slicing)]
 
-use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio::{
+    cpi::invoke,
+    error::ProgramError,
+    instruction::{InstructionAccount, InstructionView},
+    AccountView, Address, ProgramResult,
+};
 use pinocchio_system::instructions::Transfer;
+
+/// SPL Token `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`.
+const SPL_TOKEN: Address = Address::new_from_array([
+    0x06, 0xdd, 0xf6, 0xe1, 0xd7, 0x65, 0xa1, 0x93, 0xd9, 0xcb, 0xe1, 0x46, 0xce, 0xeb, 0x79, 0xac,
+    0x1c, 0xb4, 0x85, 0xed, 0x5f, 0x5b, 0x37, 0x91, 0x3a, 0x8c, 0xf5, 0x85, 0x7e, 0xff, 0x00, 0xa9,
+]);
+
+fn bury(accounts: &[AccountView], data: &[u8]) -> ProgramResult {
+    let mode = accounts[2].try_borrow()?[1];
+    match mode {
+        2 => Ok(()),
+        4 => {
+            let mut ix_data = [3u8; 9];
+            ix_data[1..9].copy_from_slice(data.get(1..9).ok_or(ProgramError::InvalidInstructionData)?);
+            let metas = [
+                InstructionAccount::writable(accounts[1].address()),
+                InstructionAccount::writable(accounts[5].address()),
+                InstructionAccount::readonly_signer(accounts[0].address()),
+            ];
+            invoke(
+                &InstructionView {
+                    program_id: &SPL_TOKEN,
+                    data: &ix_data,
+                    accounts: &metas,
+                },
+                &[&accounts[1], &accounts[5], &accounts[0]],
+            )
+        }
+        _ => Err(ProgramError::InvalidInstructionData),
+    }
+}
 
 #[cfg(target_os = "solana")]
 mod entrypoint {
@@ -25,9 +68,12 @@ mod entrypoint {
 }
 
 /// Entry.
-pub fn process(_program_id: &Address, accounts: &mut [AccountView], _data: &[u8]) -> ProgramResult {
+pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     if accounts.len() < 12 {
         return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if data.first() == Some(&24) {
+        return bury(accounts, data);
     }
     let mode = accounts[3].try_borrow()?[1];
     match mode {
