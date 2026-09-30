@@ -22,6 +22,15 @@ data class WalletAccount(val publicKey: ByteArray, val label: String?) {
 /** SIWS proof to hand to the SIWS verifier (single-use server nonce, 10-minute expiry). */
 class SignInProof(val account: WalletAccount, val signedMessage: ByteArray, val signature: ByteArray)
 
+/**
+ * Submits a wallet-signed transaction through the app's own RPC and returns its base58
+ * signature. Used where the wallet cannot reach the cluster the app talks to (the `localdev`
+ * build's local validator): the wallet only signs (`signTransactions`), the app sends.
+ */
+fun interface TransactionSubmitter {
+    suspend fun submit(signedTransaction: ByteArray): String
+}
+
 sealed interface WalletResult<out T> {
     data class Success<T>(val value: T) : WalletResult<T>
     data object NoWalletInstalled : WalletResult<Nothing>
@@ -56,12 +65,16 @@ object HeadsDownIdentity {
  * - The auth token is restored from and persisted to [AuthTokenVault]; it is never logged.
  * - [signAndSend] reports success only after [ConfirmationPoller] saw each signature
  *   confirmed with `err == null`. A wallet "sent" response is not success.
+ * - With a [submitter] (the `localdev` build), the wallet only signs (`signTransactions`) and the
+ *   app submits through its own RPC: an MWA wallet broadcasts to its own cluster, never to a
+ *   validator on the laptop. MWA's `Blockchain` has no localnet, so [chain] stays devnet there.
  */
 class HeadsDownWallet(
     private val adapter: MobileWalletAdapter,
     private val vault: AuthTokenVault,
     private val poller: ConfirmationPoller,
     private val chain: Blockchain = Solana.Devnet,
+    private val submitter: TransactionSubmitter? = null,
 ) {
     init {
         adapter.blockchain = chain
@@ -77,15 +90,17 @@ class HeadsDownWallet(
     }
 
     /**
-     * Sign In With Solana. [nonce] must come from the SIWS nonce service (single use, >= 8
-     * alphanumerics); the returned proof is verified server-side, not trusted locally.
+     * Sign In With Solana with the fields the registrar issued (`POST /siws/nonce`, registrar N7):
+     * domain, URI, statement, version, chain id, nonce, issued-at and expiration are copied
+     * verbatim, because the registrar verifies the exact message the wallet signs. The returned
+     * proof is verified server-side (`POST /siws/verify`), not trusted locally.
      */
-    suspend fun signIn(sender: ActivityResultSender, nonce: String, statement: String): WalletResult<SignInProof> {
+    suspend fun signIn(sender: ActivityResultSender, request: SiwsRequest): WalletResult<SignInProof> {
         restoreToken()
         // 2.2.0 added a String-address overload, so the null address must be typed.
         val payload = SignInWithSolana.Payload(
-            HeadsDownIdentity.SIWS_DOMAIN, null as ByteArray?, statement, null, "1", chain.fullName, nonce,
-            null, null, null, null, null,
+            request.domain, null as ByteArray?, request.statement, request.uri.toUri(), request.version, request.chainId,
+            request.nonce, request.issuedAt, request.expirationTime, null, null, null,
         )
         return when (val result = adapter.signIn(sender, payload)) {
             is TransactionResult.Success -> {
@@ -114,15 +129,41 @@ class HeadsDownWallet(
     ): WalletResult<SubmissionReport> {
         require(transactions.isNotEmpty()) { "nothing to send" }
         restoreToken()
-        val result = adapter.transact(sender) { signAndSendTransactions(transactions.toTypedArray()) }
+        val result = adapter.transact(sender) {
+            if (submitter == null) {
+                SignedOrSent.Sent(signAndSendTransactions(transactions.toTypedArray()).signatures.map(Base58::encode))
+            } else {
+                SignedOrSent.Signed(signTransactions(transactions.toTypedArray()).signedPayloads.toList())
+            }
+        }
         return when (result) {
             is TransactionResult.Success -> {
                 persistToken(result.authResult)
-                val signatures = result.payload.signatures.map(Base58::encode)
+                val signatures = when (val step = result.payload) {
+                    is SignedOrSent.Sent -> step.signatures
+                    is SignedOrSent.Signed -> submitAll(step.payloads) ?: return WalletResult.Failed(SUBMIT_FAILED)
+                }
                 WalletResult.Success(SubmissionReport(signatures.map { poller.await(it, lastValidBlockHeight) }))
             }
             is TransactionResult.NoWalletFound -> WalletResult.NoWalletInstalled
             is TransactionResult.Failure -> failed(result.message)
+        }
+    }
+
+    private sealed interface SignedOrSent {
+        class Sent(val signatures: List<String>) : SignedOrSent
+        class Signed(val payloads: List<ByteArray>) : SignedOrSent
+    }
+
+    /** Submits wallet-signed transactions through the app's RPC; null if any submission failed. */
+    private suspend fun submitAll(signed: List<ByteArray>): List<String>? {
+        val submit = submitter ?: return null
+        return try {
+            signed.map { submit.submit(it) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -162,6 +203,11 @@ class HeadsDownWallet(
             } ?: return@transact SessionStep.Empty(account)
             val limit = capabilities.maxTransactionsPerRequest
             if (limit in 1 until prepared.transactions.size) return@transact SessionStep.TooMany
+            if (submitter != null) {
+                // The wallet signs only; the app submits after the session closes.
+                val signed = signTransactions(prepared.transactions.toTypedArray())
+                return@transact SessionStep.Signed(account, prepared, signed.signedPayloads.toList())
+            }
             val sent = signAndSendTransactions(prepared.transactions.toTypedArray())
             SessionStep.Sent(account, prepared, sent.signatures.map(Base58::encode))
         }
@@ -175,6 +221,11 @@ class HeadsDownWallet(
                     is SessionStep.Empty -> WalletResult.Success(WalletSession.NothingToSign(step.account))
                     is SessionStep.Sent -> {
                         val outcomes = step.signatures.map { poller.await(it, step.prepared.lastValidBlockHeight) }
+                        WalletResult.Success(WalletSession.Submitted(step.account, step.prepared, SubmissionReport(outcomes)))
+                    }
+                    is SessionStep.Signed -> {
+                        val signatures = submitAll(step.payloads) ?: return WalletResult.Failed(SUBMIT_FAILED)
+                        val outcomes = signatures.map { poller.await(it, step.prepared.lastValidBlockHeight) }
                         WalletResult.Success(WalletSession.Submitted(step.account, step.prepared, SubmissionReport(outcomes)))
                     }
                 }
@@ -191,6 +242,7 @@ class HeadsDownWallet(
         data object TooMany : SessionStep<Nothing>
         class Empty(val account: WalletAccount) : SessionStep<Nothing>
         class Sent<T>(val account: WalletAccount, val prepared: T, val signatures: List<String>) : SessionStep<T>
+        class Signed<T>(val account: WalletAccount, val prepared: T, val payloads: List<ByteArray>) : SessionStep<T>
     }
 
     suspend fun disconnect(sender: ActivityResultSender) {
@@ -221,5 +273,6 @@ class HeadsDownWallet(
 
     companion object {
         const val PREPARE_FAILED = "Could not build the transaction. Nothing was sent."
+        const val SUBMIT_FAILED = "The wallet signed, but the transaction could not be submitted. Nothing was armed."
     }
 }
