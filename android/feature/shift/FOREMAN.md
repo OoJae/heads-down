@@ -236,7 +236,8 @@ only, kept in memory.
 3. **A quiet night.** Arm, lay the phone down: the shift must still be hot after 10 minutes,
    and "Last shift" should show few triggers and no pickup. Many re-fires would mean the rest
    test is not settling the trigger on this sensor.
-4. **Bumps.** Knock the nightstand: no break, and one more window judged.
+4. **Bumps.** Knock the nightstand, and send the phone a notification that makes it buzz: no
+   break, and one more window judged each time the trigger fired.
 5. **A flat carry.** Lift the phone without tilting it and walk away with the screen off: the
    shift breaks about 3 s later as "the phone was picked up".
 6. **The planner log.** `run-as xyz.headsdown cat files/foreman/planner.jsonl` after a shift.
