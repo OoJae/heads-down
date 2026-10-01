@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 TOOLCHAIN="${HD_TOOLCHAIN:-+1.97.1}"
 
-[[ -f tests/fixtures/ore.so ]] || bash tests/fixtures/fetch-fixtures.sh
+[[ -f tests/fixtures/ore.so && -f tests/fixtures/ore_stake.so ]] || bash tests/fixtures/fetch-fixtures.sh
 bash scripts/build.sh
 cargo "$TOOLCHAIN" test -p heads-down
 cargo "$TOOLCHAIN" test -p heads-down-tests "$@"

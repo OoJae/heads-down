@@ -8,9 +8,11 @@
 //! wallet-signed caps and the Motherlode-aware production-cost gate.
 //!
 //! The contract (PDAs, byte layouts, preimages, instruction formats, dig
-//! semantics, errors, events) is `INTERFACE.md` v1.1, frozen from this code;
-//! `vectors/` is its machine-checked form (generated from LiteSVM runs); the
-//! audit checklist is in `README.md`.
+//! semantics, errors, events) is `INTERFACE.md` v1.1, frozen from this code,
+//! plus the additive v1.2 SKR section (§11: Stack, Focus Bond, Gift a Rig,
+//! Bury auction; tags 15..=27, accounts 5..=9, events 11..=23, errors
+//! 32..=48); `vectors/` is its machine-checked form (generated from LiteSVM
+//! runs); the audit checklist is in `README.md`.
 //!
 //! Pinocchio 0.11, `no_std` on SBF, no allocator, one audited `unsafe`
 //! block (`events::log_data`, the `sol_log_data` syscall).
@@ -41,7 +43,9 @@ pub mod logic;
 pub mod message;
 pub mod ore;
 pub mod pda;
+pub mod skr;
 pub mod state;
+pub mod token;
 pub mod util;
 
 /// Program id `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`.
@@ -60,6 +64,16 @@ pub const RIG_SEED: &[u8] = b"rig";
 pub const SEEKER_SEED: &[u8] = b"seeker";
 /// ShiftLog PDA seed.
 pub const SHIFT_SEED: &[u8] = b"shift";
+/// StackTable PDA seed (v1.2): `["stack", host, table_id u64 LE]`.
+pub const STACK_SEED: &[u8] = b"stack";
+/// StackSeat PDA seed (v1.2): `["stackseat", table, key]`.
+pub const STACK_SEAT_SEED: &[u8] = b"stackseat";
+/// FocusBond PDA seed (v1.2): `["bond", rig, shift_id u64 LE]`.
+pub const BOND_SEED: &[u8] = b"bond";
+/// GiftEscrow PDA seed (v1.2): `["gift", sender, nonce u64 LE]`.
+pub const GIFT_SEED: &[u8] = b"gift";
+/// BuryVault PDA seed (v1.2): `["bury"]`.
+pub const BURY_SEED: &[u8] = b"bury";
 
 /// Canonical bump of `[b"config"]` (asserted against `find_program_address`
 /// by a unit test and again on-chain by `initialize_config`).
@@ -74,6 +88,12 @@ pub const EXECUTOR_BUMP: u8 = 249;
 /// and its own crank-reimbursement transfers.
 pub const EXECUTOR_ID: Address =
     Address::derive_address_const(&[EXECUTOR_SEED], Some(EXECUTOR_BUMP), &ID);
+/// Canonical bump of `[b"bury"]` (v1.2).
+pub const BURY_BUMP: u8 = 255;
+/// BuryVault PDA `6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS` (v1.2): the
+/// singleton Bury auction. It signs only its own SKR / ORE transfers and ORE
+/// `bury`.
+pub const BURY_ID: Address = Address::derive_address_const(&[BURY_SEED], Some(BURY_BUMP), &ID);
 
 /// Instruction tags (`data[0]`).
 pub mod tag {
@@ -107,6 +127,33 @@ pub mod tag {
     pub const APPLY_CONFIG: u8 = 13;
     /// close_rig.
     pub const CLOSE_RIG: u8 = 14;
+    // ---- v1.2 (SKR), additive ----
+    /// open_stack.
+    pub const OPEN_STACK: u8 = 15;
+    /// join_stack.
+    pub const JOIN_STACK: u8 = 16;
+    /// stack_checkin.
+    pub const STACK_CHECKIN: u8 = 17;
+    /// settle_stack.
+    pub const SETTLE_STACK: u8 = 18;
+    /// claim_stack.
+    pub const CLAIM_STACK: u8 = 19;
+    /// lock_focus_bond.
+    pub const LOCK_FOCUS_BOND: u8 = 20;
+    /// release_focus_bond.
+    pub const RELEASE_FOCUS_BOND: u8 = 21;
+    /// forfeit_focus_bond.
+    pub const FORFEIT_FOCUS_BOND: u8 = 22;
+    /// create_gift.
+    pub const CREATE_GIFT: u8 = 23;
+    /// claim_gift.
+    pub const CLAIM_GIFT: u8 = 24;
+    /// refund_gift.
+    pub const REFUND_GIFT: u8 = 25;
+    /// init_bury_vault.
+    pub const INIT_BURY_VAULT: u8 = 26;
+    /// bury_auction_buy.
+    pub const BURY_AUCTION_BUY: u8 = 27;
 }
 
 #[cfg(all(target_os = "solana", not(feature = "no-entrypoint")))]
@@ -147,6 +194,19 @@ pub fn process_instruction(
         tag::PROPOSE_CONFIG => governance::process_propose(accounts, rest),
         tag::APPLY_CONFIG => governance::process_apply(accounts, rest),
         tag::CLOSE_RIG => close_rig::process(accounts, rest),
+        tag::OPEN_STACK => stack::process_open(accounts, rest),
+        tag::JOIN_STACK => stack::process_join(accounts, rest),
+        tag::STACK_CHECKIN => stack::process_checkin(accounts, rest),
+        tag::SETTLE_STACK => stack::process_settle(accounts, rest),
+        tag::CLAIM_STACK => stack::process_claim(accounts, rest),
+        tag::LOCK_FOCUS_BOND => focus_bond::process_lock(accounts, rest),
+        tag::RELEASE_FOCUS_BOND => focus_bond::process_release(accounts, rest),
+        tag::FORFEIT_FOCUS_BOND => focus_bond::process_forfeit(accounts, rest),
+        tag::CREATE_GIFT => gift::process_create(accounts, rest),
+        tag::CLAIM_GIFT => gift::process_claim(accounts, rest),
+        tag::REFUND_GIFT => gift::process_refund(accounts, rest),
+        tag::INIT_BURY_VAULT => bury::process_init(accounts, rest),
+        tag::BURY_AUCTION_BUY => bury::process_buy(accounts, rest),
         _ => Err(error::HdError::InvalidInstruction.into()),
     }
 }
@@ -178,6 +238,49 @@ mod tests {
             executor,
             Address::from_str("By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge").unwrap()
         );
+        let (bury, bump) = Address::find_program_address(&[BURY_SEED], &ID);
+        assert_eq!((bury, bump), (BURY_ID, BURY_BUMP));
+        assert_eq!(
+            bury,
+            Address::from_str("6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS").unwrap()
+        );
+    }
+
+    #[test]
+    fn pinned_skr_ids_match_base58() {
+        let cases = [
+            (token::SKR_MINT, "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3"),
+            (ore::MINT_ADDRESS, "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp"),
+            (
+                token::SPL_TOKEN_PROGRAM_ID,
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            ),
+            (
+                token::ATA_PROGRAM_ID,
+                "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            ),
+        ];
+        for (a, s) in cases {
+            assert_eq!(a, Address::from_str(s).unwrap(), "{s}");
+        }
+        // Distinct seed prefixes per purpose (PDA sharing, audit class 8).
+        let seeds = [
+            CONFIG_SEED,
+            EXECUTOR_SEED,
+            RIG_SEED,
+            SEEKER_SEED,
+            SHIFT_SEED,
+            STACK_SEED,
+            STACK_SEAT_SEED,
+            BOND_SEED,
+            GIFT_SEED,
+            BURY_SEED,
+        ];
+        for (i, a) in seeds.iter().enumerate() {
+            for b in &seeds[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
     }
 
     #[test]

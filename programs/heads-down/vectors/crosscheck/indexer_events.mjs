@@ -44,7 +44,13 @@ for (const e of golden.events) {
       ShiftEnded: [["rig", "rig"], ["shiftId", "shift_id"], ["darkRounds", "dark_rounds"], ["roundsDug", "rounds_dug"], ["lamports", "lamports"], ["reason", "reason"]],
       SeekerVerified: [["rig", "rig"], ["sgtMint", "sgt_mint"], ["memberNumber", "member_number"]],
     }[out.kind];
-    verdict = pairs.every(([a, b]) => String(out[a]) === String(f[b])) ? "MATCH" : "MISMATCH";
+    // A kind this script has no field map for (the indexer may decode newer
+    // tags, such as the v1.2 SKR events 11..23) is reported, not compared.
+    verdict = !pairs
+      ? `DECODED as ${out.kind} (no field map here)`
+      : pairs.every(([a, b]) => String(out[a]) === String(f[b]))
+        ? "MATCH"
+        : "MISMATCH";
   }
   rows.push({ tag: e.tag, event: e.event, length: bytes.length, indexer_expects: HD_EVENT_SIZE[e.tag] ?? null, verdict, decoded: out });
 }

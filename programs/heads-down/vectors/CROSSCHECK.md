@@ -254,3 +254,19 @@ The Android uplink and the crank intake do not speak the same protocol.
 * **BREAK and FREEZE frames.** Android sends
   `{"kind":"break"|"freeze", …}`. The crank has no handler for these, so
   nothing lands a phone-signed BREAK or FREEZE on-chain.
+
+## 8. v1.2 (SKR, additive): no consumer implements it yet
+
+INTERFACE.md §11 adds instruction tags 15 to 27, accounts 5 to 9, events 11 to
+23 and errors 32 to 48. Nothing in v1.1 changed, so every row above still
+stands. `vectors/instructions.json` (16 new executed vectors) and
+`vectors/events.json` (tags 11 to 23) are the reference for these, from the
+same pinned fork.
+
+| Consumer | State | What it needs for SKR |
+|---|---|---|
+| Indexer (`services/indexer/src/codec`) | **SAFE, NOT DECODED.** `indexer_events.mjs` shows tags 11 to 23 come back as `Unknown` with their exact length, so nothing breaks (tags 6 to 10 likewise) | Decoders for tags 11 to 23 by exact length, names for errors 32 to 48, and the StackCheckin `result` code |
+| Crank | **NOT IMPLEMENTED** | Each round, for every seated rig: land the heartbeat, then `stack_checkin` (observe mode `hb_ix = 0xFF` after its `dig` or `record_heartbeats`, or verify mode with the precompile; at most 4 verified seats per 1,232-byte packet, 8 in observe mode); `settle_stack` after `end_round`; optionally the claims (permissionless) |
+| Android | **NOT IMPLEMENTED** | Builders for tags 15 to 27 as in `instructions.json`, including the ATA `CreateIdempotent` companions for the table, bond and Bury vaults; a one-round-lease plan (`lease = 1`) for any shift seated at a table |
+
+This section has no MISMATCH rows: there is no consumer code to compare yet.

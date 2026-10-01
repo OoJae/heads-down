@@ -10,7 +10,7 @@ use pinocchio::{
     cpi::{invoke_signed, Signer},
     error::ProgramError,
     instruction::{seeds, InstructionAccount, InstructionView},
-    AccountView, Address,
+    AccountView, Address, ProgramResult,
 };
 
 use crate::error::HdError;
@@ -47,6 +47,15 @@ pub const ENTROPY_PROGRAM_ID: Address = Address::new_from_array([
 ]);
 /// System program.
 pub const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0; 32]);
+/// ORE mint `oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp` (`consts.rs:71`;
+/// classic SPL Token, 11 decimals).
+pub const MINT_ADDRESS: Address = Address::new_from_array([
+    0x0c, 0x00, 0xdb, 0xce, 0xb8, 0xce, 0xaa, 0x73, 0x58, 0x94, 0x5a, 0x47, 0x5b, 0xca, 0x9f, 0x00,
+    0x2a, 0xd0, 0xb2, 0xe6, 0xd8, 0xb0, 0x63, 0xc8, 0x25, 0xa8, 0x58, 0x16, 0x43, 0xb9, 0xf5, 0x75,
+]);
+/// ORE `Bury` instruction tag (`instruction.rs:18`), permissionless: any
+/// signer buries ORE from its own ORE ATA (`bury.rs:18-21`).
+pub const BURY_TAG: u8 = 24;
 
 /// ORE PDA seeds (`consts.rs`).
 pub const AUTOMATION_SEED: &[u8] = b"automation";
@@ -577,6 +586,86 @@ pub fn cpi_deploy(
             a.ore_program,
             a.var,
             a.entropy_program,
+        ],
+        &[signer],
+    )
+}
+
+/// The 12 accounts of ORE `bury` (`bury.rs:13-16`, `sdk.rs:207-240`): signer,
+/// sender (the signer's ORE ATA), board, mint, treasury, treasury ORE ATA,
+/// stake treasury, stake treasury ORE ATA, stake vesting, token program,
+/// ORE program, ORE stake program. ORE and the stake program validate every
+/// one of them; heads_down pins the program id it invokes.
+pub struct BuryAccounts<'a> {
+    /// BuryVault PDA (signs via seeds).
+    pub signer: &'a AccountView,
+    /// `ATA(BuryVault, ORE mint)`.
+    pub sender: &'a AccountView,
+    /// Board.
+    pub board: &'a AccountView,
+    /// ORE mint.
+    pub mint: &'a AccountView,
+    /// ORE Treasury.
+    pub treasury: &'a AccountView,
+    /// ORE Treasury's ORE ATA.
+    pub treasury_ore: &'a AccountView,
+    /// ORE stake Treasury.
+    pub stake_treasury: &'a AccountView,
+    /// ORE stake Treasury's ORE ATA.
+    pub stake_treasury_ore: &'a AccountView,
+    /// ORE stake Vesting.
+    pub stake_vesting: &'a AccountView,
+    /// SPL Token.
+    pub token_program: &'a AccountView,
+    /// ORE program.
+    pub ore_program: &'a AccountView,
+    /// ORE stake program.
+    pub stake_program: &'a AccountView,
+}
+
+/// CPI ORE `bury(amount)` signed by the BuryVault PDA (`seeds`). ORE moves
+/// `min(sender.amount, amount)` to its Treasury, sends 10% to ORE's stake program
+/// through `distribute` and burns 90% (`bury.rs:35-74`). The caller re-reads
+/// the sender balance and the mint supply afterwards.
+pub fn cpi_bury(a: &BuryAccounts<'_>, amount: u64, signer: Signer<'_, '_>) -> ProgramResult {
+    let mut data = [0u8; 9];
+    let (tag, rest) = data.split_at_mut(1);
+    tag.copy_from_slice(&[BURY_TAG]);
+    rest.copy_from_slice(&amount.to_le_bytes());
+    let metas = [
+        InstructionAccount::readonly_signer(a.signer.address()),
+        InstructionAccount::writable(a.sender.address()),
+        InstructionAccount::writable(a.board.address()),
+        InstructionAccount::writable(a.mint.address()),
+        InstructionAccount::writable(a.treasury.address()),
+        InstructionAccount::writable(a.treasury_ore.address()),
+        InstructionAccount::writable(a.stake_treasury.address()),
+        InstructionAccount::writable(a.stake_treasury_ore.address()),
+        InstructionAccount::writable(a.stake_vesting.address()),
+        InstructionAccount::readonly(a.token_program.address()),
+        InstructionAccount::readonly(a.ore_program.address()),
+        InstructionAccount::readonly(a.stake_program.address()),
+    ];
+    let ix = InstructionView {
+        program_id: &ORE_PROGRAM_ID,
+        data: &data,
+        accounts: &metas,
+    };
+    invoke_signed(
+        &ix,
+        &[
+            a.signer,
+            a.sender,
+            a.board,
+            a.mint,
+            a.treasury,
+            a.treasury_ore,
+            a.stake_treasury,
+            a.stake_treasury_ore,
+            a.stake_vesting,
+            a.token_program,
+            a.ore_program,
+            a.stake_program,
         ],
         &[signer],
     )

@@ -12,7 +12,7 @@
 |---|---|---|
 | **User wallet** (Seed Vault or MWA wallet) | Everything the wallet controls. This key is the root of authority, and Heads Down cannot bound it. | The wallet's own security; on-device transaction building and simulation |
 | **Rig P-256 key** (Android Keystore) | The armed weekly budget is deployed into ORE, but only in rounds where ORE's production-cost EMA is at or below the ceiling the wallet signed. Most of each deployed lamport comes back to the user, and none goes to the attacker. It can also forfeit this rig's own SKR bonds, or cheat at Stack. | Wallet-signed caps and expiry; the on-chain cost gate; ORE's per-square cap; Freeze (device key) and Revoke (wallet) |
-| **Crank or relayer** (anyone) | Liveness only: nothing mines, nothing is lost. A relayer that withholds heartbeats can make a Stack seat record gaps. | Competing permissionless cranks; the Nostr mirror; phones posting their own heartbeats; grace gaps |
+| **Crank or relayer** (anyone) | Liveness only: nothing mines, nothing is lost. A relayer that withholds heartbeats or a seat's `stack_checkin` can make a Stack seat record gaps. | Competing permissionless cranks; the Nostr mirror; phones posting their own heartbeats; `stack_checkin` is permissionless, so any seat or phone can land it; grace gaps |
 | **Registrar** (Ed25519 key) | Software keys get attestation level 1 or higher, so a cheater can win remote "honor-plus" Stack tables, up to the bond cap per seat. It has no custody and no mining authority. | Bond caps; in-person tables are the primary mode; voucher expiry; published transcripts; timelocked rotation |
 | **Upgrade authority** (beta) | After a **public 72 h delay**: take the SKR and SOL held in Heads Down vaults, and force deploys of armed Automations, which ORE limits to `25 x automation.amount` plus one fee per round. It cannot withdraw from Automations or claim anyone's ORE. | 72 h timelock with an in-app banner; one-approval Revoke; small vault caps; then revoked (immutable v1) |
 | **Team servers** | Liveness, privacy exposure, and phishing-shaped notifications. None of them holds authority over funds. | No signing from push; every transaction is built on-device from chain state and simulated |
@@ -48,10 +48,10 @@
 |---|---|---|---|
 | Mining SOL | the user's ORE `Automation` (owned by ORE) | the user's wallet (authority); the Executor PDA may only deploy | No Heads Down vault exists for mining funds |
 | Mined ORE and returned SOL | the user's ORE `Miner` (owned by ORE) | only the user's wallet can claim (`claim_ore.rs:24-27`) | |
-| Stack bonds (SKR) | per-table vault ATA, authority = table PDA | `heads_down` | **Custodied by Heads Down** and capped per seat |
-| Focus Bonds (SKR) | per-bond vault ATA | `heads_down` | Custodied and capped |
-| Gift escrows (SOL) | `GiftEscrow` PDA | `heads_down` | Custodied; refunds after 30 days |
-| Bury lots (SKR) and ORE proceeds | `BuryVault` | `heads_down` | ORE leaves only through ORE `bury` |
+| Stack bonds (SKR) | per-table vault: the SPL Token ATA of `StackTable ["stack", host, table_id]` | `heads_down` | **Custodied by Heads Down** and capped per seat (2,000 SKR in person, 1,000 remote, 500 for guests); paid out only to the seat's stored wallet or to the Bury lot |
+| Focus Bonds (SKR) | per-bond vault: the SPL Token ATA of `FocusBond ["bond", rig, shift_id]` | `heads_down` | Custodied, capped at 5,000 SKR; back to the stored owner or to the Bury lot |
+| Gift escrows (SOL) | `GiftEscrow ["gift", sender, nonce]` (lamports on top of rent) | `heads_down` | Custodied, capped at 10 SOL; to the recipient wallet or the SGT's current holder, or back to the sender from day 30 |
+| Bury lots (SKR) and ORE proceeds | `BuryVault ["bury"]`: an SKR ATA (the lot) and an ORE ATA | `heads_down` | No admin. ORE leaves only through ORE `bury`, checked against the ORE supply; SKR leaves only to a buyer who paid |
 | Executor float (SOL) | Executor PDA (System-owned, no data) | `heads_down` via `invoke_signed` | Pays `CHECKPOINT_FEE` top-ups and crank reimbursements; has no withdraw path |
 | Rig P-256 private key | Android Keystore on the phone | the device | Cannot be exported; can be *used* by code running in the app |
 | Rig state integrity | `Rig`, `SeekerSeat`, `ShiftLog` | `heads_down` | caps, counters, one verified rig per SGT |
@@ -161,7 +161,7 @@
 
 ### K3: crank and relayer (anyone; the team runs one)
 
-- **Powers.** Choose which heartbeats to submit and when within the round; batch and pay fees; checkpoint; relay Stack heartbeats.
+- **Powers.** Choose which heartbeats to submit and when within the round; batch and pay fees; checkpoint; relay Stack heartbeats and land `stack_checkin` (permissionless) each round.
 - **Cannot.**
   - Forge a heartbeat.
   - Choose the amount or the squares: the program computes both.
@@ -172,7 +172,7 @@
   - Withhold every dig: nothing mines and nothing is lost.
   - Deploy early instead of late, so more SOL piles onto the chosen squares after the dig and the realized cost rises. This stays inside the gate and caps.
   - Crowd the rig's squares with its own SOL in the same transaction before the dig. That costs the crank about 10.5% of what it deploys and gains it nothing, because ORE has no parimutuel payout.
-  - Withhold a Stack seat's heartbeats so the seat records gaps.
+  - Withhold a Stack seat's heartbeats, or its `stack_checkin` in a round, so the seat records gaps. A check-in only counts a heartbeat that landed in that same round, so it cannot be landed late.
 - **Mitigations.**
   - Competing cranks, funded by the fixed reimbursement.
   - Heartbeats mirrored to a public Nostr relay.
@@ -193,7 +193,7 @@
   - `attestationApplicationId` matches the package and its release-certificate digest;
   - the challenge is bound to the registration nonce.
 - **Worst case.**
-  - Software keys are vouched as hardware keys. A cheater then scripts heartbeats and wins remote "honor-plus" tables, taking up to `bond_cap x (seats - 1)` per table joined.
+  - Software keys are vouched as hardware keys. A cheater then scripts heartbeats and wins remote "honor-plus" tables, taking at most 80% of the other seats' forfeits, `0.8 x 1,000 SKR x 7` per table joined (bury-only tables: nothing).
   - Leaderboard tiers are inflated.
   - There is no custody and no effect on mining: guest rigs gate only their own money, whatever their attestation.
 - **Mitigations.**
@@ -298,10 +298,32 @@ The Radiants brief names 13 of these classes (marked `*`). Rows 3, 15 and 16 com
 | A dig needs a fresh, bound P-256 signature | Section 6, rules 1 to 6 |
 | Spend stays within the wallet-signed caps | Post-CPI `spent` delta checked against the round, shift and week caps (row 12) |
 | One verified rig per SGT mint | `SeekerSeat [seeker, sgt_mint]` is init-only (row 9) and re-pointed only by `rebind_seeker` |
-| Stack conservation | Row 11 rounding rule; Kani proof |
-| Gifts reach only the intended recipient or return to the sender | Row 3 relationship checks; refund goes only to the stored sender |
+| Stack conservation | Row 11 rounding rule (`skr::stack_payouts`): an exhaustive unit test over every finisher subset of 1 to 8 seats, and end to end on the fork (`skr_stack`). No Kani proof yet |
+| Gifts reach only the intended recipient or return to the sender | Row 3 relationship checks; the SGT is re-verified at claim; refund goes only to the stored sender (`skr_gift`) |
+| Forfeited SKR leaves the Bury lot only to a buyer whose ORE went through ORE `bury` | The vault ORE balance and the ORE supply are re-read after the `bury` CPI before any SKR moves (`skr_bury`) |
 | No admin withdraw path | No instruction exists; the audit greps for lamport and token moves out of every PDA |
 | Discriminators, canonical bumps, checked math, no reinitialization | Rows 4, 7, 9, 11 |
+
+### SKR checks as built (INTERFACE.md v1.2 §11)
+
+These rows cover only the SKR instructions (tags 15 to 27). Test names are `file::test` under `programs/heads-down/tests/tests/`, all run on the fork of live mainnet ORE.
+
+| # | Class | SKR check in `heads_down` | Test that fails without it |
+|---|---|---|---|
+| 1 | Missing signer | `join_stack` (the rig's wallet), `lock_focus_bond` (the rig's wallet), `create_gift` (sender), `claim_gift` (claimer), `open_stack` (host), `bury_auction_buy` (buyer). Settle, claim, release, forfeit and refund are permissionless but pay only recipients stored in state | `skr_stack::joins_are_gated_by_time_room_signature_and_uniqueness`, `skr_stack::open_stack_validates_every_parameter`, `skr_bond::lock_needs_the_wallet_an_open_clean_shift_and_real_skr`, `skr_gift::create_gift_validates_its_arguments_and_tolerates_prefunding`, `skr_bury::every_account_of_a_purchase_is_pinned` |
+| 2 | Missing owner | heads_down accounts: owner, length, tag (5 to 9) and version before any read. SKR / ORE token accounts: owned by classic SPL Token, 165 bytes, initialized. SGTs: `sgt-verify` (Token-2022) | `skr_stack::token_accounts_must_be_classic_spl_skr_owned_by_the_right_wallet`, `skr_bury::every_account_of_a_purchase_is_pinned` |
+| 3 | Account relationships | seat ↔ table and seat ↔ rig at every check-in; every seat of the table exactly once at settle (count and bond total); vaults equal the address stored in their PDA (derived once as the canonical ATA, owner field = the PDA, no delegate or close authority); payout accounts owned by the stored wallet; the bond's ShiftLog matched by rig, shift id, start round and start time; the gift's SGT mint re-verified for the claimer | `skr_stack::check_ins_prove_each_round_and_nothing_else`, `skr_stack::settle_needs_every_seat_exactly_once`, `skr_stack::a_table_settles_from_heartbeats_and_conserves_every_bond` (another wallet's ATA refused), `skr_bond::a_rig_re_registered_after_closing_cannot_revive_an_abandoned_bond`, `skr_gift::an_sgt_gift_follows_the_sgt_to_its_current_holder` |
+| 5 | Arbitrary CPI | CPI targets are constants: SPL Token (`Transfer`, `CloseAccount`), System, ORE (`bury`); the token-program, ORE-program, Board and Treasury slots are compared with them. ORE's stake program is reached only through ORE | `skr_bury::every_account_of_a_purchase_is_pinned`, `skr_stack::token_accounts_must_be_classic_spl_skr_owned_by_the_right_wallet` |
+| 6 | Duplicate mutable accounts | a seat or rig twice in a check-in fails (`DuplicateRig`); a seat twice at settle fails; transfers refuse source == destination | `skr_stack::check_ins_prove_each_round_and_nothing_else`, `skr_stack::settle_needs_every_seat_exactly_once` |
+| 7, 8 | Canonical bumps, PDA sharing | every SKR PDA created with its `find_program_address` bump; distinct seed prefixes (`stack`, `stackseat`, `bond`, `gift`, `bury`); each vault's authority is its own table or bond PDA; the BuryVault signs only its own transfers and ORE `bury` | `lib::tests::pinned_skr_ids_match_base58`, `skr_stack::joins_are_gated_by_time_room_signature_and_uniqueness` (non-canonical seat), `skr_bond::lock_needs_the_wallet_an_open_clean_shift_and_real_skr` (non-canonical bond) |
+| 9 | Reinitialization | init-only seats, bonds, gifts, tables and the BuryVault (one seat per key, one bond per shift, one escrow per sender and nonce); pre-funding tolerated | `skr_stack::remote_tables_take_only_attested_seekers_one_seat_per_sgt`, `skr_gift::create_gift_validates_its_arguments_and_tolerates_prefunding`, `skr_bury::the_bury_vault_is_a_permissionless_canonical_singleton` |
+| 10 | Closing accounts | claimed seats, released or forfeited bonds (and their vault ATAs), claimed or refunded gifts are closed to the wallet stored in state; a second claim, release or refund fails the account check | `skr_stack::a_table_settles_from_heartbeats_and_conserves_every_bond`, `skr_bond::a_completed_shift_releases_the_bond_to_its_owner_only`, `skr_gift::unclaimed_gifts_refund_to_the_sender_from_day_30_only` |
+| 11 | Arithmetic | u128 pro rata with floors, dust to Bury, `sum(payouts) + bury == B`; claims capped by the settled totals; the auction price and cost in u128, rounded up for the lot | `skr::tests::conservation_holds_for_every_small_table`, `skr::tests::purchases_round_up_in_the_lots_favour`, `skr_bury::the_price_bottoms_out_at_the_floor_and_every_unit_costs_at_least_one_atom` |
+| 12 | Stale data after CPI | every token CPI is followed by a balance re-read; after ORE `bury` the vault must have lost exactly the payment and the ORE supply must have fallen by the burned 90%, before any SKR moves | `skr_bury::an_ore_that_skips_the_burn_cannot_buy_the_lot` (a TEST-ONLY mock ORE that returns Ok without taking the ORE, and one that takes it without burning) |
+| 13 | Signer passthrough | the user's signature reaches only the SPL Token transfer the user asked for (the bond, the ORE payment); vault PDAs sign only transfers out of their own vault to recipients fixed by state | `skr_stack::token_accounts_must_be_classic_spl_skr_owned_by_the_right_wallet`, `skr_bury::every_account_of_a_purchase_is_pinned` |
+| 14 | Token-2022 pitfalls | SKR and ORE: classic SPL Token only, mints pinned; a Token-2022 account with the same bytes is refused. SGTs: the `sgt-verify` checks at Stack joins and SGT gift claims, re-run at each value action | `skr_stack::token_accounts_must_be_classic_spl_skr_owned_by_the_right_wallet`, `skr_bond::lock_needs_the_wallet_an_open_clean_shift_and_real_skr`, `skr_bury::every_account_of_a_purchase_is_pinned`, `skr_stack::remote_tables_take_only_attested_seekers_one_seat_per_sgt` (moved SGT) |
+| 15 | Introspection | verify-mode check-ins reuse the v1.1 heartbeat path (sysvar address, precompile id, same-instruction offsets, low-S, counter) | `skr_stack::check_ins_prove_each_round_and_nothing_else` (stale and late heartbeats) |
+| 16 | Griefing | per-seat check-in failures are reported, not fatal, including a seat whose wallet closed its rig; at most 8 seats per table and per instruction; settles and claims cannot be blocked by others; a table nobody settles refunds every bond after its timeout. Residual: anyone can take an open seat by posting the bond (no allowlist) | `skr_stack::a_closed_rig_cannot_sink_the_other_seats_check_in`, `skr_stack::an_unsettled_table_refunds_every_bond_after_the_timeout`, `fuzz_skr::*` (4,000 random and mutated SKR instructions, no aborts) |
 
 ---
 
@@ -353,6 +375,8 @@ The posture below is the manifest and code policy the Android workstream must im
 - **That the phone was really face-down and unused.** The DOWN state is the app's own sensor reading. The chain trusts it because the key is (as far as the registrar can tell) held in hardware by the genuine app on a locked, verified-boot device. A rooted device with a leaked keybox can defeat that (K4). This is why **remote** tables are labelled **"honor-plus"**, with capped bonds.
 - **That the person was not using another phone.** Stack measures "this phone stayed down", nothing more. We never claim "proof of focus".
 - **Delivery.** Airplane mode before a pickup, a force-stop or a dead battery all stop the heartbeat stream, and gaps beyond grace count as breaks (**fail-closed**). That also means an honest player on a flaky network can lose a bond. This is disclosed before joining, and grace is set per table.
+- **Timeliness, as built.** A seat counts round `r` only if a heartbeat for `r` was applied during `r` and a `stack_checkin` saw it during `r` (INTERFACE.md v1.2 §11.5). A round in which nobody lands the check-in is a gap even if the phone was down; any player, the phone itself or any crank may land it.
+- **Breaks, as built.** The seat reads the rig's `break_reason`, which every BREAK and freeze set and only a new arm clears, so a pickup breaks the seat even if the phone goes back down. A BREAK that lands in the end round after the seat's last check-in that round is not seen.
 - **Relay fairness at a table.** A relaying seat could withhold other seats' heartbeats. Every phone therefore posts its own heartbeats when online, every phone relays for everyone, and settlement counts a heartbeat that landed by any path. The residual risk is a seat with no connectivity of its own whose neighbours all collude.
 - **Leases.** Solo shifts may sign leases of up to 3 rounds. A pickup while offline therefore lets digs continue until `lease_end`, about 4 minutes at about 78 s per round. Stack requires a lease of 1.
 - **Clock skew** does not matter: messages bind to ORE's `round_id`, not wall-clock time.

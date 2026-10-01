@@ -1,12 +1,13 @@
 {
   "format": "heads-down/golden-events",
-  "interface_version": "1.1",
+  "interface_version": "1.2",
   "generated_by": "programs/heads-down/tests/src/vectors.rs",
   "notes": [
     "One `Program data: <base64>` log line per event: a single sol_log_data slice, byte 0 = tag, fields little-endian, no padding. Only lines emitted while heads_down is the innermost executing program are heads_down events.",
     "Every sample was captured from a real transaction on the pinned LiteSVM fork (samples come from instructions.json vectors unless noted).",
     "Lengths are exact and never change for a tag; new fields get a new tag. end_shift emits ShiftEnded (4) and then ShiftEndedV2 (10), its superset: a consumer that knows tag 10 should ignore tag 4.",
-    "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it."
+    "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it.",
+    "v1.2 (SKR, additive): tags 11..=23. StackCheckin.result is 0 when the round counted, else the reason (heads_down 0..=48 or a p256-introspect code). stack_checkin also emits HeartbeatsRecorded (8) for every heartbeat it verifies itself. BuryAuctionSold.ore_burned / ore_shared are ORE bury's 90/10 split, checked on-chain against the ORE supply."
   ],
   "events": [
     {
@@ -489,6 +490,783 @@
           "start_round": "422700",
           "end_round": "422700",
           "mode": 0
+        }
+      }
+    },
+    {
+      "tag": 11,
+      "event": "StackOpened",
+      "length": 103,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "table",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "host",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "table_id",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "bond",
+          "type": "u64",
+          "offset": 73,
+          "size": 8
+        },
+        {
+          "name": "start_round",
+          "type": "u64",
+          "offset": 81,
+          "size": 8
+        },
+        {
+          "name": "end_round",
+          "type": "u64",
+          "offset": 89,
+          "size": 8
+        },
+        {
+          "name": "grace_gaps",
+          "type": "u32",
+          "offset": 97,
+          "size": 4
+        },
+        {
+          "name": "flags",
+          "type": "u8",
+          "offset": 101,
+          "size": 1
+        },
+        {
+          "name": "max_seats",
+          "type": "u8",
+          "offset": 102,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "open_stack",
+        "hex": "0b2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd0493db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37010000000000000000c2eb0b000000002e730600000000002f73060000000000000000000004",
+        "base64": "Cy9p5eFi37jQAsp0THNcJGGF4YlhKmgtVGYon3hPHb0Ek9ufLuD3456UL7WUQRkL8gucQ8/MigUaFSSZzzkrejcBAAAAAAAAAADC6wsAAAAALnMGAAAAAAAvcwYAAAAAAAAAAAAABA==",
+        "fields": {
+          "tag": 11,
+          "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "host": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+          "table_id": "1",
+          "bond": "200000000",
+          "start_round": "422702",
+          "end_round": "422703",
+          "grace_gaps": 0,
+          "flags": 0,
+          "max_seats": 4
+        }
+      }
+    },
+    {
+      "tag": 12,
+      "event": "StackJoined",
+      "length": 138,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "table",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "authority",
+          "type": "pubkey",
+          "offset": 65,
+          "size": 32
+        },
+        {
+          "name": "sgt_mint",
+          "type": "pubkey",
+          "offset": 97,
+          "size": 32
+        },
+        {
+          "name": "bond",
+          "type": "u64",
+          "offset": 129,
+          "size": 8
+        },
+        {
+          "name": "seat_index",
+          "type": "u8",
+          "offset": 137,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "join_stack",
+        "hex": "0c2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee97193db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37000000000000000000000000000000000000000000000000000000000000000000c2eb0b0000000000",
+        "base64": "DC9p5eFi37jQAsp0THNcJGGF4YlhKmgtVGYon3hPHb0E13ckdFxixdaAbg3nNVGyUgbsfVW+kV14s5wYT3Ou6XGT258u4PfjnpQvtZRBGQvyC5xDz8yKBRoVJJnPOSt6NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMLrCwAAAAAA",
+        "fields": {
+          "tag": 12,
+          "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+          "authority": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+          "sgt_mint": "11111111111111111111111111111111",
+          "bond": "200000000",
+          "seat_index": 0
+        }
+      }
+    },
+    {
+      "tag": 13,
+      "event": "StackCheckin",
+      "length": 85,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "table",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "round_id",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "checked_rounds",
+          "type": "u64",
+          "offset": 73,
+          "size": 8
+        },
+        {
+          "name": "result",
+          "type": "u32",
+          "offset": 81,
+          "size": 4
+        }
+      ],
+      "sample": {
+        "captured_from": "stack_checkin_heartbeat",
+        "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee9712e73060000000000010000000000000000000000",
+        "base64": "DS9p5eFi37jQAsp0THNcJGGF4YlhKmgtVGYon3hPHb0E13ckdFxixdaAbg3nNVGyUgbsfVW+kV14s5wYT3Ou6XEucwYAAAAAAAEAAAAAAAAAAAAAAA==",
+        "fields": {
+          "tag": 13,
+          "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+          "round_id": "422702",
+          "checked_rounds": "1",
+          "result": 0
+        }
+      }
+    },
+    {
+      "tag": 14,
+      "event": "StackSettled",
+      "length": 67,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "table",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "total_bonds",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "finisher_bonds",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        },
+        {
+          "name": "payouts_total",
+          "type": "u64",
+          "offset": 49,
+          "size": 8
+        },
+        {
+          "name": "bury_amount",
+          "type": "u64",
+          "offset": 57,
+          "size": 8
+        },
+        {
+          "name": "seats",
+          "type": "u8",
+          "offset": 65,
+          "size": 1
+        },
+        {
+          "name": "finishers",
+          "type": "u8",
+          "offset": 66,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "settle_stack",
+        "hex": "0e2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd040046c323000000000084d7170000000000ec602100000000005a6202000000000302",
+        "base64": "Di9p5eFi37jQAsp0THNcJGGF4YlhKmgtVGYon3hPHb0EAEbDIwAAAAAAhNcXAAAAAADsYCEAAAAAAFpiAgAAAAADAg==",
+        "fields": {
+          "tag": 14,
+          "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "total_bonds": "600000000",
+          "finisher_bonds": "400000000",
+          "payouts_total": "560000000",
+          "bury_amount": "40000000",
+          "seats": 3,
+          "finishers": 2
+        }
+      }
+    },
+    {
+      "tag": 15,
+      "event": "StackClaimed",
+      "length": 106,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "table",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "authority",
+          "type": "pubkey",
+          "offset": 65,
+          "size": 32
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "offset": 97,
+          "size": 8
+        },
+        {
+          "name": "kind",
+          "type": "u8",
+          "offset": 105,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "claim_stack",
+        "hex": "0f2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee97193db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a370076b0100000000000",
+        "base64": "Dy9p5eFi37jQAsp0THNcJGGF4YlhKmgtVGYon3hPHb0E13ckdFxixdaAbg3nNVGyUgbsfVW+kV14s5wYT3Ou6XGT258u4PfjnpQvtZRBGQvyC5xDz8yKBRoVJJnPOSt6NwB2sBAAAAAAAA==",
+        "fields": {
+          "tag": 15,
+          "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+          "authority": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+          "amount": "280000000",
+          "kind": 0
+        }
+      }
+    },
+    {
+      "tag": 16,
+      "event": "FocusBondLocked",
+      "length": 113,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "bond",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "authority",
+          "type": "pubkey",
+          "offset": 65,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 97,
+          "size": 8
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "offset": 105,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "lock_focus_bond",
+        "hex": "10b88551927fea4958233835f610c0f834520a3ddd361f13ed676a0fba2511cf19e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb363e6ea7acba59568c5f36acb41816fb16ab2b27ab13abd38b0924ca2691ad659901000000000000000065cd1d00000000",
+        "base64": "ELiFUZJ/6klYIzg19hDA+DRSCj3dNh8T7WdqD7olEc8Z57EHubny1LBq79pTHtAzzwRttiPPKdr4WZE5vkyn+zY+bqesullWjF82rLQYFvsWqysnqxOr04sJJMomka1lmQEAAAAAAAAAAGXNHQAAAAA=",
+        "fields": {
+          "tag": 16,
+          "bond": "DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+          "rig": "GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+          "authority": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+          "shift_id": "1",
+          "amount": "500000000"
+        }
+      }
+    },
+    {
+      "tag": 17,
+      "event": "FocusBondReleased",
+      "length": 81,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "bond",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "offset": 73,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "release_focus_bond",
+        "hex": "11b88551927fea4958233835f610c0f834520a3ddd361f13ed676a0fba2511cf19e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb3601000000000000000065cd1d00000000",
+        "base64": "EbiFUZJ/6klYIzg19hDA+DRSCj3dNh8T7WdqD7olEc8Z57EHubny1LBq79pTHtAzzwRttiPPKdr4WZE5vkyn+zYBAAAAAAAAAABlzR0AAAAA",
+        "fields": {
+          "tag": 17,
+          "bond": "DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+          "rig": "GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+          "shift_id": "1",
+          "amount": "500000000"
+        }
+      }
+    },
+    {
+      "tag": 18,
+      "event": "FocusBondForfeited",
+      "length": 82,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "bond",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "offset": 73,
+          "size": 8
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 81,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "forfeit_focus_bond",
+        "hex": "1240a07b9f0804c61a669ff60acb88cdbca8aad5c19c37390f49b0d1d87ef582efdc97f4acc9c063ffe2378f995fc8a8b4aa8387b353842f2eb5be888e1bc451e5010000000000000000a3e1110000000006",
+        "base64": "EkCge58IBMYaZp/2CsuIzbyoqtXBnDc5D0mw0dh+9YLv3Jf0rMnAY//iN4+ZX8iotKqDh7NThC8utb6IjhvEUeUBAAAAAAAAAACj4REAAAAABg==",
+        "fields": {
+          "tag": 18,
+          "bond": "5MH2RZd4txEgtg9uffLHbH5aEfLeujRRqdLYuN4qrE2S",
+          "rig": "Fr75sRJBJ1g1k9xttUTD5VtcGcu7sfm9e1yb5ms1dhVE",
+          "shift_id": "1",
+          "amount": "300000000",
+          "reason": 6
+        }
+      }
+    },
+    {
+      "tag": 19,
+      "event": "GiftCreated",
+      "length": 114,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "gift",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "sender",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "recipient",
+          "type": "pubkey",
+          "offset": 65,
+          "size": 32
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 97,
+          "size": 8
+        },
+        {
+          "name": "expiry_ts",
+          "type": "i64",
+          "offset": 105,
+          "size": 8
+        },
+        {
+          "name": "recipient_kind",
+          "type": "u8",
+          "offset": 113,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "create_gift_wallet",
+        "hex": "139a498c6e6e61913d3a1382608abe33ea93cec96938ff3c58e596a5a0d3d2da7e673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24f5eacab77517c5b4b3b4373811c6f874fffb3dd4657da908b42fa2c7fe0ac0d80065cd1d00000000826de36a0000000000",
+        "base64": "E5pJjG5uYZE9OhOCYIq+M+qTzslpOP88WOWWpaDT0tp+Zz1rovpIznbs8YEJDNpgeUDFBSBEoDd/FZxZzPpUrST16sq3dRfFtLO0NzgRxvh0//s91GV9qQi0L6LH/grA2ABlzR0AAAAAgm3jagAAAAAA",
+        "fields": {
+          "tag": 19,
+          "gift": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1",
+          "sender": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "recipient": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+          "lamports": "500000000",
+          "expiry_ts": "1793289602",
+          "recipient_kind": 0
+        }
+      }
+    },
+    {
+      "tag": 20,
+      "event": "GiftClaimed",
+      "length": 74,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "gift",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "claimer",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "recipient_kind",
+          "type": "u8",
+          "offset": 73,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "claim_gift_wallet",
+        "hex": "149a498c6e6e61913d3a1382608abe33ea93cec96938ff3c58e596a5a0d3d2da7ef5eacab77517c5b4b3b4373811c6f874fffb3dd4657da908b42fa2c7fe0ac0d80065cd1d0000000000",
+        "base64": "FJpJjG5uYZE9OhOCYIq+M+qTzslpOP88WOWWpaDT0tp+9erKt3UXxbSztDc4Ecb4dP/7PdRlfakItC+ix/4KwNgAZc0dAAAAAAA=",
+        "fields": {
+          "tag": 20,
+          "gift": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1",
+          "claimer": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+          "lamports": "500000000",
+          "recipient_kind": 0
+        }
+      }
+    },
+    {
+      "tag": 21,
+      "event": "GiftRefunded",
+      "length": 73,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "gift",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "sender",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "refund_gift",
+        "hex": "15c19ce655e86847c18d2292aa929ebd3467f452fd91380cd9b62bf0279a8f2367673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad240065cd1d00000000",
+        "base64": "FcGc5lXoaEfBjSKSqpKevTRn9FL9kTgM2bYr8CeajyNnZz1rovpIznbs8YEJDNpgeUDFBSBEoDd/FZxZzPpUrSQAZc0dAAAAAA==",
+        "fields": {
+          "tag": 21,
+          "gift": "E2nT26PYbqJaG6NnpKB7Toq1pun5VGjHWE1WnGrBPSTG",
+          "sender": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "lamports": "500000000"
+        }
+      }
+    },
+    {
+      "tag": 22,
+      "event": "BuryLotAdded",
+      "length": 66,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "source",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "lot_skr",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        },
+        {
+          "name": "start_price",
+          "type": "u64",
+          "offset": 49,
+          "size": 8
+        },
+        {
+          "name": "start_slot",
+          "type": "u64",
+          "offset": 57,
+          "size": 8
+        },
+        {
+          "name": "source_kind",
+          "type": "u8",
+          "offset": 65,
+          "size": 1
+        }
+      ],
+      "sample": {
+        "captured_from": "settle_stack",
+        "hex": "162f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04005a620200000000005a62020000000000e1f505000000002a94f91a0000000001",
+        "base64": "Fi9p5eFi37jQAsp0THNcJGGF4YlhKmgtVGYon3hPHb0EAFpiAgAAAAAAWmICAAAAAADh9QUAAAAAKpT5GgAAAAAB",
+        "fields": {
+          "tag": 22,
+          "source": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "amount": "40000000",
+          "lot_skr": "40000000",
+          "start_price": "100000000",
+          "start_slot": "452564010",
+          "source_kind": 1
+        }
+      }
+    },
+    {
+      "tag": 23,
+      "event": "BuryAuctionSold",
+      "length": 81,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "buyer",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "skr_amount",
+          "type": "u64",
+          "offset": 33,
+          "size": 8
+        },
+        {
+          "name": "price",
+          "type": "u64",
+          "offset": 41,
+          "size": 8
+        },
+        {
+          "name": "ore_paid",
+          "type": "u64",
+          "offset": 49,
+          "size": 8
+        },
+        {
+          "name": "ore_burned",
+          "type": "u64",
+          "offset": 57,
+          "size": 8
+        },
+        {
+          "name": "ore_shared",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "lot_remaining",
+          "type": "u64",
+          "offset": 73,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "bury_auction_buy",
+        "hex": "17a11dbe28d6b2c2d80c4f6cb2b0bca67baa2f8c9ceb81c0c94ac47e3cf0697035809698000000000084727804000000002879b42c00000000a4063c280000000084727804000000008066ab1300000000",
+        "base64": "F6EdvijWssLYDE9ssrC8pnuqL4yc64HAyUrEfjzwaXA1gJaYAAAAAACEcngEAAAAACh5tCwAAAAApAY8KAAAAACEcngEAAAAAIBmqxMAAAAA",
+        "fields": {
+          "tag": 23,
+          "buyer": "BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+          "skr_amount": "10000000",
+          "price": "75002500",
+          "ore_paid": "750025000",
+          "ore_burned": "675022500",
+          "ore_shared": "75002500",
+          "lot_remaining": "330000000"
         }
       }
     }

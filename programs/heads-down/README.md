@@ -12,16 +12,25 @@ Automation uses the Discretionary strategy with a fixed fee. `heads_down` signs 
 
 The user's SOL never leaves ORE custody.
 
+On top of that core, v1.2 adds the **SKR features**: Stack (an SKR-bonded
+self-control contest settled from the phones' heartbeats), Focus Bonds, Gift a
+Rig, and a no-oracle Bury auction that sells SKR forfeits for ORE that ORE's own
+`bury` instruction burns. See "SKR features (v1.2)" below.
+
 - Program id: **`HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`**, declared with
   `Address::new_from_array` and unit-tested against base58.
 - Executor PDA: `By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge` (bump 249).
 - Config PDA: `inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW` (bump 253).
+- BuryVault PDA: `6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS` (bump 255).
 - Pinocchio 0.11, `no_std`, no allocator. There is **one** `unsafe` block, the
-  `sol_log_data` syscall in `events.rs`. The build is about 109 KB.
-- Contract: [`INTERFACE.md`](INTERFACE.md) **v1.1**, frozen from this code: every
-  instruction's data and account list, every event, errors 0..31, the Rig field
-  usage, the dig budget, pause and state-machine semantics, and measured
-  transaction limits. `INTERFACE-NOTES.md` is superseded.
+  `sol_log_data` syscall in `events.rs`. The build is about 180 KB (SBPF v0, the
+  default) or 177 KB with `--arch v3` (see "SBPFv3" below).
+- Contract: [`INTERFACE.md`](INTERFACE.md) **v1.2**: the v1.1 core (§0 to §10),
+  frozen from this code (every instruction's data and account list, every event,
+  errors 0..31, the Rig field usage, the dig budget, pause and state-machine
+  semantics, measured transaction limits), plus §11, the **additive** SKR section
+  (tags 15..27, accounts 5..9, events 11..23, errors 32..48). No v1.1 layout,
+  event byte or error code changed. `INTERFACE-NOTES.md` is superseded.
 - Machine-checked contract: [`vectors/`](vectors/) (golden instructions, messages,
   events and registrar voucher, all generated from LiteSVM runs; see "Golden
   vectors" below). Where each consumer disagrees: [`vectors/CROSSCHECK.md`](vectors/CROSSCHECK.md).
@@ -29,17 +38,23 @@ The user's SOL never leaves ORE custody.
 ```
 program/            the SBF program (crate `heads-down`, lib `heads_down`)
   src/lib.rs          id, PDAs, dispatch
-  src/state.rs        zero-copy Config / Rig / SeekerSeat / ShiftLog, const offset pins
-  src/ore.rs          pinned ORE ids, layouts, checked readers, distribution_mask, deploy CPI
+  src/state.rs        zero-copy Config / Rig / SeekerSeat / ShiftLog, and the v1.2
+                      StackTable / StackSeat / FocusBond / GiftEscrow / BuryVault, const offset pins
+  src/ore.rs          pinned ORE ids, layouts, checked readers, distribution_mask, deploy and bury CPIs
   src/logic.rs        pure gate / budget / tiles / lease / streak logic (unit-tested)
+  src/skr.rs          v1.2 caps, Stack finish rule and payout split, Bury auction price (unit-tested)
+  src/token.rs        v1.2 classic SPL Token checks and the Transfer / CloseAccount CPIs
   src/message.rs      HEARTBEAT / BREAK / FREEZE / PLAN / registrar preimages
   src/ed25519.rs      registrar attestation introspection
-  src/instructions/   one module per instruction (account lists in each module doc)
-tests/              LiteSVM fork suite + reference client (tests/src/lib.rs)
-  fixtures/           fetch-fixtures.sh → live ORE bytecode + accounts (gitignored)
-  mock-ore/           TEST ONLY: misbehaving ORE stand-in for the invariant tests
+  src/instructions/   one module per instruction or SKR feature (stack, focus_bond, gift, bury);
+                      account lists in each module doc
+tests/              LiteSVM fork suite + reference client (tests/src/lib.rs, tests/src/skr.rs)
+  fixtures/           fetch-fixtures.sh → live ORE bytecode + accounts, the SKR and ORE mints,
+                      the ORE stake program and bury's accounts (gitignored)
+  mock-ore/           TEST ONLY: misbehaving ORE stand-in for the invariant tests (deploy and bury)
 scripts/build.sh    both SBF variants (+ mock)
 scripts/test.sh     fixtures → build → unit + fork tests (incl. the golden-vector drift test) → clippy -D warnings
+scripts/test-v3.sh  both variants with --arch v3 (SBPFv3), then the whole fork suite against them
 scripts/vectors.sh  regenerate vectors/ after an intentional contract change
 vectors/            golden vectors (JSON), CROSSCHECK.md, crosscheck/ (reproducible consumer checks)
 ```
@@ -91,7 +106,24 @@ solana program deploy -u devnet --program-id "$KP" target/deploy-devnet/heads_do
 The ORE addresses are pinned to **mainnet** ORE (`oreV3EG1…`, Board `BrcSxdp1…`, and
 so on). On devnet the registration, SGT, caps, arming, signals, heartbeats and
 `end_shift` flows all work. `dig` needs ORE at those addresses, so it is exercised
-against a mainnet fork: this LiteSVM suite, or Surfpool with the same fixtures.
+against a mainnet fork: this LiteSVM suite, or Surfpool with the same fixtures. The
+v1.2 SKR paths likewise pin the mainnet SKR and ORE mints, so they too run on a
+mainnet fork (the devstack's `solana-test-validator` clones, or this suite); after a
+deploy, run `init_bury_vault` once (anyone may) and create its two ATAs.
+
+## SKR features (v1.2)
+
+INTERFACE.md §11 is the contract and [`docs/SKR.md`](../../docs/SKR.md) the
+product description. SKR is collateral, bond and gift currency only: the program
+mints nothing, pays nothing for holding SKR, and never touches Solana Mobile's SKR
+staking program.
+
+| Feature | Instructions | What the program enforces |
+|---|---|---|
+| **Stack** | `open_stack` 15, `join_stack` 16, `stack_checkin` 17, `settle_stack` 18, `claim_stack` 19 | Equal SKR bonds in a table-owned vault; joins only before the window (remote tables: attested Seekers with a re-verified SGT, one seat per SGT; guests only up to 500 SKR); a round counts only if a heartbeat for it landed during it, read from existing Rig fields (`shift_id`, `break_reason`, `plan_lease_rounds == 1`, `lease_from == lease_to == Board.round_id`); a seat finishes iff never broken in its bound shift, it counted `end_round`, and its gaps ≤ grace; permissionless settle with the 80/20 split (dust to Bury), `sum(payouts) + bury == bonds`; pull claims that close the seat; a timeout refund |
+| **Focus Bond** | `lock_focus_bond` 20, `release_focus_bond` 21, `forfeit_focus_bond` 22 | SKR locked on an open, clean shift; released to the owner only if that shift's ShiftLog (matched by id, start round and start time) says `completed`, otherwise forfeited permissionlessly to the Bury lot, including when the rig was closed mid-shift |
+| **Gift a Rig** | `create_gift` 23, `claim_gift` 24, `refund_gift` 25 | Lamports escrowed for a wallet or an SGT mint; the claimer must be that wallet or hold that SGT now (`sgt-verify`); the claim can share a transaction with ORE `automate` + `register_rig`; refund to the sender only, from day 30 |
+| **Bury auction** | `init_bury_vault` 26, `bury_auction_buy` 27 | One pooled SKR lot; a linear Dutch price from the slot (no oracle) that restarts at 4× the last clearing price on each new lot; the buyer's ORE goes into the BuryVault's ORE ATA and through ORE's permissionless `bury` signed by the BuryVault PDA; the vault delta and the 90% supply burn are checked before the SKR leaves |
 
 ## Tests
 
@@ -104,17 +136,23 @@ cargo +1.97.1 test -p heads-down     # host unit tests only
 LiteSVM 0.17 with `features = ["precompiles"]` runs the real Agave secp256r1 and
 ed25519 precompiles, and its agave 4.3 dependencies need rustc 1.97.1
 (`rust-toolchain.toml`). `tests/fixtures/fetch-fixtures.sh` dumps the **live mainnet
-ORE program** (`ore.so`, sha256 `57503f43…`, fetched 2026-09-29T19:03Z), the entropy
-program, and the Board, Config, Treasury, Var and current Round (round 422,685).
-heads_down is loaded at its real program id through the upgradeable loader, with a
-test upgrade authority written into its ProgramData.
+ORE program** (`ore.so`, sha256 `57503f43…`; last fetched 2026-09-30T23:23Z, round
+424,018), the entropy program, and the Board, Config, Treasury, Var and current
+Round. For v1.2 it also dumps the **SKR and ORE mints**, the **live ORE stake
+program** (`ore_stake.so`, sha256 `1ea52a5d…`) and every account ORE `bury` touches
+(the Treasury's ORE ATA, the stake Treasury, its ORE ATA and Vesting; the Vesting
+schedule is pinned to the suite's clock). heads_down is loaded at its real program
+id through the upgradeable loader, with a test upgrade authority written into its
+ProgramData. SKR and ORE balances are account surgery: the fork cannot mint either.
 
-Last run, `bash scripts/test.sh`: **88 passed, 0 failed, 1 ignored** (15 unit + 73 fork; the ignored one is `crosscheck`). `cargo +1.97.1 clippy
---workspace --all-targets -- -D warnings` is clean.
+Last run, `bash scripts/test.sh` (2026-10-01): **137 passed, 0 failed, 1 ignored**
+(30 unit + 107 fork; the ignored one is `crosscheck`). `cargo +1.97.1 clippy
+--workspace --all-targets -- -D warnings` is clean. `bash scripts/test-v3.sh` runs the
+same 107 fork tests against the SBPFv3 builds: all pass.
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| unit (`program/src`) | 15 | program id / PDAs vs base58 and `find_program_address`; `distribution_mask` equals a verbatim transcription of ORE's over 20k round ids; gate matches `ml/forecaster` (incl. the live fixture); budget reserves the fee; tile choice; leases; streak; overflow edges; every event encoder fills its exact length |
+| unit (`program/src`) | 30 | program id / PDAs vs base58 and `find_program_address` (incl. the BuryVault and the pinned SKR ids); `distribution_mask` equals a verbatim transcription of ORE's over 20k round ids; gate matches `ml/forecaster` (incl. the live fixture); budget reserves the fee; tile choice; leases; streak; overflow edges; every event encoder (tags 1..23) fills its exact length; **v1.2:** Stack payout conservation over every finisher subset of 1 to 8 seats, the finish rule, the refund timeout, the Dutch price, purchase rounding and bury's 90/10 split, strict SPL Token account parsing |
 | `lifecycle` | 3 | one-transaction onboarding: ORE `automate` (Discretionary, fee = `executor_fee`, executor = PDA) + `register_rig` + `set_caps` + `arm_shift`; a real P-256 heartbeat dig through the gate credits the 10 least-crowded split tiles, debits tiles + fee, reimburses the crank and emits `RigDug`; ShiftLog; close |
 | `batch` | 3 | 6 rigs: gate-closed, lease-less, un-checkpointed Miner and underfunded rigs are skipped with exact codes while 2 dig (one reimbursement each); duplicate rig fails; a user re-pointing or revoking its executor skips only itself |
 | `heartbeat` | 9 | stale counter; exact replay; future / old / mismatched round; wrong `shift_id`; another rig's key; offsets smuggled into a foreign instruction; forged instructions sysvar; high-S; bad precompile indices; entries swapped between rigs |
@@ -127,7 +165,13 @@ Last run, `bash scripts/test.sh`: **88 passed, 0 failed, 1 ignored** (15 unit + 
 | `capacity` | 2 | the measurements below |
 | `events_v11` | 5 | v1.1: BREAK 7 unplugged → Cooling (a fresh heartbeat resumes), 8 unlocked → Broken and sealed with reason 8; ShiftBroken on BREAK and on a shift-interrupting FREEZE only; HeartbeatsRecorded reports only the rounds added; ShiftEndedV2 mode; every reason code → state |
 | `registrar_voucher` | 3 | a voucher built exactly like `registrar/src/voucher.rs` (111-byte HDreg, 223-byte Ed25519SigVerify, `IX_HEADER`) is accepted by `register_rig` and `rotate_key`; level 0, level 3, expired, another wallet, a non-registrar key and a mismatched level are refused |
-| `vectors` | 3 | the committed golden vectors are byte-identical to a fresh LiteSVM generation; generation is deterministic; INTERFACE.md's event, error and instruction tables match the program |
+| `vectors` | 4 | the committed golden vectors are byte-identical to a fresh LiteSVM generation; generation is deterministic; INTERFACE.md's event, error and instruction tables match the program, for v1.1 (§5, §7, §8) and v1.2 (§11.4, §11.9, §11.10) |
+| `skr_stack` | 13 | **v1.2 Stack:** a six-seat table settled from real P-256 check-ins (finish, grace, broken, too many gaps, missed end round) with the exact 80/20 split, rounding dust to Bury, conservation and single claims; bury-only and nobody-finishes tables; the timeout refund; join gating (time, room, signature, uniqueness, canonical seat, guest cap, attested-only, remote Seekers with a re-verified real SGT, one seat per SGT); classic SPL Token only (Token-2022 look-alikes, fake mints, wrong owners, swapped vaults); check-in rules (lease 1, late and replayed heartbeats, shift binding, no binding to a broken shift, observe mode after a real dig, FREEZE, a closed rig cannot sink a batch); settle needs every seat once |
+| `skr_bond` | 6 | **v1.2 Focus Bond:** release to the owner only after `completed`; forfeit to the Bury lot after a hard break; a resumed pickup keeps the bond; bonds on a rig closed mid-shift (then re-registered) are abandoned and forfeit; lock gating |
+| `skr_gift` | 4 | **v1.2 Gift a Rig:** a wallet gift claimed in the same transaction as the recipient's ORE `automate` and `register_rig`; an SGT gift that follows a real SGT to its current holder; refunds from day 30 to the stored sender only; argument checks, one escrow per (sender, nonce), pre-funding |
+| `skr_bury` | 6 | **v1.2 Bury auction:** lots from real forfeits sold through the **live ORE `bury` and ORE stake programs** (supply −90%, stake Treasury +10%); price decay, restarts, floor, one-atom minimum; slippage and amount guards; every pinned account; a TEST-ONLY mock ORE that returns Ok without taking the ORE, or takes it without burning, is caught (`BuryMismatch`) |
+| `fuzz_skr` | 2 | 2,000 random tag 15..27 instructions and 2,000 mutations of valid SKR instructions on the SBF binary: only clean errors |
+| `skr_capacity` | 2 | the SKR measurements in INTERFACE.md §11.11 |
 | `crosscheck` | (ignored) | executes the Android and crank vectors and the consumer assumptions (`vectors/CROSSCHECK.md`); run with `-- --ignored` |
 
 ## Golden vectors
@@ -139,9 +183,9 @@ Round pinned to round 422,700, EMA 918,782,720 and a 344 ORE pot.
 
 | File | Contents |
 |---|---|
-| `instructions.json` | All 15 tags, both auth paths (25 vectors). Each has data hex with a per-field layout, the ordered account metas (role, signer, writable, PDA seeds and bump), the full transaction including precompile and compute-budget companions, and the executed LiteSVM result with its raw events. Every vector must succeed |
-| `messages.json` | HEARTBEAT (94 B), BREAK and FREEZE (86 B) and PLAN (113 B) preimages, SHA-256 digests, RFC 6979 and low-S signatures from the RFC 6979 A.2.5 test key, and the 145-byte Secp256r1SigVerify data. Each was verified by the real precompile, and a tampered copy was rejected |
-| `events.json` | Tags 1..10 with layouts and bytes captured from runs, plus `RigSkipped` captured for 20 skip codes, including every ORE pre-flight code 25..31 |
+| `instructions.json` | All 28 tags, both auth paths (41 vectors: the 25 v1.1 vectors, byte-identical, then 16 v1.2 SKR vectors). Each has data hex with a per-field layout, the ordered account metas (role, signer, writable, PDA seeds and bump), the full transaction including precompile, ATA and compute-budget companions, and the executed LiteSVM result with its raw events. Every vector must succeed. The SKR scenario: `init_bury_vault`; a three-seat Stack with verify-mode and observe-mode check-ins, settle (80/20, a Bury lot) and a claim; Focus Bond lock, forfeit and release; wallet and SGT-mint gifts with claims and a refund; a Bury auction buy through the live ORE `bury` |
+| `messages.json` | HEARTBEAT (94 B), BREAK and FREEZE (86 B) and PLAN (113 B) preimages, SHA-256 digests, RFC 6979 and low-S signatures from the RFC 6979 A.2.5 test key, and the 145-byte Secp256r1SigVerify data. Each was verified by the real precompile, and a tampered copy was rejected. (Stack check-ins reuse HEARTBEAT: no new message kind.) |
+| `events.json` | Tags 1..23 with layouts and bytes captured from runs, plus `RigSkipped` captured for 20 skip codes, including every ORE pre-flight code 25..31 |
 | `registrar.json` | The 111-byte HDreg preimage and the 223-byte Ed25519SigVerify instruction in `registrar/src/voucher.rs` format, accepted by `register_rig` (level 2). Level 0 and expired vouchers are rejected |
 
 These tests guard the vectors:
@@ -187,6 +231,52 @@ Per rig, a transaction carries 4 account keys (rig, authority, automation, miner
 digest). Compute is never the binding limit: 11 rigs use about 27% of 1.4M CU. Each
 secp256r1 signature adds one 5,000-lamport signature fee, and `crank_fee` must cover it.
 
+Re-measured on 2026-10-01 with the round-424,018 fixtures, heads_down's own share of a
+`dig` is 19,310 / 13,290 / 12,605 CU per rig for 1 / 4 / 7 rigs, identical (±1 CU) to
+the pre-v1.2 program built from `main` on the same fixtures: the SKR work did not
+change `dig`. The table above was measured earlier; the ORE share moves with the live
+round.
+
+**v1.2 SKR instructions** (`tests/tests/skr_capacity.rs`; INTERFACE.md §11.11):
+
+| Instruction | CU | Transaction |
+|---|---|---|
+| `stack_checkin`, verify mode | 8,846 for 4 seats | the 4-seat maximum per 1,232-byte packet (1,226 B) |
+| `stack_checkin`, observe mode | 8,171 for 8 seats | 961 B |
+| `settle_stack` | 5,250 for 8 seats | 634 B |
+| `join_stack` / `claim_stack` | 6k to 7.5k / 2,734 | |
+| `lock_focus_bond` / `release` / `forfeit` | 8.7k to 11.7k / 3,650 / 6,251 | |
+| `create_gift` / `claim_gift` (wallet; SGT re-verified) / `refund_gift` | 4,993 / 879; 2,604 / 695 | |
+| `bury_auction_buy` (with ORE `bury` and stake `distribute`) | 104,464 | 780 B |
+
+## SBPFv3
+
+`cargo build-sbf --arch v3` builds heads_down as SBPFv3 (ELF `e_flags` 3; 177 KB
+against 180 KB for the default v0). `bash scripts/test-v3.sh` builds both variants
+that way and runs the **whole fork suite** against them (`HD_SBF_ARCH=v3` makes the
+harness load `target/deploy-v3` and `target/deploy-devnet-v3`): all 107 fork tests
+pass, including the golden vectors, which are byte-identical to the v0 run, and the
+fuzzers. Compute is marginally lower: deterministic paths drop by 2 to 52 CU (for
+example `stack_checkin` with 4 verified seats 8,846 → 8,794; `settle_stack` 5,250 →
+5,245; heads_down's share of a 1-rig `dig` 19,310 → 19,301). Its CPIs into the
+SBPFv0 ORE, ORE stake and SPL Token programs all work from v3.
+
+**On a real validator (2026-10-01).** On a bare `solana-test-validator` 4.1.2 (every
+feature active, so SIMD-0500 is on), the default v0 build is **refused** at deploy
+("Detected sbpf_version required by the executable which are not enabled"), while the
+`--arch v3` build **deploys** at `HDn4vgLW…` and executes: `initialize_config` read the
+upgrade authority from the real loader's ProgramData and created the Config (256 B,
+bump 253), `init_bury_vault` created the BuryVault (192 B, bump 255), and an unknown tag
+failed cleanly with `Custom(0)`.
+
+**Mainnet feature gates (queried 2026-10-01):** SBPFv3 deployment and execution
+(SIMD-0178/0189/0377, `5cC3foj7…`) is **active** since epoch 993; SIMD-0500 (no more
+v0/v1/v2 deploys, `B8JJXCy5…`) is **inactive**. So heads_down can be deployed to
+mainnet as SBPFv3 today, and once SIMD-0500 activates the v0 build will no longer
+deploy. `scripts/build.sh` still builds v0 by default (the devstack clones mainnet's
+feature set and deploys that build); switching the mainnet deploy to `--arch v3` is
+recommended.
+
 ## Security
 
 ### Invariants
@@ -208,11 +298,26 @@ secp256r1 signature adds one 5,000-lamport signature fee, and `crank_fee` must c
   `executor_fee`, and `crank_fee <= executor_fee`.
 - **One verified rig per SGT mint.** The seat is keyed by mint and re-pointed only by
   the current holder.
+- **Stack conservation (v1.2).** `sum(payouts) + bury == sum(bonds)` for every table;
+  each seat claims once (claiming closes it); claims never exceed the settled payouts,
+  or the bonds when refunding.
+- **SKR leaves a vault only to a recipient fixed by state (v1.2).** Table, bond and
+  Bury vaults are SPL Token ATAs owned by their own PDA; each PDA signs only transfers
+  out of its own vault to the seat's wallet, the bond's owner, the Bury lot or a buyer
+  who paid. There is no admin, and no withdraw path.
+- **Bury ORE is really buried (v1.2).** The SKR lot leaves only after the buyer's ORE
+  went through ORE `bury`: the vault lost exactly the payment and the ORE supply fell
+  by the burned 90%, re-read after the CPI.
 
 ### Audit checklist: the 16 bug classes
 
 Each row lists the concrete check (file / function) and the tests that fail if it is
-removed. Test paths are relative to `tests/tests/`.
+removed. Test paths are relative to `tests/tests/`. The table covers the v1.1 core; the
+same classes for the v1.2 SKR instructions (signers, SPL Token owners, vault and seat
+relationships, constant CPI targets, duplicates, seeds, init-only accounts, closes,
+u128 payouts, the post-`bury` re-reads, Token-2022 look-alikes, griefing) are mapped
+check by check, with their tests, in
+[`docs/THREAT_MODEL.md`](../../docs/THREAT_MODEL.md) §7 "SKR checks as built".
 
 | # | Class | Concrete check | Tests |
 |---|---|---|---|
@@ -239,8 +344,14 @@ removed. Test paths are relative to `tests/tests/`.
   can dig only while the gate is open, at most `plan_dig_lamports` per round and at most
   one dig per round. The deployed SOL goes into ORE rounds, not to the attacker. It
   can freeze and break its own rig, but it cannot unfreeze, raise caps or change keys.
+  With SKR (v1.2), a forged BREAK forfeits only this rig's own Stack seats and Focus
+  Bonds; it cannot move SKR anywhere but the Bury lot.
 - **Cranker.** It chooses which heartbeats to land and when. It cannot choose amounts,
-  tiles or authority, and it is reimbursed only for real deploys.
+  tiles or authority, and it is reimbursed only for real deploys. With SKR (v1.2) it
+  can withhold a seat's `stack_checkin` (the seat records a gap), but anyone else can
+  land it; it cannot touch bonds, gifts or the Bury lot.
+- **Bury auction buyer (v1.2).** It chooses when to buy, so lots may sell cheaply
+  after a long decay; it always pays the program's price in ORE that ORE burns (90%).
 - **Governance.** It can change the registrar, `crank_fee` (≤ `executor_fee`) or
   `bury_bps` after 72 h, and pause immediately. It cannot move funds or change
   `executor_fee`.
@@ -249,8 +360,15 @@ removed. Test paths are relative to `tests/tests/`.
 
 ## Known limitations
 
-See `INTERFACE.md` §10. Two more:
+See `INTERFACE.md` §10 and, for the SKR features, §11.12 (tables and their vaults are
+never closed; in-person co-presence is not verified on-chain; caps and auction
+constants are compile-time constants; SKR fuel is a client-side swap). Also:
 
+- Stack is fail-closed on liveness: a round in which nobody lands the seat's
+  `stack_checkin` is a gap, so the crank must check in every seated rig every round
+  (4 verified seats or 8 observed seats per packet).
+- No consumer implements the v1.2 instructions or events yet
+  (`vectors/CROSSCHECK.md` §8).
 - The consumers do not yet all match v1.1. The Android instruction layouts, the
   crank's `RigDug.lamports` and skip-code assumptions, and the indexer's names for
   the new codes and events are listed with exact bytes in `vectors/CROSSCHECK.md`.

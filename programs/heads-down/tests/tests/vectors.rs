@@ -145,6 +145,96 @@ fn interface_md_tables_match_the_program() {
     }
 }
 
+/// Table rows of the subsection whose heading starts with `heading`, up to
+/// the next heading of any level (§11 has `###` subsections).
+fn subsection_rows(doc: &str, heading: &str) -> Vec<Vec<String>> {
+    let start = doc
+        .find(heading)
+        .unwrap_or_else(|| panic!("{heading} missing"));
+    let body = &doc[start + heading.len()..];
+    let end = body.find("\n#").unwrap_or(body.len());
+    body[..end]
+        .lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| ---") && !l.starts_with("|---"))
+        .map(|l| {
+            l.trim_matches('|')
+                .split('|')
+                .map(|c| c.trim().to_string())
+                .collect()
+        })
+        .filter(|cells: &Vec<String>| cells[0].parse::<u32>().is_ok())
+        .collect()
+}
+
+#[test]
+fn interface_md_v12_tables_match_the_program() {
+    use heads_down_tests::hd::{error::HdError, events};
+    let doc = std::fs::read_to_string(root().join("INTERFACE.md")).unwrap();
+
+    // §11.9 events 11..=23: name and exact length.
+    let rows = subsection_rows(&doc, "### 11.9 Events");
+    assert_eq!(rows.len(), 13, "one row per v1.2 event tag");
+    for (i, r) in rows.iter().enumerate() {
+        let tag: usize = r[0].parse().unwrap();
+        assert_eq!(tag, 11 + i);
+        assert_eq!(r[1], vectors::event_name(tag as u8), "event tag {tag} name");
+        let len: usize = r[3].parse().unwrap();
+        assert_eq!(len, events::LEN[tag], "INTERFACE.md event tag {tag} length");
+    }
+
+    // §11.10 errors 32..=48 with the program's variant names.
+    let all = [
+        HdError::InvalidTokenAccount,
+        HdError::AmountOutOfRange,
+        HdError::InvalidStackParams,
+        HdError::StackJoinClosed,
+        HdError::StackIneligible,
+        HdError::StackNotEnded,
+        HdError::InvalidStackState,
+        HdError::StackSeatMismatch,
+        HdError::StackShiftMismatch,
+        HdError::StackLeaseTooLong,
+        HdError::StackSeatBroken,
+        HdError::BondNotResolvable,
+        HdError::GiftNotClaimable,
+        HdError::GiftExpiry,
+        HdError::AuctionEmpty,
+        HdError::PriceAboveMax,
+        HdError::BuryMismatch,
+    ];
+    let rows = subsection_rows(&doc, "### 11.10 Errors");
+    assert_eq!(rows.len(), all.len(), "one row per v1.2 error code");
+    for (e, r) in all.iter().zip(&rows) {
+        assert_eq!(r[0].parse::<u32>().unwrap(), e.code());
+        assert_eq!(r[1], format!("{e:?}"), "error {}", e.code());
+    }
+
+    // §11.4 instructions 15..=27: name and data length vs the executed vectors.
+    let ix: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("vectors/instructions.json")).unwrap(),
+    )
+    .unwrap();
+    let vectors = ix["instructions"].as_array().unwrap();
+    let rows = subsection_rows(&doc, "### 11.4 Instructions");
+    assert_eq!(rows.len(), 13, "one row per v1.2 instruction tag");
+    for (i, r) in rows.iter().enumerate() {
+        let tag: u64 = r[0].parse().unwrap();
+        assert_eq!(tag, 15 + i as u64);
+        let name = r[1].trim_matches('`');
+        let mine: Vec<&serde_json::Value> = vectors.iter().filter(|v| v["tag"] == tag).collect();
+        assert!(!mine.is_empty(), "tag {tag} has vectors");
+        for v in &mine {
+            assert_eq!(v["instruction"], name, "tag {tag} name");
+            let len = v["data_len"].as_u64().unwrap();
+            if r[3] == "2 + 20n" {
+                assert_eq!(len, 2 + 20 * v["args"]["n"].as_u64().unwrap(), "{name}");
+            } else {
+                assert_eq!(len, r[3].parse::<u64>().unwrap(), "{name}");
+            }
+        }
+    }
+}
+
 #[test]
 fn generation_is_deterministic() {
     let a = vectors::generate();

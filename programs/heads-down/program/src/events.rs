@@ -16,6 +16,8 @@
 //! | 9 | ShiftBroken | rig 32, shift_id u64, reason u8 | 42 |
 //! | 10 | ShiftEndedV2 | ShiftEnded's fields, then start_round u64, end_round u64, mode u8 | 83 |
 //!
+//! v1.2 (SKR), additive: tags 11..=23, see [`tag`] and `INTERFACE.md` §11.6.
+//!
 //! A tag's length never changes: the indexer decodes by exact length, so no
 //! field is ever appended to an existing tag. `ShiftEnded` (tag 4) is still
 //! emitted unchanged, immediately followed by its superset `ShiftEndedV2`
@@ -46,10 +48,51 @@ pub mod tag {
     pub const SHIFT_BROKEN: u8 = 9;
     /// ShiftEndedV2 (superset of ShiftEnded).
     pub const SHIFT_ENDED_V2: u8 = 10;
+    /// StackOpened (v1.2).
+    pub const STACK_OPENED: u8 = 11;
+    /// StackJoined (v1.2).
+    pub const STACK_JOINED: u8 = 12;
+    /// StackCheckin (v1.2): one per seat per `stack_checkin`, with a result code.
+    pub const STACK_CHECKIN: u8 = 13;
+    /// StackSettled (v1.2).
+    pub const STACK_SETTLED: u8 = 14;
+    /// StackClaimed (v1.2): a payout (kind 0) or a timeout refund (kind 1).
+    pub const STACK_CLAIMED: u8 = 15;
+    /// FocusBondLocked (v1.2).
+    pub const FOCUS_BOND_LOCKED: u8 = 16;
+    /// FocusBondReleased (v1.2).
+    pub const FOCUS_BOND_RELEASED: u8 = 17;
+    /// FocusBondForfeited (v1.2).
+    pub const FOCUS_BOND_FORFEITED: u8 = 18;
+    /// GiftCreated (v1.2).
+    pub const GIFT_CREATED: u8 = 19;
+    /// GiftClaimed (v1.2).
+    pub const GIFT_CLAIMED: u8 = 20;
+    /// GiftRefunded (v1.2).
+    pub const GIFT_REFUNDED: u8 = 21;
+    /// BuryLotAdded (v1.2): SKR forfeits entered the Bury auction (it restarts).
+    pub const BURY_LOT_ADDED: u8 = 22;
+    /// BuryAuctionSold (v1.2): ORE paid, buried through ORE `bury`, SKR sold.
+    pub const BURY_AUCTION_SOLD: u8 = 23;
 }
 
 /// Exact byte length of each event, tag byte included (index = tag; 0 unused).
-pub const LEN: [usize; 11] = [0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83];
+pub const LEN: [usize; 24] = [
+    0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83, // v1.1
+    103, 138, 85, 67, 106, 113, 81, 82, 114, 74, 73, 66, 81, // v1.2 (SKR)
+];
+
+/// `StackClaimed.kind`: a settled payout.
+pub const CLAIM_PAYOUT: u8 = 0;
+/// `StackClaimed.kind`: a timeout refund of the seat's own bond.
+pub const CLAIM_REFUND: u8 = 1;
+/// `BuryLotAdded.source_kind`: a Stack table's settle.
+pub const LOT_FROM_STACK: u8 = 1;
+/// `BuryLotAdded.source_kind`: a forfeited Focus Bond.
+pub const LOT_FROM_BOND: u8 = 2;
+/// `FocusBondForfeited.reason` when the bonded shift can never be sealed
+/// (the rig was closed while the shift was open).
+pub const BOND_ABANDONED: u8 = 255;
 
 struct Buf<const N: usize> {
     b: [u8; N],
@@ -281,6 +324,263 @@ pub fn shift_broken(rig: &Address, shift_id: u64, reason: u8) {
     log_data(&shift_broken_bytes(rig, shift_id, reason));
 }
 
+// ---- v1.2 (SKR) encoders ------------------------------------------------------
+
+/// The fields of StackOpened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StackOpened {
+    /// Host-chosen id.
+    pub table_id: u64,
+    /// SKR base units per seat.
+    pub bond: u64,
+    /// Window start round.
+    pub start_round: u64,
+    /// Window end round (inclusive).
+    pub end_round: u64,
+    /// Grace gaps.
+    pub grace_gaps: u32,
+    /// `stack_flags`.
+    pub flags: u8,
+    /// Seat limit.
+    pub max_seats: u8,
+}
+
+/// StackOpened bytes: `table · host · table_id u64 · bond u64 ·
+/// start_round u64 · end_round u64 · grace_gaps u32 · flags u8 · max_seats u8`.
+pub fn stack_opened_bytes(table: &Address, host: &Address, o: &StackOpened) -> [u8; 103] {
+    Buf::<103>::new(tag::STACK_OPENED)
+        .put(table.as_ref())
+        .put(host.as_ref())
+        .put(&o.table_id.to_le_bytes())
+        .put(&o.bond.to_le_bytes())
+        .put(&o.start_round.to_le_bytes())
+        .put(&o.end_round.to_le_bytes())
+        .put(&o.grace_gaps.to_le_bytes())
+        .put(&[o.flags, o.max_seats])
+        .done()
+}
+
+/// StackJoined bytes: `table · rig · authority · sgt_mint (zero if not
+/// verified) · bond u64 · seat_index u8`.
+pub fn stack_joined_bytes(
+    table: &Address,
+    rig: &Address,
+    authority: &Address,
+    sgt_mint: &[u8; 32],
+    bond: u64,
+    seat_index: u8,
+) -> [u8; 138] {
+    Buf::<138>::new(tag::STACK_JOINED)
+        .put(table.as_ref())
+        .put(rig.as_ref())
+        .put(authority.as_ref())
+        .put(sgt_mint)
+        .put(&bond.to_le_bytes())
+        .put(&[seat_index])
+        .done()
+}
+
+/// StackCheckin bytes: `table · rig · round_id u64 (= Board.round_id) ·
+/// checked_rounds u64 · result u32 (0 = counted, else the skip code)`.
+pub fn stack_checkin_bytes(
+    table: &Address,
+    rig: &Address,
+    round_id: u64,
+    checked_rounds: u64,
+    result: u32,
+) -> [u8; 85] {
+    Buf::<85>::new(tag::STACK_CHECKIN)
+        .put(table.as_ref())
+        .put(rig.as_ref())
+        .put(&round_id.to_le_bytes())
+        .put(&checked_rounds.to_le_bytes())
+        .put(&result.to_le_bytes())
+        .done()
+}
+
+/// StackSettled bytes: `table · total_bonds u64 · finisher_bonds u64 ·
+/// payouts_total u64 · bury_amount u64 · seats u8 · finishers u8`.
+pub fn stack_settled_bytes(
+    table: &Address,
+    total_bonds: u64,
+    finisher_bonds: u64,
+    payouts_total: u64,
+    bury_amount: u64,
+    seats: u8,
+    finishers: u8,
+) -> [u8; 67] {
+    Buf::<67>::new(tag::STACK_SETTLED)
+        .put(table.as_ref())
+        .put(&total_bonds.to_le_bytes())
+        .put(&finisher_bonds.to_le_bytes())
+        .put(&payouts_total.to_le_bytes())
+        .put(&bury_amount.to_le_bytes())
+        .put(&[seats, finishers])
+        .done()
+}
+
+/// StackClaimed bytes: `table · rig · authority · amount u64 · kind u8`.
+pub fn stack_claimed_bytes(
+    table: &Address,
+    rig: &Address,
+    authority: &Address,
+    amount: u64,
+    kind: u8,
+) -> [u8; 106] {
+    Buf::<106>::new(tag::STACK_CLAIMED)
+        .put(table.as_ref())
+        .put(rig.as_ref())
+        .put(authority.as_ref())
+        .put(&amount.to_le_bytes())
+        .put(&[kind])
+        .done()
+}
+
+/// FocusBondLocked bytes: `bond · rig · authority · shift_id u64 · amount u64`.
+pub fn focus_bond_locked_bytes(
+    bond: &Address,
+    rig: &Address,
+    authority: &Address,
+    shift_id: u64,
+    amount: u64,
+) -> [u8; 113] {
+    Buf::<113>::new(tag::FOCUS_BOND_LOCKED)
+        .put(bond.as_ref())
+        .put(rig.as_ref())
+        .put(authority.as_ref())
+        .put(&shift_id.to_le_bytes())
+        .put(&amount.to_le_bytes())
+        .done()
+}
+
+/// FocusBondReleased bytes: `bond · rig · shift_id u64 · amount u64`.
+pub fn focus_bond_released_bytes(
+    bond: &Address,
+    rig: &Address,
+    shift_id: u64,
+    amount: u64,
+) -> [u8; 81] {
+    Buf::<81>::new(tag::FOCUS_BOND_RELEASED)
+        .put(bond.as_ref())
+        .put(rig.as_ref())
+        .put(&shift_id.to_le_bytes())
+        .put(&amount.to_le_bytes())
+        .done()
+}
+
+/// FocusBondForfeited bytes: `bond · rig · shift_id u64 · amount u64 ·
+/// reason u8 (the ShiftLog break_reason, or 255 abandoned)`.
+pub fn focus_bond_forfeited_bytes(
+    bond: &Address,
+    rig: &Address,
+    shift_id: u64,
+    amount: u64,
+    reason: u8,
+) -> [u8; 82] {
+    Buf::<82>::new(tag::FOCUS_BOND_FORFEITED)
+        .put(bond.as_ref())
+        .put(rig.as_ref())
+        .put(&shift_id.to_le_bytes())
+        .put(&amount.to_le_bytes())
+        .put(&[reason])
+        .done()
+}
+
+/// GiftCreated bytes: `gift · sender · recipient · lamports u64 ·
+/// expiry_ts i64 · recipient_kind u8`.
+pub fn gift_created_bytes(
+    gift: &Address,
+    sender: &Address,
+    recipient: &[u8; 32],
+    lamports: u64,
+    expiry_ts: i64,
+    recipient_kind: u8,
+) -> [u8; 114] {
+    Buf::<114>::new(tag::GIFT_CREATED)
+        .put(gift.as_ref())
+        .put(sender.as_ref())
+        .put(recipient)
+        .put(&lamports.to_le_bytes())
+        .put(&expiry_ts.to_le_bytes())
+        .put(&[recipient_kind])
+        .done()
+}
+
+/// GiftClaimed bytes: `gift · claimer · lamports u64 · recipient_kind u8`.
+pub fn gift_claimed_bytes(
+    gift: &Address,
+    claimer: &Address,
+    lamports: u64,
+    recipient_kind: u8,
+) -> [u8; 74] {
+    Buf::<74>::new(tag::GIFT_CLAIMED)
+        .put(gift.as_ref())
+        .put(claimer.as_ref())
+        .put(&lamports.to_le_bytes())
+        .put(&[recipient_kind])
+        .done()
+}
+
+/// GiftRefunded bytes: `gift · sender · lamports u64`.
+pub fn gift_refunded_bytes(gift: &Address, sender: &Address, lamports: u64) -> [u8; 73] {
+    Buf::<73>::new(tag::GIFT_REFUNDED)
+        .put(gift.as_ref())
+        .put(sender.as_ref())
+        .put(&lamports.to_le_bytes())
+        .done()
+}
+
+/// BuryLotAdded bytes: `source (table or bond) · amount u64 · lot_skr u64 ·
+/// start_price u64 · start_slot u64 · source_kind u8`.
+pub fn bury_lot_added_bytes(
+    source: &Address,
+    amount: u64,
+    lot_skr: u64,
+    start_price: u64,
+    start_slot: u64,
+    source_kind: u8,
+) -> [u8; 66] {
+    Buf::<66>::new(tag::BURY_LOT_ADDED)
+        .put(source.as_ref())
+        .put(&amount.to_le_bytes())
+        .put(&lot_skr.to_le_bytes())
+        .put(&start_price.to_le_bytes())
+        .put(&start_slot.to_le_bytes())
+        .put(&[source_kind])
+        .done()
+}
+
+/// The fields of BuryAuctionSold.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BurySale {
+    /// SKR base units sold.
+    pub skr_amount: u64,
+    /// ORE atoms per whole SKR at the sale slot.
+    pub price: u64,
+    /// ORE atoms paid (all of it went through ORE `bury`).
+    pub ore_paid: u64,
+    /// ORE atoms burned by `bury` (90%).
+    pub ore_burned: u64,
+    /// ORE atoms `bury` sent to ORE's stake program (10%).
+    pub ore_shared: u64,
+    /// SKR left in the lot.
+    pub lot_remaining: u64,
+}
+
+/// BuryAuctionSold bytes: `buyer · skr_amount u64 · price u64 · ore_paid u64
+/// · ore_burned u64 · ore_shared u64 · lot_remaining u64`.
+pub fn bury_auction_sold_bytes(buyer: &Address, s: &BurySale) -> [u8; 81] {
+    Buf::<81>::new(tag::BURY_AUCTION_SOLD)
+        .put(buyer.as_ref())
+        .put(&s.skr_amount.to_le_bytes())
+        .put(&s.price.to_le_bytes())
+        .put(&s.ore_paid.to_le_bytes())
+        .put(&s.ore_burned.to_le_bytes())
+        .put(&s.ore_shared.to_le_bytes())
+        .put(&s.lot_remaining.to_le_bytes())
+        .done()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +624,56 @@ mod tests {
         assert_eq!(&v2[66..74], &6u64.to_le_bytes());
         assert_eq!(&v2[74..82], &7u64.to_le_bytes());
         assert_eq!(v2[82], 1);
+    }
+
+    #[test]
+    fn every_v12_encoder_fills_its_declared_length_exactly() {
+        let a = Address::new_from_array([7; 32]);
+        let b = Address::new_from_array([9; 32]);
+        let o = StackOpened {
+            table_id: 1,
+            bond: 2,
+            start_round: 3,
+            end_round: 4,
+            grace_gaps: 5,
+            flags: 6,
+            max_seats: 7,
+        };
+        let sale = BurySale {
+            skr_amount: 1,
+            price: 2,
+            ore_paid: 3,
+            ore_burned: 4,
+            ore_shared: 5,
+            lot_remaining: 6,
+        };
+        let all: [&[u8]; 13] = [
+            &stack_opened_bytes(&a, &b, &o),
+            &stack_joined_bytes(&a, &b, &a, &[3; 32], 1, 2),
+            &stack_checkin_bytes(&a, &b, 1, 2, 3),
+            &stack_settled_bytes(&a, 1, 2, 3, 4, 5, 6),
+            &stack_claimed_bytes(&a, &b, &a, 1, 1),
+            &focus_bond_locked_bytes(&a, &b, &a, 1, 2),
+            &focus_bond_released_bytes(&a, &b, 1, 2),
+            &focus_bond_forfeited_bytes(&a, &b, 1, 2, 3),
+            &gift_created_bytes(&a, &b, &[3; 32], 1, 2, 1),
+            &gift_claimed_bytes(&a, &b, 1, 1),
+            &gift_refunded_bytes(&a, &b, 1),
+            &bury_lot_added_bytes(&a, 1, 2, 3, 4, 1),
+            &bury_auction_sold_bytes(&a, &sale),
+        ];
+        for (i, bytes) in all.iter().enumerate() {
+            let t = i + 11;
+            assert_eq!(usize::from(bytes[0]), t);
+            assert_eq!(bytes.len(), LEN[t], "tag {t}");
+            assert_eq!(&bytes[1..33], a.as_ref(), "tag {t} starts with its subject");
+        }
+        // Spot-check a few field offsets against INTERFACE.md §11.6.
+        let c = stack_checkin_bytes(&a, &b, 0x0102, 0x0304, 42);
+        assert_eq!(&c[65..73], &0x0102u64.to_le_bytes());
+        assert_eq!(&c[73..81], &0x0304u64.to_le_bytes());
+        assert_eq!(&c[81..85], &42u32.to_le_bytes());
+        let s = bury_auction_sold_bytes(&a, &sale);
+        assert_eq!(&s[73..81], &6u64.to_le_bytes());
     }
 }

@@ -38,7 +38,10 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 pub use solana_transaction_error::TransactionError;
 
+pub mod skr;
 pub mod vectors;
+
+pub use skr::*;
 
 // ---- ids --------------------------------------------------------------------
 
@@ -123,11 +126,16 @@ pub enum Build {
     Devnet,
 }
 
-/// Path of the built `.so`.
+/// Path of the built `.so`. With `HD_SBF_ARCH=v3` the suite loads the
+/// SBPFv3 builds instead (`scripts/test-v3.sh`: `cargo build-sbf --arch v3`
+/// into `target/deploy-v3` and `target/deploy-devnet-v3`).
 pub fn so_path(build: Build) -> PathBuf {
-    let dir = match build {
-        Build::Mainnet => "deploy",
-        Build::Devnet => "deploy-devnet",
+    let v3 = std::env::var("HD_SBF_ARCH").is_ok_and(|a| a == "v3");
+    let dir = match (build, v3) {
+        (Build::Mainnet, false) => "deploy",
+        (Build::Devnet, false) => "deploy-devnet",
+        (Build::Mainnet, true) => "deploy-v3",
+        (Build::Devnet, true) => "deploy-devnet-v3",
     };
     root().join("target").join(dir).join("heads_down.so")
 }
@@ -338,6 +346,189 @@ pub enum Event {
         /// 0 night, 1 day, 2 focus-only.
         mode: u8,
     },
+    /// StackOpened (v1.2).
+    StackOpened {
+        /// Table.
+        table: Address,
+        /// Host.
+        host: Address,
+        /// Table id.
+        table_id: u64,
+        /// Bond.
+        bond: u64,
+        /// Window start.
+        start_round: u64,
+        /// Window end.
+        end_round: u64,
+        /// Grace gaps.
+        grace_gaps: u32,
+        /// Flags.
+        flags: u8,
+        /// Seat limit.
+        max_seats: u8,
+    },
+    /// StackJoined (v1.2).
+    StackJoined {
+        /// Table.
+        table: Address,
+        /// Rig.
+        rig: Address,
+        /// Wallet.
+        authority: Address,
+        /// Verified SGT (default = none).
+        sgt_mint: Address,
+        /// Bond.
+        bond: u64,
+        /// Join order.
+        seat_index: u8,
+    },
+    /// StackCheckin (v1.2).
+    StackCheckin {
+        /// Table.
+        table: Address,
+        /// Rig.
+        rig: Address,
+        /// Board round.
+        round_id: u64,
+        /// Seat's checked rounds after this check-in.
+        checked_rounds: u64,
+        /// 0 counted, else the skip code.
+        result: u32,
+    },
+    /// StackSettled (v1.2).
+    StackSettled {
+        /// Table.
+        table: Address,
+        /// B.
+        total_bonds: u64,
+        /// W.
+        finisher_bonds: u64,
+        /// Sum of payouts.
+        payouts_total: u64,
+        /// To Bury.
+        bury_amount: u64,
+        /// Seats.
+        seats: u8,
+        /// Finishers.
+        finishers: u8,
+    },
+    /// StackClaimed (v1.2).
+    StackClaimed {
+        /// Table.
+        table: Address,
+        /// Rig.
+        rig: Address,
+        /// Wallet paid.
+        authority: Address,
+        /// SKR paid.
+        amount: u64,
+        /// 0 payout, 1 refund.
+        kind: u8,
+    },
+    /// FocusBondLocked (v1.2).
+    FocusBondLocked {
+        /// Bond.
+        bond: Address,
+        /// Rig.
+        rig: Address,
+        /// Wallet.
+        authority: Address,
+        /// Shift.
+        shift_id: u64,
+        /// SKR.
+        amount: u64,
+    },
+    /// FocusBondReleased (v1.2).
+    FocusBondReleased {
+        /// Bond.
+        bond: Address,
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// SKR.
+        amount: u64,
+    },
+    /// FocusBondForfeited (v1.2).
+    FocusBondForfeited {
+        /// Bond.
+        bond: Address,
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// SKR.
+        amount: u64,
+        /// ShiftLog reason, or 255 abandoned.
+        reason: u8,
+    },
+    /// GiftCreated (v1.2).
+    GiftCreated {
+        /// Escrow.
+        gift: Address,
+        /// Sender.
+        sender: Address,
+        /// Wallet or SGT mint.
+        recipient: Address,
+        /// Lamports.
+        lamports: u64,
+        /// Expiry.
+        expiry_ts: i64,
+        /// 0 wallet, 1 SGT mint.
+        recipient_kind: u8,
+    },
+    /// GiftClaimed (v1.2).
+    GiftClaimed {
+        /// Escrow.
+        gift: Address,
+        /// Claimer.
+        claimer: Address,
+        /// Lamports.
+        lamports: u64,
+        /// Kind.
+        recipient_kind: u8,
+    },
+    /// GiftRefunded (v1.2).
+    GiftRefunded {
+        /// Escrow.
+        gift: Address,
+        /// Sender.
+        sender: Address,
+        /// Lamports.
+        lamports: u64,
+    },
+    /// BuryLotAdded (v1.2).
+    BuryLotAdded {
+        /// Table or bond.
+        source: Address,
+        /// SKR added.
+        amount: u64,
+        /// Lot after.
+        lot_skr: u64,
+        /// Restart price.
+        start_price: u64,
+        /// Restart slot.
+        start_slot: u64,
+        /// 1 stack, 2 bond.
+        source_kind: u8,
+    },
+    /// BuryAuctionSold (v1.2).
+    BuryAuctionSold {
+        /// Buyer.
+        buyer: Address,
+        /// SKR sold.
+        skr_amount: u64,
+        /// ORE atoms per SKR.
+        price: u64,
+        /// ORE paid.
+        ore_paid: u64,
+        /// ORE burned.
+        ore_burned: u64,
+        /// ORE sent to ORE's stake program.
+        ore_shared: u64,
+        /// Lot left.
+        lot_remaining: u64,
+    },
 }
 
 fn addr_at(d: &[u8], off: usize) -> Address {
@@ -403,6 +594,104 @@ fn decode_event(d: &[u8]) -> Option<Event> {
             start_round: u64_at(d, 66),
             end_round: u64_at(d, 74),
             mode: d[82],
+        },
+        (&tag::STACK_OPENED, 103) => Event::StackOpened {
+            table: addr_at(d, 1),
+            host: addr_at(d, 33),
+            table_id: u64_at(d, 65),
+            bond: u64_at(d, 73),
+            start_round: u64_at(d, 81),
+            end_round: u64_at(d, 89),
+            grace_gaps: u32::from_le_bytes(d[97..101].try_into().unwrap()),
+            flags: d[101],
+            max_seats: d[102],
+        },
+        (&tag::STACK_JOINED, 138) => Event::StackJoined {
+            table: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            authority: addr_at(d, 65),
+            sgt_mint: addr_at(d, 97),
+            bond: u64_at(d, 129),
+            seat_index: d[137],
+        },
+        (&tag::STACK_CHECKIN, 85) => Event::StackCheckin {
+            table: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            round_id: u64_at(d, 65),
+            checked_rounds: u64_at(d, 73),
+            result: u32::from_le_bytes(d[81..85].try_into().unwrap()),
+        },
+        (&tag::STACK_SETTLED, 67) => Event::StackSettled {
+            table: addr_at(d, 1),
+            total_bonds: u64_at(d, 33),
+            finisher_bonds: u64_at(d, 41),
+            payouts_total: u64_at(d, 49),
+            bury_amount: u64_at(d, 57),
+            seats: d[65],
+            finishers: d[66],
+        },
+        (&tag::STACK_CLAIMED, 106) => Event::StackClaimed {
+            table: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            authority: addr_at(d, 65),
+            amount: u64_at(d, 97),
+            kind: d[105],
+        },
+        (&tag::FOCUS_BOND_LOCKED, 113) => Event::FocusBondLocked {
+            bond: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            authority: addr_at(d, 65),
+            shift_id: u64_at(d, 97),
+            amount: u64_at(d, 105),
+        },
+        (&tag::FOCUS_BOND_RELEASED, 81) => Event::FocusBondReleased {
+            bond: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            shift_id: u64_at(d, 65),
+            amount: u64_at(d, 73),
+        },
+        (&tag::FOCUS_BOND_FORFEITED, 82) => Event::FocusBondForfeited {
+            bond: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            shift_id: u64_at(d, 65),
+            amount: u64_at(d, 73),
+            reason: d[81],
+        },
+        (&tag::GIFT_CREATED, 114) => Event::GiftCreated {
+            gift: addr_at(d, 1),
+            sender: addr_at(d, 33),
+            recipient: addr_at(d, 65),
+            lamports: u64_at(d, 97),
+            expiry_ts: u64_at(d, 105) as i64,
+            recipient_kind: d[113],
+        },
+        (&tag::GIFT_CLAIMED, 74) => Event::GiftClaimed {
+            gift: addr_at(d, 1),
+            claimer: addr_at(d, 33),
+            lamports: u64_at(d, 65),
+            recipient_kind: d[73],
+        },
+        (&tag::GIFT_REFUNDED, 73) => Event::GiftRefunded {
+            gift: addr_at(d, 1),
+            sender: addr_at(d, 33),
+            lamports: u64_at(d, 65),
+        },
+        (&tag::BURY_LOT_ADDED, 66) => Event::BuryLotAdded {
+            source: addr_at(d, 1),
+            amount: u64_at(d, 33),
+            lot_skr: u64_at(d, 41),
+            start_price: u64_at(d, 49),
+            start_slot: u64_at(d, 57),
+            source_kind: d[65],
+        },
+        (&tag::BURY_AUCTION_SOLD, 81) => Event::BuryAuctionSold {
+            buyer: addr_at(d, 1),
+            skr_amount: u64_at(d, 33),
+            price: u64_at(d, 41),
+            ore_paid: u64_at(d, 49),
+            ore_burned: u64_at(d, 57),
+            ore_shared: u64_at(d, 65),
+            lot_remaining: u64_at(d, 73),
         },
         _ => return None,
     })
@@ -681,6 +970,8 @@ impl Env {
         if init {
             ok(env.initialize_config());
         }
+        // v1.2 (SKR): mints, the ORE stake program and bury's accounts.
+        env.load_skr_fixtures();
         env
     }
 
