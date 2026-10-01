@@ -49,6 +49,22 @@ class SkrAccountDecodersTest {
     }
 
     @Test
+    fun `SeekerSeat decodes, and must be the seat of the mint stored in it`() {
+        val seat = HeadsDownProgram.seekerSeat(sgtMint).address
+        val bytes = TestAccounts.seekerSeatBytes(sgtMint, rig, host, memberNumber = 121_035, verifiedSlot = 451_000_123)
+        val s = HeadsDownAccounts.seekerSeat(seat, hd(bytes))
+        assertEquals(sgtMint, s.sgtMint)
+        assertEquals(rig, s.rig)
+        assertEquals(host, s.authority)
+        assertEquals(121_035uL, s.memberNumber)
+        assertEquals(451_000_123uL, s.verifiedSlot)
+        assertHeaderRule(bytes) { HeadsDownAccounts.seekerSeat(seat, it) }
+        // The same bytes at another mint's seat address, and a ShiftLog (also 128 bytes), are not this seat.
+        rejects { HeadsDownAccounts.seekerSeat(HeadsDownProgram.seekerSeat(other).address, hd(bytes)) }
+        rejects { HeadsDownAccounts.seekerSeat(seat, hd(TestAccounts.shiftLogBytes(rig, 1))) }
+    }
+
+    @Test
     fun `StackTable decodes every field at its offset`() {
         val bytes = TestAccounts.stackTableBytes(
             host, tableId = 1, bond = 200_000_000, startRound = 422_702, endRound = 422_703, graceGaps = 0, flags = 0, maxSeats = 4,

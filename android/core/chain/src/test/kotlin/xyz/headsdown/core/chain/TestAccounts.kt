@@ -127,6 +127,15 @@ object TestAccounts {
         putLong(96, startTs); putLong(104, endTs)
     }.array()
 
+    /** A SeekerSeat (INTERFACE §3.4): the rig a Seeker Genesis Token is verified for. */
+    fun seekerSeatBytes(sgtMint: Pubkey, rig: Pubkey, authority: Pubkey, memberNumber: Long = 33_078, verifiedSlot: Long = 451_000_000): ByteArray =
+        header(128, 3, HeadsDownProgram.seekerSeat(sgtMint).bump).apply {
+            position(8); put(sgtMint.bytes)
+            position(40); put(rig.bytes)
+            position(72); put(authority.bytes)
+            putLong(104, memberNumber); putLong(112, verifiedSlot)
+        }.array()
+
     fun stackTableBytes(
         host: Pubkey,
         tableId: Long,
@@ -145,6 +154,7 @@ object TestAccounts {
         refundAfterTs: Long = 1_790_300_000,
         openedTs: Long = 1_790_000_000,
         openedRound: Long = 990,
+        claimedCount: Int = 0,
     ): ByteArray {
         val table = HeadsDownProgram.stackTable(host, tableId.toULong())
         return header(208, 5, table.bump).apply {
@@ -153,7 +163,7 @@ object TestAccounts {
             putLong(72, tableId); putLong(80, bond); putLong(88, startRound); putLong(96, endRound)
             putInt(104, graceGaps)
             put(108, flags.toByte()); put(109, maxSeats.toByte()); put(110, status.toByte()); put(111, seatCount.toByte())
-            put(112, finishers.toByte())
+            put(112, finishers.toByte()); put(113, claimedCount.toByte())
             putLong(120, totalBonds); putLong(136, payoutsTotal); putLong(144, buryAmount)
             putLong(160, refundAfterTs); putLong(168, openedTs); putLong(176, openedRound)
         }.array()

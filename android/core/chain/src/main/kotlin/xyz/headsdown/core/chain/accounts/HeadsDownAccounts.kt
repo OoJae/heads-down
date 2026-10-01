@@ -79,6 +79,19 @@ data class RigAccount(
 )
 
 /**
+ * heads_down `SeekerSeat` (128 bytes, tag 3; INTERFACE §3.4): the one rig a Seeker Genesis Token
+ * is verified for. `verify_seeker` needs the seat's current rig when it points at another one.
+ */
+data class SeekerSeatAccount(
+    val address: Pubkey,
+    val sgtMint: Pubkey,
+    val rig: Pubkey,
+    val authority: Pubkey,
+    val memberNumber: ULong,
+    val verifiedSlot: ULong,
+)
+
+/**
  * heads_down `ShiftLog` (128 bytes, tag 4; INTERFACE §3.5): a sealed shift. A Focus Bond resolves
  * from it: `break_reason` 0 (`completed`) releases the bond, anything else forfeits it.
  */
@@ -240,6 +253,7 @@ object HeadsDownAccounts {
     const val VERSION = 1
     const val CONFIG_TAG = 1
     const val RIG_TAG = 2
+    const val SEEKER_SEAT_TAG = 3
     const val SHIFT_LOG_TAG = 4
     const val STACK_TABLE_TAG = 5
     const val STACK_SEAT_TAG = 6
@@ -247,6 +261,7 @@ object HeadsDownAccounts {
     const val GIFT_ESCROW_TAG = 8
     const val CONFIG_SIZE = 256
     const val RIG_SIZE = 384
+    const val SEEKER_SEAT_SIZE = 128
     const val SHIFT_LOG_SIZE = 128
     const val STACK_TABLE_SIZE = 208
     const val STACK_SEAT_SIZE = 200
@@ -255,6 +270,8 @@ object HeadsDownAccounts {
 
     /** Offsets used as `getProgramAccounts` memcmp filters. */
     const val STACK_SEAT_TABLE_OFFSET = 8
+    const val STACK_SEAT_AUTHORITY_OFFSET = 72
+    const val STACK_TABLE_HOST_OFFSET = 8
     const val GIFT_ESCROW_SENDER_OFFSET = 8
     const val GIFT_ESCROW_RECIPIENT_OFFSET = 40
 
@@ -336,6 +353,21 @@ object HeadsDownAccounts {
             shiftOpen = flag(b.u8(336), "shift_open"),
             breakReason = b.u8(337),
             shiftStartTs = b.i64(344),
+        )
+    }
+
+    /** A Seeker seat. The address must be `["seeker", sgt_mint]` for the mint stored in it. */
+    fun seekerSeat(address: Pubkey, account: AccountInfo): SeekerSeatAccount {
+        val b = header(account, SEEKER_SEAT_SIZE, SEEKER_SEAT_TAG, "SeekerSeat")
+        val mint = b.pubkey(8)
+        canonical(address, b, HeadsDownProgram.seekerSeat(mint), "SeekerSeat")
+        return SeekerSeatAccount(
+            address = address,
+            sgtMint = mint,
+            rig = b.pubkey(40),
+            authority = b.pubkey(72),
+            memberNumber = b.u64(104),
+            verifiedSlot = b.u64(112),
         )
     }
 
