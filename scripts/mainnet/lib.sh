@@ -17,6 +17,10 @@ set -euo pipefail
 case $- in
   *x*) echo "refusing to run with xtrace: set -x would print secrets" >&2; exit 2 ;;
 esac
+# Parse the whole calling script before running any of it. bash executes line by line, so a
+# syntax error late in a script (bash 3.2, the macOS default, is stricter than shellcheck)
+# would otherwise surface only after the steps before it had already run.
+"$BASH" -n "$0" || { echo "$0 does not parse with bash $BASH_VERSION; nothing was run" >&2; exit 2; }
 
 MAINNET_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$MAINNET_SCRIPTS/../.." && pwd)"

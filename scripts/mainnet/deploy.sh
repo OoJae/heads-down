@@ -103,6 +103,24 @@ solana_cfg "$K_DEPLOYER"
 BAL_BEFORE="$(scli balance "$DEPLOYER" --lamports | awk '{print $1}')"
 OUT="$HD_STATE/deploy-$CLUSTER-$TS.out"
 COMMON=(--use-rpc --with-compute-unit-price "$HD_CU_PRICE" --max-sign-attempts "$HD_MAX_SIGN_ATTEMPTS" --commitment confirmed --output json-compact)
+# signature_of FILE: the "signature" of the last JSON object the CLI printed (one line with
+# json-compact, several with json). Kept out of any command substitution: bash 3.2, the macOS
+# default, misparses a here-document inside one.
+signature_of() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+lines = open(sys.argv[1]).read().splitlines()
+for i in range(len(lines) - 1, -1, -1):
+    if lines[i].lstrip().startswith("{"):
+        try:
+            print(json.loads("\n".join(lines[i:])).get("signature") or "")
+            break
+        except ValueError:
+            continue
+PY
+}
 recover_hint() {
   cat >&2 <<EOF
 
@@ -136,21 +154,7 @@ if [[ $RC -ne 0 ]]; then
   recover_hint
   die "$WHAT failed (exit $RC); log $OUT"
 fi
-SIG="$(python3 - "$OUT" <<'PY'
-import json, sys
-# The CLI's result object: the last JSON object in the output (one line with json-compact,
-# several with json), after any progress lines.
-text = open(sys.argv[1]).read()
-lines = text.splitlines()
-for i in range(len(lines) - 1, -1, -1):
-    if lines[i].lstrip().startswith("{"):
-        try:
-            print(json.loads("\n".join(lines[i:])).get("signature") or "")
-            break
-        except ValueError:
-            continue
-PY
-)"
+SIG="$(signature_of "$OUT")"
 [[ -n "$SIG" || "$MODE" == buffer ]] || warn "no transaction signature in the CLI output ($OUT); the receipt will not carry one"
 if [[ "$MODE" == buffer && -n "$BUFFER_AUTHORITY" ]]; then
   log "handing the buffer to $BUFFER_AUTHORITY"
@@ -175,6 +179,7 @@ case "$MODE" in
   buffer) VERIFY+=(--buffer "$BUFFER" --authority "${BUFFER_AUTHORITY:-$DEPLOYER}") ;;
 esac
 tool verify-deploy "${VERIFY[@]}"
+[[ -s "$RECEIPT" ]] || die "verify-deploy wrote no receipt ($RECEIPT): treat this deploy as unverified"
 
 echo
 bold "done: $MODE on $CLUSTER"
