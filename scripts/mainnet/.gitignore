@@ -1,0 +1,7 @@
+# Keys, the Helius key and deploy state live OUTSIDE the repo (~/.config/heads-down/mainnet,
+# ~/.local/share/heads-down/deploy). Belt and braces in case a path is pointed here:
+*.json
+*.env
+*-secret
+*.out
+*.log
