@@ -133,6 +133,8 @@ class EndpointPolicyTest {
         // The crank intake path is contract A's /ws.
         assertTrue(BuildConfig.CRANK_WS_URL.isEmpty() || BuildConfig.CRANK_WS_URL.endsWith("/ws"))
         assertFalse(BuildConfig.SUBMIT_THROUGH_APP_RPC)
+        // The app signs in to its own domain; only localdev uses the devstack's "localhost".
+        assertEquals("headsdown.xyz", BuildConfig.SIWS_DOMAIN)
         assertTrue(BuildTransports.transports === SecureTransports)
     }
 }

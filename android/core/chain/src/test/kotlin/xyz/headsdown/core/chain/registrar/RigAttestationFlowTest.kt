@@ -117,6 +117,24 @@ class RigAttestationFlowTest {
     }
 
     @Test
+    fun `the localdev build talks to the devstack registrar on localhost`() = runBlocking {
+        // scripts/devstack/up.sh --with-registrar: HD_SIWS_DOMAIN=localhost, loopback URI, solana:localnet.
+        fake.domain = "localhost"
+        fake.uri = "http://127.0.0.1:8790"
+        fake.chainIds = listOf("solana:localnet")
+        val localdev = RigAttestationFlow(client, domain = "localhost", chainId = "solana:localnet", allowLoopbackUri = true)
+        val run = localdev.run(signIn, generateKey)
+        assertEquals(AttestationOutcome.ATTESTED, run.outcome)
+        assertEquals("http://127.0.0.1:8790", signInRequest!!.uri)
+        assertEquals("solana:localnet", signInRequest!!.chainId)
+        // Any other build refuses a loopback URI before the wallet is asked.
+        signInRequest = null
+        val release = RigAttestationFlow(client, domain = "localhost", chainId = "solana:localnet")
+        assertEquals(AttestationOutcome.REGISTRAR_UNAVAILABLE, release.run(signIn, generateKey).outcome)
+        assertNull(signInRequest)
+    }
+
+    @Test
     fun `a declined sign-in stops before any key`() = runBlocking {
         val run = flow.run({ null }, generateKey)
         assertEquals(AttestationOutcome.SIGN_IN_DECLINED, run.outcome)

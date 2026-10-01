@@ -81,7 +81,8 @@ class RegistrarClient(
     private val http: JsonHttp,
     private val programId: Pubkey = HeadsDownProgram.ID,
 ) {
-    suspend fun siwsNonce(expectedDomain: String, buildChainId: String): SiwsRequest {
+    /** @param allowLoopbackUri the `localdev` build only: accept the devstack's loopback http URI. */
+    suspend fun siwsNonce(expectedDomain: String, buildChainId: String, allowLoopbackUri: Boolean = false): SiwsRequest {
         val o = ok(http.post("/siws/nonce", "{}"))
         return try {
             SiwsRequest.fromRegistrar(
@@ -95,6 +96,7 @@ class RegistrarClient(
                 nonce = o.string("nonce"),
                 issuedAt = o.string("issued_at"),
                 expirationTime = o.string("expiration_time"),
+                allowLoopbackUri = allowLoopbackUri,
             )
         } catch (_: IllegalArgumentException) {
             throw RegistrarException("siws_request_refused")

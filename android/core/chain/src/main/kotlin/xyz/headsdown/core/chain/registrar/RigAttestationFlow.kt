@@ -70,6 +70,8 @@ class RigAttestationFlow(
     private val domain: String,
     /** This build's cluster, e.g. `solana:devnet` or `solana:localnet`. */
     private val chainId: String,
+    /** The `localdev` build only: the devstack registrar's SIWS URI is loopback http. */
+    private val allowLoopbackUri: Boolean = false,
 ) : RigAttestor {
     private sealed interface Step<out T> {
         class Ok<T>(val value: T) : Step<T>
@@ -84,7 +86,7 @@ class RigAttestationFlow(
         signIn: suspend (SiwsRequest) -> SignInProof?,
         generateKey: suspend (challenge: ByteArray) -> ChallengedKey,
     ): AttestationRun {
-        val request = when (val s = step { registrar.siwsNonce(domain, chainId) }) {
+        val request = when (val s = step { registrar.siwsNonce(domain, chainId, allowLoopbackUri) }) {
             is Step.Ok -> s.value
             is Step.Failed -> return AttestationRun(AttestationOutcome.REGISTRAR_UNAVAILABLE, null, null, null, s.code)
         }

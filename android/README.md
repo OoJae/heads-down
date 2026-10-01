@@ -206,7 +206,10 @@ scripts/devstack/phone.sh          # adb reverse 8899, 8900, 8787, 8788, 8790 (a
   so localdev sets `SUBMIT_THROUGH_APP_RPC`: the wallet only signs (`signTransactions`; the
   Solana Mobile fakewallet works) and the app submits through its own RPC, then polls it for
   confirmation. MWA has no localnet `Blockchain`, so the session is authorized as devnet; SIWS
-  uses `solana:localnet`, which the devstack registrar accepts.
+  uses `solana:localnet` and the domain `localhost`, as the devstack registrar
+  (`up.sh --with-registrar`) is configured, and its loopback `http` URI is accepted in this build
+  only. That registrar attests app package `xyz.headsdown` by default: run it with
+  `HD_APP_PACKAGE=xyz.headsdown.localdev` to attest the localdev APK (otherwise the rig is a guest).
 - **Rig debug screen** (home → "Rig key and devstack (debug)", debug and localdev builds only):
   the rig P-256 public key as 33-byte hex and the `scripts/devstack/clock-in.sh <hex>` command to
   copy, the bound wallet and Rig address, the voucher, the counter, crank acks and endpoints.

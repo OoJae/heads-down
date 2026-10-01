@@ -40,6 +40,19 @@ class SiwsRequestTest {
     }
 
     @Test
+    fun `only the localdev build accepts the devstack registrar's loopback URI`() {
+        fun local(uri: String, allow: Boolean) = SiwsRequest.fromRegistrar(
+            "localhost", "solana:localnet", "localhost", uri, "1", listOf("solana:localnet"), "Sign in to Heads Down.",
+            "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", "2026-10-01T12:00:00Z", "2026-10-01T12:10:00Z", allowLoopbackUri = allow,
+        )
+        assertEquals("http://127.0.0.1:8790", local("http://127.0.0.1:8790", allow = true).uri)
+        assertEquals("http://localhost:8790", local("http://localhost:8790", allow = true).uri)
+        assertThrows(IllegalArgumentException::class.java) { local("http://127.0.0.1:8790", allow = false) }
+        assertThrows(IllegalArgumentException::class.java) { local("http://192.168.1.5:8790", allow = true) }
+        assertThrows(IllegalArgumentException::class.java) { local("http://127.0.0.1.nip.io:8790", allow = true) }
+    }
+
+    @Test
     fun `a registrar answer for another site, cluster or shape is refused`() {
         listOf(
             { build(domain = "evil.example") },

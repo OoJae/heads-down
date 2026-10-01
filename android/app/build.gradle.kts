@@ -110,6 +110,8 @@ android {
         buildConfigField("String", "CRANK_WS_URL", "\"$crankUrl\"")
         buildConfigField("String", "REGISTRAR_URL", "\"$registrarUrl\"")
         buildConfigField("String", "INDEXER_URL", "\"$indexerUrl\"")
+        // The domain the app signs in to (SIWS); the registrar must answer for exactly this one.
+        buildConfigField("String", "SIWS_DOMAIN", "\"headsdown.xyz\"")
         buildConfigField("boolean", "LOOPBACK_CLEARTEXT_ALLOWED", "false")
         // true: the wallet only signs and the app submits through its own RPC (localdev).
         buildConfigField("boolean", "SUBMIT_THROUGH_APP_RPC", "false")
@@ -150,6 +152,8 @@ android {
             buildConfigField("String", "CRANK_WS_URL", "\"$localdevCrankUrl\"")
             buildConfigField("String", "REGISTRAR_URL", "\"$localdevRegistrarUrl\"")
             buildConfigField("String", "INDEXER_URL", "\"$localdevIndexerUrl\"")
+            // scripts/devstack/up.sh --with-registrar runs the registrar with HD_SIWS_DOMAIN=localhost.
+            buildConfigField("String", "SIWS_DOMAIN", "\"localhost\"")
             buildConfigField("boolean", "LOOPBACK_CLEARTEXT_ALLOWED", "true")
             // MWA wallets broadcast to their own cluster, never to the laptop's validator.
             buildConfigField("boolean", "SUBMIT_THROUGH_APP_RPC", "true")

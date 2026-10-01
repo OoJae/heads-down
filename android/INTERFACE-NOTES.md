@@ -54,7 +54,9 @@ there is no finished shift. Parsed strictly by `core/chain` `IndexerHaulClient`:
 
 1. `POST /siws/nonce`. The phone refuses an answer for another domain, a URI that is not https on
    the app's domain, a version other than 1, or a chain list without this build's chain id
-   (`solana:mainnet`, `solana:devnet`, or `solana:localnet` for localdev).
+   (`solana:mainnet`, `solana:devnet`, or `solana:localnet` for localdev). The localdev build
+   signs in to `localhost` and accepts the devstack registrar's loopback `http` URI; no other
+   build does.
 2. MWA Sign In With Solana with `nonce`, `uri`, `issued_at`, `expiration_time`, `statement`,
    `version` and the chain id copied verbatim.
 3. `POST /siws/verify` → a session token (memory only, never logged).

@@ -181,7 +181,14 @@ object AppModule {
     fun rigOnboarding(client: OkHttpClient, keys: RigKeyRepository, vouchers: VoucherStore): RigOnboarding {
         val registrar = service(EndpointKind.REGISTRAR, BuildConfig.REGISTRAR_URL, client)
         return RigOnboarding(
-            attestor = registrar?.let { RigAttestationFlow(RegistrarClient(it), HeadsDownIdentity.SIWS_DOMAIN, BuildConfig.SOLANA_CHAIN) },
+            attestor = registrar?.let {
+                RigAttestationFlow(
+                    RegistrarClient(it),
+                    domain = BuildConfig.SIWS_DOMAIN,
+                    chainId = BuildConfig.SOLANA_CHAIN,
+                    allowLoopbackUri = BuildConfig.LOOPBACK_CLEARTEXT_ALLOWED,
+                )
+            },
             keys = keys,
             vouchers = vouchers,
             debugLog = { DebugLog.d("HeadsDown/registrar", it) },

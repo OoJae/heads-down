@@ -27,7 +27,9 @@ data class SiwsRequest(
         /**
          * Builds the request from the registrar's answer, refusing anything that would make the
          * wallet sign a message for another site or cluster:
-         * - the domain must be this app's SIWS domain, and the URI an `https` URL on it;
+         * - the domain must be this app's SIWS domain, and the URI an `https` URL on it (or, only
+         *   with [allowLoopbackUri], the `localdev` build, `http` to 127.0.0.1 / localhost: the
+         *   devstack registrar runs with `HD_SIWS_DOMAIN=localhost` and a loopback URI);
          * - [buildChainId] (the cluster this build talks to) must be one the registrar accepts;
          * - version 1, an 8..64 character alphanumeric nonce, RFC 3339 times, a one-line statement.
          *
@@ -44,6 +46,7 @@ data class SiwsRequest(
             nonce: String,
             issuedAt: String,
             expirationTime: String,
+            allowLoopbackUri: Boolean = false,
         ): SiwsRequest {
             require(domain == expectedDomain) { "registrar signs in for another domain" }
             val parsed = try {
@@ -52,9 +55,9 @@ data class SiwsRequest(
                 throw IllegalArgumentException("registrar SIWS URI is not a URI")
             }
             val host = parsed.host?.lowercase()
-            require(parsed.scheme == "https" && host != null && (host == expectedDomain || host.endsWith(".$expectedDomain"))) {
-                "registrar SIWS URI is not an https URL on the app's domain"
-            }
+            val onDomain = parsed.scheme == "https" && host != null && (host == expectedDomain || host.endsWith(".$expectedDomain"))
+            val loopback = allowLoopbackUri && parsed.scheme == "http" && (host == "127.0.0.1" || host == "localhost")
+            require(onDomain || loopback) { "registrar SIWS URI is not an https URL on the app's domain" }
             require(parsed.rawUserInfo == null && parsed.rawQuery == null && parsed.rawFragment == null) { "registrar SIWS URI carries extra parts" }
             require(version == "1") { "unsupported SIWS version" }
             require(buildChainId in chainIds) { "registrar does not accept this build's cluster" }
