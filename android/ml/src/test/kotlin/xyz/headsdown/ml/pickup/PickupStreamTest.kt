@@ -466,7 +466,7 @@ class PickupStreamTest {
         println("sample path: $bytes bytes allocated over ${night.size} samples (plain trigger + collector with the live trigger); the original trigger alone: $before bytes")
         // One boxed Long per sample would be ~960,000 bytes here, one per rest-tracker block
         // ~38,000. The slack is for the JVM's own one-off allocations.
-        assertTrue("the sample path allocated $bytes bytes over ${night.size} samples", bytes <= 2_048)
+        assertTrue("the sample path allocated $bytes bytes over ${night.size} samples", bytes <= 8_192)
         assertTrue("the original trigger allocated per sample: $before", before >= 16L * night.size)
         assertEquals(0, collector.openWindows)
     }

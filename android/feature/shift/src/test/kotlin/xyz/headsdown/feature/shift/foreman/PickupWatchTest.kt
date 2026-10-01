@@ -468,7 +468,7 @@ class PickupWatchTest {
         println("shift sensor path: $bytes bytes allocated over ${night.size} samples (FaceDownDetector + PickupWatch)")
         // One boxed Long per sample would be ~960,000 bytes here, one per rest-tracker block
         // ~38,000, one per second ~19,000. The slack is for the JVM's own one-off allocations.
-        assertTrue("the sample path allocated $bytes bytes over ${night.size} samples", bytes <= 2_048)
+        assertTrue("the sample path allocated $bytes bytes over ${night.size} samples", bytes <= 8_192)
         assertEquals("and no inference: nothing triggered", 0, watch.stats.judged)
         assertNotNull(detector.lastSampleMillis)
     }

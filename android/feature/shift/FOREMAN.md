@@ -104,7 +104,7 @@ release builds have no screen for it yet. It cannot make a rig hot in either pos
   time-based, so its 1.5 s and 0.3 s dwell times are unchanged.
 * **Per sample.** The detector, the trigger, the rest test and the ring buffer: a few dozen
   arithmetic operations and **no allocation**. `PickupWatchTest` and `PickupStreamTest`
-  measure 0 to 40 bytes over 60,000 samples (they allow 2 KB for the JVM's own one-off
+  measure 0 to 40 bytes over 60,000 samples (they allow 8 KB for the JVM's own one-off
   allocations); the trigger as first written allocated 2.4 MB over the same samples.
 * **Inference.** Only when a window passes the three rules, on the `hd-foreman` background
   thread. A still night runs none (`PickupWatchTest`: an hour of samples, zero windows judged).
