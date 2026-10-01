@@ -9,7 +9,7 @@
  *  - Explorer links from the API are only rendered if they point at an allowlisted explorer
  *    (see safeExplorerUrl), so even a compromised API cannot inject javascript: URLs.
  */
-import type { DatasetInfo, Envelope } from "./types";
+import type { DatasetInfo, DatasetName, Envelope, HaulSummary } from "./types";
 
 export function parseApiBase(raw: string | undefined | null): string | null {
   if (!raw) return null;
@@ -82,6 +82,94 @@ export function createClient(base: string | null, fetchImpl: typeof fetch = (...
 }
 
 export type ApiClient = ReturnType<typeof createClient>;
+
+const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+export function isRigAddress(s: string | null | undefined): s is string {
+  return typeof s === "string" && BASE58_ADDRESS.test(s);
+}
+
+const isU64 = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0) || (typeof v === "string" && /^\d{1,20}$/.test(v));
+const isDecOrNull = (v: unknown) => v === null || (typeof v === "string" && /^\d{1,40}$/.test(v));
+
+/** Shape check for contract B (the haul is not enveloped). */
+export function isHaulSummary(x: unknown): x is HaulSummary {
+  if (typeof x !== "object" || x === null) return false;
+  const h = x as Record<string, unknown>;
+  const ex = h.explorer as Record<string, unknown> | undefined;
+  return (
+    isRigAddress(h.rig as string) &&
+    isU64(h.shift_id) &&
+    (h.mode === "night" || h.mode === "day" || h.mode === "focus_only") &&
+    Number.isSafeInteger(h.start_ts) &&
+    Number.isSafeInteger(h.end_ts) &&
+    isU64(h.start_round) &&
+    isU64(h.end_round) &&
+    Array.isArray(h.rounds) &&
+    h.rounds.length <= 20_000 &&
+    (h.rounds as Record<string, unknown>[]).every(
+      (r) =>
+        isU64(r.round_id) &&
+        typeof r.dark === "boolean" &&
+        Number.isInteger(r.dug_mask) &&
+        (r.dug_mask as number) >= 0 &&
+        (r.dug_mask as number) < 1 << 25 &&
+        (r.winning_square === null || (Number.isInteger(r.winning_square) && (r.winning_square as number) >= 0 && (r.winning_square as number) <= 24)) &&
+        typeof r.motherlode === "boolean" &&
+        typeof r.split === "boolean",
+    ) &&
+    isU64(h.dark_rounds) &&
+    isU64(h.rounds_dug) &&
+    isU64(h.sol_placed_lamports) &&
+    isU64(h.fees_lamports) &&
+    typeof h.ore_mined_atoms === "string" &&
+    /^\d{1,40}$/.test(h.ore_mined_atoms) &&
+    isDecOrNull(h.effective_lamports_per_ore) &&
+    isDecOrNull(h.market_lamports_per_ore) &&
+    (h.market_source === null || typeof h.market_source === "string") &&
+    Number.isInteger(h.streak_before) &&
+    Number.isInteger(h.streak_after) &&
+    Number.isInteger(h.break_reason) &&
+    h.first_pickup_ts === null &&
+    typeof h.simulated === "boolean" &&
+    typeof ex === "object" &&
+    ex !== null &&
+    (ex.shift_log === null || typeof ex.shift_log === "string") &&
+    Array.isArray(ex.sample_digs) &&
+    ex.sample_digs.every((u) => typeof u === "string")
+  );
+}
+
+export type HaulResult =
+  | { status: "ok"; haul: HaulSummary; dataset: DatasetName }
+  | { status: "none"; message: string; retryAfterS: number | null };
+
+/**
+ * GET /v1/rigs/{rig}/haul/{shift}: contract B is not enveloped, so the dataset comes from the
+ * X-HeadsDown-Dataset header (exposed by the API's CORS) and must agree with both the pinned
+ * dataset and the haul's own `simulated` flag.
+ */
+export async function getHaul(api: ApiClient, rig: string, shift: string, fetchImpl: typeof fetch = (...a) => fetch(...a), signal?: AbortSignal): Promise<HaulResult> {
+  if (!isRigAddress(rig)) throw new Error("not a rig address");
+  if (shift !== "latest" && !/^\d{1,20}$/.test(shift)) throw new Error("not a shift id");
+  const url = api.url(`/v1/rigs/${rig}/haul/${shift}`);
+  if (!url) throw new Error("NEXT_PUBLIC_HD_API_BASE is not configured");
+  const res = await fetchImpl(url, { signal, headers: { accept: "application/json" }, credentials: "omit" });
+  const body: unknown = await res.json().catch(() => null);
+  if (res.status === 404) {
+    const ra = Number(res.headers.get("retry-after"));
+    const msg = typeof (body as { error?: unknown } | null)?.error === "string" ? (body as { error: string }).error : "no finished shift";
+    return { status: "none", message: msg.slice(0, 300), retryAfterS: Number.isFinite(ra) && ra > 0 ? ra : null };
+  }
+  if (!res.ok) throw new Error(`API haul: HTTP ${res.status}`);
+  const name = res.headers.get("x-headsdown-dataset");
+  if (!name || !DATASETS.has(name)) throw new Error("API haul: missing dataset header");
+  if (!isHaulSummary(body)) throw new Error("API haul: unexpected response shape");
+  if (body.simulated !== (name === "simulated")) throw new Error("API haul: dataset header and simulated flag disagree");
+  const pinned = api.dataset();
+  if (pinned && pinned.name !== name) throw new DatasetMismatchError(pinned.name, name);
+  return { status: "ok", haul: body, dataset: name as DatasetName };
+}
 
 export const client = createClient(API_BASE);
 
