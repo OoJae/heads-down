@@ -88,13 +88,16 @@ sealed interface TickResult {
     data class SigningFailed(val cause: String) : TickResult
 }
 
-/** The `ShiftLog.break_reason` a device-side break is reported with (INTERFACE codes 0..6). */
+/**
+ * The `ShiftLog.break_reason` a device-side break is reported with (INTERFACE v1.1 §3.5). On-chain,
+ * pickup, screen-on and unplugged cool the rig (a fresh heartbeat revives it); unlocked breaks it.
+ */
 val BreakReason.wireReason: ShiftEndReason
     get() = when (this) {
         BreakReason.LIFTED -> ShiftEndReason.PICKUP
-        BreakReason.SCREEN_ON, BreakReason.UNLOCKED -> ShiftEndReason.SCREEN_ON
-        // No INTERFACE code for "unplugged": the user chose to end the charger shift.
-        BreakReason.UNPLUGGED -> ShiftEndReason.MANUAL
+        BreakReason.SCREEN_ON -> ShiftEndReason.SCREEN_ON
+        BreakReason.UNPLUGGED -> ShiftEndReason.UNPLUGGED
+        BreakReason.UNLOCKED -> ShiftEndReason.UNLOCKED
     }
 
 /**

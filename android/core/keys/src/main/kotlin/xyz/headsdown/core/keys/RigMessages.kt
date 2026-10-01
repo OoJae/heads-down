@@ -72,8 +72,12 @@ enum class RigMessageKind(val wire: Int) {
 }
 
 /**
- * `ShiftLog.break_reason` codes (INTERFACE, ShiftLog), also carried by BREAK / FREEZE messages.
- * Wire format: never renumber.
+ * `ShiftLog.break_reason` codes (INTERFACE v1.1 §3.5), also carried by BREAK / FREEZE messages.
+ * Wire format: never renumber, only append.
+ *
+ * On-chain effect of a BREAK (§5, `break_shift`): 1, 2 and 7 move the rig to Cooling (a fresh
+ * heartbeat makes it Down again); 4, 5, 6 and 8 move it to Broken. 0 and 3 are not BREAK
+ * reasons: `completed` is written by `end_shift`, `freeze` by `freeze_rig`.
  */
 enum class ShiftEndReason(val wire: Int) {
     COMPLETED(0),
@@ -83,7 +87,16 @@ enum class ShiftEndReason(val wire: Int) {
     LEASE_LAPSE(4),
     BUDGET(5),
     MANUAL(6),
+
+    /** v1.1: the charger was unplugged during a Night Shift. BREAK → Cooling. */
+    UNPLUGGED(7),
+
+    /** v1.1: the phone was unlocked. BREAK → Broken. */
+    UNLOCKED(8),
     ;
+
+    /** `break_shift` accepts this reason (1, 2, 4, 5, 6, 7, 8); anything else is InvalidInstruction. */
+    val isBreakReason: Boolean get() = this != COMPLETED && this != FREEZE
 
     companion object {
         fun fromWire(value: Int): ShiftEndReason =
@@ -262,12 +275,15 @@ data class ShiftPlan(
         require(splitTiles in 0..MAX_SPLIT_TILES) { "split tiles must be 0..15" }
         require(soloTiles in 0..MAX_SOLO_TILES) { "solo tiles must be 0..10" }
         require(leaseRounds in 1..RigMessageFormat.MAX_LEASE_ROUNDS) { "lease rounds must be 1..3" }
-        require(flags and FLAG_FOCUS_ONLY.inv() == 0) { "unknown plan flag bits" }
+        require(flags and KNOWN_FLAGS.inv() == 0) { "unknown plan flag bits" }
         require(focusOnly || splitTiles + soloTiles >= 1) { "a mining plan needs at least one tile" }
         require(windowEndTs > windowStartTs) { "plan window must not be empty" }
     }
 
     val focusOnly: Boolean get() = flags and FLAG_FOCUS_ONLY != 0
+
+    /** A Day Shift (`ShiftLog.mode` 1 unless focus-only, which wins). */
+    val day: Boolean get() = flags and FLAG_DAY != 0
 
     val tiles: Int get() = splitTiles + soloTiles
 
@@ -291,6 +307,12 @@ data class ShiftPlan(
 
         /** bit0: focus-only (never deploys). */
         const val FLAG_FOCUS_ONLY = 0x01
+
+        /** bit1 (v1.1): Day Shift, recorded as `ShiftLog.mode` 1. */
+        const val FLAG_DAY = 0x02
+
+        /** Every other bit is refused by `arm_shift`. */
+        const val KNOWN_FLAGS = FLAG_FOCUS_ONLY or FLAG_DAY
 
         fun decode(bytes: ByteArray, offset: Int): ShiftPlan {
             require(offset >= 0 && bytes.size - offset >= ENCODED_BYTES) { "truncated plan" }

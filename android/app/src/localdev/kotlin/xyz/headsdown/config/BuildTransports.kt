@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -18,11 +19,15 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.Buffer
+import xyz.headsdown.core.chain.http.HttpExchange
+import xyz.headsdown.core.chain.http.HttpReply
+import xyz.headsdown.core.chain.http.JsonHttp
 import xyz.headsdown.core.chain.rpc.JsonRpcTransport
 import xyz.headsdown.core.chain.rpc.RpcException
 import xyz.headsdown.core.chain.rpc.RpcHttpException
 import xyz.headsdown.core.chain.rpc.RpcResponseTooLargeException
 import xyz.headsdown.core.chain.uplink.Backoff
+import xyz.headsdown.core.chain.uplink.CrankReply
 import xyz.headsdown.core.chain.uplink.MessageUplink
 import java.io.IOException
 import kotlin.coroutines.resume
@@ -42,11 +47,20 @@ object LoopbackAwareTransports : EndpointTransports {
     override fun rpc(url: String, client: OkHttpClient): JsonRpcTransport =
         if (isLoopbackCleartext(EndpointKind.RPC, url)) LoopbackJsonRpcTransport(url, client) else SecureTransports.rpc(url, client)
 
-    override fun uplink(url: String, client: OkHttpClient, scope: CoroutineScope, onConnected: () -> Unit): MessageUplink =
+    override fun http(url: String, client: OkHttpClient): JsonHttp =
+        if (isLoopbackCleartext(EndpointKind.INDEXER, url)) LoopbackJsonHttp(url, client) else SecureTransports.http(url, client)
+
+    override fun uplink(
+        url: String,
+        client: OkHttpClient,
+        scope: CoroutineScope,
+        onConnected: () -> Unit,
+        onText: (String) -> Unit,
+    ): MessageUplink =
         if (isLoopbackCleartext(EndpointKind.CRANK, url)) {
-            LoopbackUplink(url, client, scope, onConnected)
+            LoopbackUplink(url, client, scope, onConnected, onText)
         } else {
-            SecureTransports.uplink(url, client, scope, onConnected)
+            SecureTransports.uplink(url, client, scope, onConnected, onText)
         }
 
     private fun isLoopbackCleartext(kind: EndpointKind, url: String) =
@@ -95,12 +109,34 @@ class LoopbackJsonRpcTransport(endpoint: String, client: OkHttpClient) : JsonRpc
     }
 }
 
-/** The crank uplink over `ws://127.0.0.1`: reconnects with backoff, never blocks or throws. */
+/** Registrar / indexer JSON over plain HTTP to a loopback devstack. Same bounds and checks as HTTPS. */
+class LoopbackJsonHttp(endpoint: String, client: OkHttpClient) : JsonHttp {
+    init {
+        require(EndpointPolicy.check(EndpointKind.INDEXER, endpoint, true) == EndpointVerdict.LoopbackCleartext) {
+            "loopback service must be http://127.0.0.1 or http://localhost"
+        }
+    }
+
+    private val base = endpoint.toHttpUrl()
+    private val client = HttpExchange.noRedirects(client)
+
+    override suspend fun get(path: String, bearer: String?): HttpReply =
+        HttpExchange.execute(client, HttpExchange.request(HttpExchange.resolve(base, path), null, bearer))
+
+    override suspend fun post(path: String, json: String, bearer: String?): HttpReply =
+        HttpExchange.execute(client, HttpExchange.request(HttpExchange.resolve(base, path), json, bearer))
+}
+
+/**
+ * The crank uplink over `ws://127.0.0.1`: reconnects with backoff, never blocks or throws. The
+ * crank's text frames (acks) go to [onText], bounded like the WSS uplink.
+ */
 class LoopbackUplink(
     endpoint: String,
     client: OkHttpClient,
     private val scope: CoroutineScope,
     private val onConnected: () -> Unit,
+    private val onText: (String) -> Unit = {},
     private val backoff: Backoff = Backoff(baseMillis = 500, maxMillis = 10_000),
 ) : MessageUplink {
     init {
@@ -149,6 +185,10 @@ class LoopbackUplink(
                     socket = webSocket
                     opened.complete(true)
                     runCatching(onConnected)
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (text.length <= CrankReply.MAX_FRAME_CHARS) runCatching { onText(text) }
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

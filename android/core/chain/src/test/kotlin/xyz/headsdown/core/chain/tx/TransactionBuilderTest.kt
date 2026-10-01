@@ -81,7 +81,7 @@ class TransactionBuilderTest {
         )
         val readonly = keys.toSet() - writable
         assertEquals(
-            setOf(WellKnown.COMPUTE_BUDGET, Ore.PROGRAM_ID, HeadsDownProgram.ID, WellKnown.SYSTEM_PROGRAM, HeadsDownProgram.config.address, WellKnown.INSTRUCTIONS_SYSVAR),
+            setOf(WellKnown.COMPUTE_BUDGET, Ore.PROGRAM_ID, HeadsDownProgram.ID, WellKnown.SYSTEM_PROGRAM, HeadsDownProgram.config.address, Ore.BOARD),
             readonly,
         )
         assertEquals(readonly.size, msg.numReadonlyUnsigned)

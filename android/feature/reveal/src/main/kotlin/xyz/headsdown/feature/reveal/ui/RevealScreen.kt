@@ -57,6 +57,8 @@ object RevealTags {
     const val DONE = "reveal-done"
     const val VERDICT = "reveal-verdict"
     const val STREAK = "reveal-streak"
+    const val EXPLORER = "reveal-explorer"
+    const val SHOW_SAMPLE = "reveal-show-sample"
 }
 
 /** What the reveal screen can be showing. */
@@ -76,11 +78,15 @@ fun RevealRoute(
     onBuyRest: () -> Unit,
     onShare: (HaulSummary) -> Unit,
     onDone: () -> Unit,
+    /** Opens an https explorer link (the haul's on-chain record). */
+    onOpenExplorer: (String) -> Unit = {},
+    /** Shows the labelled sample night when there is no real haul yet; null hides the offer. */
+    onShowSample: (() -> Unit)? = null,
 ) = RevealTheme {
     Box(Modifier.fillMaxSize().background(RevealColors.Charcoal)) {
         when (state) {
             RevealUiState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = RevealColors.OreGold)
-            RevealUiState.NoHaul -> NoHaul(onDone)
+            RevealUiState.NoHaul -> NoHaul(onDone, onShowSample)
             is RevealUiState.Ready -> RevealScreen(
                 summary = state.summary,
                 zone = zone,
@@ -90,6 +96,7 @@ fun RevealRoute(
                 onBuyRest = onBuyRest,
                 onShare = { onShare(state.summary) },
                 onDone = onDone,
+                onOpenExplorer = onOpenExplorer,
             )
         }
     }
@@ -110,6 +117,7 @@ fun RevealScreen(
     onBuyRest: () -> Unit = {},
     onShare: () -> Unit = {},
     onDone: () -> Unit = {},
+    onOpenExplorer: (String) -> Unit = {},
 ) {
     val copy = remember(summary, zone) { RevealCopyBuilder.build(summary, zone) }
     val replay = remember(summary) { BoardReplay(summary.rounds) }
@@ -176,6 +184,11 @@ fun RevealScreen(
 
         Text(copy.solPlacedNote, color = RevealColors.AshMuted, style = MaterialTheme.typography.bodySmall)
         Text(copy.footnote, color = RevealColors.AshMuted, style = MaterialTheme.typography.bodySmall)
+        summary.explorerUrl?.let { url ->
+            TextButton(onClick = { onOpenExplorer(url) }, modifier = Modifier.fillMaxWidth().testTag(RevealTags.EXPLORER)) {
+                Text("See this shift on-chain", color = RevealColors.Ash)
+            }
+        }
 
         TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth().testTag(RevealTags.DONE)) {
             Text("Done", color = RevealColors.Ash)
@@ -278,7 +291,7 @@ private fun PriceCard(copy: RevealCopy) {
 }
 
 @Composable
-private fun NoHaul(onDone: () -> Unit) {
+private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -292,6 +305,11 @@ private fun NoHaul(onDone: () -> Unit) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
+        if (onShowSample != null) {
+            TextButton(onClick = onShowSample, modifier = Modifier.testTag(RevealTags.SHOW_SAMPLE)) {
+                Text("See a sample night (not your data)", color = RevealColors.OreGold)
+            }
+        }
         TextButton(onClick = onDone) { Text("Done", color = RevealColors.Ash) }
     }
 }

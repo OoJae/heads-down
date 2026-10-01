@@ -20,11 +20,23 @@ data class ShiftSpec(
     val requiresCharger: Boolean = mode == ShiftMode.NIGHT,
     /** Planned length in ORE rounds (Day Shift / planned Night window), for progress only. */
     val plannedRounds: Int? = null,
+    /** Rounds each heartbeat leases (1..3); the program caps it at the plan's `lease_rounds`. */
+    val leaseRounds: Int = 1,
+    /** The plan's `window_end_ts` (unix seconds), when the shift was armed on-chain. */
+    val windowEndUnix: Long? = null,
 ) {
     init {
         require(shiftId >= 0) { "shift id is a u64 on-chain" }
         require(plannedRounds == null || plannedRounds > 0)
+        require(leaseRounds in 1..3) { "a heartbeat leases 1..3 rounds" }
     }
+
+    /**
+     * A BREAK still matters at [nowUnix]: inside the plan window. After it the program digs
+     * nothing (`OutsideWindow`), and a BREAK would only make `end_shift` record pickup / screen-on
+     * instead of `completed`, costing the user the night's streak (INTERFACE v1.1 §6.8).
+     */
+    fun breakStillUseful(nowUnix: Long): Boolean = windowEndUnix == null || nowUnix <= windowEndUnix
 
     companion object {
         /** Day Shift presets (25/50/90 min) expressed in ~78 s ORE rounds, rounded up. */

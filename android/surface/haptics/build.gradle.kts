@@ -8,13 +8,9 @@ android {
     testOptions.unitTests.isIncludeAndroidResources = true
 }
 
-// Test-only versions (fold into gradle/libs.versions.toml when the catalog is next touched).
-val robolectric = "4.17"
-val androidxTestCore = "1.7.0"
-
 dependencies {
     implementation(libs.androidx.core.ktx)
 
-    testImplementation("org.robolectric:robolectric:$robolectric")
-    testImplementation("androidx.test:core:$androidxTestCore")
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

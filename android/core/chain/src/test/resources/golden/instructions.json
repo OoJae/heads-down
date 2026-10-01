@@ -1,0 +1,4147 @@
+{
+  "format": "heads-down/golden-instructions",
+  "interface_version": "1.1",
+  "generated_by": "programs/heads-down/tests/src/vectors.rs (HD_WRITE_VECTORS=1 cargo +1.97.1 test -p heads-down-tests --test vectors)",
+  "notes": [
+    "Every vector below was executed, in the order of `scenario`, on the LiteSVM fork of live mainnet ORE with the mainnet heads_down build and signature verification on; `litesvm.result` is what happened.",
+    "All integers little-endian. u64/i64 values are decimal strings. `data_layout` gives every field's offset and size inside the instruction data (tag at offset 0).",
+    "`accounts` is the exact ordered AccountMeta list the program accepted; `pda` gives the seeds and program each derived address comes from (bump = canonical find_program_address bump).",
+    "`transaction.instructions` is the whole transaction: companion instructions (compute budget, Secp256r1SigVerify, Ed25519SigVerify) are given in full so hb_ix / p256_ix / ed25519_ix are real top-level indices.",
+    "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched."
+  ],
+  "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+  "program_id_hex": "f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7",
+  "constants": {
+    "config": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+    "executor": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge",
+    "program_data": "3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ",
+    "ore_program": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+    "ore_board": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+    "ore_config": "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy",
+    "ore_treasury": "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+    "ore_entropy_var": "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E",
+    "entropy_program": "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X",
+    "system_program": "11111111111111111111111111111111",
+    "instructions_sysvar": "Sysvar1nstructions1111111111111111111111111",
+    "secp256r1_program": "Secp256r1SigVerify1111111111111111111111111",
+    "ed25519_program": "Ed25519SigVerify111111111111111111111111111",
+    "compute_budget_program": "ComputeBudget111111111111111111111111111111",
+    "token_2022_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "pinned_fork": {
+    "ore_program_sha256": "57503f435dac3888571c1b21330994a821d5f891790bde5af93888b7ba9eb3a7 (live mainnet ORE, tests/fixtures/ore.so)",
+    "board": {
+      "round_id": "422700",
+      "start_slot": "451700000",
+      "end_slot": "451700240",
+      "production_cost_ema": "918782720"
+    },
+    "treasury_motherlode": "34400000000000",
+    "ema_ev": "653163071",
+    "round": {
+      "address": "8u22RwixZSvPk5xqouEPn59VcWUynA55QnVv7UHWQeeZ",
+      "id": "422700",
+      "deployed": [
+        "370000000",
+        "381000000",
+        "392000000",
+        "378000000",
+        "389000000",
+        "375000000",
+        "386000000",
+        "372000000",
+        "383000000",
+        "394000000",
+        "380000000",
+        "391000000",
+        "377000000",
+        "388000000",
+        "374000000",
+        "385000000",
+        "371000000",
+        "382000000",
+        "393000000",
+        "379000000",
+        "390000000",
+        "376000000",
+        "387000000",
+        "373000000",
+        "384000000"
+      ]
+    },
+    "solo_mask": "0x124f304",
+    "clock": {
+      "slot": "451700010",
+      "unix_timestamp": "1790640000"
+    },
+    "config": {
+      "crank_fee": "4000",
+      "executor_fee": "5000",
+      "bury_bps": 0
+    },
+    "automation": {
+      "strategy": 2,
+      "fee": "5000",
+      "amount_per_square": "100000",
+      "executor": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge"
+    }
+  },
+  "keys": {
+    "upgrade_authority": {
+      "pubkey": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+      "seed": "[0x0a; 32] (public test seed)"
+    },
+    "cranker": {
+      "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+      "seed": "[0x0c; 32] (public test seed)"
+    },
+    "governance": {
+      "pubkey": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+      "seed": "[0x06; 32] (public test seed)"
+    },
+    "registrar": {
+      "pubkey": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+      "seed": "[0x05; 32] (public test seed, the key registrar/src/voucher.rs tests use)"
+    }
+  },
+  "users": [
+    {
+      "name": "alice",
+      "wallet": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+      "wallet_seed": "[0xa1; 32] (public test seed)",
+      "p256_private_scalar": "RFC 6979 A.2.5 test key c9afa9d8...0f6721",
+      "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+      "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+      "ore_automation": "5qaLkvoFUZQNvU3J1Jsdo8Pcvj8hhU1FWn7noooTP3hA",
+      "ore_miner": "2Av9zFiPUsVczidGzfRexXQg78g5JimKZx2BDTSxDBEe"
+    },
+    {
+      "name": "bob",
+      "wallet": "6j8W37jZH14euYAPdhDxkPyJWWjJY6LrQ87azHcNVDQJ",
+      "wallet_seed": "[0xb2; 32] (public test seed)",
+      "p256_private_scalar": "[0x22; 32]",
+      "p256_pubkey_hex": "03d65a93977caa3d1b081852ff57a79e465f1660577304baead505dd3a48589cf3",
+      "rig": "8XCxGnb5FtgPsNtrGrs2xvBHQVocaqdyTY7y2epzTHH1",
+      "ore_automation": "HNoV1cR3GTHwBPbYCFzo7iATELhyqV5msihxS5SVau6k",
+      "ore_miner": "CdFSNmzXFuLf7oWcxrThBJhsjdG26jd9Qh1Uo566NMSH"
+    },
+    {
+      "name": "carol",
+      "wallet": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+      "wallet_seed": "[0xc3; 32] (public test seed)",
+      "p256_private_scalar": "[0x33; 32] (rotated to [0x34; 32], then [0x35; 32])",
+      "p256_pubkey_hex": "0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d",
+      "rig": "9CBpaD4PGumMM95TfoNpSxoFSENqjV4pMnjCPEsN4s7",
+      "ore_automation": "AWoF2ypKgYvMkraCejnujoBvq1241BD889kFYYt3xtai",
+      "ore_miner": "Gob9BmjrzLhVHUMjweTMn8au82TLrh3JR8CxFMvLiHyL"
+    },
+    {
+      "name": "dave",
+      "wallet": "Gxv2YjpBkAeT92MpSY5T3Kw5SSq6zpaRKPp7bjic4vSY",
+      "wallet_seed": "[0xd4; 32] (public test seed)",
+      "p256_private_scalar": "[0x44; 32]",
+      "p256_pubkey_hex": "025b36890dacbd7c9a96bb74a1ee28b3d2d75b72e09a20ef25cf8e6fd8a9f0350d",
+      "rig": "Dg6UvxKLYpRwZ2dXHMsC6A8BqKyEWR34nbxJQRd1xM9N",
+      "ore_automation": "GQvaMJhqpHfKtydoh5X4pz6QKCiSNhN3kkLc6vxd4Ur4",
+      "ore_miner": "HyRHiS62gK5JWGgSV6eRppNxqGmGQsLEcyfgnL7JqaRN"
+    },
+    {
+      "name": "erin",
+      "wallet": "6GwjXukdYeBhFeSffUboKC8gAcZXCMhEDyiRhiMwBKfA",
+      "wallet_seed": "[0xe5; 32] (public test seed)",
+      "p256_private_scalar": "[0x55; 32]",
+      "p256_pubkey_hex": "0257e977f6db7e33c3fe7acf2842ed987009caf56d458682fca447b7d3d762ab34",
+      "rig": "7iYr3Ar84Ph45W5cxeQKUV6dt6Aenn8SaXvDmJGvZcws",
+      "ore_automation": "Ca3Q79ztko2kkNrSCFME4DxhBCnc7xSE6p8KmbQXEcZz",
+      "ore_miner": "Cirxubym6DNaj1bRYGAsdcgYSZNDQyhpRstaF6twQx9K"
+    },
+    {
+      "name": "frank",
+      "wallet": "EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+      "wallet_seed": "[0xf6; 32] (public test seed)",
+      "p256_private_scalar": "[0x66; 32]",
+      "p256_pubkey_hex": "030bbbc5e8bc84bd33d1d3ce03ffac9a747f4c1993fddb2ec93a4116a86f022a77",
+      "rig": "7Bzb9PHK9gZeyDVFtrDk48Rdqmk2YF66KFqjBdgP9N6R",
+      "ore_automation": "86bpzc8frdrCsjjb8n5Mm8FLFvkrZWcz2bPeQC5oLozt",
+      "ore_miner": "6KRJiXN6A6EFPURJuvMgUjJcyMDHGWkpgJhPSG8gA6b8"
+    },
+    {
+      "name": "grace",
+      "wallet": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+      "wallet_seed": "[0x97; 32] (public test seed)",
+      "p256_private_scalar": "[0x77; 32]",
+      "p256_pubkey_hex": "02e45054eb5b1abd976650f7f395bf51d0d8dd193e0174e7a14a1c8c127fbdf2db",
+      "rig": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb",
+      "ore_automation": "4MmLTomi67n8gummnvjNBTJidSFhz3visoRRBcy1V6TC",
+      "ore_miner": "5ZCS7mzNsERcu5Vi7rrxLdb9qLk93VgKVkK8Ht9gHovd"
+    }
+  ],
+  "scenario": [
+    {
+      "step": 1,
+      "kind": "setup",
+      "action": "Env::golden: live ORE + entropy bytecode, heads_down at its program id with the upgrade authority written into ProgramData, pinned Board/Treasury/Round, clock (slot 451,700,010, unix 1,790,640,000), Executor PDA funded with 0.01 SOL"
+    },
+    {
+      "step": 2,
+      "kind": "vector",
+      "name": "initialize_config"
+    },
+    {
+      "step": 3,
+      "kind": "setup",
+      "action": "alice: ORE automate (Discretionary, fee = executor_fee 5000, executor = Executor PDA, amount 100000/square, deposit 0.05 SOL)"
+    },
+    {
+      "step": 4,
+      "kind": "vector",
+      "name": "register_rig_guest"
+    },
+    {
+      "step": 5,
+      "kind": "vector",
+      "name": "set_caps"
+    },
+    {
+      "step": 6,
+      "kind": "vector",
+      "name": "arm_shift_wallet"
+    },
+    {
+      "step": 7,
+      "kind": "vector",
+      "name": "dig_fresh_heartbeat"
+    },
+    {
+      "step": 8,
+      "kind": "vector",
+      "name": "break_shift_wallet"
+    },
+    {
+      "step": 9,
+      "kind": "vector",
+      "name": "end_shift_authority"
+    },
+    {
+      "step": 10,
+      "kind": "vector",
+      "name": "arm_shift_p256"
+    },
+    {
+      "step": 11,
+      "kind": "vector",
+      "name": "record_heartbeats"
+    },
+    {
+      "step": 12,
+      "kind": "vector",
+      "name": "break_shift_p256"
+    },
+    {
+      "step": 13,
+      "kind": "vector",
+      "name": "freeze_rig_p256"
+    },
+    {
+      "step": 14,
+      "kind": "vector",
+      "name": "unfreeze_rig"
+    },
+    {
+      "step": 15,
+      "kind": "setup",
+      "action": "bob: ORE automate + register_rig + set_caps + arm_shift (wallet), one transaction"
+    },
+    {
+      "step": 16,
+      "kind": "setup",
+      "action": "bob: record_heartbeats (counter 1, shift 1, round 422700, lease 3) -> lease [422700, 422702]"
+    },
+    {
+      "step": 17,
+      "kind": "vector",
+      "name": "dig_reuse_lease"
+    },
+    {
+      "step": 18,
+      "kind": "setup",
+      "action": "dave / erin: ORE automate + register_rig + set_caps + arm_shift (wallet)"
+    },
+    {
+      "step": 19,
+      "kind": "setup",
+      "action": "dave / erin: ORE automate + register_rig + set_caps + arm_shift (wallet)"
+    },
+    {
+      "step": 20,
+      "kind": "vector",
+      "name": "dig_batch_two_rigs"
+    },
+    {
+      "step": 21,
+      "kind": "vector",
+      "name": "register_rig_attested"
+    },
+    {
+      "step": 22,
+      "kind": "vector",
+      "name": "rotate_key_unattested"
+    },
+    {
+      "step": 23,
+      "kind": "vector",
+      "name": "rotate_key_attested"
+    },
+    {
+      "step": 24,
+      "kind": "setup",
+      "action": "frank: mainnet SGT member #20 mint (crates/sgt-verify/fixtures) + a frozen Token-2022 ATA holding it for frank (bytes as Solana Mobile leaves them after a move)"
+    },
+    {
+      "step": 25,
+      "kind": "setup",
+      "action": "frank: register_rig (guest)"
+    },
+    {
+      "step": 26,
+      "kind": "vector",
+      "name": "verify_seeker"
+    },
+    {
+      "step": 27,
+      "kind": "setup",
+      "action": "SGT #20 moves frank -> grace: frank's token account amount set to 0, grace gets a frozen ATA holding it"
+    },
+    {
+      "step": 28,
+      "kind": "setup",
+      "action": "grace: register_rig (guest)"
+    },
+    {
+      "step": 29,
+      "kind": "vector",
+      "name": "verify_seeker_repoint"
+    },
+    {
+      "step": 30,
+      "kind": "vector",
+      "name": "close_rig_seeker"
+    },
+    {
+      "step": 31,
+      "kind": "setup",
+      "action": "clock -> window_end + 1 (unix 1,790,668,801); Board.round_id -> 422701 so alice's lease [422700, 422700] has expired"
+    },
+    {
+      "step": 32,
+      "kind": "vector",
+      "name": "end_shift_permissionless"
+    },
+    {
+      "step": 33,
+      "kind": "vector",
+      "name": "freeze_rig_wallet"
+    },
+    {
+      "step": 34,
+      "kind": "vector",
+      "name": "close_rig_guest"
+    },
+    {
+      "step": 35,
+      "kind": "vector",
+      "name": "propose_config"
+    },
+    {
+      "step": 36,
+      "kind": "setup",
+      "action": "clock slot += 864000 (TIMELOCK_SLOTS)"
+    },
+    {
+      "step": 37,
+      "kind": "vector",
+      "name": "apply_config"
+    }
+  ],
+  "instructions": [
+    {
+      "name": "initialize_config",
+      "tag": 0,
+      "instruction": "initialize_config",
+      "auth": "upgrade_authority",
+      "description": "Create the Config PDA. Signer must be the upgrade authority recorded in this program's ProgramData; ore_layout_hash must equal sha256(ore::LAYOUT_PREIMAGE); crank_fee <= executor_fee; bury_bps <= 10000.",
+      "step": 2,
+      "args": {
+        "governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+        "registrar": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+        "crank_fee": "4000",
+        "executor_fee": "5000",
+        "bury_bps": 0,
+        "ore_layout_hash": "cc9b3521eaa022a05fd9c38f745b8844a740ca9e3243a91f1bbda66a3448aa91"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 115,
+      "data_hex": "008a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f176e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1a00f00000000000088130000000000000000cc9b3521eaa022a05fd9c38f745b8844a740ca9e3243a91f1bbda66a3448aa91",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "governance",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32,
+          "value": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa"
+        },
+        {
+          "name": "registrar",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32,
+          "value": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe"
+        },
+        {
+          "name": "crank_fee",
+          "type": "u64",
+          "offset": 65,
+          "size": 8,
+          "value": "4000"
+        },
+        {
+          "name": "executor_fee",
+          "type": "u64",
+          "offset": 73,
+          "size": 8,
+          "value": "5000"
+        },
+        {
+          "name": "bury_bps",
+          "type": "u16",
+          "offset": 81,
+          "size": 2,
+          "value": 0
+        },
+        {
+          "name": "ore_layout_hash",
+          "type": "[u8;32]",
+          "offset": 83,
+          "size": 32,
+          "value": "cc9b3521eaa022a05fd9c38f745b8844a740ca9e3243a91f1bbda66a3448aa91"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "upgrade_authority",
+          "pubkey": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 2,
+          "role": "program_data",
+          "pubkey": "3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "BPFLoaderUpgradeable (BPFLoaderUpgradeab1e11111111111111111111111)",
+            "seeds": [
+              {
+                "seed": "program HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+                "hex": "f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 3,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "register_rig_guest",
+      "tag": 1,
+      "instruction": "register_rig",
+      "auth": "wallet, no attestation",
+      "description": "Create the Rig PDA with the Keystore P-256 key (SEC1 compressed); attestation_level 0. Emits RigRegistered.",
+      "step": 4,
+      "args": {
+        "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+        "has_attestation": 0
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 35,
+      "data_hex": "010360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb600",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "p256_pubkey",
+          "type": "[u8;33]",
+          "offset": 1,
+          "size": 33,
+          "value": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+        },
+        {
+          "name": "has_attestation",
+          "type": "u8",
+          "offset": 34,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 3,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 6,
+            "event": "RigRegistered",
+            "hex": "066c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4ebc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a50000",
+            "fields": {
+              "tag": 6,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+              "tier": 0,
+              "attestation_level": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "set_caps",
+      "tag": 3,
+      "instruction": "set_caps",
+      "auth": "wallet",
+      "description": "Wallet-signed spend caps (the only instruction that can raise limits); clamps plan_max_ev_cost and plan_dig_lamports down.",
+      "step": 5,
+      "args": {
+        "cap_week": "100000000",
+        "cap_shift": "20000000",
+        "cap_round": "2000000",
+        "cap_max_cost": "1000000000",
+        "caps_expiry_ts": "1791244800"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 41,
+      "data_hex": "0300e1f50500000000002d31010000000080841e000000000000ca9a3b00000000003ac46a00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "cap_week",
+          "type": "u64",
+          "offset": 1,
+          "size": 8,
+          "value": "100000000"
+        },
+        {
+          "name": "cap_shift",
+          "type": "u64",
+          "offset": 9,
+          "size": 8,
+          "value": "20000000"
+        },
+        {
+          "name": "cap_round",
+          "type": "u64",
+          "offset": 17,
+          "size": 8,
+          "value": "2000000"
+        },
+        {
+          "name": "cap_max_cost",
+          "type": "u64",
+          "offset": 25,
+          "size": 8,
+          "value": "1000000000"
+        },
+        {
+          "name": "caps_expiry_ts",
+          "type": "i64",
+          "offset": 33,
+          "size": 8,
+          "value": "1791244800"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "arm_shift_wallet",
+      "tag": 5,
+      "instruction": "arm_shift",
+      "auth": "wallet (mode 0)",
+      "description": "Arm shift 1 with the wallet's signature. Emits ShiftArmed.",
+      "step": 6,
+      "args": {
+        "mode": 0,
+        "plan": {
+          "max_ev_cost": "700000000",
+          "dig_lamports": "1000000",
+          "split": 10,
+          "solo": 0,
+          "lease": 3,
+          "flags": 0,
+          "window_start": "1790636400",
+          "window_end": "1790668800"
+        }
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 38,
+      "data_hex": "05000027b9290000000040420f00000000000a00030070f1ba6a000000000070bb6a00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 5
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "max_ev_cost",
+          "type": "u64",
+          "offset": 2,
+          "size": 8,
+          "value": "700000000"
+        },
+        {
+          "name": "dig_lamports",
+          "type": "u64",
+          "offset": 10,
+          "size": 8,
+          "value": "1000000"
+        },
+        {
+          "name": "split",
+          "type": "u8",
+          "offset": 18,
+          "size": 1,
+          "value": 10
+        },
+        {
+          "name": "solo",
+          "type": "u8",
+          "offset": 19,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "lease",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "flags",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "window_start",
+          "type": "i64",
+          "offset": 22,
+          "size": 8,
+          "value": "1790636400"
+        },
+        {
+          "name": "window_end",
+          "type": "i64",
+          "offset": 30,
+          "size": 8,
+          "value": "1790668800"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 3,
+            "event": "ShiftArmed",
+            "hex": "036c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e0100000000000000",
+            "fields": {
+              "tag": 3,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "dig_fresh_heartbeat",
+      "tag": 6,
+      "instruction": "dig",
+      "auth": "cranker + P-256 HEARTBEAT (hb_ix = 1)",
+      "description": "One rig, fresh HEARTBEAT (counter 1, shift 1, round 422700, lease 3) verified by the secp256r1 precompile at top-level index 1. Gate open (ema_ev 653163071 <= 700000000), 10 least-crowded split squares x 100000 lamports, Automation debited tiles + 5000 fee, cranker reimbursed 4000. Emits RigDug.",
+      "step": 7,
+      "args": {
+        "n": 1,
+        "entries": [
+          {
+            "hb_ix": 1,
+            "hb_sig_index": 0,
+            "counter": "1",
+            "round_id": "422700",
+            "lease_rounds": 3
+          }
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 22,
+      "data_hex": "0601010001000000000000002c730600000000000300",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 6
+        },
+        {
+          "name": "n",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0].hb_ix",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0].hb_sig_index",
+          "type": "u8",
+          "offset": 3,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].counter",
+          "type": "u64",
+          "offset": 4,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "entry[0].round_id",
+          "type": "u64",
+          "offset": 12,
+          "size": 8,
+          "value": "422700"
+        },
+        {
+          "name": "entry[0].lease_rounds",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "entry[0]._pad",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "cranker",
+          "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 2,
+          "role": "executor",
+          "pubkey": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"executor\"",
+                "hex": "6578656375746f72"
+              }
+            ],
+            "bump": 249
+          }
+        },
+        {
+          "index": 3,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 4,
+          "role": "ore_config",
+          "pubkey": "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 5,
+          "role": "ore_round",
+          "pubkey": "8u22RwixZSvPk5xqouEPn59VcWUynA55QnVv7UHWQeeZ",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"round\"",
+                "hex": "726f756e64"
+              },
+              {
+                "seed": "round_id 422700 u64 LE",
+                "hex": "2c73060000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 6,
+          "role": "ore_treasury",
+          "pubkey": "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 7,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 8,
+          "role": "ore_program",
+          "pubkey": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 9,
+          "role": "ore_entropy_var",
+          "pubkey": "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 10,
+          "role": "entropy_program",
+          "pubkey": "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 11,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 12,
+          "role": "rig[0]",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 13,
+          "role": "authority[0]",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 14,
+          "role": "ore_automation[0]",
+          "pubkey": "5qaLkvoFUZQNvU3J1Jsdo8Pcvj8hhU1FWn7noooTP3hA",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"automation\"",
+                "hex": "6175746f6d6174696f6e"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 15,
+          "role": "ore_miner[0]",
+          "pubkey": "2Av9zFiPUsVczidGzfRexXQg78g5JimKZx2BDTSxDBEe",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"miner\"",
+                "hex": "6d696e6572"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 251
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "compute_budget: SetComputeUnitLimit(1400000)",
+            "program_id": "ComputeBudget111111111111111111111111111111",
+            "data_len": 5,
+            "data_hex": "02c05c1500"
+          },
+          {
+            "index": 1,
+            "role": "secp256r1: HEARTBEAT(alice)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 145,
+            "data_hex": "01003100ffff1000ffff71002000ffff0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6411d832f614536e21c6c1bd75403bd319c8cbc40e159fc6d565c4d2ed127c47d7c0cffc07ec4e595e4924a2235547a47ef49daab370dbea4f62c6f0551b1c736d3a3389c210383564f7f1b640c2ccb776ff8faf18f46a7186fda9aaa7334d4ea"
+          },
+          {
+            "index": 2,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 1,
+            "event": "RigDug",
+            "hex": "016c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e2c7306000000000040420f0000000000ab048b003f7aee2600000000",
+            "fields": {
+              "tag": 1,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "round_id": "422700",
+              "lamports": "1000000",
+              "mask": 9110699,
+              "ema_ev": "653163071"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "break_shift_wallet",
+      "tag": 8,
+      "instruction": "break_shift",
+      "auth": "wallet (mode 0)",
+      "description": "Wallet BREAK with reason 6 (manual): Down -> Broken. Emits ShiftBroken.",
+      "step": 8,
+      "args": {
+        "mode": 0,
+        "reason": 6
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 3,
+      "data_hex": "080006",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 8
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 6
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 9,
+            "event": "ShiftBroken",
+            "hex": "096c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000006",
+            "fields": {
+              "tag": 9,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "1",
+              "reason": 6
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "end_shift_authority",
+      "tag": 11,
+      "instruction": "end_shift",
+      "auth": "rig authority (any time)",
+      "description": "The authority seals shift 1 into ShiftLog [\"shift\", rig, 1] (reason = the stored BREAK reason 6) and pays its rent. Emits ShiftEnded then ShiftEndedV2.",
+      "step": 9,
+      "args": {
+        "caller": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+        "shift_id": "1"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "0b",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 11
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "caller",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "shift_log",
+          "pubkey": "77tATZgGifUxMBrUSHqtdUCavhqeR8TD2JeYmB1Frb3f",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig 8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+                "hex": "6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 3,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 4,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 4,
+            "event": "ShiftEnded",
+            "hex": "046c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000001000000000000000100000000000000c8550f000000000006",
+            "fields": {
+              "tag": 4,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "1",
+              "dark_rounds": "1",
+              "rounds_dug": "1",
+              "lamports": "1005000",
+              "reason": 6
+            }
+          },
+          {
+            "tag": 10,
+            "event": "ShiftEndedV2",
+            "hex": "0a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000001000000000000000100000000000000c8550f0000000000062c730600000000002c7306000000000000",
+            "fields": {
+              "tag": 10,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "1",
+              "dark_rounds": "1",
+              "rounds_dug": "1",
+              "lamports": "1005000",
+              "reason": 6,
+              "start_round": "422700",
+              "end_round": "422700",
+              "mode": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "arm_shift_p256",
+      "tag": 5,
+      "instruction": "arm_shift",
+      "auth": "P-256 PLAN (mode 1), no wallet signature",
+      "description": "The phone key arms shift 2 inside the wallet's caps; the PLAN (counter 2) is verified by the secp256r1 precompile at index 0. The authority account is passed unsigned (it must still equal rig.authority). Fee payer = cranker. Emits ShiftArmed.",
+      "step": 10,
+      "args": {
+        "mode": 1,
+        "plan": {
+          "max_ev_cost": "700000000",
+          "dig_lamports": "1000000",
+          "split": 10,
+          "solo": 0,
+          "lease": 3,
+          "flags": 0,
+          "window_start": "1790636400",
+          "window_end": "1790668800"
+        },
+        "counter": "2",
+        "p256_ix": 0,
+        "p256_sig_index": 0
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 48,
+      "data_hex": "05010027b9290000000040420f00000000000a00030070f1ba6a000000000070bb6a0000000002000000000000000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 5
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "max_ev_cost",
+          "type": "u64",
+          "offset": 2,
+          "size": 8,
+          "value": "700000000"
+        },
+        {
+          "name": "dig_lamports",
+          "type": "u64",
+          "offset": 10,
+          "size": 8,
+          "value": "1000000"
+        },
+        {
+          "name": "split",
+          "type": "u8",
+          "offset": 18,
+          "size": 1,
+          "value": 10
+        },
+        {
+          "name": "solo",
+          "type": "u8",
+          "offset": 19,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "lease",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "flags",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "window_start",
+          "type": "i64",
+          "offset": 22,
+          "size": 8,
+          "value": "1790636400"
+        },
+        {
+          "name": "window_end",
+          "type": "i64",
+          "offset": 30,
+          "size": 8,
+          "value": "1790668800"
+        },
+        {
+          "name": "counter",
+          "type": "u64",
+          "offset": 38,
+          "size": 8,
+          "value": "2"
+        },
+        {
+          "name": "p256_ix",
+          "type": "u8",
+          "offset": 46,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "p256_sig_index",
+          "type": "u8",
+          "offset": 47,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 3,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "secp256r1: PLAN(alice)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 145,
+            "data_hex": "01003100ffff1000ffff71002000ffff0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6a85ffb6ebb9b0262c45c57f49450ee98dc08831dbaea69f475cd14e661ca33467748af379809bd950e6f226f87c511e739b34adbb08b05fd78ec99a44d21ee923e6f1259015c9a7860f35cd3dc643ebeb66ecd3f4477d5a917b7c3928b8c2dde"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 3,
+            "event": "ShiftArmed",
+            "hex": "036c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e0200000000000000",
+            "fields": {
+              "tag": 3,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "record_heartbeats",
+      "tag": 7,
+      "instruction": "record_heartbeats",
+      "auth": "anyone + P-256 HEARTBEAT (hb_ix = 0)",
+      "description": "Record a HEARTBEAT (counter 3, shift 2, round 422700, lease 1) without deploying: Armed -> Down, lease [422700, 422700], 1 dark round. Emits HeartbeatsRecorded.",
+      "step": 11,
+      "args": {
+        "n": 1,
+        "entries": [
+          {
+            "hb_ix": 0,
+            "hb_sig_index": 0,
+            "counter": "3",
+            "round_id": "422700",
+            "lease_rounds": 1
+          }
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 22,
+      "data_hex": "0701000003000000000000002c730600000000000100",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 7
+        },
+        {
+          "name": "n",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0].hb_ix",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].hb_sig_index",
+          "type": "u8",
+          "offset": 3,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].counter",
+          "type": "u64",
+          "offset": 4,
+          "size": 8,
+          "value": "3"
+        },
+        {
+          "name": "entry[0].round_id",
+          "type": "u64",
+          "offset": 12,
+          "size": 8,
+          "value": "422700"
+        },
+        {
+          "name": "entry[0].lease_rounds",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0]._pad",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "rig[0]",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "secp256r1: HEARTBEAT(alice)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 145,
+            "data_hex": "01003100ffff1000ffff71002000ffff0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb64caa9a87a534fce8be4ccffe3558ea24f79c5805716f8ca80ce3220a6296651e47d78b609b3f67c605f09dac3680051d2826935512fbfbec1c8db75cd9ab2e51daa7d189020051d46aa4da0a578fab558bf192d2714b259f65ea6ce3386e8181"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 8,
+            "event": "HeartbeatsRecorded",
+            "hex": "086c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e2c730600000000000100000000000000",
+            "fields": {
+              "tag": 8,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "round_id": "422700",
+              "dark_rounds_added": "1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "break_shift_p256",
+      "tag": 8,
+      "instruction": "break_shift",
+      "auth": "P-256 BREAK (mode 1)",
+      "description": "Phone BREAK with reason 1 (pickup, counter 4, shift 2): Down -> Cooling (a fresh heartbeat would resume). Emits ShiftBroken.",
+      "step": 12,
+      "args": {
+        "mode": 1,
+        "reason": 1,
+        "counter": "4",
+        "p256_ix": 0,
+        "p256_sig_index": 0
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 13,
+      "data_hex": "08010104000000000000000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 8
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "counter",
+          "type": "u64",
+          "offset": 3,
+          "size": 8,
+          "value": "4"
+        },
+        {
+          "name": "p256_ix",
+          "type": "u8",
+          "offset": 11,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "p256_sig_index",
+          "type": "u8",
+          "offset": 12,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "secp256r1: BREAK(alice)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 145,
+            "data_hex": "01003100ffff1000ffff71002000ffff0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb664818686118c9a2307c82915397a473baaab40e494b58fb27cedb4ecf03948361fa1fee13927e5152da2c31a842b44c1b94a2a923852544eafa2278c6602f6f47a2c53b849a4ad2480595f481077d27e84aa7e41d80903fe870249ecc7877d98"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 9,
+            "event": "ShiftBroken",
+            "hex": "096c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e020000000000000001",
+            "fields": {
+              "tag": 9,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "2",
+              "reason": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "freeze_rig_p256",
+      "tag": 9,
+      "instruction": "freeze_rig",
+      "auth": "P-256 FREEZE (mode 1)",
+      "description": "Phone FREEZE (counter 5, shift 2, reason 3): Cooling -> Frozen; the open shift records break_reason 3. Emits ShiftBroken(3).",
+      "step": 13,
+      "args": {
+        "mode": 1,
+        "reason": 3,
+        "counter": "5",
+        "p256_ix": 0,
+        "p256_sig_index": 0
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 13,
+      "data_hex": "09010305000000000000000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 9
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "counter",
+          "type": "u64",
+          "offset": 3,
+          "size": 8,
+          "value": "5"
+        },
+        {
+          "name": "p256_ix",
+          "type": "u8",
+          "offset": 11,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "p256_sig_index",
+          "type": "u8",
+          "offset": 12,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "secp256r1: FREEZE(alice)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 145,
+            "data_hex": "01003100ffff1000ffff71002000ffff0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6c31a9e4d92f3f33497cf0355f8a6fdd5b37a2d6c2d5a913dc2222f5d0a23532c247d6a994e777afe64413bf3e2d443636793227f512a616d6a3018782483f93803a131ccce1e74559f6008a1422cee808e548154d28ecbedaf795a5b6a14dc8e"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 9,
+            "event": "ShiftBroken",
+            "hex": "096c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e020000000000000003",
+            "fields": {
+              "tag": 9,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "2",
+              "reason": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "unfreeze_rig",
+      "tag": 10,
+      "instruction": "unfreeze_rig",
+      "auth": "wallet only",
+      "description": "Frozen -> Broken because shift 2 is still open (Frozen -> Idle when no shift is open).",
+      "step": 14,
+      "args": {},
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "0a",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 10
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "dig_reuse_lease",
+      "tag": 6,
+      "instruction": "dig",
+      "auth": "cranker, lease reuse (hb_ix = 0xFF)",
+      "description": "Dig bob on the lease granted by the earlier record_heartbeats; no precompile in the transaction. Entry fields after hb_ix are ignored (written as 0). Emits RigDug.",
+      "step": 17,
+      "args": {
+        "n": 1,
+        "entries": [
+          {
+            "hb_ix": 255,
+            "hb_sig_index": 0,
+            "counter": "0",
+            "round_id": "0",
+            "lease_rounds": 0
+          }
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 22,
+      "data_hex": "0601ff00000000000000000000000000000000000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 6
+        },
+        {
+          "name": "n",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0].hb_ix",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 255
+        },
+        {
+          "name": "entry[0].hb_sig_index",
+          "type": "u8",
+          "offset": 3,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].counter",
+          "type": "u64",
+          "offset": 4,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[0].round_id",
+          "type": "u64",
+          "offset": 12,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[0].lease_rounds",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0]._pad",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "cranker",
+          "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 2,
+          "role": "executor",
+          "pubkey": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"executor\"",
+                "hex": "6578656375746f72"
+              }
+            ],
+            "bump": 249
+          }
+        },
+        {
+          "index": 3,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 4,
+          "role": "ore_config",
+          "pubkey": "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 5,
+          "role": "ore_round",
+          "pubkey": "8u22RwixZSvPk5xqouEPn59VcWUynA55QnVv7UHWQeeZ",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"round\"",
+                "hex": "726f756e64"
+              },
+              {
+                "seed": "round_id 422700 u64 LE",
+                "hex": "2c73060000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 6,
+          "role": "ore_treasury",
+          "pubkey": "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 7,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 8,
+          "role": "ore_program",
+          "pubkey": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 9,
+          "role": "ore_entropy_var",
+          "pubkey": "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 10,
+          "role": "entropy_program",
+          "pubkey": "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 11,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 12,
+          "role": "rig[0]",
+          "pubkey": "8XCxGnb5FtgPsNtrGrs2xvBHQVocaqdyTY7y2epzTHH1",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority 6j8W37jZH14euYAPdhDxkPyJWWjJY6LrQ87azHcNVDQJ",
+                "hex": "55154f42065ea5a1bea05463826be2684eb92df92c100027aabaae57ca554207"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 13,
+          "role": "authority[0]",
+          "pubkey": "6j8W37jZH14euYAPdhDxkPyJWWjJY6LrQ87azHcNVDQJ",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 14,
+          "role": "ore_automation[0]",
+          "pubkey": "HNoV1cR3GTHwBPbYCFzo7iATELhyqV5msihxS5SVau6k",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"automation\"",
+                "hex": "6175746f6d6174696f6e"
+              },
+              {
+                "seed": "authority 6j8W37jZH14euYAPdhDxkPyJWWjJY6LrQ87azHcNVDQJ",
+                "hex": "55154f42065ea5a1bea05463826be2684eb92df92c100027aabaae57ca554207"
+              }
+            ],
+            "bump": 251
+          }
+        },
+        {
+          "index": 15,
+          "role": "ore_miner[0]",
+          "pubkey": "CdFSNmzXFuLf7oWcxrThBJhsjdG26jd9Qh1Uo566NMSH",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"miner\"",
+                "hex": "6d696e6572"
+              },
+              {
+                "seed": "authority 6j8W37jZH14euYAPdhDxkPyJWWjJY6LrQ87azHcNVDQJ",
+                "hex": "55154f42065ea5a1bea05463826be2684eb92df92c100027aabaae57ca554207"
+              }
+            ],
+            "bump": 255
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "compute_budget: SetComputeUnitLimit(1400000)",
+            "program_id": "ComputeBudget111111111111111111111111111111",
+            "data_len": 5,
+            "data_hex": "02c05c1500"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 1,
+            "event": "RigDug",
+            "hex": "016fbebf7e527b3910af0f1eff914b058869916211f7ce8c14c157dc43560c50a02c7306000000000040420f0000000000ab048b003f7aee2600000000",
+            "fields": {
+              "tag": 1,
+              "rig": "8XCxGnb5FtgPsNtrGrs2xvBHQVocaqdyTY7y2epzTHH1",
+              "round_id": "422700",
+              "lamports": "1000000",
+              "mask": 9110699,
+              "ema_ev": "653163071"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "dig_batch_two_rigs",
+      "tag": 6,
+      "instruction": "dig",
+      "auth": "cranker + two P-256 HEARTBEATs in one precompile instruction (hb_ix = 1, hb_sig_index 0 and 1)",
+      "description": "Two rigs, 12 + 4n = 20 accounts; one Secp256r1SigVerify instruction with 2 signatures. Each rig digs 10 split squares. Emits one RigDug per rig, in account order.",
+      "step": 20,
+      "args": {
+        "n": 2,
+        "entries": [
+          {
+            "hb_ix": 1,
+            "hb_sig_index": 0,
+            "counter": "1",
+            "round_id": "422700",
+            "lease_rounds": 2
+          },
+          {
+            "hb_ix": 1,
+            "hb_sig_index": 1,
+            "counter": "1",
+            "round_id": "422700",
+            "lease_rounds": 3
+          }
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 42,
+      "data_hex": "0602010001000000000000002c730600000000000200010101000000000000002c730600000000000300",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 6
+        },
+        {
+          "name": "n",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 2
+        },
+        {
+          "name": "entry[0].hb_ix",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0].hb_sig_index",
+          "type": "u8",
+          "offset": 3,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].counter",
+          "type": "u64",
+          "offset": 4,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "entry[0].round_id",
+          "type": "u64",
+          "offset": 12,
+          "size": 8,
+          "value": "422700"
+        },
+        {
+          "name": "entry[0].lease_rounds",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 2
+        },
+        {
+          "name": "entry[0]._pad",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[1].hb_ix",
+          "type": "u8",
+          "offset": 22,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[1].hb_sig_index",
+          "type": "u8",
+          "offset": 23,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[1].counter",
+          "type": "u64",
+          "offset": 24,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "entry[1].round_id",
+          "type": "u64",
+          "offset": 32,
+          "size": 8,
+          "value": "422700"
+        },
+        {
+          "name": "entry[1].lease_rounds",
+          "type": "u8",
+          "offset": 40,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "entry[1]._pad",
+          "type": "u8",
+          "offset": 41,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "cranker",
+          "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 2,
+          "role": "executor",
+          "pubkey": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"executor\"",
+                "hex": "6578656375746f72"
+              }
+            ],
+            "bump": 249
+          }
+        },
+        {
+          "index": 3,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 4,
+          "role": "ore_config",
+          "pubkey": "9c9X7aDRAF41faiDs94ELjT19UrGnn72wBW9hPsS4Awy",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 5,
+          "role": "ore_round",
+          "pubkey": "8u22RwixZSvPk5xqouEPn59VcWUynA55QnVv7UHWQeeZ",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"round\"",
+                "hex": "726f756e64"
+              },
+              {
+                "seed": "round_id 422700 u64 LE",
+                "hex": "2c73060000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 6,
+          "role": "ore_treasury",
+          "pubkey": "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 7,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 8,
+          "role": "ore_program",
+          "pubkey": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 9,
+          "role": "ore_entropy_var",
+          "pubkey": "BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 10,
+          "role": "entropy_program",
+          "pubkey": "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 11,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 12,
+          "role": "rig[0]",
+          "pubkey": "Dg6UvxKLYpRwZ2dXHMsC6A8BqKyEWR34nbxJQRd1xM9N",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority Gxv2YjpBkAeT92MpSY5T3Kw5SSq6zpaRKPp7bjic4vSY",
+                "hex": "ed3234b276d4ceda57d59bad14fbaf5a773c0f318c999de3a60d53c5a5b34c05"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 13,
+          "role": "authority[0]",
+          "pubkey": "Gxv2YjpBkAeT92MpSY5T3Kw5SSq6zpaRKPp7bjic4vSY",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 14,
+          "role": "ore_automation[0]",
+          "pubkey": "GQvaMJhqpHfKtydoh5X4pz6QKCiSNhN3kkLc6vxd4Ur4",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"automation\"",
+                "hex": "6175746f6d6174696f6e"
+              },
+              {
+                "seed": "authority Gxv2YjpBkAeT92MpSY5T3Kw5SSq6zpaRKPp7bjic4vSY",
+                "hex": "ed3234b276d4ceda57d59bad14fbaf5a773c0f318c999de3a60d53c5a5b34c05"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 15,
+          "role": "ore_miner[0]",
+          "pubkey": "HyRHiS62gK5JWGgSV6eRppNxqGmGQsLEcyfgnL7JqaRN",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"miner\"",
+                "hex": "6d696e6572"
+              },
+              {
+                "seed": "authority Gxv2YjpBkAeT92MpSY5T3Kw5SSq6zpaRKPp7bjic4vSY",
+                "hex": "ed3234b276d4ceda57d59bad14fbaf5a773c0f318c999de3a60d53c5a5b34c05"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 16,
+          "role": "rig[1]",
+          "pubkey": "7iYr3Ar84Ph45W5cxeQKUV6dt6Aenn8SaXvDmJGvZcws",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority 6GwjXukdYeBhFeSffUboKC8gAcZXCMhEDyiRhiMwBKfA",
+                "hex": "4e6008b01b74e49e38d8b11392bfaccc7b5bff86ca2048cbb0f783633a61e2dd"
+              }
+            ],
+            "bump": 251
+          }
+        },
+        {
+          "index": 17,
+          "role": "authority[1]",
+          "pubkey": "6GwjXukdYeBhFeSffUboKC8gAcZXCMhEDyiRhiMwBKfA",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 18,
+          "role": "ore_automation[1]",
+          "pubkey": "Ca3Q79ztko2kkNrSCFME4DxhBCnc7xSE6p8KmbQXEcZz",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"automation\"",
+                "hex": "6175746f6d6174696f6e"
+              },
+              {
+                "seed": "authority 6GwjXukdYeBhFeSffUboKC8gAcZXCMhEDyiRhiMwBKfA",
+                "hex": "4e6008b01b74e49e38d8b11392bfaccc7b5bff86ca2048cbb0f783633a61e2dd"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 19,
+          "role": "ore_miner[1]",
+          "pubkey": "Cirxubym6DNaj1bRYGAsdcgYSZNDQyhpRstaF6twQx9K",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE (oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv)",
+            "seeds": [
+              {
+                "seed": "utf8 \"miner\"",
+                "hex": "6d696e6572"
+              },
+              {
+                "seed": "authority 6GwjXukdYeBhFeSffUboKC8gAcZXCMhEDyiRhiMwBKfA",
+                "hex": "4e6008b01b74e49e38d8b11392bfaccc7b5bff86ca2048cbb0f783633a61e2dd"
+              }
+            ],
+            "bump": 254
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "compute_budget: SetComputeUnitLimit(1400000)",
+            "program_id": "ComputeBudget111111111111111111111111111111",
+            "data_len": 5,
+            "data_hex": "02c05c1500"
+          },
+          {
+            "index": 1,
+            "role": "secp256r1: HEARTBEAT(dave), HEARTBEAT(erin)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 288,
+            "data_hex": "02003f00ffff1e00ffff7f002000ffffc000ffff9f00ffff00012000ffff025b36890dacbd7c9a96bb74a1ee28b3d2d75b72e09a20ef25cf8e6fd8a9f0350d5b29cf70ec1a95a6e2ed5347fed818b024c5ad548a72c71dce8b65bbae8ddcd7666471999c04ca2ea32481cb28ea60ae5411451f8ed48909a6d0b46f2018a58139fc3d3cfc3355de9067a9b504547a07a349660c9ca995f960eee767088a33240257e977f6db7e33c3fe7acf2842ed987009caf56d458682fca447b7d3d762ab343267e568337ada86520fde76c5d40be1fd92af0ddd7e1fc92e13456619de70d53ffb62e3fcc37537589097954f3189f43169490530057e79cd09daf2cde71d9b682f160cbe46b5b44724ad0835c362d5df8feb375e140da90372ae4ac75c6b27"
+          },
+          {
+            "index": 2,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 1,
+            "event": "RigDug",
+            "hex": "01bc5017ba35527b5de7535cb4c117642d1c2cee5ee8fc6f0c9c9903245c6fe04d2c7306000000000040420f0000000000ab048b003f7aee2600000000",
+            "fields": {
+              "tag": 1,
+              "rig": "Dg6UvxKLYpRwZ2dXHMsC6A8BqKyEWR34nbxJQRd1xM9N",
+              "round_id": "422700",
+              "lamports": "1000000",
+              "mask": 9110699,
+              "ema_ev": "653163071"
+            }
+          },
+          {
+            "tag": 1,
+            "event": "RigDug",
+            "hex": "0163caf1490baaf1e3cb5a761bcb65bfa606f66937a0028afaa93b521c246dcc4a2c7306000000000040420f0000000000ab048b003f7aee2600000000",
+            "fields": {
+              "tag": 1,
+              "rig": "7iYr3Ar84Ph45W5cxeQKUV6dt6Aenn8SaXvDmJGvZcws",
+              "round_id": "422700",
+              "lamports": "1000000",
+              "mask": 9110699,
+              "ema_ev": "653163071"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "register_rig_attested",
+      "tag": 1,
+      "instruction": "register_rig",
+      "auth": "wallet + registrar Ed25519 voucher (level 2 StrongBox)",
+      "description": "Register with the registrar's Ed25519 voucher over the 111-byte HDreg preimage, carried by the 223-byte Ed25519SigVerify instruction at index 0 (registrar/src/voucher.rs format). Sets attestation_level 2 and attestation_expiry_slot. Emits RigRegistered(level 2).",
+      "step": 21,
+      "args": {
+        "authority": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+        "p256_pubkey_hex": "0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d",
+        "has_attestation": 1,
+        "ed25519_ix": 0,
+        "ed25519_sig_index": 0,
+        "level": 2,
+        "expiry_slot": "458180000"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 46,
+      "data_hex": "010351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d01000002a0454f1b00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "p256_pubkey",
+          "type": "[u8;33]",
+          "offset": 1,
+          "size": 33,
+          "value": "0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d"
+        },
+        {
+          "name": "has_attestation",
+          "type": "u8",
+          "offset": 34,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "ed25519_ix",
+          "type": "u8",
+          "offset": 35,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "ed25519_sig_index",
+          "type": "u8",
+          "offset": 36,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "level",
+          "type": "u8",
+          "offset": 37,
+          "size": 1,
+          "value": 2
+        },
+        {
+          "name": "expiry_slot",
+          "type": "u64",
+          "offset": 38,
+          "size": 8,
+          "value": "458180000"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "9CBpaD4PGumMM95TfoNpSxoFSENqjV4pMnjCPEsN4s7",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+                "hex": "d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 3,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 4,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "ed25519: registrar voucher(carol, level 2)",
+            "program_id": "Ed25519SigVerify111111111111111111111111111",
+            "data_len": 223,
+            "data_hex": "01003000ffff1000ffff70006f00ffff6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1dd83ce5ad696cdd16b5fa27cbd2268e54ff6f2dc5661ca884bf68bc10f6beb83bad9404cf70f3ae5dc16ef4194b40af56025179f849db70be796dadb8c86af024844726567f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf0351a7580833898ea1b183cbd7350a4099078c6ef1c1e18e970cd7683035f25e7d02a0454f1b00000000"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 6,
+            "event": "RigRegistered",
+            "hex": "0602194b8f070fcf77ff926171ea09d8b1c6da0e02da1375ec45159269509e0f4ed404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf0002",
+            "fields": {
+              "tag": 6,
+              "rig": "9CBpaD4PGumMM95TfoNpSxoFSENqjV4pMnjCPEsN4s7",
+              "authority": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+              "tier": 0,
+              "attestation_level": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "rotate_key_unattested",
+      "tag": 4,
+      "instruction": "rotate_key",
+      "auth": "wallet, no attestation",
+      "description": "Replace the P-256 key (reinstall / new phone); without a voucher attestation_level resets to 0. hb_counter is kept.",
+      "step": 22,
+      "args": {
+        "authority": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+        "p256_pubkey_hex": "031004c4e613c6732516d177d226ed7382d6167f76adfa072436a72b652064ceb5",
+        "has_attestation": 0
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 35,
+      "data_hex": "04031004c4e613c6732516d177d226ed7382d6167f76adfa072436a72b652064ceb500",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 4
+        },
+        {
+          "name": "p256_pubkey",
+          "type": "[u8;33]",
+          "offset": 1,
+          "size": 33,
+          "value": "031004c4e613c6732516d177d226ed7382d6167f76adfa072436a72b652064ceb5"
+        },
+        {
+          "name": "has_attestation",
+          "type": "u8",
+          "offset": 34,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "9CBpaD4PGumMM95TfoNpSxoFSENqjV4pMnjCPEsN4s7",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+                "hex": "d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "rotate_key_attested",
+      "tag": 4,
+      "instruction": "rotate_key",
+      "auth": "wallet + registrar Ed25519 voucher (level 1 TEE)",
+      "description": "Rotate to a new key with a fresh level-1 voucher (Ed25519SigVerify at index 0): attestation_level 1.",
+      "step": 23,
+      "args": {
+        "authority": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+        "p256_pubkey_hex": "02b31002687316f9900cc0ce9e6c227be8a982be1c3ec547a41adebe2289dbaaf5",
+        "has_attestation": 1,
+        "ed25519_ix": 0,
+        "ed25519_sig_index": 0,
+        "level": 1,
+        "expiry_slot": "458180000"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 46,
+      "data_hex": "0402b31002687316f9900cc0ce9e6c227be8a982be1c3ec547a41adebe2289dbaaf501000001a0454f1b00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 4
+        },
+        {
+          "name": "p256_pubkey",
+          "type": "[u8;33]",
+          "offset": 1,
+          "size": 33,
+          "value": "02b31002687316f9900cc0ce9e6c227be8a982be1c3ec547a41adebe2289dbaaf5"
+        },
+        {
+          "name": "has_attestation",
+          "type": "u8",
+          "offset": 34,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "ed25519_ix",
+          "type": "u8",
+          "offset": 35,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "ed25519_sig_index",
+          "type": "u8",
+          "offset": 36,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "level",
+          "type": "u8",
+          "offset": 37,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "expiry_slot",
+          "type": "u64",
+          "offset": 38,
+          "size": 8,
+          "value": "458180000"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "9CBpaD4PGumMM95TfoNpSxoFSENqjV4pMnjCPEsN4s7",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+                "hex": "d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 3,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "ed25519: registrar voucher(carol, level 1)",
+            "program_id": "Ed25519SigVerify111111111111111111111111111",
+            "data_len": 223,
+            "data_hex": "01003000ffff1000ffff70006f00ffff6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1fd893169888c243024f8211d5c45f47262e47fa26a4260f634e3dba9c3b75c29f9274bfc2feb9db38f85fd4dfd290b13f4fae03e12bc72301a05e923241624094844726567f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7d404bc44565aedbb899150e5b0b3b32b9441bf0cb7884c33130da8dbc27dd2cf02b31002687316f9900cc0ce9e6c227be8a982be1c3ec547a41adebe2289dbaaf501a0454f1b00000000"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "verify_seeker",
+      "tag": 2,
+      "instruction": "verify_seeker",
+      "auth": "wallet (SGT holder)",
+      "description": "In-program SGT verification (mainnet anchors) of member #20: creates SeekerSeat [\"seeker\", mint] -> this rig, rig.tier = 1. Emits SeekerVerified.",
+      "step": 26,
+      "args": {
+        "authority": "EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+        "sgt_mint": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+        "sgt_token_account": "7i3taANHeP9diS6BCdz5cXy3Dnn7pMvgytCQhRSxpLso"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "02",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 2
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "7Bzb9PHK9gZeyDVFtrDk48Rdqmk2YF66KFqjBdgP9N6R",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+                "hex": "c9077518cfa438767ed68c718178cf1a92343d3c5ffc854f22658b65cba262f0"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "seeker_seat",
+          "pubkey": "6uxQMrU5pMTu7p3jPHxhkPd4C4oYnhBB8XZqmdGd3YmB",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"seeker\"",
+                "hex": "7365656b6572"
+              },
+              {
+                "seed": "sgt_mint 5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+                "hex": "46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b8"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "sgt_token_account",
+          "pubkey": "7i3taANHeP9diS6BCdz5cXy3Dnn7pMvgytCQhRSxpLso",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+                "hex": "c9077518cfa438767ed68c718178cf1a92343d3c5ffc854f22658b65cba262f0"
+              },
+              {
+                "seed": "token_program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                "hex": "06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc"
+              },
+              {
+                "seed": "mint 5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+                "hex": "46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b8"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 4,
+          "role": "sgt_mint",
+          "pubkey": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 5,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 5,
+            "event": "SeekerVerified",
+            "hex": "055bf70b9f3f1e399fd526a6037bfcc6148bcfba3b2ec8e646da6079c175b57d2e46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b81400000000000000",
+            "fields": {
+              "tag": 5,
+              "rig": "7Bzb9PHK9gZeyDVFtrDk48Rdqmk2YF66KFqjBdgP9N6R",
+              "sgt_mint": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+              "member_number": "20"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "verify_seeker_repoint",
+      "tag": 2,
+      "instruction": "verify_seeker",
+      "auth": "wallet (new SGT holder) + previous rig",
+      "description": "The seat points at frank's rig, so grace must pass it (writable) as account 6: the seat is re-pointed to grace's rig and frank's rig drops to tier 0. Emits SeekerVerified.",
+      "step": 29,
+      "args": {
+        "authority": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+        "sgt_mint": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+        "sgt_token_account": "CGs1AYENqjoHLqrd2mBzU2pkWUJinWp1iDEihhLJsfku",
+        "previous_rig": "7Bzb9PHK9gZeyDVFtrDk48Rdqmk2YF66KFqjBdgP9N6R"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "02",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 2
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+                "hex": "e1b71abfd3232804261e423f36556f6b4185bed41fdfd00d769ce15a394f43ce"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "seeker_seat",
+          "pubkey": "6uxQMrU5pMTu7p3jPHxhkPd4C4oYnhBB8XZqmdGd3YmB",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"seeker\"",
+                "hex": "7365656b6572"
+              },
+              {
+                "seed": "sgt_mint 5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+                "hex": "46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b8"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "sgt_token_account",
+          "pubkey": "CGs1AYENqjoHLqrd2mBzU2pkWUJinWp1iDEihhLJsfku",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+                "hex": "e1b71abfd3232804261e423f36556f6b4185bed41fdfd00d769ce15a394f43ce"
+              },
+              {
+                "seed": "token_program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                "hex": "06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc"
+              },
+              {
+                "seed": "mint 5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+                "hex": "46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b8"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 4,
+          "role": "sgt_mint",
+          "pubkey": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 5,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 6,
+          "role": "previous_rig",
+          "pubkey": "7Bzb9PHK9gZeyDVFtrDk48Rdqmk2YF66KFqjBdgP9N6R",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority EXjYUNtEMED4MrRENzxRNFvixYaGQEFkMqn9WCVnBxAB",
+                "hex": "c9077518cfa438767ed68c718178cf1a92343d3c5ffc854f22658b65cba262f0"
+              }
+            ],
+            "bump": 255
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 5,
+            "event": "SeekerVerified",
+            "hex": "059a21cf3d8d8480cb5391a06ad6e475e1823b8428df71912ffe5745f1f5fdbe9246d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b81400000000000000",
+            "fields": {
+              "tag": 5,
+              "rig": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb",
+              "sgt_mint": "5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+              "member_number": "20"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "close_rig_seeker",
+      "tag": 14,
+      "instruction": "close_rig",
+      "auth": "wallet",
+      "description": "Close a Seeker-tier Idle rig together with its seat (the seat still points here); all rent to the authority. Emits RigClosed.",
+      "step": 30,
+      "args": {
+        "authority": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+        "seeker_seat": "6uxQMrU5pMTu7p3jPHxhkPd4C4oYnhBB8XZqmdGd3YmB"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "0e",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 14
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+                "hex": "e1b71abfd3232804261e423f36556f6b4185bed41fdfd00d769ce15a394f43ce"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "seeker_seat",
+          "pubkey": "6uxQMrU5pMTu7p3jPHxhkPd4C4oYnhBB8XZqmdGd3YmB",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"seeker\"",
+                "hex": "7365656b6572"
+              },
+              {
+                "seed": "sgt_mint 5mXbkqKz883aufhAsx3p5Z1NcvD2ppZbdTTznM6oUKLj",
+                "hex": "46d6e6e7a7b65a9a7a21c3789b3b0619a01f428d33b8c77ea3abe198551c52b8"
+              }
+            ],
+            "bump": 254
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "GC6ftgS1x6FktjrZ16Kx9wYhF76UcKKaqRbxQFL3Jec5",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 7,
+            "event": "RigClosed",
+            "hex": "079a21cf3d8d8480cb5391a06ad6e475e1823b8428df71912ffe5745f1f5fdbe92",
+            "fields": {
+              "tag": 7,
+              "rig": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "end_shift_permissionless",
+      "tag": 11,
+      "instruction": "end_shift",
+      "auth": "anyone, after plan_window_end_ts and lease_to_round < Board.round_id",
+      "description": "The cranker seals alice's shift 2 (Broken, stored reason 3 freeze) and pays the ShiftLog rent. Emits ShiftEnded then ShiftEndedV2.",
+      "step": 32,
+      "args": {
+        "caller": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+        "shift_id": "2"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "0b",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 11
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "caller",
+          "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "shift_log",
+          "pubkey": "8G5GYup7e5fkPKvLNdSsBob5MjhxH7fwt4V7iwgj9trm",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig 8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+                "hex": "6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e"
+              },
+              {
+                "seed": "shift_id 2 u64 LE",
+                "hex": "0200000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 3,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 4,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 4,
+            "event": "ShiftEnded",
+            "hex": "046c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e020000000000000001000000000000000000000000000000000000000000000003",
+            "fields": {
+              "tag": 4,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "2",
+              "dark_rounds": "1",
+              "rounds_dug": "0",
+              "lamports": "0",
+              "reason": 3
+            }
+          },
+          {
+            "tag": 10,
+            "event": "ShiftEndedV2",
+            "hex": "0a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e0200000000000000010000000000000000000000000000000000000000000000032c730600000000002d7306000000000000",
+            "fields": {
+              "tag": 10,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "2",
+              "dark_rounds": "1",
+              "rounds_dug": "0",
+              "lamports": "0",
+              "reason": 3,
+              "start_round": "422700",
+              "end_round": "422701",
+              "mode": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "freeze_rig_wallet",
+      "tag": 9,
+      "instruction": "freeze_rig",
+      "auth": "wallet (mode 0)",
+      "description": "Wallet FREEZE of an Idle rig: -> Frozen; no shift is open, so no event.",
+      "step": 33,
+      "args": {
+        "mode": 0,
+        "reason": 3
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 3,
+      "data_hex": "090003",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 9
+        },
+        {
+          "name": "mode",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "reason",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 3
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "close_rig_guest",
+      "tag": 14,
+      "instruction": "close_rig",
+      "auth": "wallet",
+      "description": "Close a guest rig (state Idle or Frozen; here Frozen); rent to the authority. Emits RigClosed.",
+      "step": 34,
+      "args": {
+        "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "0e",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 14
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 7,
+            "event": "RigClosed",
+            "hex": "076c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e",
+            "fields": {
+              "tag": 7,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "propose_config",
+      "tag": 12,
+      "instruction": "propose_config",
+      "auth": "governance",
+      "description": "Propose crank_fee 4500 (<= executor_fee), bury_bps 250, paused 0: pending_* with pending_eta_slot = slot + 864000. (paused = 1 would also pause immediately.)",
+      "step": 35,
+      "args": {
+        "registrar": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+        "crank_fee": "4500",
+        "bury_bps": 250,
+        "paused": 0
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 44,
+      "data_hex": "0c6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf19411000000000000fa0000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 12
+        },
+        {
+          "name": "registrar",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32,
+          "value": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe"
+        },
+        {
+          "name": "crank_fee",
+          "type": "u64",
+          "offset": 33,
+          "size": 8,
+          "value": "4500"
+        },
+        {
+          "name": "bury_bps",
+          "type": "u16",
+          "offset": 41,
+          "size": 2,
+          "value": 250
+        },
+        {
+          "name": "paused",
+          "type": "u8",
+          "offset": 43,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "governance",
+          "pubkey": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "apply_config",
+      "tag": 13,
+      "instruction": "apply_config",
+      "auth": "anyone, once slot >= pending_eta_slot",
+      "description": "Apply the pending proposal after the timelock.",
+      "step": 37,
+      "args": {},
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "0d",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 13
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    }
+  ]
+}

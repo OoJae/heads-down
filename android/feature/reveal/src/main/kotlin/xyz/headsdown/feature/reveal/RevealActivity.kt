@@ -3,6 +3,7 @@ package xyz.headsdown.feature.reveal
 import android.animation.ValueAnimator
 import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,9 +13,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.getSystemService
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulSummary
 import xyz.headsdown.feature.reveal.share.RevealShare
@@ -49,6 +52,7 @@ class RevealActivity : ComponentActivity() {
         NotificationManagerCompat.from(this).cancel(RevealAlarmReceiver.NOTIFICATION_ID)
         HighRefreshRate.request(this)
         lifecycleScope.launch {
+            // Offline, no indexer, no finished shift: all "no haul yet". Never a sample by default.
             val haul = runCatching { haulRepository.latest() }.getOrNull()
             state = if (haul == null) RevealUiState.NoHaul else RevealUiState.Ready(haul)
         }
@@ -66,7 +70,22 @@ class RevealActivity : ComponentActivity() {
                 onBuyRest = { /* Stub: the Jupiter buy leg is wired later. The screen says nothing was bought. */ },
                 onShare = ::share,
                 onDone = ::finish,
+                onOpenExplorer = ::openExplorer,
+                // The labelled sample, only on request and only when there is no real haul.
+                onShowSample = {
+                    state = RevealUiState.Ready(FakeHaulRepository.sampleNight(System.currentTimeMillis(), ZoneId.systemDefault()))
+                },
             )
+        }
+    }
+
+    /** Explorer links are https-only by construction (contract B parser, HaulSummary). */
+    private fun openExplorer(url: String) {
+        if (!url.startsWith("https://")) return
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
+        } catch (_: ActivityNotFoundException) {
+            // No browser: nothing to do.
         }
     }
 

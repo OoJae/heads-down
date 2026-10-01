@@ -91,6 +91,23 @@ class EndpointPolicyTest {
         assertEquals(Disabled, release(CRANK, ""))
         assertEquals(Disabled, localdev(CRANK, ""))
         assertTrue(refused(release(RPC, "")))
+        // No registrar: guest rigs. No indexer: no morning haul.
+        assertEquals(Disabled, release(EndpointKind.REGISTRAR, ""))
+        assertEquals(Disabled, release(EndpointKind.INDEXER, ""))
+    }
+
+    @Test
+    fun `registrar and indexer follow the same rules as RPC`() {
+        for (kind in listOf(EndpointKind.REGISTRAR, EndpointKind.INDEXER)) {
+            assertEquals(Secure, release(kind, "https://registrar-devnet.headsdown.xyz"))
+            assertEquals(Secure, release(kind, "https://indexer.example.org/api"))
+            assertTrue(refused(release(kind, "http://127.0.0.1:8790")))
+            assertEquals(LoopbackCleartext, localdev(kind, "http://127.0.0.1:8790"))
+            assertEquals(LoopbackCleartext, localdev(kind, "http://localhost:8788"))
+            assertTrue(refused(localdev(kind, "http://10.0.2.2:8788")))
+            assertTrue(refused(release(kind, "https://indexer.example.org/?key=secret")))
+            assertTrue(refused(release(kind, "wss://indexer.example.org")))
+        }
     }
 
     @Test
@@ -109,6 +126,15 @@ class EndpointPolicyTest {
         assertEquals(Secure, EndpointPolicy.check(RPC, BuildConfig.SOLANA_RPC_URL, BuildConfig.LOOPBACK_CLEARTEXT_ALLOWED))
         val crank = EndpointPolicy.check(CRANK, BuildConfig.CRANK_WS_URL, BuildConfig.LOOPBACK_CLEARTEXT_ALLOWED)
         assertTrue(crank == Secure || crank == Disabled)
+        for ((kind, url) in listOf(EndpointKind.REGISTRAR to BuildConfig.REGISTRAR_URL, EndpointKind.INDEXER to BuildConfig.INDEXER_URL)) {
+            val v = EndpointPolicy.check(kind, url, BuildConfig.LOOPBACK_CLEARTEXT_ALLOWED)
+            assertTrue("$kind", v == Secure || v == Disabled)
+        }
+        // The crank intake path is contract A's /ws.
+        assertTrue(BuildConfig.CRANK_WS_URL.isEmpty() || BuildConfig.CRANK_WS_URL.endsWith("/ws"))
+        assertFalse(BuildConfig.SUBMIT_THROUGH_APP_RPC)
+        // The app signs in to its own domain; only localdev uses the devstack's "localhost".
+        assertEquals("headsdown.xyz", BuildConfig.SIWS_DOMAIN)
         assertTrue(BuildTransports.transports === SecureTransports)
     }
 }

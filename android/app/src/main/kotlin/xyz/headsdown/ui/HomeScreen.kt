@@ -49,6 +49,8 @@ import kotlinx.coroutines.delay
 import xyz.headsdown.feature.oemkeepalive.ExitCause
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
 import xyz.headsdown.feature.shift.BreakReason
+import xyz.headsdown.feature.shift.CrankLinkStatus
+import xyz.headsdown.feature.shift.refusalLine
 import xyz.headsdown.feature.shift.ShiftMode
 import xyz.headsdown.feature.shift.ShiftSnapshot
 import xyz.headsdown.feature.shift.ShiftSpec
@@ -66,7 +68,9 @@ object HomeTags {
     const val PREVIEW_REVEAL = "home-preview-reveal"
     const val ADD_WIDGET = "home-add-widget"
     const val SENSOR_LAB = "home-sensor-lab"
+    const val RIG_DEBUG = "home-rig-debug"
     const val HOW_IT_WORKS = "home-how-it-works"
+    const val CRANK_REFUSAL = "home-crank-refusal"
 }
 
 internal data class RigLook(val word: String, val color: Color, val line: String, val pixels: Int)
@@ -102,6 +106,10 @@ fun HomeScreen(
     onAddWidget: (() -> Unit)? = null,
     /** Non-null only in debug builds (the sensor lab does not exist in release). */
     onOpenSensorLab: (() -> Unit)? = null,
+    /** Non-null only in debug and localdev builds (the rig debug screen for the devstack). */
+    onOpenRigDebug: (() -> Unit)? = null,
+    /** The crank intake's acks (contract A): a current refusal is shown on the rig card. */
+    crank: CrankLinkStatus = CrankLinkStatus(),
 ) {
     Column(
         Modifier
@@ -126,7 +134,7 @@ fun HomeScreen(
         }
 
         HealthBanner(health, onOpenSetup)
-        RigCard(snapshot, onClockIn, onEndShift, onFreeze)
+        RigCard(snapshot, crank, onClockIn, onEndShift, onFreeze)
         HaulCard(onPreviewReveal)
         if (onAddWidget != null) WidgetCard(onAddWidget)
 
@@ -143,12 +151,17 @@ fun HomeScreen(
                 }
             }
         }
+        if (onOpenRigDebug != null) {
+            TextButton(onClick = onOpenRigDebug, modifier = Modifier.testTag(HomeTags.RIG_DEBUG)) {
+                Text("Rig key and devstack (debug)", color = HdColors.Cooling)
+            }
+        }
         Text("Powered by ORE", style = PixelLabel, color = HdColors.AshMuted)
     }
 }
 
 @Composable
-private fun RigCard(snapshot: ShiftSnapshot, onClockIn: () -> Unit, onEndShift: () -> Unit, onFreeze: () -> Unit) {
+private fun RigCard(snapshot: ShiftSnapshot, crank: CrankLinkStatus, onClockIn: () -> Unit, onEndShift: () -> Unit, onFreeze: () -> Unit) {
     val look = lookOf(snapshot.state)
     val hot = snapshot.state is ShiftState.Down
     Card(
@@ -180,6 +193,9 @@ private fun RigCard(snapshot: ShiftSnapshot, onClockIn: () -> Unit, onEndShift: 
                 Stat("Dark for", TileRenderer.elapsed(now - since))
             }
             Stat("Rounds dark", snapshot.darkRounds.toString())
+            crank.refusalLine()?.let {
+                Text(it, color = HdColors.Cooling, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(HomeTags.CRANK_REFUSAL))
+            }
             Spacer(Modifier.height(4.dp))
             when (snapshot.state) {
                 ShiftState.Idle, is ShiftState.Broken -> Button(
@@ -209,7 +225,7 @@ private fun HaulCard(onPreviewReveal: () -> Unit) {
             Text("— ORE", color = HdColors.OreGold, style = MaterialTheme.typography.displaySmall)
             Text("Your first haul appears after your first mined shift.", color = HdColors.AshMuted)
             TextButton(onClick = onPreviewReveal, modifier = Modifier.testTag(HomeTags.PREVIEW_REVEAL)) {
-                Text("Preview the morning reveal (sample night)", color = HdColors.OreGold)
+                Text("Open the morning reveal", color = HdColors.OreGold)
             }
         }
     }
@@ -316,8 +332,13 @@ private fun Stat(label: String, value: String) {
 
 private fun trustFootnote(snapshot: ShiftSnapshot, onboarding: OnboardingState): String = buildString {
     append(if (onboarding.rigKeyReady) "Heartbeats are signed by this phone's hardware key. " else "Create your rig key to sign heartbeats. ")
-    append("Your rig is not registered on-chain yet, so nothing can be mined or spent; ")
-    append("every dig will need a fresh heartbeat from this phone, verified on-chain.")
+    if (onboarding.rigRegistered) {
+        append("Your rig is registered on-chain: every dig needs a fresh heartbeat from this phone, verified on-chain, ")
+        append("inside the caps your wallet signed.")
+    } else {
+        append("Your rig is not registered on-chain yet, so nothing can be mined or spent; ")
+        append("every dig will need a fresh heartbeat from this phone, verified on-chain.")
+    }
     if (snapshot.state is ShiftState.Down && !snapshot.signing) append(" (No rig key: this shift is focus-only.)")
 }
 

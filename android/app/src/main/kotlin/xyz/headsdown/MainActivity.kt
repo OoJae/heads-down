@@ -17,7 +17,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
+import xyz.headsdown.core.wallet.HeadsDownWallet
+import xyz.headsdown.core.wallet.WalletResult
+import xyz.headsdown.devtools.RigDebug
 import xyz.headsdown.feature.reveal.RevealActivity
 import xyz.headsdown.feature.shift.devlog.SensorLab
 import xyz.headsdown.surface.tile.TrampolineActivity
@@ -27,26 +31,39 @@ import xyz.headsdown.ui.NightShiftIntro
 import xyz.headsdown.ui.OnboardingScreen
 import xyz.headsdown.ui.launch
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import javax.inject.Inject
 
-/** The only exported Activity (launcher). Everything wallet-related goes through the trampoline. */
+/** The only exported Activity (launcher). Clock-in goes through the trampoline. */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val vm: HomeViewModel by viewModels()
 
+    @Inject lateinit var wallet: HeadsDownWallet
+
+    /** The wallet's Sign In With Solana when the rig key is created (registered before STARTED). */
+    private lateinit var sender: ActivityResultSender
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        sender = ActivityResultSender(this)
         setContent {
             HeadsDownTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     HeadsDownRoot(
                         vm = vm,
                         onClockIn = { startActivity(Intent(this, TrampolineActivity::class.java)) },
-                        // The reveal shows the (labelled) sample night until the indexer exists.
+                        // The reveal shows the latest real haul, or says there is none yet.
                         onPreviewReveal = { launch(Intent(this, RevealActivity::class.java)) },
                         // Debug and localdev builds only: release has no sensor lab at all.
                         onOpenSensorLab = SensorLab.intent(this)?.let { intent -> { launch(intent) } },
+                        // Debug and localdev builds only: release has no rig debug screen at all.
+                        onOpenRigDebug = RigDebug.intent(this)?.let { intent -> { launch(intent) } },
+                        // The registrar's SIWS request goes to the wallet; a decline leaves a guest key.
+                        onCreateRigKey = {
+                            vm.createRigKey { request -> (wallet.signIn(sender, request) as? WalletResult.Success)?.value }
+                        },
                     )
                 }
             }
@@ -65,10 +82,13 @@ private fun HeadsDownRoot(
     onClockIn: () -> Unit,
     onPreviewReveal: () -> Unit,
     onOpenSensorLab: (() -> Unit)?,
+    onOpenRigDebug: (() -> Unit)?,
+    onCreateRigKey: () -> Unit,
 ) {
     val onboarding by vm.onboarding.collectAsStateWithLifecycle()
     val snapshot by vm.shift.collectAsStateWithLifecycle()
     val health by vm.health.collectAsStateWithLifecycle()
+    val crank by vm.crank.collectAsStateWithLifecycle()
     // null = decide from onboarding progress; true/false = the user chose.
     var setupChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
     // Re-reading the ritual from the home screen.
@@ -81,7 +101,7 @@ private fun HeadsDownRoot(
     when {
         rereadIntro -> NightShiftIntro(onContinue = { rereadIntro = false }, continueLabel = "Back")
         showSetup && !onboarding.introSeen -> NightShiftIntro(onContinue = vm::markIntroSeen)
-        showSetup -> OnboardingScreen(onboarding, vm, onContinue = { setupChoice = false })
+        showSetup -> OnboardingScreen(onboarding, vm, onContinue = { setupChoice = false }, onCreateRigKey = onCreateRigKey)
         else -> HomeScreen(
             snapshot = snapshot,
             onboarding = onboarding,
@@ -94,6 +114,8 @@ private fun HeadsDownRoot(
             onPreviewReveal = onPreviewReveal,
             onAddWidget = if (vm.widgetPinSupported) vm::requestRigWidget else null,
             onOpenSensorLab = onOpenSensorLab,
+            onOpenRigDebug = onOpenRigDebug,
+            crank = crank,
         )
     }
 }

@@ -17,6 +17,11 @@ data class ShiftRecord(
     /** Set when the shift left the running states through our own code path. */
     val endedAtWallMillis: Long?,
     val endReason: String?,
+    /**
+     * When the phone was first picked up (lifted or unlocked) after going dark, or the shift was
+     * ended by hand. Not observable on-chain: the morning haul fills `first_pickup_ts` from it.
+     */
+    val firstPickupWallMillis: Long? = null,
 )
 
 /** Tiny SharedPreferences journal of the most recent shift. */
@@ -38,6 +43,15 @@ class ShiftJournal(context: Context) {
         prefs.edit { putLong(K_LAST_HB, nowWall).putInt(K_ROUNDS, darkRounds) }
     }
 
+    /** The first pickup of this shift wins; later ones are ignored. */
+    fun onPickup(nowWall: Long) {
+        if (!prefs.contains(K_SHIFT) || prefs.contains(K_PICKUP)) return
+        prefs.edit { putLong(K_PICKUP, nowWall) }
+    }
+
+    /** The first pickup recorded for [shiftId], if the journal still holds that shift. */
+    fun firstPickupFor(shiftId: Long): Long? = last()?.takeIf { it.shiftId == shiftId }?.firstPickupWallMillis
+
     /** Graceful or deliberate end (user end, break, freeze): anything but an OS kill. */
     fun onEnded(nowWall: Long, reason: String) {
         // commit = true: this record is what distinguishes "we stopped" from "we were killed",
@@ -55,6 +69,7 @@ class ShiftJournal(context: Context) {
             darkRounds = prefs.getInt(K_ROUNDS, 0),
             endedAtWallMillis = prefs.getLong(K_ENDED, -1).takeIf { it >= 0 },
             endReason = prefs.getString(K_REASON, null),
+            firstPickupWallMillis = prefs.getLong(K_PICKUP, -1).takeIf { it >= 0 },
         )
     }
 
@@ -67,5 +82,6 @@ class ShiftJournal(context: Context) {
         const val K_ROUNDS = "dark_rounds"
         const val K_ENDED = "ended_at"
         const val K_REASON = "end_reason"
+        const val K_PICKUP = "first_pickup"
     }
 }

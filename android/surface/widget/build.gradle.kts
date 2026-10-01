@@ -9,18 +9,13 @@ android {
     testOptions.unitTests.isIncludeAndroidResources = true
 }
 
-// Versions not in the catalog yet (fold into gradle/libs.versions.toml when it is next touched).
-val glance = "1.2.0"
-val robolectric = "4.17"
-val androidxTestCore = "1.7.0"
-
 dependencies {
-    api("androidx.glance:glance-appwidget:$glance")
-    implementation("androidx.glance:glance-material3:$glance")
+    api(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
 
-    testImplementation("androidx.glance:glance-appwidget-testing:$glance")
-    testImplementation("org.robolectric:robolectric:$robolectric")
-    testImplementation("androidx.test:core:$androidxTestCore")
+    testImplementation(libs.androidx.glance.appwidget.testing)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

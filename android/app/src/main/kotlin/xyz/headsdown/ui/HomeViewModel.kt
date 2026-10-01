@@ -23,6 +23,11 @@ import xyz.headsdown.feature.oemkeepalive.OemProfile
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
 import xyz.headsdown.feature.oemkeepalive.ShiftHealthCheck
 import xyz.headsdown.feature.reveal.RevealScheduler
+import xyz.headsdown.core.chain.registrar.AttestationOutcome
+import xyz.headsdown.core.wallet.SignInProof
+import xyz.headsdown.core.wallet.SiwsRequest
+import xyz.headsdown.feature.shift.CrankLinkMonitor
+import xyz.headsdown.feature.shift.CrankLinkStatus
 import xyz.headsdown.feature.shift.ShiftController
 import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.ShiftSnapshot
@@ -30,6 +35,9 @@ import xyz.headsdown.feature.shift.ShiftStatusRepository
 import xyz.headsdown.feature.shift.isRunning
 import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.rig.RigKeyStatus
+import xyz.headsdown.rig.RigBindingStore
+import xyz.headsdown.rig.RigOnboarding
+import xyz.headsdown.rig.VoucherStore
 import xyz.headsdown.surface.tile.TileAddOutcome
 import xyz.headsdown.surface.tile.TilePrompt
 import xyz.headsdown.surface.widget.RigWidgetReceiver
@@ -47,6 +55,10 @@ data class OnboardingState(
     val tilePromptSupported: Boolean = true,
     val rigKey: RigKeyStatus = RigKeyStatus.Missing,
     val creatingKey: Boolean = false,
+    /** How the last key creation went with the registrar (null: not this session). */
+    val attestation: AttestationOutcome? = null,
+    /** A clock-in confirmed on-chain and bound this phone to its Rig. */
+    val rigRegistered: Boolean = false,
 ) {
     val keepAliveDone: Boolean
         get() = batteryUnrestricted && (oem?.needsAutostartStep != true || autostartConfirmed)
@@ -66,11 +78,18 @@ class HomeViewModel @Inject constructor(
     private val keepAlive: KeepAlive,
     private val reveal: RevealScheduler,
     private val journal: ShiftJournal,
+    private val onboardingFlow: RigOnboarding,
+    private val vouchers: VoucherStore,
+    private val binding: RigBindingStore,
+    crankLink: CrankLinkMonitor,
 ) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("hd_onboarding", Context.MODE_PRIVATE)
 
     val shift: StateFlow<ShiftSnapshot> = shiftStatus.snapshot
+
+    /** Crank intake acks (contract A): refusals are shown on the rig card. */
+    val crank: StateFlow<CrankLinkStatus> = crankLink.status
 
     // introSeen is read synchronously so a returning user never sees the intro flash by.
     private val _onboarding = MutableStateFlow(OnboardingState(introSeen = prefs.getBoolean(K_INTRO, false)))
@@ -88,7 +107,7 @@ class HomeViewModel @Inject constructor(
     /** Re-reads every permission / setting; call on resume (users change them in Settings). */
     fun refresh() {
         viewModelScope.launch {
-            val key = withContext(Dispatchers.Default) { rigKeys.status() }
+            val key = withContext(Dispatchers.Default) { rigKeys.status(vouchers.forKey(rigKeys.compressedPublicKey())?.level) }
             val oem = withContext(Dispatchers.Default) { keepAlive.profile }
             _onboarding.value = _onboarding.value.copy(
                 introSeen = prefs.getBoolean(K_INTRO, false),
@@ -100,6 +119,7 @@ class HomeViewModel @Inject constructor(
                 tileAdded = prefs.getBoolean(K_TILE, false),
                 tilePromptSupported = TilePrompt.supported,
                 rigKey = key,
+                rigRegistered = binding.current().isRegistered,
             )
             _health.value = withContext(Dispatchers.Default) { evaluateHealth() }
         }
@@ -145,12 +165,17 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun createRigKey() {
+    /**
+     * Creates the rig key, attested by the registrar when possible. [signIn] is the wallet's Sign
+     * In With Solana (it needs the Activity's result sender); it is asked only after the registrar
+     * answered, and a decline still leaves a working guest key.
+     */
+    fun createRigKey(signIn: suspend (SiwsRequest) -> SignInProof?) {
         if (_onboarding.value.creatingKey) return
         _onboarding.value = _onboarding.value.copy(creatingKey = true)
         viewModelScope.launch {
-            val status = withContext(Dispatchers.Default) { rigKeys.create() }
-            _onboarding.value = _onboarding.value.copy(rigKey = status, creatingKey = false)
+            val setup = onboardingFlow.createKey(signIn)
+            _onboarding.value = _onboarding.value.copy(rigKey = setup.status, creatingKey = false, attestation = setup.attestation)
         }
     }
 

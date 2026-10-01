@@ -31,8 +31,26 @@ class RigMessagesTest {
     @Test
     fun `kind and reason bytes are frozen`() {
         assertEquals(listOf(1, 2, 3, 4), RigMessageKind.entries.map { it.wire })
-        assertEquals((0..6).toList(), ShiftEndReason.entries.map { it.wire })
+        // v1.1 appended 7 unplugged and 8 unlocked.
+        assertEquals((0..8).toList(), ShiftEndReason.entries.map { it.wire })
         assertEquals((0..5).toList(), RigSignalState.entries.map { it.wire })
+        // INTERFACE v1.1 break_shift: 1, 2, 4, 5, 6, 7, 8 are BREAK reasons; 0 and 3 are not.
+        assertEquals(listOf(1, 2, 4, 5, 6, 7, 8), ShiftEndReason.entries.filter { it.isBreakReason }.map { it.wire })
+    }
+
+    @Test
+    fun `v1_1 break reasons and the DAY flag encode as their bytes`() {
+        val unplugged = ShiftSignalPreimage(programId, rig, RigMessageKind.BREAK, 9uL, 7uL, ShiftEndReason.UNPLUGGED)
+        val unlocked = ShiftSignalPreimage(programId, rig, RigMessageKind.BREAK, 10uL, 7uL, ShiftEndReason.UNLOCKED)
+        assertEquals(7, unplugged.preimage()[RigMessageFormat.OFFSET_SIGNAL_REASON].toInt())
+        assertEquals(8, unlocked.preimage()[RigMessageFormat.OFFSET_SIGNAL_REASON].toInt())
+        assertEquals(unlocked, RigMessage.decode(unlocked.preimage()))
+        val day = plan.copy(flags = ShiftPlan.FLAG_DAY)
+        assertTrue(day.day && !day.focusOnly)
+        assertEquals(0x02, day.encode()[19].toInt()) // flags byte of the 36-byte plan
+        assertEquals(day, ShiftPlan.decode(day.encode(), 0))
+        val focusDay = plan.copy(splitTiles = 0, soloTiles = 0, flags = ShiftPlan.FLAG_FOCUS_ONLY or ShiftPlan.FLAG_DAY)
+        assertTrue(focusDay.focusOnly && focusDay.day)
     }
 
     @Test
@@ -170,7 +188,7 @@ class RigMessagesTest {
         }
         val sig = ShiftSignalPreimage(programId, rig, RigMessageKind.BREAK, 1uL, 1uL, ShiftEndReason.PICKUP).preimage()
         assertThrows(IllegalArgumentException::class.java) {
-            RigMessage.decode(sig.copyOf().also { it[RigMessageFormat.OFFSET_SIGNAL_REASON] = 7 })
+            RigMessage.decode(sig.copyOf().also { it[RigMessageFormat.OFFSET_SIGNAL_REASON] = 9 })
         }
     }
 
@@ -195,7 +213,7 @@ class RigMessagesTest {
         assertThrows(IllegalArgumentException::class.java) { plan.copy(splitTiles = -1) }
         assertThrows(IllegalArgumentException::class.java) { plan.copy(leaseRounds = 0) }
         assertThrows(IllegalArgumentException::class.java) { plan.copy(leaseRounds = 4) }
-        assertThrows(IllegalArgumentException::class.java) { plan.copy(flags = 0x02) }
+        assertThrows(IllegalArgumentException::class.java) { plan.copy(flags = 0x04) }
         assertThrows(IllegalArgumentException::class.java) { plan.copy(splitTiles = 0, soloTiles = 0) }
         assertThrows(IllegalArgumentException::class.java) { plan.copy(windowEndTs = plan.windowStartTs) }
         // Focus-only needs no tiles.

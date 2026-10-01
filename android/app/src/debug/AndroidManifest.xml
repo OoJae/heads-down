@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    DEBUG BUILD TYPE ONLY: the rig debug screen (src/devtools) for scripts/devstack/clock-in.sh.
+    Not exported. Release has no such activity (src/release has only a stub entry point).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="xyz.headsdown.devtools.RigDebugActivity"
+            android:exported="false"
+            android:label="Rig debug"
+            android:theme="@style/Theme.HeadsDown" />
+    </application>
+
+</manifest>

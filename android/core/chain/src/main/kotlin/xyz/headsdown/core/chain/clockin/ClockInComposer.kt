@@ -9,13 +9,16 @@ import xyz.headsdown.core.chain.ix.ComputeBudgetInstructions
 import xyz.headsdown.core.chain.ix.HeadsDownInstructions
 import xyz.headsdown.core.chain.ix.OreInstructions
 import xyz.headsdown.core.chain.ix.RigCaps
+import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.tx.Instruction
+import xyz.headsdown.core.keys.RigMessageFormat
 import xyz.headsdown.core.keys.RigSignalState
 import xyz.headsdown.core.keys.ShiftPlan
 
 /**
- * What the user asked for at clock-in. Budgets are lamports, costs lamports per ORE, times
- * unix seconds. Defaults follow `ml/forecaster/RESULTS.md`: concentrated 0.001 SOL digs on
+ * What the user asked for at clock-in. Budgets are lamports of SOL **placed on squares**; the
+ * executor fee is added on top by the composer (INTERFACE v1.1 §6.4). Costs are lamports per ORE,
+ * times unix seconds. Defaults follow `ml/forecaster/RESULTS.md`: concentrated 0.001 SOL digs on
  * split tiles, heartbeat lease of one round.
  */
 data class ClockInRequest(
@@ -31,6 +34,8 @@ data class ClockInRequest(
     val soloTiles: Int = 0,
     val leaseRounds: Int = 1,
     val focusOnly: Boolean = false,
+    /** A Day Shift: `plan_flags` bit1, recorded on-chain as `ShiftLog.mode` 1. */
+    val day: Boolean = false,
     val capsValiditySeconds: Long = SECONDS_PER_WEEK,
     /** 0 = no ComputeBudget instructions (the wallet may add its own priority fee). */
     val priorityMicroLamports: ULong = 0uL,
@@ -39,10 +44,13 @@ data class ClockInRequest(
         require(windowSeconds in 60..MAX_WINDOW_SECONDS) { "shift window must be 1 minute to 24 hours" }
         require(capsValiditySeconds in 3_600..(4 * SECONDS_PER_WEEK)) { "caps validity must be 1 hour to 4 weeks" }
         require(planMaxEvCostPerOre <= capMaxCostPerOre) { "plan ceiling must not exceed the wallet cap" }
+        require(leaseRounds in 1..RigMessageFormat.MAX_LEASE_ROUNDS) { "lease rounds must be 1..3" }
         if (!focusOnly) {
             require(digLamports >= MIN_DIG_LAMPORTS) { "digs are concentrated chunks of at least 0.001 SOL" }
             require(shiftBudgetLamports >= digLamports) { "the shift budget must cover one dig" }
             require(weeklyBudgetLamports >= shiftBudgetLamports) { "the weekly cap must cover the shift" }
+            require(splitTiles in 0..ShiftPlan.MAX_SPLIT_TILES && soloTiles in 0..ShiftPlan.MAX_SOLO_TILES) { "tiles out of range" }
+            require(splitTiles + soloTiles >= 1) { "a mining shift needs at least one tile" }
         }
     }
 
@@ -62,6 +70,8 @@ class ClockInChainState(
     val rig: RigAccount?,
     /** null: the ORE Automation does not exist yet. */
     val automation: OreAutomation?,
+    /** The cluster slot the reads were made at (voucher expiry check); null when unknown. */
+    val slot: ULong? = null,
 )
 
 /** Why a clock-in cannot be built. The message is fixed text, safe to show. */
@@ -69,7 +79,29 @@ class ClockInRefusedException(val reason: Reason) : IllegalStateException(reason
     enum class Reason(val message: String) {
         RIG_FROZEN("Rig frozen. Unfreeze it with your wallet first."),
         OTHER_AUTHORITY("This Rig belongs to a different wallet."),
+        RIG_BUSY("This Rig is in a state that cannot be armed. End its shift with your wallet first."),
     }
+}
+
+/** What happened to a registrar voucher at clock-in. */
+enum class VoucherUse {
+    /** No voucher held: the rig registers (or stays) a guest. */
+    NONE,
+
+    /** The Ed25519 voucher is in the transaction; the rig gets its attestation level. */
+    INCLUDED,
+
+    /** The rig already carries at least this level with this key: nothing to send. */
+    ALREADY_ATTESTED,
+
+    /** Held but for another wallet or key: never sent. */
+    SKIPPED_OTHER_KEY,
+
+    /** Signed by a key that is not `Config.registrar`: the program would refuse it. */
+    SKIPPED_WRONG_REGISTRAR,
+
+    /** Expired, too close to expiring, or the slot is unknown. */
+    SKIPPED_EXPIRED,
 }
 
 /** The instructions for one clock-in transaction and what they will do. */
@@ -88,20 +120,31 @@ class ClockInPlan(
     val expectedShiftId: ULong,
     /** On-chain `hb_counter`: the local counter must be raised to at least this. */
     val hbCounterFloor: ULong,
+    val voucher: VoucherUse = VoucherUse.NONE,
 )
 
 /**
  * Composes the single clock-in transaction:
  *
- * `[ComputeBudget?] [end_shift?] [rotate_key?] [ORE automate?] [register_rig?] set_caps arm_shift`
+ * `[ComputeBudget?] [end_shift?] [ed25519 voucher? rotate_key?] [ORE automate?] [ed25519 voucher? register_rig?] set_caps arm_shift`
  *
- * - **ORE automate** (the deposit) points the user's own Automation at the heads_down Executor
- *   PDA with Discretionary strategy and `fee = Config.executor_fee`, per-tile cap =
- *   `dig_lamports / tiles`, and tops the balance up to the shift budget plus one executor fee
- *   per possible dig. It is skipped when nothing would change, and always for focus-only shifts.
+ * - **ORE automate** points the user's own Automation at the heads_down Executor PDA with the
+ *   Discretionary strategy and `fee = Config.executor_fee` (read at Config @80; any other fee
+ *   makes every dig a `StrategyMismatch` skip), per-tile cap `dig_lamports / tiles`, and tops the
+ *   balance up to the shift budget plus one executor fee per dig round. It is skipped when
+ *   nothing would change, and always for focus-only shifts.
+ * - **The fee is inside every cap** (INTERFACE v1.1 §6.4): `dig` reserves `automation.fee` from
+ *   `min(cap_round, cap_shift - spent_shift, cap_week - spent_week)` before placing SOL, so
+ *   `cap_round = dig_lamports + executor_fee` and `cap_shift` / `cap_week` carry one executor fee
+ *   per dig round their budgets allow. Otherwise every dig would place less than the plan.
  * - **register_rig** only when the Rig does not exist; **rotate_key** when it exists with a
- *   different device key (reinstall); **end_shift** when a previous shift was left open.
- * - **set_caps** then **arm_shift** (wallet path) with a plan inside the caps.
+ *   different device key (reinstall), or to attach a registrar voucher; **end_shift** when the
+ *   Rig still has a shift open (`shift_open`, Rig @336).
+ * - A **registrar voucher** is included only when it covers this wallet and key, was signed by
+ *   `Config.registrar` and will not expire before the transaction lands; anything else registers
+ *   the rig as a guest (level-0 or unusable vouchers would fail the whole clock-in on-chain).
+ * - **set_caps** then **arm_shift** (wallet path) with a plan inside the caps; `plan_flags` bit0
+ *   for focus-only, bit1 for a Day Shift.
  *
  * Pure function of its inputs: every decision is unit-tested without a network.
  */
@@ -113,32 +156,44 @@ object ClockInComposer {
         request: ClockInRequest,
         state: ClockInChainState,
         nowUnix: Long,
+        voucher: RegistrarVoucher? = null,
     ): ClockInPlan {
         val rigAddress = HeadsDownProgram.rig(authority).address
         val rig = state.rig
         if (rig != null) {
             if (rig.authority != authority) throw ClockInRefusedException(ClockInRefusedException.Reason.OTHER_AUTHORITY)
             if (rig.state == RigSignalState.FROZEN) throw ClockInRefusedException(ClockInRefusedException.Reason.RIG_FROZEN)
+            // arm_shift needs Idle: only an open shift can be closed here (end_shift requires shift_open).
+            if (rig.state != RigSignalState.IDLE && !rig.shiftOpen) throw ClockInRefusedException(ClockInRefusedException.Reason.RIG_BUSY)
         }
 
-        val tiles = if (request.focusOnly) 0 else request.splitTiles + request.soloTiles
+        val fee = state.config.executorFee
+        val focus = request.focusOnly
+        val tiles = if (focus) 0 else request.splitTiles + request.soloTiles
+        val flags = (if (focus) ShiftPlan.FLAG_FOCUS_ONLY else 0) or (if (request.day) ShiftPlan.FLAG_DAY else 0)
         val plan = ShiftPlan(
-            maxEvCost = if (request.focusOnly) 0uL else request.planMaxEvCostPerOre,
-            digLamports = if (request.focusOnly) 0uL else request.digLamports,
-            splitTiles = if (request.focusOnly) 0 else request.splitTiles,
-            soloTiles = if (request.focusOnly) 0 else request.soloTiles,
+            maxEvCost = if (focus) 0uL else request.planMaxEvCostPerOre,
+            digLamports = if (focus) 0uL else request.digLamports,
+            splitTiles = if (focus) 0 else request.splitTiles,
+            soloTiles = if (focus) 0 else request.soloTiles,
             leaseRounds = request.leaseRounds,
-            flags = if (request.focusOnly) ShiftPlan.FLAG_FOCUS_ONLY else 0,
+            flags = flags,
             windowStartTs = nowUnix,
             windowEndTs = Math.addExact(nowUnix, request.windowSeconds),
         )
-        val caps = RigCaps(
-            capWeek = request.weeklyBudgetLamports,
-            capShift = request.shiftBudgetLamports,
-            capRound = if (request.focusOnly) minOf(request.digLamports, request.shiftBudgetLamports) else request.digLamports,
-            capMaxCost = request.capMaxCostPerOre,
-            capsExpiryTs = Math.addExact(nowUnix, request.capsValiditySeconds),
-        )
+        val capsExpiry = Math.addExact(nowUnix, request.capsValiditySeconds)
+        val caps = if (focus) {
+            // A focus-only shift never deploys: the wallet grants no spending at all.
+            RigCaps(capWeek = 0uL, capShift = 0uL, capRound = 0uL, capMaxCost = 0uL, capsExpiryTs = capsExpiry)
+        } else {
+            RigCaps(
+                capWeek = withFees(request.weeklyBudgetLamports, request.digLamports, fee),
+                capShift = withFees(request.shiftBudgetLamports, request.digLamports, fee),
+                capRound = checkedAdd(request.digLamports, fee),
+                capMaxCost = request.capMaxCostPerOre,
+                capsExpiryTs = capsExpiry,
+            )
+        }
         check(caps.admits(plan)) { "plan exceeds caps" }
 
         val ixs = mutableListOf<Instruction>()
@@ -147,20 +202,30 @@ object ClockInComposer {
             ixs += ComputeBudgetInstructions.setComputeUnitPrice(request.priorityMicroLamports)
         }
 
-        val endsPrevious = rig != null && rig.state in OPEN_STATES
+        val endsPrevious = rig != null && rig.shiftOpen
         if (rig != null && endsPrevious) ixs += HeadsDownInstructions.endShift(authority, rigAddress, rig.shiftId)
 
-        val rotates = rig != null && !rig.p256Pubkey.toByteArray().contentEquals(rigKey)
-        if (rotates) ixs += HeadsDownInstructions.rotateKey(authority, rigKey)
+        val registers = rig == null
+        val keyChanges = rig != null && !rig.p256Pubkey.toByteArray().contentEquals(rigKey)
+        val voucherUse = voucherUse(voucher, authority, rigKey, state, rig, keyChanges)
+        val attestationUpgrade = rig != null && !keyChanges && voucherUse == VoucherUse.INCLUDED
+        val rotates = keyChanges || attestationUpgrade
+        if (rotates) {
+            val attestation = if (voucherUse == VoucherUse.INCLUDED) {
+                ixs += voucher!!.instruction
+                voucher.attestation(ed25519Ix = ixs.lastIndex)
+            } else {
+                null
+            }
+            ixs += HeadsDownInstructions.rotateKey(authority, rigKey, attestation)
+        }
 
         var deposit = 0uL
         var automate = false
-        if (!request.focusOnly) {
+        if (!focus) {
             val perTile = request.digLamports / tiles.toULong()
             check(perTile > 0uL) { "per-tile amount rounds to zero" }
-            val fee = state.config.executorFee
-            val maxDigs = ceilDiv(request.shiftBudgetLamports, request.digLamports)
-            val target = checkedAdd(request.shiftBudgetLamports, checkedMul(maxDigs, fee))
+            val target = caps.capShift
             val current = state.automation?.balance ?: 0uL
             deposit = if (target > current) target - current else 0uL
             val a = state.automation
@@ -170,8 +235,15 @@ object ClockInComposer {
             if (automate) ixs += OreInstructions.automateHeadsDown(authority, perTile, deposit, fee)
         }
 
-        val registers = rig == null
-        if (registers) ixs += HeadsDownInstructions.registerRig(authority, rigKey)
+        if (registers) {
+            val attestation = if (voucherUse == VoucherUse.INCLUDED) {
+                ixs += voucher!!.instruction
+                voucher.attestation(ed25519Ix = ixs.lastIndex)
+            } else {
+                null
+            }
+            ixs += HeadsDownInstructions.registerRig(authority, rigKey, attestation)
+        }
         ixs += HeadsDownInstructions.setCaps(authority, caps)
         ixs += HeadsDownInstructions.armShift(authority, plan)
 
@@ -187,13 +259,40 @@ object ClockInComposer {
             endsPreviousShift = endsPrevious,
             expectedShiftId = checkedAdd(rig?.shiftId ?: 0uL, 1uL),
             hbCounterFloor = rig?.hbCounter ?: 0uL,
+            voucher = voucherUse,
         )
     }
 
-    /** Covers ORE automate (account creation), register_rig and the two small updates. */
+    /** Covers ORE automate (account creation), register_rig with a voucher and the two small updates. */
     const val COMPUTE_UNIT_LIMIT = 400_000L
 
-    private val OPEN_STATES = setOf(RigSignalState.ARMED, RigSignalState.DOWN, RigSignalState.COOLING, RigSignalState.BROKEN)
+    /**
+     * Whether the voucher goes into this transaction. It is only ever needed where the key is set:
+     * `register_rig`, `rotate_key`, or a `rotate_key` to the same key that raises the rig's level.
+     */
+    private fun voucherUse(
+        voucher: RegistrarVoucher?,
+        authority: Pubkey,
+        rigKey: ByteArray,
+        state: ClockInChainState,
+        rig: RigAccount?,
+        keyChanges: Boolean,
+    ): VoucherUse {
+        if (voucher == null) return VoucherUse.NONE
+        if (!voucher.covers(authority, rigKey)) return VoucherUse.SKIPPED_OTHER_KEY
+        if (voucher.registrar != state.config.registrar) return VoucherUse.SKIPPED_WRONG_REGISTRAR
+        val slot = state.slot ?: return VoucherUse.SKIPPED_EXPIRED
+        if (!voucher.usableAt(slot)) return VoucherUse.SKIPPED_EXPIRED
+        if (rig != null && !keyChanges) {
+            val current = rig.attestationLevel
+            val stillValid = rig.attestationExpirySlot > slot
+            if (current >= voucher.level && stillValid) return VoucherUse.ALREADY_ATTESTED
+        }
+        return VoucherUse.INCLUDED
+    }
+
+    /** [budget] of SOL placed, plus one executor fee for every dig round that budget allows. */
+    private fun withFees(budget: ULong, dig: ULong, fee: ULong): ULong = checkedAdd(budget, checkedMul(ceilDiv(budget, dig), fee))
 
     private fun ceilDiv(a: ULong, b: ULong): ULong = a / b + if (a % b == 0uL) 0uL else 1uL
 

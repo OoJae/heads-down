@@ -3,7 +3,8 @@
 # --- No logging in release builds ------------------------------------------------------
 # R8 treats these calls as side-effect free and deletes them, so no android.util.Log output
 # (and nothing a log could leak: tokens, keys, addresses) ships in a release APK. The app's
-# own sources contain no Log calls; this also strips any in bundled libraries.
+# own Log calls are debug-only (DebugLog, guarded by BuildConfig.DEBUG); this also strips any
+# in bundled libraries.
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);

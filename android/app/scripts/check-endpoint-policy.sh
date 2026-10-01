@@ -27,5 +27,16 @@ expect ACCEPTED "localdev.crankUrl=ws://localhost:8787/ws" -Pheadsdown.localdev.
 expect REFUSED  "localdev.rpcUrl=http://192.168.1.5:8899" -Pheadsdown.localdev.rpcUrl=http://192.168.1.5:8899
 expect REFUSED  "localdev.rpcUrl=http://10.0.2.2:8899" -Pheadsdown.localdev.rpcUrl=http://10.0.2.2:8899
 expect REFUSED  "localdev.crankUrl=ws://127.0.0.1.nip.io:8787/ws" -Pheadsdown.localdev.crankUrl=ws://127.0.0.1.nip.io:8787/ws
+expect REFUSED  "registrarUrl=http://127.0.0.1:8790 (debug and release)" -Pheadsdown.registrarUrl=http://127.0.0.1:8790
+expect REFUSED  "indexerUrl with ?api-key=" "-Pheadsdown.indexerUrl=https://indexer.example.org/?api-key=x"
+expect ACCEPTED "registrarUrl= and indexerUrl= (disabled)" -Pheadsdown.registrarUrl= -Pheadsdown.indexerUrl=
+expect ACCEPTED "localdev.registrarUrl=http://127.0.0.1:8790" -Pheadsdown.localdev.registrarUrl=http://127.0.0.1:8790
+expect REFUSED  "localdev.indexerUrl=http://10.0.2.2:8788" -Pheadsdown.localdev.indexerUrl=http://10.0.2.2:8788
+# Clock-in policy for demo takes: checked at configuration time.
+expect ACCEPTED "policy: a 25-minute Day Shift, lease 3, 10 split tiles" -Pheadsdown.policy.mode=day -Pheadsdown.policy.windowMinutes=25 -Pheadsdown.policy.leaseRounds=3 -Pheadsdown.policy.splitTiles=10
+expect REFUSED  "policy.leaseRounds=4" -Pheadsdown.policy.leaseRounds=4
+expect REFUSED  "policy.planMaxEvCost above capMaxCost" -Pheadsdown.policy.planMaxEvCost=700000000 -Pheadsdown.policy.capMaxCost=600000000
+expect REFUSED  "policy.digLamports below 0.001 SOL" -Pheadsdown.policy.digLamports=500000
+expect REFUSED  "policy.mode=dusk" -Pheadsdown.policy.mode=dusk
 
 exit "$failures"

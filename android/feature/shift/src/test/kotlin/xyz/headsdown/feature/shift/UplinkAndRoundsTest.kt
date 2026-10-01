@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import xyz.headsdown.core.chain.uplink.AckReason
 import xyz.headsdown.core.chain.uplink.MessageUplink
 import xyz.headsdown.core.keys.CounterStore
 import xyz.headsdown.core.keys.DerSigner
@@ -36,6 +37,7 @@ class UplinkAndRoundsTest {
         var stopped = 0
         val sent = mutableListOf<String>()
         lateinit var onConnected: () -> Unit
+        lateinit var onText: (String) -> Unit
 
         override fun start() { started++ }
         override fun stop() { stopped++; connected = false }
@@ -64,7 +66,7 @@ class UplinkAndRoundsTest {
     fun `connected uplink receives the contract JSON and the log keeps a copy`() = runTest {
         val fake = FakeUplink()
         val log = mutableListOf<String>()
-        val sink = CrankHeartbeatSink({ cb -> fake.also { it.onConnected = cb } }, { log += it }, { currentTime }, backgroundScope)
+        val sink = CrankHeartbeatSink(UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { log += it }, { currentTime }, backgroundScope)
         sink.open()
         assertEquals(1, fake.started)
         fake.connect()
@@ -72,14 +74,82 @@ class UplinkAndRoundsTest {
         assertEquals(1, fake.sent.size)
         assertEquals(fake.sent, log)
         val o = Json.parseToJsonElement(fake.sent.single()).jsonObject
-        assertEquals(setOf("rig", "counter", "shift_id", "round_id", "lease_rounds", "sig"), o.keys)
+        assertEquals(setOf("type", "rig", "counter", "shift_id", "round_id", "lease_rounds", "sig64"), o.keys)
+        assertEquals("\"heartbeat\"", o["type"].toString())
+    }
+
+    @Test
+    fun `break and freeze go out as contract A frames the crank lands`() = runTest {
+        val fake = FakeUplink().also { it.connected = true }
+        val sink = CrankHeartbeatSink(UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { }, { currentTime }, backgroundScope)
+        sink.deliver(signer.shiftSignal(programId, rig, RigMessageKind.BREAK, 3uL, ShiftEndReason.UNLOCKED))
+        sink.deliver(signer.shiftSignal(programId, rig, RigMessageKind.FREEZE, 3uL, ShiftEndReason.FREEZE))
+        val (brk, frz) = fake.sent.map { Json.parseToJsonElement(it).jsonObject }
+        assertEquals("\"break\"", brk["type"].toString())
+        assertEquals("8", brk["reason"].toString())
+        assertEquals("\"freeze\"", frz["type"].toString())
+        assertEquals("3", frz["reason"].toString())
+        assertEquals(setOf("type", "rig", "counter", "shift_id", "reason", "sig64"), brk.keys)
+    }
+
+    @Test
+    fun `acks are matched to sent frames and refusals surface without secrets`() = runTest {
+        val fake = FakeUplink().also { it.connected = true }
+        val monitor = CrankLinkMonitor()
+        val logs = mutableListOf<String>()
+        var resyncs = 0
+        val sink = CrankHeartbeatSink(
+            UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { }, { currentTime }, backgroundScope,
+            monitor = monitor, wallClock = { 1_000L }, onStaleCounter = { resyncs++ }, debugLog = { logs += it },
+        )
+        assertTrue(monitor.status.value.configured)
+        val hb = heartbeat(round = 7uL)
+        sink.deliver(hb)
+        val c = hb.payload.counter
+        fake.onText("""{"type":"ack","counter":$c,"ok":true,"reason":"accepted"}""")
+        assertEquals(1, monitor.status.value.accepted)
+        assertFalse(monitor.status.value.refusing)
+        assertEquals(null, monitor.status.value.refusalLine())
+
+        val hb2 = heartbeat(round = 8uL)
+        sink.deliver(hb2)
+        fake.onText("""{"type":"ack","counter":"${hb2.payload.counter}","ok":false,"reason":"stale_counter"}""")
+        assertTrue(monitor.status.value.refusing)
+        assertEquals(AckReason.STALE_COUNTER, monitor.status.value.lastRejection!!.reason)
+        assertEquals("heartbeat", monitor.status.value.lastRejection!!.frame)
+        assertEquals(1, resyncs)
+        assertTrue(monitor.status.value.refusalLine()!!.contains("already used"))
+
+        val brk = signer.shiftSignal(programId, rig, RigMessageKind.BREAK, 3uL, ShiftEndReason.PICKUP)
+        sink.deliver(brk)
+        fake.onText("""{"type":"ack","counter":${brk.payload.counter},"ok":false,"reason":"bad_signature"}""")
+        assertEquals("break", monitor.status.value.lastRejection!!.frame)
+        assertTrue(monitor.status.value.refusalLine()!!.contains("does not match the rig key"))
+        assertEquals(1, resyncs)
+
+        // An ack for a counter this phone never sent, a status frame and garbage change nothing.
+        val before = monitor.status.value
+        fake.onText("""{"type":"ack","counter":999999,"ok":true,"reason":"accepted"}""")
+        fake.onText("""{"type":"status","round_id":1}""")
+        fake.onText("{not json")
+        assertEquals(before, monitor.status.value)
+        // Debug lines carry counters and codes only: never the frame, the rig or the signature.
+        assertTrue(logs.any { "stale_counter" in it } && logs.any { "bad_signature" in it })
+        val sig64 = java.util.Base64.getEncoder().encodeToString(brk.signature)
+        assertTrue(logs.none { sig64 in it || "sig64" in it || "{" in it })
+        // Every refusal line is honest copy.
+        val banned = Regex("(?i)\\b(earn|yield|stak|passive income|proof of focus)")
+        AckReason.entries.forEach { reason ->
+            val line = before.copy(lastAck = CrankAck(1uL, "heartbeat", reason == AckReason.ACCEPTED, reason, 0L)).refusalLine()
+            if (line != null) assertFalse(line, banned.containsMatchIn(line))
+        }
     }
 
     @Test
     fun `offline delivery fails fast, queues, and flushes only fresh messages on reconnect`() = runTest {
         val fake = FakeUplink()
         val log = mutableListOf<String>()
-        val sink = CrankHeartbeatSink({ cb -> fake.also { it.onConnected = cb } }, { log += it }, { currentTime }, backgroundScope)
+        val sink = CrankHeartbeatSink(UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { log += it }, { currentTime }, backgroundScope)
         sink.open()
         // Offline: the tick is undelivered, never blocked, never a crash.
         assertThrows(UplinkUnavailableException::class.java) { kotlinx.coroutines.runBlocking { sink.deliver(heartbeat(1uL, lease = 1)) } }
@@ -97,7 +167,7 @@ class UplinkAndRoundsTest {
     @Test
     fun `the queue is bounded and drops the oldest`() = runTest {
         val fake = FakeUplink()
-        val sink = CrankHeartbeatSink({ cb -> fake.also { it.onConnected = cb } }, { }, { currentTime }, backgroundScope, maxPending = 3)
+        val sink = CrankHeartbeatSink(UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { }, { currentTime }, backgroundScope, maxPending = 3)
         repeat(5) { i -> runCatching { sink.deliver(heartbeat(i.toULong() + 1uL, lease = 3)) } }
         assertEquals(3, sink.pendingCount)
         fake.connect()
@@ -107,7 +177,7 @@ class UplinkAndRoundsTest {
     @Test
     fun `close is graceful and a quick re-open cancels it`() = runTest {
         val fake = FakeUplink()
-        val sink = CrankHeartbeatSink({ cb -> fake.also { it.onConnected = cb } }, { }, { currentTime }, backgroundScope, closeGraceMillis = 5_000)
+        val sink = CrankHeartbeatSink(UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { }, { currentTime }, backgroundScope, closeGraceMillis = 5_000)
         sink.open()
         fake.connect()
         sink.close()
@@ -141,7 +211,7 @@ class UplinkAndRoundsTest {
     @Test
     fun `a failing local log never blocks delivery`() = runTest {
         val fake = FakeUplink().also { it.connected = true }
-        val sink = CrankHeartbeatSink({ cb -> fake.also { it.onConnected = cb } }, { throw IOException("disk full") }, { currentTime }, backgroundScope)
+        val sink = CrankHeartbeatSink(UplinkFactory { cb, text -> fake.also { it.onConnected = cb; it.onText = text } }, { throw IOException("disk full") }, { currentTime }, backgroundScope)
         sink.deliver(heartbeat(1uL))
         assertEquals(1, fake.sent.size)
     }

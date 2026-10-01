@@ -2,6 +2,8 @@ package xyz.headsdown.config
 
 import kotlinx.coroutines.CoroutineScope
 import okhttp3.OkHttpClient
+import xyz.headsdown.core.chain.http.JsonHttp
+import xyz.headsdown.core.chain.http.OkHttpJsonHttp
 import xyz.headsdown.core.chain.rpc.JsonRpcTransport
 import xyz.headsdown.core.chain.rpc.OkHttpJsonRpcTransport
 import xyz.headsdown.core.chain.uplink.CrankUplink
@@ -15,13 +17,30 @@ import xyz.headsdown.core.chain.uplink.MessageUplink
 interface EndpointTransports {
     fun rpc(url: String, client: OkHttpClient): JsonRpcTransport
 
-    fun uplink(url: String, client: OkHttpClient, scope: CoroutineScope, onConnected: () -> Unit): MessageUplink
+    /** JSON over HTTP(S) for the registrar and the indexer. */
+    fun http(url: String, client: OkHttpClient): JsonHttp
+
+    /** The crank intake (contract A): [onText] receives the crank's frames (acks). */
+    fun uplink(
+        url: String,
+        client: OkHttpClient,
+        scope: CoroutineScope,
+        onConnected: () -> Unit,
+        onText: (String) -> Unit,
+    ): MessageUplink
 }
 
 /** HTTPS JSON-RPC and the WSS crank uplink from core/chain, which refuse anything else. */
 object SecureTransports : EndpointTransports {
     override fun rpc(url: String, client: OkHttpClient): JsonRpcTransport = OkHttpJsonRpcTransport(url, client)
 
-    override fun uplink(url: String, client: OkHttpClient, scope: CoroutineScope, onConnected: () -> Unit): MessageUplink =
-        CrankUplink(url, client, scope, onConnected = onConnected)
+    override fun http(url: String, client: OkHttpClient): JsonHttp = OkHttpJsonHttp(url, client)
+
+    override fun uplink(
+        url: String,
+        client: OkHttpClient,
+        scope: CoroutineScope,
+        onConnected: () -> Unit,
+        onText: (String) -> Unit,
+    ): MessageUplink = CrankUplink(url, client, scope, onConnected = onConnected, onText = onText)
 }

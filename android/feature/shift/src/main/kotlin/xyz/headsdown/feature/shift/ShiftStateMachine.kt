@@ -60,7 +60,16 @@ data class Transition(
     val to: ShiftState,
     val signals: Signals,
     val effects: List<ShiftEffect>,
-)
+) {
+    /**
+     * The phone was picked up after going dark: lifted out of Down, unlocked, or the shift was
+     * ended by hand while running. Screen-on alone (a notification) is not a pickup.
+     */
+    val isPickup: Boolean
+        get() = effects.any { it is ShiftEffect.CoolingStarted && it.reason == CoolReason.LIFTED } ||
+            (to is ShiftState.Broken && from !is ShiftState.Broken && (to.reason == BreakReason.LIFTED || to.reason == BreakReason.UNLOCKED)) ||
+            (effects.any { it == ShiftEffect.ShiftEnded } && (from is ShiftState.Down || from is ShiftState.Cooling))
+}
 
 /**
  * The Heads Down shift lifecycle, as a pure, clock-injected state machine:
