@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    LOCALDEV BUILD TYPE ONLY: loopback cleartext for the local devstack (see the config), and the
-    rig debug screen (src/devtools) for scripts/devstack/clock-in.sh. Nothing here is exported.
+    DEBUG BUILD TYPE ONLY: the rig debug screen (src/devtools) for scripts/devstack/clock-in.sh.
+    Not exported. Release has no such activity (src/release has only a stub entry point).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application android:networkSecurityConfig="@xml/network_security_config_localdev">
+    <application>
         <activity
             android:name="xyz.headsdown.devtools.RigDebugActivity"
             android:exported="false"
