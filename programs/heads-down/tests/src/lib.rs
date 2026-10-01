@@ -126,11 +126,16 @@ pub enum Build {
     Devnet,
 }
 
-/// Path of the built `.so`.
+/// Path of the built `.so`. With `HD_SBF_ARCH=v3` the suite loads the
+/// SBPFv3 builds instead (`scripts/test-v3.sh`: `cargo build-sbf --arch v3`
+/// into `target/deploy-v3` and `target/deploy-devnet-v3`).
 pub fn so_path(build: Build) -> PathBuf {
-    let dir = match build {
-        Build::Mainnet => "deploy",
-        Build::Devnet => "deploy-devnet",
+    let v3 = std::env::var("HD_SBF_ARCH").is_ok_and(|a| a == "v3");
+    let dir = match (build, v3) {
+        (Build::Mainnet, false) => "deploy",
+        (Build::Devnet, false) => "deploy-devnet",
+        (Build::Mainnet, true) => "deploy-v3",
+        (Build::Devnet, true) => "deploy-devnet-v3",
     };
     root().join("target").join(dir).join("heads_down.so")
 }
