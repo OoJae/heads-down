@@ -1,7 +1,6 @@
 package xyz.headsdown.ml
 
 import android.content.res.AssetManager
-import kotlinx.serialization.SerializationException
 import xyz.headsdown.ml.pickup.FailClosedPickupClassifier
 import xyz.headsdown.ml.pickup.LiteRtPickupBackend
 import xyz.headsdown.ml.pickup.ModelPickupClassifier
@@ -39,13 +38,14 @@ object ForemanModels {
 
     fun shiftPlanner(assets: AssetManager): ShiftPlanner = shiftPlanner(assets.readText(PLANNER_PARAMS_ASSET))
 
+    /**
+     * Any failure to read the model means "no model": the caller then fails closed. A model file
+     * is never worth a crash in the shift service, so every exception counts, not only the ones
+     * the parser is known to throw (kotlinx's SerializationException is one of them).
+     */
     private fun parseOrNull(json: String): PickupModelDocument? = try {
         PickupModelDocument.parse(json)
-    } catch (e: IllegalArgumentException) {
-        null
-    } catch (e: SerializationException) {
-        null
-    } catch (e: IllegalStateException) {
+    } catch (e: RuntimeException) {
         null
     }
 
