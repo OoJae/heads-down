@@ -13,6 +13,10 @@ costs are in [`docs/DEPLOY.md`](../../docs/DEPLOY.md#5-railway).
 | `dashboard` | `/deploy/railway/dashboard/railway.json` | Next static export → node 26 alpine + `server.mjs`, `USER node` | 8080 | `/healthz` | none | none (`NEXT_PUBLIC_HD_API_BASE` is public, build time) |
 | `Postgres` | Railway's PostgreSQL template ([postgres/README.md](postgres/README.md)) | Railway-managed | 5432 (private) | Railway | Railway-managed | Railway-generated |
 
+Start commands come from the images (ENTRYPOINT/CMD), so `railway.json` sets none: leave the
+service's Custom Start Command empty, because one would replace the crank's and the
+registrar's entrypoint.
+
 Key handling (crank and registrar): the keypair JSON arrives as a sealed variable; the
 entrypoint checks its shape without printing it, writes it to a `0600` file in a private `0700`
 directory on tmpfs (`/dev/shm`), unsets the variable, starts the service as uid 10001 with
