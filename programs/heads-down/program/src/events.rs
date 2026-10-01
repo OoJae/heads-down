@@ -16,7 +16,8 @@
 //! | 9 | ShiftBroken | rig 32, shift_id u64, reason u8 | 42 |
 //! | 10 | ShiftEndedV2 | ShiftEnded's fields, then start_round u64, end_round u64, mode u8 | 83 |
 //!
-//! v1.2 (SKR), additive: tags 11..=23, see [`tag`] and `INTERFACE.md` §11.6.
+//! v1.2 (SKR), additive: tags 11..=23, see [`tag`] and `INTERFACE.md` §11.9.
+//! v1.3, additive: tags 24..=27 (governance rotation, ShiftLog close), §12.9.
 //!
 //! A tag's length never changes: the indexer decodes by exact length, so no
 //! field is ever appended to an existing tag. `ShiftEnded` (tag 4) is still
@@ -74,12 +75,21 @@ pub mod tag {
     pub const BURY_LOT_ADDED: u8 = 22;
     /// BuryAuctionSold (v1.2): ORE paid, buried through ORE `bury`, SKR sold.
     pub const BURY_AUCTION_SOLD: u8 = 23;
+    /// GovernanceProposed (v1.3): a timelocked governance rotation started.
+    pub const GOVERNANCE_PROPOSED: u8 = 24;
+    /// GovernanceAccepted (v1.3): the new governance took over.
+    pub const GOVERNANCE_ACCEPTED: u8 = 25;
+    /// GovernanceCancelled (v1.3): the pending rotation was dropped.
+    pub const GOVERNANCE_CANCELLED: u8 = 26;
+    /// ShiftLogClosed (v1.3): a sealed log's rent went back to its payer.
+    pub const SHIFT_LOG_CLOSED: u8 = 27;
 }
 
 /// Exact byte length of each event, tag byte included (index = tag; 0 unused).
-pub const LEN: [usize; 24] = [
+pub const LEN: [usize; 28] = [
     0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83, // v1.1
     103, 138, 85, 67, 106, 113, 81, 82, 114, 74, 73, 66, 81, // v1.2 (SKR)
+    73, 65, 65, 81, // v1.3
 ];
 
 /// `StackClaimed.kind`: a settled payout.
@@ -581,6 +591,55 @@ pub fn bury_auction_sold_bytes(buyer: &Address, s: &BurySale) -> [u8; 81] {
         .done()
 }
 
+// ---- v1.3 encoders ----------------------------------------------------------------
+
+/// GovernanceProposed bytes: `governance (current) · pending_governance ·
+/// eta_slot u64`.
+pub fn governance_proposed_bytes(
+    governance: &Address,
+    pending: &[u8; 32],
+    eta_slot: u64,
+) -> [u8; 73] {
+    Buf::<73>::new(tag::GOVERNANCE_PROPOSED)
+        .put(governance.as_ref())
+        .put(pending)
+        .put(&eta_slot.to_le_bytes())
+        .done()
+}
+
+/// GovernanceAccepted bytes: `governance (the new one) · previous governance`.
+pub fn governance_accepted_bytes(governance: &Address, previous: &[u8; 32]) -> [u8; 65] {
+    Buf::<65>::new(tag::GOVERNANCE_ACCEPTED)
+        .put(governance.as_ref())
+        .put(previous)
+        .done()
+}
+
+/// GovernanceCancelled bytes: `governance (current) · the pending governance
+/// that was dropped`.
+pub fn governance_cancelled_bytes(governance: &Address, cancelled: &[u8; 32]) -> [u8; 65] {
+    Buf::<65>::new(tag::GOVERNANCE_CANCELLED)
+        .put(governance.as_ref())
+        .put(cancelled)
+        .done()
+}
+
+/// ShiftLogClosed bytes: `shift_log · rig · shift_id u64 · lamports u64 (the
+/// rent returned)`.
+pub fn shift_log_closed_bytes(
+    shift_log: &Address,
+    rig: &[u8; 32],
+    shift_id: u64,
+    lamports: u64,
+) -> [u8; 81] {
+    Buf::<81>::new(tag::SHIFT_LOG_CLOSED)
+        .put(shift_log.as_ref())
+        .put(rig)
+        .put(&shift_id.to_le_bytes())
+        .put(&lamports.to_le_bytes())
+        .done()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,5 +734,27 @@ mod tests {
         assert_eq!(&c[81..85], &42u32.to_le_bytes());
         let s = bury_auction_sold_bytes(&a, &sale);
         assert_eq!(&s[73..81], &6u64.to_le_bytes());
+    }
+
+    #[test]
+    fn every_v13_encoder_fills_its_declared_length_exactly() {
+        let a = Address::new_from_array([7; 32]);
+        let all: [&[u8]; 4] = [
+            &governance_proposed_bytes(&a, &[9; 32], 0x0102),
+            &governance_accepted_bytes(&a, &[9; 32]),
+            &governance_cancelled_bytes(&a, &[9; 32]),
+            &shift_log_closed_bytes(&a, &[9; 32], 0x0304, 0x0506),
+        ];
+        for (i, bytes) in all.iter().enumerate() {
+            let t = i + 24;
+            assert_eq!(usize::from(bytes[0]), t);
+            assert_eq!(bytes.len(), LEN[t], "tag {t}");
+            assert_eq!(&bytes[1..33], a.as_ref(), "tag {t} starts with its subject");
+            assert_eq!(&bytes[33..65], &[9; 32], "tag {t}: second address");
+        }
+        assert_eq!(&all[0][65..73], &0x0102u64.to_le_bytes());
+        assert_eq!(&all[3][65..73], &0x0304u64.to_le_bytes());
+        assert_eq!(&all[3][73..81], &0x0506u64.to_le_bytes());
+        assert_eq!(LEN.len(), 28, "tags 1..=27");
     }
 }

@@ -39,9 +39,11 @@ use solana_transaction::Transaction;
 pub use solana_transaction_error::TransactionError;
 
 pub mod skr;
+pub mod v13;
 pub mod vectors;
 
 pub use skr::*;
+pub use v13::*;
 
 // ---- ids --------------------------------------------------------------------
 
@@ -529,6 +531,40 @@ pub enum Event {
         /// Lot left.
         lot_remaining: u64,
     },
+    /// GovernanceProposed (v1.3).
+    GovernanceProposed {
+        /// The current governance (signer).
+        governance: Address,
+        /// The proposed successor.
+        pending: Address,
+        /// First slot it may accept.
+        eta_slot: u64,
+    },
+    /// GovernanceAccepted (v1.3).
+    GovernanceAccepted {
+        /// The new governance (signer).
+        governance: Address,
+        /// The one it replaced.
+        previous: Address,
+    },
+    /// GovernanceCancelled (v1.3).
+    GovernanceCancelled {
+        /// The current governance (signer).
+        governance: Address,
+        /// The successor that was dropped.
+        cancelled: Address,
+    },
+    /// ShiftLogClosed (v1.3).
+    ShiftLogClosed {
+        /// The closed ShiftLog.
+        shift_log: Address,
+        /// Its rig.
+        rig: Address,
+        /// Its shift.
+        shift_id: u64,
+        /// Rent returned.
+        lamports: u64,
+    },
 }
 
 fn addr_at(d: &[u8], off: usize) -> Address {
@@ -692,6 +728,25 @@ fn decode_event(d: &[u8]) -> Option<Event> {
             ore_burned: u64_at(d, 57),
             ore_shared: u64_at(d, 65),
             lot_remaining: u64_at(d, 73),
+        },
+        (&tag::GOVERNANCE_PROPOSED, 73) => Event::GovernanceProposed {
+            governance: addr_at(d, 1),
+            pending: addr_at(d, 33),
+            eta_slot: u64_at(d, 65),
+        },
+        (&tag::GOVERNANCE_ACCEPTED, 65) => Event::GovernanceAccepted {
+            governance: addr_at(d, 1),
+            previous: addr_at(d, 33),
+        },
+        (&tag::GOVERNANCE_CANCELLED, 65) => Event::GovernanceCancelled {
+            governance: addr_at(d, 1),
+            cancelled: addr_at(d, 33),
+        },
+        (&tag::SHIFT_LOG_CLOSED, 81) => Event::ShiftLogClosed {
+            shift_log: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            shift_id: u64_at(d, 65),
+            lamports: u64_at(d, 73),
         },
         _ => return None,
     })

@@ -11,7 +11,10 @@
 //! semantics, errors, events) is `INTERFACE.md` v1.1, frozen from this code,
 //! plus the additive v1.2 SKR section (§11: Stack, Focus Bond, Gift a Rig,
 //! Bury auction; tags 15..=27, accounts 5..=9, events 11..=23, errors
-//! 32..=48); `vectors/` is its machine-checked form (generated from LiteSVM
+//! 32..=48) and the additive v1.3 hardening section (§12: governance
+//! rotation, the Rig tombstone, ShiftLog rent recovery, attestation at every
+//! attested check-in; tags 28..=31, account 10, events 24..=27, errors
+//! 49..=50); `vectors/` is its machine-checked form (generated from LiteSVM
 //! runs); the audit checklist is in `README.md`.
 //!
 //! Pinocchio 0.11, `no_std` on SBF, no allocator, one audited `unsafe`
@@ -154,6 +157,15 @@ pub mod tag {
     pub const INIT_BURY_VAULT: u8 = 26;
     /// bury_auction_buy.
     pub const BURY_AUCTION_BUY: u8 = 27;
+    // ---- v1.3 (hardening), additive ----
+    /// propose_governance.
+    pub const PROPOSE_GOVERNANCE: u8 = 28;
+    /// accept_governance.
+    pub const ACCEPT_GOVERNANCE: u8 = 29;
+    /// cancel_governance.
+    pub const CANCEL_GOVERNANCE: u8 = 30;
+    /// close_shift_log.
+    pub const CLOSE_SHIFT_LOG: u8 = 31;
 }
 
 #[cfg(all(target_os = "solana", not(feature = "no-entrypoint")))]
