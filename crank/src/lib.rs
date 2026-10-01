@@ -20,7 +20,7 @@
 //! | [`tx`], [`alt`] | batched v0 (+ lookup table) / v1 / legacy transactions, packed under the size limit |
 //! | [`sender`], [`ledger`] | submit, confirm, retry with a fresh blockhash, idempotent per (rig, round) |
 //! | [`breaker`], [`metrics`] | circuit breaker on ORE layout drift; Prometheus text metrics |
-//! | [`crank`] | the loop: digs, `record_heartbeats`, BREAK / FREEZE landing |
+//! | [`crank`] | the loop: digs, `record_heartbeats`, BREAK / FREEZE landing, permissionless `end_shift` |
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

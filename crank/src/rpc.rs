@@ -385,6 +385,14 @@ impl RpcClient {
         }))
     }
 
+    /// `getMinimumBalanceForRentExemption`.
+    pub async fn get_minimum_balance_for_rent_exemption(&self, len: usize) -> Result<u64, RpcError> {
+        self.call("getMinimumBalanceForRentExemption", json!([len, { "commitment": self.commitment }]))
+            .await?
+            .as_u64()
+            .ok_or_else(|| RpcError::Decode("rent".into()))
+    }
+
     /// `getRecentPrioritizationFees` for the accounts a dig write-locks.
     pub async fn get_recent_prioritization_fees(&self, accounts: &[Address]) -> Result<Vec<u64>, RpcError> {
         let ks: Vec<String> = accounts.iter().map(ToString::to_string).collect();
@@ -433,6 +441,15 @@ pub fn rig_filters(state: hd::RigState) -> Vec<Filter> {
     ]
 }
 
+/// Filters for the Rigs with an open shift (`shift_open == 1` at offset 336).
+pub fn open_shift_filters() -> Vec<Filter> {
+    vec![
+        Filter::DataSize(hd::RIG_LEN as u64),
+        Filter::Memcmp { offset: 0, bytes: vec![hd::TAG_RIG, hd::ACCOUNT_VERSION] },
+        Filter::Memcmp { offset: hd::RIG_SHIFT_OPEN_OFFSET, bytes: vec![1] },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,6 +490,12 @@ mod tests {
         assert_eq!(priority_fee_from_samples(vec![0, 10, 20, 30, 40], 50, 0, 1_000), 20);
         assert_eq!(priority_fee_from_samples(vec![5, 1_000_000], 100, 0, 50_000), 50_000);
         assert_eq!(priority_fee_from_samples(vec![0, 0, 0], 90, 1_000, 50_000), 1_000);
+    }
+
+    #[test]
+    fn open_shift_filter_targets_shift_open() {
+        let f = open_shift_filters();
+        assert_eq!(f[2], Filter::Memcmp { offset: 336, bytes: vec![1] });
     }
 
     #[test]

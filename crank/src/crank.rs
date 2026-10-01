@@ -7,7 +7,8 @@
 //!            │     → getMultipleAccounts(Automations, Miners, Executor) → planner
 //!            │     → pack → [simulate → size CU | bisect on failure] → sign → send
 //!            │     → ledger (rig, round) pending → confirm task → events → ledger / metrics
-//!            └─► (delay after the round starts) record pass: focus-only rigs → record_heartbeats
+//!            ├─► (delay after the round starts) record pass: focus-only rigs → record_heartbeats
+//!            └─► every end_shift.poll_secs: permissionless end_shift for stale shifts
 //! intake ──► SignalHub ──► signal lander: phone-signed BREAK / FREEZE → break_shift / freeze_rig
 //! ```
 //!
@@ -53,6 +54,10 @@ pub const MAX_ALT_TXS_PER_ROUND: usize = 4;
 pub const MAX_SWEEP_TXS: usize = 5;
 /// Record transactions per round at most.
 pub const MAX_RECORD_TXS_PER_ROUND: usize = 8;
+/// Do not retry `end_shift` for the same (rig, shift) within this long.
+pub const END_SHIFT_RETRY_AFTER: Duration = Duration::from_secs(600);
+/// ShiftLog rent at the default rent parameters, used if RPC cannot tell.
+pub const SHIFT_LOG_RENT_FALLBACK: u64 = 1_781_760;
 
 fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -199,6 +204,9 @@ pub struct Crank {
     nonce: AtomicU64,
     alt_sync: tokio::sync::Mutex<()>,
     record_budget: FeeBudget,
+    end_shift_budget: FeeBudget,
+    end_shift_tried: Mutex<HashMap<(Address, u64), Instant>>,
+    shift_log_rent: AtomicU64,
 }
 
 impl Crank {
@@ -219,6 +227,7 @@ impl Crank {
         let program_id = cfg.program_id();
         Arc::new(Crank {
             record_budget: FeeBudget::new(cfg.record.max_lamports_per_hour, Duration::from_secs(3600)),
+            end_shift_budget: FeeBudget::new(cfg.end_shift.max_lamports_per_day, Duration::from_secs(86_400)),
             cfg,
             program_id,
             rpc,
@@ -236,6 +245,8 @@ impl Crank {
             rig_seed,
             nonce: AtomicU64::new(0),
             alt_sync: tokio::sync::Mutex::new(()),
+            end_shift_tried: Mutex::new(HashMap::new()),
+            shift_log_rent: AtomicU64::new(0),
         })
     }
 
@@ -259,6 +270,9 @@ impl Crank {
         tokio::spawn(self.clone().poll_loop());
         if let Some(rx) = self.signals.take_receiver() {
             tokio::spawn(self.clone().signal_loop(rx));
+        }
+        if self.cfg.end_shift.enabled {
+            tokio::spawn(self.clone().end_shift_loop());
         }
         let mut chain = self.chain.clone();
         let mut current_round = 0u64;
@@ -843,6 +857,106 @@ impl Crank {
             });
         }
         Ok(())
+    }
+
+    // ---- permissionless end_shift -----------------------------------------------------------
+
+    async fn end_shift_loop(self: Arc<Self>) {
+        let every = Duration::from_secs(self.cfg.end_shift.poll_secs.max(1));
+        loop {
+            tokio::time::sleep(every).await;
+            if self.breaker.is_tripped() {
+                continue;
+            }
+            if let Err(e) = self.end_shift_sweep().await {
+                tracing::warn!(error = %e, "end_shift sweep failed");
+            }
+        }
+    }
+
+    async fn shift_log_rent(&self) -> u64 {
+        let cached = self.shift_log_rent.load(Ordering::Relaxed);
+        if cached != 0 {
+            return cached;
+        }
+        let rent = self.rpc.get_minimum_balance_for_rent_exemption(hd::SHIFT_LOG_LEN).await.unwrap_or(SHIFT_LOG_RENT_FALLBACK);
+        self.shift_log_rent.store(rent, Ordering::Relaxed);
+        rent
+    }
+
+    /// Seal shifts whose window has passed and whose lease has expired (INTERFACE §5 `end_shift`:
+    /// anyone may, and pays the ShiftLog rent). At most `max_per_pass` per pass, within the
+    /// daily lamport budget, oldest window first; a failing (rig, shift) is left alone for 10 min.
+    pub async fn end_shift_sweep(&self) -> anyhow::Result<usize> {
+        let c = &self.cfg.end_shift;
+        let Some(board) = self.chain.borrow().board else { return Ok(0) };
+        let now = unix_now();
+        let mut due: Vec<(Address, Rig)> = self
+            .rpc
+            .get_program_accounts(&self.program_id, &rpc::open_shift_filters())
+            .await?
+            .into_iter()
+            .filter_map(|(a, acc)| Rig::decode(&self.program_id, &acc.owner, &acc.data).ok().map(|r| (a, r)))
+            .filter(|(_, r)| r.shift_open && now > r.plan_window_end_ts.saturating_add(c.grace_secs) && r.lease_to_round < board.round_id)
+            .collect();
+        {
+            let mut tried = lock(&self.end_shift_tried);
+            tried.retain(|_, at| at.elapsed() < END_SHIFT_RETRY_AFTER);
+            due.retain(|(a, r)| !tried.contains_key(&(*a, r.shift_id)));
+        }
+        due.sort_by_key(|(_, r)| r.plan_window_end_ts);
+        let rent = self.shift_log_rent().await;
+        let price = self.cfg.dig.cu_price_micro_lamports;
+        let mut ended = 0usize;
+        for (rig, r) in due.into_iter().take(c.max_per_pass) {
+            let cost = rent.saturating_add(tx::fee_for(0, c.cu_limit, price, tx::LAMPORTS_PER_SIGNATURE));
+            if !self.end_shift_budget.try_take(cost) {
+                self.metrics.end_shift_failed.inc("budget");
+                tracing::warn!(%rig, cost, "end_shift budget spent for today");
+                break;
+            }
+            lock(&self.end_shift_tried).insert((rig, r.shift_id), Instant::now());
+            let ixs = tx::end_shift_instructions(&self.program_id, &self.cranker(), &rig, r.shift_id, c.cu_limit, price);
+            match self.send_signed(&ixs).await {
+                Ok((sig, Outcome::Landed { err: None, slot })) => {
+                    ended += 1;
+                    self.metrics.shifts_ended.inc();
+                    self.metrics.end_shift_lamports.add(cost);
+                    tracing::info!(%sig, slot, %rig, shift = r.shift_id, rent, "ended a stale shift (permissionless)");
+                }
+                Ok((sig, other)) => {
+                    self.end_shift_budget.refund(rent);
+                    self.metrics.end_shift_failed.inc("onchain");
+                    tracing::warn!(%sig, %rig, shift = r.shift_id, outcome = ?other, "end_shift did not land");
+                }
+                Err(e) => {
+                    self.end_shift_budget.refund(cost);
+                    self.metrics.end_shift_failed.inc("send");
+                    tracing::warn!(%rig, error = %e, "end_shift failed");
+                }
+            }
+        }
+        Ok(ended)
+    }
+
+    /// Sign `ixs` (legacy, crank pays), simulate, send, confirm.
+    async fn send_signed(&self, ixs: &[Instruction]) -> anyhow::Result<(String, Outcome)> {
+        let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
+        let t = tx::sign_legacy(ixs, self.key.keypair(), bh)?;
+        let wire = tx::serialize(&t)?;
+        let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
+        let sim = self.rpc.simulate_transaction(&wire).await?;
+        if let Some(err) = sim.err {
+            let tail: Vec<&String> = sim.logs.iter().rev().take(4).collect();
+            anyhow::bail!("simulation failed: {err} {tail:?}");
+        }
+        self.submitter.send(&wire).await?;
+        self.metrics.txs_sent.inc();
+        let out = self.submitter.confirm(&sig, &wire, lvbh, ConfirmPolicy::default()).await;
+        if matches!(out, Outcome::Landed { err: None, .. }) {
+            self.metrics.txs_confirmed.inc();
+        }
+        Ok((sig, out))
     }
 
     // ---- maintenance ---------------------------------------------------------------------

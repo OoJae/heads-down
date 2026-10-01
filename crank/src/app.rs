@@ -173,5 +173,7 @@ pub async fn check(cfg: Config) -> anyhow::Result<()> {
     for (a, s) in &plan.skips {
         println!("  skip {a} {}", s.label());
     }
+    let open = rpc.get_program_accounts(&program_id, &crate::rpc::open_shift_filters()).await?.len();
+    println!("open shifts    {open}");
     Ok(())
 }

@@ -92,3 +92,11 @@ max_rigs_per_tx = 8
 max_lamports_per_hour = 2000000    # ~6,300 lamports per recorded rig, not reimbursed
 cu_base = 3000                     # measured: ~1,500 CU per rig
 cu_per_rig = 4000
+
+[end_shift]                        # permissionless end_shift: window over and lease expired
+enabled = true
+grace_secs = 60                    # after plan_window_end_ts
+max_per_pass = 4
+max_lamports_per_day = 50000000    # ShiftLog rent 1,781,760 + fee each: ~27 shifts per day
+poll_secs = 60
+cu_limit = 15000                   # measured: 5,195 CU

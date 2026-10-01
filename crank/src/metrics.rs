@@ -122,6 +122,9 @@ pub struct Metrics {
     pub record_dark_rounds: Counter,
     pub record_skipped: LabeledCounter,
     pub record_fees_lamports: Counter,
+    pub shifts_ended: Counter,
+    pub end_shift_failed: LabeledCounter,
+    pub end_shift_lamports: Counter,
 }
 
 fn counter(out: &mut String, name: &str, help: &str, v: u64) {
@@ -186,6 +189,9 @@ impl Metrics {
         counter(&mut o, "hd_crank_record_dark_rounds_total", "Dark rounds added by recorded heartbeats", self.record_dark_rounds.get());
         labeled(&mut o, "hd_crank_record_skipped_total", "Rigs not recorded this round, by reason", "reason", &self.record_skipped);
         counter(&mut o, "hd_crank_record_fees_lamports_total", "Fees paid for record_heartbeats", self.record_fees_lamports.get());
+        counter(&mut o, "hd_crank_shifts_ended_total", "Shifts sealed by the crank's permissionless end_shift", self.shifts_ended.get());
+        labeled(&mut o, "hd_crank_end_shift_failed_total", "end_shift attempts that did not land, by stage", "stage", &self.end_shift_failed);
+        counter(&mut o, "hd_crank_end_shift_lamports_total", "ShiftLog rent + fees paid for end_shift", self.end_shift_lamports.get());
         o
     }
 }
