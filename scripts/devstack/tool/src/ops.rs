@@ -411,10 +411,12 @@ pub async fn init(o: InitOpts) -> Result<()> {
     receipt["executor_float_target"] = json!(float_target);
     if have < float_target {
         let top_up = float_target - have;
-        println!(
-            "init: Executor PDA {ex} holds {have} lamports; target {float_target} = rent-exempt(0) {rent0} + reserve {EXECUTOR_RESERVE}{}",
-            if o.executor_float.is_none() { format!(" + {} x crank_fee", o.crank_reserve_digs) } else { " (explicit)".to_string() }
-        );
+        let why = if o.executor_float.is_none() {
+            format!("= rent-exempt(0) {rent0} + reserve {EXECUTOR_RESERVE} + {} x crank_fee", o.crank_reserve_digs)
+        } else {
+            "(--executor-float)".to_string()
+        };
+        println!("init: Executor PDA {ex} holds {have} lamports; target {float_target} {why}");
         require_yes(o.cluster, o.yes, "the Executor float transfer")?;
         let ix = hd_crank::tx::system_transfer(&auth.pubkey(), &ex, top_up);
         let l = chain.send_budgeted(&auth, &[ix], o.cu_price).await?;
