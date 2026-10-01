@@ -13,6 +13,7 @@
 
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use hd_crank::hd::{self, HdConfig};
@@ -29,7 +30,7 @@ use solana_signer::Signer;
 
 use crate::cluster::{self, Cluster};
 use crate::hd as hdix;
-use crate::util::{read_keypair, rfc3339, sol, unix_now, Chain, Landed};
+use crate::util::{read_keypair, rfc3339, sol, unix_now, wait_for, Chain, Landed};
 
 /// SIMD-0500: "Disable deployment of SBPF v0, v1 and v2 programs".
 pub const SIMD_0500: Address = Address::from_str_const("B8JJXCy5amZyWG9r7EnUYLwzXSXTxG7GZ1qZ1qggo83g");
@@ -310,15 +311,22 @@ pub async fn init(o: InitOpts) -> Result<()> {
     }
     // The signer must be the upgrade authority recorded in ProgramData (the program checks it
     // too; checking first gives a clear message instead of `Unauthorized`).
-    match program_state(&chain, &hd::PROGRAM_ID).await? {
-        ProgramState::Deployed { authority: Some(a), .. } if a == auth.pubkey() => {}
+    let deploy_slot = match program_state(&chain, &hd::PROGRAM_ID).await? {
+        ProgramState::Deployed { authority: Some(a), slot, .. } if a == auth.pubkey() => slot,
         ProgramState::Deployed { authority: Some(a), .. } => {
             bail!("the upgrade authority is {a}, not the signer {}: only it can initialize the Config", auth.pubkey())
         }
         ProgramState::Deployed { authority: None, .. } => bail!("heads_down is immutable: initialize_config cannot run"),
         ProgramState::Absent => bail!("heads_down is not deployed at {} on this cluster", hd::PROGRAM_ID),
         ProgramState::Other(why) => bail!("{}: {why}", hd::PROGRAM_ID),
-    }
+    };
+    // A program becomes callable in the slot after its deploy; right after deploy.sh the
+    // cluster (or a load-balanced RPC node behind it) may not be there yet.
+    let callable = deploy_slot.saturating_add(2);
+    wait_for("heads_down to become callable", Duration::from_secs(60), Duration::from_millis(400), || async {
+        Ok((chain.slot().await? >= callable).then_some(()))
+    })
+    .await?;
     let rent0 = chain.rent(0).await?;
     let float_target = o.executor_float.unwrap_or_else(|| default_float(rent0, o.crank_fee, o.crank_reserve_digs));
     let layout = heads_down::ore::layout_hash();
@@ -371,7 +379,7 @@ pub async fn init(o: InitOpts) -> Result<()> {
             println!("  ore_layout_hash    {}", hex::encode(layout));
             require_yes(o.cluster, o.yes, "initialize_config")?;
             let ix = hdix::initialize_config_ix(&auth.pubkey(), &o.governance, &o.registrar, o.crank_fee, o.executor_fee, o.bury_bps);
-            let l = chain.send_budgeted(&auth, &[ix], o.cu_price).await?;
+            let l = send_when_deployed(&chain, &auth, &ix, o.cu_price).await?;
             let (c, _) = read_config(&chain).await?.ok_or_else(|| anyhow!("Config missing after initialize_config"))?;
             let ok = c.governance == o.governance
                 && c.registrar == o.registrar
@@ -425,6 +433,21 @@ pub async fn init(o: InitOpts) -> Result<()> {
         println!("init: receipt {}", p.display());
     }
     Ok(())
+}
+
+/// `send_budgeted`, retried while a simulation still reports the program as not deployed (an
+/// RPC node that has not reached the slot after the deploy yet). Any other error is final.
+async fn send_when_deployed(chain: &Chain, payer: &Keypair, ix: &solana_instruction::Instruction, cu_price: u64) -> Result<Landed> {
+    let mut attempt = 0;
+    loop {
+        match chain.send_budgeted(payer, std::slice::from_ref(ix), cu_price).await {
+            Err(e) if attempt < 10 && e.to_string().contains("Program is not deployed") => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            other => return other,
+        }
+    }
 }
 
 async fn landed_json(chain: &Chain, l: &Landed) -> Value {
