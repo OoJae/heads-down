@@ -2,6 +2,12 @@
 # Secrets never go here: the keypair is a path (or HD_CRANK_KEYPAIR), and the Helius key
 # comes only from the HELIUS_API_KEY environment variable via the {HELIUS_API_KEY} placeholder.
 # A URL with a literal api-key= value is refused.
+#
+# Every setting below can also be set by an environment variable, which wins over this file:
+# HD_CRANK_<SECTION>_<FIELD> in upper case (stack.max_lamports_per_hour is
+# HD_CRANK_STACK_MAX_LAMPORTS_PER_HOUR; top-level settings have no section: HD_CRANK_LISTEN).
+# `hd-crank config --env` lists them all with their defaults; `hd-crank config` prints the
+# effective configuration without anything secret.
 
 rpc_url = "https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"   # default: api.mainnet-beta.solana.com
 # ws_url = "wss://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"   # default: derived from rpc_url
@@ -9,8 +15,9 @@ commitment = "confirmed"
 # keypair_path = "/home/crank/.config/hd-crank/id.json"                # chmod 600; or --keypair / HD_CRANK_KEYPAIR
 program_id = "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
 listen = "0.0.0.0:8787"            # /ws (alias /v1/heartbeats: contract A frames), /healthz, /metrics
-state_dir = ".hd-crank"           # remembers the crank's lookup tables
+state_dir = ".hd-crank"           # remembers the crank's lookup tables and what each Stack table has cost
 log_json = false
+shutdown_grace_secs = 8            # on SIGTERM / SIGINT: wait this long for sent transactions and queued BREAK / FREEZE
 
 [dig]
 enabled = true
@@ -82,6 +89,8 @@ cu_price_micro_lamports = 20000    # land within a slot or two
 simulate = true                    # a signal the program would refuse is not sent
 max_attempts = 3                   # fresh blockhash when one expires unconfirmed
 queue = 256
+streak_protection = true           # a BREAK for a rig whose plan window already ended is not landed (ack lease_invalid)
+window_margin_secs = 5             # ...nor one that could land after the window: now + margin must be <= plan_window_end_ts
 
 [record]                           # record_heartbeats for focus-only rigs (plan_flags bit 0)
 enabled = true
@@ -100,3 +109,42 @@ max_per_pass = 4
 max_lamports_per_day = 50000000    # ShiftLog rent 1,781,760 + fee each: ~27 shifts per day
 poll_secs = 60
 cu_limit = 15000                   # measured: 5,195 CU
+
+[stack]                            # stack_checkin every round for every seat of an open table, then settle_stack
+enabled = true                     # nothing reimburses these: a table carries no crank tip, the crank pays
+discover_secs = 30                 # full getProgramAccounts refresh (program events and opening windows refresh sooner)
+pass_interval_ms = 1500            # re-read and re-plan the pending seats of the live round
+batch_wait_ms = 6000               # wait this long into a round for every seat's heartbeat before a partial batch
+straggler_wait_ms = 3000           # minimum gap between two partial batches of one table
+late_slots = 40                    # with this few slots left in the round, send whatever is ready
+retry_after_slots = 8              # re-plan a check-in that is unconfirmed after this many slots
+max_attempts_per_round = 4         # transactions per (seat, round); Stack is fail-closed, so retries are generous
+max_seats_per_tx = 8               # a packet holds 3 verified seats legacy, 4 with the lookup table, 8 observed
+max_tables = 64                    # open tables tracked at most, largest total bonds first
+max_txs_per_pass = 16
+simulate = true                    # sizes the CU limit; a check-in the program would fail is not paid for
+cu_base = 4000                     # estimate when not simulating (measured: 7,000 CU for 3 verified, 9,046 for 8 observed)
+cu_per_verify = 3500
+cu_per_observe = 2000
+cu_price_micro_lamports = 10000    # check-ins and settles outbid the dig floor
+max_lamports_per_table = 100000000 # 0.1 SOL: above the largest table the program allows (8 seats x 1,440 rounds = 0.081 SOL); 0 = no cap
+max_lamports_per_hour = 10000000   # 0.01 SOL per hour = about 26 seated rigs at 6,300 lamports per seat-round. Size it for your tables.
+mark_broken = true                 # record a seat's break at the table when a check-in is going out anyway
+settle = true                      # settle_stack once Board.round_id > end_round
+settle_cu_limit = 40000            # measured: 5,413 CU (3 seats, with the Bury transfer), 5,550 (8 seats)
+settle_retry_secs = 30
+settle_max_attempts = 6
+init_bury_vault = true             # create the Bury vault + its SKR account when a settle or forfeit needs them (once: 0.00427 SOL)
+
+[cleanup]                          # permissionless cleanups: the crank gains nothing and pays the fee
+enabled = true
+poll_secs = 300
+forfeit_focus_bonds = true         # forfeit_focus_bond for bonds whose shift sealed broken (SKR to the Bury lot, rents to the owner)
+forfeit_abandoned_bonds = true     # ...and for bonds whose rig was closed while the bonded shift was open
+refund_gifts = true                # refund_gift once a gift is past expiry_ts (lamports and rent to the sender)
+gift_grace_secs = 60               # after expiry_ts, by the cluster clock
+max_per_pass = 4
+max_lamports_per_day = 2000000     # about 5,030 lamports per forfeit, 5,005 per refund
+forfeit_cu_limit = 30000           # measured: 6,551 to 7,919 CU
+refund_cu_limit = 5000             # measured: 995 CU
+retry_secs = 600                   # leave a bond or gift that failed alone for this long

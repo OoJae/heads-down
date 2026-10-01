@@ -1,22 +1,37 @@
-//! Configuration: a TOML file, then environment overrides.
+//! Configuration: a TOML file, then environment overrides for **every** setting.
 //!
 //! Secrets never live in the TOML: the fee-payer keypair is a **path** (CLI or env), and
 //! the Helius API key is read **only** from `HELIUS_API_KEY` and substituted into URLs that
 //! contain the `{HELIUS_API_KEY}` placeholder. A TOML URL that embeds an `api-key=` value
 //! is refused.
 //!
-//! | Env | Overrides |
+//! ## Environment overrides
+//!
+//! Every setting has an environment variable: `HD_CRANK_` + the setting's path in upper case,
+//! with `_` between the section and the field. `[dig] max_rigs_per_tx` is
+//! `HD_CRANK_DIG_MAX_RIGS_PER_TX`, `[stack] max_lamports_per_table` is
+//! `HD_CRANK_STACK_MAX_LAMPORTS_PER_TABLE`, the top-level `log_json` is `HD_CRANK_LOG_JSON`,
+//! `[dig.cu_estimate] per_rig` is `HD_CRANK_DIG_CU_ESTIMATE_PER_RIG`. [`env_settings`] lists
+//! them all (`hd-crank config --env` prints the list). Values: booleans as `true` / `false`
+//! (also `1` / `0`, `yes` / `no`, `on` / `off`), numbers in decimal, lists comma-separated, an
+//! empty value clears an optional setting. A value that does not parse is an error that names
+//! the variable and never echoes the value.
+//!
+//! | Env | Meaning |
 //! |---|---|
-//! | `HD_CRANK_RPC_URL` / `HD_CRANK_WS_URL` | `rpc_url` / `ws_url` |
-//! | `HD_CRANK_KEYPAIR` | `keypair_path` |
-//! | `HD_CRANK_LISTEN` | `listen` |
-//! | `HD_CRANK_TX_FORMAT` | `dig.tx_format` (`legacy`/`v0`/`v1`) |
-//! | `HELIUS_API_KEY` | fills `{HELIUS_API_KEY}` in any URL |
+//! | `HD_CRANK_<SECTION>_<FIELD>` | overrides that setting (see above) |
+//! | `HD_CRANK_KEYPAIR` | alias of `HD_CRANK_KEYPAIR_PATH` |
+//! | `HD_CRANK_TX_FORMAT` | alias of `HD_CRANK_DIG_TX_FORMAT` (`legacy` / `v0` / `v1`) |
+//! | `HD_CRANK_CONFIG` | the TOML file (read by the CLI, not a setting) |
+//! | `HELIUS_API_KEY` | fills `{HELIUS_API_KEY}` in any URL; never logged |
+//!
+//! Precedence: defaults, then the TOML file, then the environment, then `--keypair`.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use solana_address::Address;
 
 use crate::hd;
@@ -24,13 +39,22 @@ use crate::intake::IntakeConfig;
 use crate::ore;
 use crate::planner::Policy;
 use crate::ratelimit::Quota;
-use crate::tx::{CuEstimate, TxFormat};
+use crate::rpc::redact_url;
+use crate::tx::{CheckinCu, CuEstimate, TxFormat};
 
 /// Placeholder substituted from `HELIUS_API_KEY`.
 pub const HELIUS_PLACEHOLDER: &str = "{HELIUS_API_KEY}";
+/// Prefix of every setting's environment variable.
+pub const ENV_PREFIX: &str = "HD_CRANK_";
+/// `HD_CRANK_*` variables that are not settings: the config path (read by the CLI) and the
+/// key material the container entrypoint consumes before it starts the binary.
+pub const RESERVED_ENV: [&str; 2] = ["HD_CRANK_CONFIG", "HD_CRANK_KEYPAIR_JSON"];
+/// Legacy short names, kept working: `(alias, canonical variable)`.
+pub const ENV_ALIASES: [(&str, &str); 2] =
+    [("HD_CRANK_KEYPAIR", "HD_CRANK_KEYPAIR_PATH"), ("HD_CRANK_TX_FORMAT", "HD_CRANK_DIG_TX_FORMAT")];
 
 /// Top-level config.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// JSON-RPC HTTP endpoint (may contain `{HELIUS_API_KEY}`).
@@ -45,10 +69,13 @@ pub struct Config {
     pub program_id: String,
     /// Intake / health / metrics listen address.
     pub listen: String,
-    /// Where the crank keeps its lookup-table list.
+    /// Where the crank keeps its lookup-table list and the per-table Stack spend.
     pub state_dir: PathBuf,
     /// JSON logs.
     pub log_json: bool,
+    /// On SIGTERM / SIGINT: stop taking work, then wait this long for transactions in flight
+    /// (a BREAK that was acknowledged, a check-in that was sent) before exiting.
+    pub shutdown_grace_secs: u64,
     /// Digging.
     pub dig: DigConfig,
     /// Heartbeat intake.
@@ -63,6 +90,10 @@ pub struct Config {
     pub record: RecordConfig,
     /// Permissionless `end_shift`.
     pub end_shift: EndShiftConfig,
+    /// Stack check-ins and settles (INTERFACE v1.2).
+    pub stack: StackConfig,
+    /// Permissionless cleanups: broken Focus Bonds, expired gifts.
+    pub cleanup: CleanupConfig,
 }
 
 impl Default for Config {
@@ -76,6 +107,7 @@ impl Default for Config {
             listen: "0.0.0.0:8787".into(),
             state_dir: PathBuf::from(".hd-crank"),
             log_json: false,
+            shutdown_grace_secs: 8,
             dig: DigConfig::default(),
             intake: IntakeToml::default(),
             alt: AltConfig::default(),
@@ -83,14 +115,24 @@ impl Default for Config {
             signals: SignalsConfig::default(),
             record: RecordConfig::default(),
             end_shift: EndShiftConfig::default(),
+            stack: StackConfig::default(),
+            cleanup: CleanupConfig::default(),
         }
+    }
+}
+
+/// The redacted view: URLs keep only scheme and host, so a `{:?}` of a config can never put
+/// an API key in a log line.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Config({})", self.public_json())
     }
 }
 
 /// Landing phone-signed BREAK / FREEZE (`break_shift` / `freeze_rig`, P-256 path). The crank
 /// pays one transaction signature, one secp256r1 signature and the priority fee per signal;
 /// the program does not reimburse these.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SignalsConfig {
     /// Land signals (false: the intake answers `rate_limited` and the phone keeps its record).
@@ -111,6 +153,14 @@ pub struct SignalsConfig {
     pub max_attempts: u32,
     /// Queue length between the intake and the lander.
     pub queue: usize,
+    /// Streak protection: never land a phone-signed BREAK once the rig's plan window has
+    /// ended. After the window nothing is dug anyway, and a BREAK there would make
+    /// `end_shift` seal a completed night as a pickup (the streak would not count it). The
+    /// phone is answered `ok: false, reason: lease_invalid`. FREEZE is always landed.
+    pub streak_protection: bool,
+    /// Seconds before `plan_window_end_ts` from which a BREAK is no longer landed (it could
+    /// reach the chain after the window ended).
+    pub window_margin_secs: i64,
 }
 
 impl Default for SignalsConfig {
@@ -126,6 +176,8 @@ impl Default for SignalsConfig {
             simulate: true,
             max_attempts: 3,
             queue: 256,
+            streak_protection: true,
+            window_margin_secs: 5,
         }
     }
 }
@@ -147,11 +199,16 @@ impl SignalsConfig {
             max_rigs: 100_000,
         }
     }
+
+    /// The window rule the intake and the lander apply to a BREAK.
+    pub fn window_rule(&self) -> crate::heartbeat::WindowRule {
+        crate::heartbeat::WindowRule { enabled: self.streak_protection, margin_secs: self.window_margin_secs }
+    }
 }
 
 /// `record_heartbeats` for focus-only rigs (`plan_flags` bit 0), so their dark rounds count
 /// on-chain. No deploy happens and nothing reimburses the crank: the fees are budgeted.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct RecordConfig {
     /// Record heartbeats at all.
@@ -209,7 +266,7 @@ impl RecordConfig {
 /// Permissionless `end_shift` for shifts past their window whose lease has expired. The
 /// caller pays the ShiftLog rent (128 bytes: 1,781,760 lamports at the default rent) plus the
 /// fee, and nothing reimburses it, so it is capped.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct EndShiftConfig {
     /// End stale shifts at all.
@@ -241,8 +298,185 @@ impl Default for EndShiftConfig {
     }
 }
 
+/// Stack (INTERFACE v1.2 §11): `stack_checkin` every round for every seat of an open table,
+/// then `settle_stack`. The program has no reimbursement for either: a StackTable carries no
+/// crank tip and `stack_checkin` has no payer account, so the crank operator pays every
+/// check-in. Both a per-table cap and an hourly budget bound that.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct StackConfig {
+    /// Check seats in and settle tables at all. Off: seated rigs dig and record as usual and
+    /// nobody checks them in from this crank.
+    pub enabled: bool,
+    /// Full `getProgramAccounts` refresh of the open tables and their pending seats, in
+    /// seconds (program events and table windows opening refresh sooner).
+    pub discover_secs: u64,
+    /// How often the pending seats of a live round are re-read and re-planned.
+    pub pass_interval_ms: u64,
+    /// After a round is first seen, wait this long for every seat's heartbeat before sending
+    /// a partial batch.
+    pub batch_wait_ms: u64,
+    /// Minimum gap between two partial batches of one table.
+    pub straggler_wait_ms: u64,
+    /// With this few slots left before the round's `end_slot`, send whatever is ready at once.
+    pub late_slots: u64,
+    /// Re-plan and re-send a check-in that is unconfirmed after this many slots.
+    pub retry_after_slots: u64,
+    /// Transactions per (seat, round) at most.
+    pub max_attempts_per_round: u32,
+    /// Seats per transaction at most (the program takes 8 per instruction; a packet holds 3
+    /// verified seats legacy, 4 or more with the crank's lookup table, 8 observed).
+    pub max_seats_per_tx: usize,
+    /// Open tables tracked at most (largest total bonds first).
+    pub max_tables: usize,
+    /// Check-in transactions per pass at most.
+    pub max_txs_per_pass: usize,
+    /// Simulate a check-in first: sizes the CU limit, and a transaction the program would
+    /// fail (the round just changed, the table was settled) is not paid for.
+    pub simulate: bool,
+    /// Compute estimate when not simulating: fixed part.
+    pub cu_base: u32,
+    /// Compute estimate: per seat whose heartbeat the check-in verifies.
+    pub cu_per_verify: u32,
+    /// Compute estimate: per observed seat.
+    pub cu_per_observe: u32,
+    /// Priority fee for check-ins and settles (micro-lamports per CU). Check-ins are
+    /// fail-closed, so they outbid the dig floor.
+    pub cu_price_micro_lamports: u64,
+    /// Fees per table at most, in lamports (0 = unlimited). When a table's budget is spent the
+    /// crank stops checking its seats in (an alert) and still settles it. The default is above
+    /// what the largest table the program allows costs (8 seats x 1,440 rounds x about 7,000
+    /// lamports = 0.081 SOL), so it only stops a table whose transactions keep failing.
+    pub max_lamports_per_table: u64,
+    /// Fees for all Stack transactions per hour at most (a rolling bucket), in lamports. One
+    /// seat costs about 0.00038 SOL per hour (60 rounds x 6,300 lamports): the default covers
+    /// about 26 seated rigs. Stack is fail-closed, so size this for the tables you serve.
+    pub max_lamports_per_hour: u64,
+    /// Add a seat whose bound shift broke to a check-in that is going out anyway, so the
+    /// table shows the break at once. A break that would change the settle outcome is always
+    /// recorded, in a transaction of its own.
+    pub mark_broken: bool,
+    /// Call `settle_stack` once `Board.round_id > end_round`.
+    pub settle: bool,
+    /// Compute limit of a settle (measured: see README).
+    pub settle_cu_limit: u32,
+    /// Seconds between settle attempts for one table.
+    pub settle_retry_secs: u64,
+    /// Settle attempts per table at most.
+    pub settle_max_attempts: u32,
+    /// Create the Bury vault and the lot's SKR token account when a settle or a forfeit needs
+    /// them and nobody has (one time: 0.00427 SOL of rent the crank never gets back).
+    pub init_bury_vault: bool,
+}
+
+impl Default for StackConfig {
+    fn default() -> Self {
+        let cu = CheckinCu::default();
+        StackConfig {
+            enabled: true,
+            discover_secs: 30,
+            pass_interval_ms: 1_500,
+            batch_wait_ms: 6_000,
+            straggler_wait_ms: 3_000,
+            late_slots: 40,
+            retry_after_slots: 8,
+            max_attempts_per_round: 4,
+            max_seats_per_tx: crate::skr::MAX_SEATS,
+            max_tables: 64,
+            max_txs_per_pass: 16,
+            simulate: true,
+            cu_base: cu.base,
+            cu_per_verify: cu.per_verify,
+            cu_per_observe: cu.per_observe,
+            cu_price_micro_lamports: 10_000,
+            max_lamports_per_table: 100_000_000,
+            max_lamports_per_hour: 10_000_000,
+            mark_broken: true,
+            settle: true,
+            // Measured with the real program (fork suite): 5,413 CU for 3 seats with the Bury
+            // transfer, 5,550 for 8 seats. The limit leaves room for a costlier token program.
+            settle_cu_limit: 40_000,
+            settle_retry_secs: 30,
+            settle_max_attempts: 6,
+            init_bury_vault: true,
+        }
+    }
+}
+
+impl StackConfig {
+    /// Compute estimate for check-ins.
+    pub fn cu(&self) -> CheckinCu {
+        CheckinCu { base: self.cu_base, per_verify: self.cu_per_verify, per_observe: self.cu_per_observe }
+    }
+
+    /// When to send a table's batch.
+    pub fn send_policy(&self) -> crate::stack::SendPolicy {
+        crate::stack::SendPolicy {
+            batch_wait: Duration::from_millis(self.batch_wait_ms),
+            straggler_wait: Duration::from_millis(self.straggler_wait_ms),
+            late_slots: self.late_slots,
+        }
+    }
+
+    /// Retry knobs.
+    pub fn retry(&self) -> crate::stack::CheckinRetry {
+        crate::stack::CheckinRetry { retry_after_slots: self.retry_after_slots, max_attempts: self.max_attempts_per_round }
+    }
+}
+
+/// Permissionless cleanups (INTERFACE v1.2 §11.6, §11.7). Each pays only what the program
+/// fixes: a forfeited bond's SKR goes to the Bury lot and its rents to the owner, an expired
+/// gift goes back to its sender. The crank gains nothing and pays the fee, so both are capped.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct CleanupConfig {
+    /// Run the cleanup sweep at all.
+    pub enabled: bool,
+    /// How often to look for bonds and gifts.
+    pub poll_secs: u64,
+    /// `forfeit_focus_bond` for bonds whose shift sealed with a reason other than completed.
+    pub forfeit_focus_bonds: bool,
+    /// Also forfeit bonds whose shift can never be sealed (the rig was closed while the shift
+    /// was open): there is no other way out for that SKR, and the rents return to the owner.
+    pub forfeit_abandoned_bonds: bool,
+    /// `refund_gift` for gifts past their `expiry_ts`.
+    pub refund_gifts: bool,
+    /// Seconds after `expiry_ts` before a gift is refunded (the cluster clock must be past it).
+    pub gift_grace_secs: i64,
+    /// Transactions per sweep at most.
+    pub max_per_pass: usize,
+    /// Fees per day at most (a rolling bucket), in lamports.
+    pub max_lamports_per_day: u64,
+    /// Compute limit of a forfeit (measured: see README).
+    pub forfeit_cu_limit: u32,
+    /// Compute limit of a refund.
+    pub refund_cu_limit: u32,
+    /// Leave a bond or a gift that failed alone for this long.
+    pub retry_secs: u64,
+}
+
+impl Default for CleanupConfig {
+    fn default() -> Self {
+        CleanupConfig {
+            enabled: true,
+            poll_secs: 300,
+            forfeit_focus_bonds: true,
+            forfeit_abandoned_bonds: true,
+            refund_gifts: true,
+            gift_grace_secs: 60,
+            max_per_pass: 4,
+            max_lamports_per_day: 2_000_000,
+            // Measured with the real program (fork suite): 6,551 to 7,919 CU for a forfeit,
+            // 995 for a refund.
+            forfeit_cu_limit: 30_000,
+            refund_cu_limit: 5_000,
+            retry_secs: 600,
+        }
+    }
+}
+
 /// Digging policy.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct DigConfig {
     /// Master switch (false = intake only).
@@ -341,7 +575,7 @@ impl DigConfig {
 }
 
 /// Intake limits (TOML form).
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 #[allow(missing_docs)]
 pub struct IntakeToml {
@@ -396,12 +630,20 @@ impl IntakeToml {
             send_timeout: IntakeConfig::default().send_timeout,
             trust_forwarded_for: self.trust_forwarded_for,
             stale_chain_after: IntakeConfig::default().stale_chain_after,
+            window_rule: IntakeConfig::default().window_rule,
         }
     }
 }
 
+impl Config {
+    /// The intake's runtime limits: `[intake]` plus the streak-protection rule of `[signals]`.
+    pub fn intake_runtime(&self) -> IntakeConfig {
+        IntakeConfig { window_rule: self.signals.window_rule(), ..self.intake.to_runtime() }
+    }
+}
+
 /// Lookup tables.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct AltConfig {
     /// Use lookup tables for v0 digs.
@@ -423,7 +665,7 @@ impl Default for AltConfig {
 }
 
 /// Submit path.
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct SenderConfig {
     /// Helius Sender endpoint (feature `helius-sender`), e.g.
@@ -435,6 +677,16 @@ pub struct SenderConfig {
     pub tip_lamports: u64,
 }
 
+impl std::fmt::Debug for SenderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SenderConfig")
+            .field("helius_sender_url", &self.helius_sender_url.as_deref().map(redact_url))
+            .field("tip_accounts", &self.tip_accounts)
+            .field("tip_lamports", &self.tip_lamports)
+            .finish()
+    }
+}
+
 /// Errors building the config.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -444,6 +696,9 @@ pub enum ConfigError {
     /// Invalid value.
     #[error("config: {0}")]
     Invalid(String),
+    /// An environment override that does not parse. Names the variable, never its value.
+    #[error("environment: {0}")]
+    Env(String),
 }
 
 fn embeds_api_key(url: &str) -> bool {
@@ -451,7 +706,19 @@ fn embeds_api_key(url: &str) -> bool {
         .any(|kv| kv.to_ascii_lowercase().starts_with("api-key=") && !kv.contains(HELIUS_PLACEHOLDER))
 }
 
-/// Replace `{HELIUS_API_KEY}` from the environment value `key`.
+/// The value of every `api-key=` query parameter in `url` (the secrets a log line must never
+/// contain).
+pub fn api_keys_in(url: &str) -> Vec<String> {
+    url.split(['?', '&', '#'])
+        .filter_map(|kv| {
+            let (k, v) = kv.split_once('=')?;
+            (k.eq_ignore_ascii_case("api-key") && !v.is_empty() && v != HELIUS_PLACEHOLDER).then(|| v.to_string())
+        })
+        .collect()
+}
+
+/// Replace `{HELIUS_API_KEY}` from the environment value `key`. The errors never contain the
+/// key or the URL.
 pub fn substitute_key(url: &str, key: Option<&str>) -> Result<String, ConfigError> {
     if !url.contains(HELIUS_PLACEHOLDER) {
         return Ok(url.to_string());
@@ -465,7 +732,8 @@ pub fn substitute_key(url: &str, key: Option<&str>) -> Result<String, ConfigErro
     }
 }
 
-/// `https://…` → `wss://…`, `http://…` → `ws://…`.
+/// `https://…` → `wss://…`, `http://…` → `ws://…` (query string included: the Helius
+/// WebSocket URL carries the same `api-key`). The result is a secret whenever the input is.
 pub fn derive_ws_url(rpc: &str) -> String {
     if let Some(rest) = rpc.strip_prefix("https://") {
         format!("wss://{rest}")
@@ -483,6 +751,88 @@ pub fn derive_ws_url(rpc: &str) -> String {
     }
 }
 
+/// `HD_CRANK_` + the dotted path in upper case, dots as underscores.
+fn env_name(path: &[String]) -> String {
+    format!("{ENV_PREFIX}{}", path.join("_").to_ascii_uppercase())
+}
+
+fn walk_leaves(v: &Value, path: &mut Vec<String>, out: &mut Vec<(String, String, Value)>) {
+    match v {
+        Value::Object(m) => {
+            for (k, child) in m {
+                path.push(k.clone());
+                walk_leaves(child, path, out);
+                path.pop();
+            }
+        }
+        leaf => out.push((env_name(path), path.join("."), leaf.clone())),
+    }
+}
+
+/// Every setting: `(environment variable, dotted path, default as JSON)`, sorted by path.
+pub fn env_settings() -> Vec<(String, String, Value)> {
+    let tree = serde_json::to_value(Config::default()).unwrap_or(Value::Null);
+    let mut out = Vec::new();
+    walk_leaves(&tree, &mut Vec::new(), &mut out);
+    out
+}
+
+/// `HD_CRANK_*` variable names among `names` that are neither a setting, an alias nor
+/// reserved: almost always a typo, so the binary warns about them at start (names only).
+pub fn unknown_env_overrides<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let known: std::collections::HashSet<String> = env_settings().into_iter().map(|(n, _, _)| n).collect();
+    let mut out: Vec<String> = names
+        .into_iter()
+        .filter(|n| n.starts_with(ENV_PREFIX))
+        .filter(|n| !known.contains(*n) && !RESERVED_ENV.contains(n) && !ENV_ALIASES.iter().any(|(a, _)| a == n))
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out
+}
+
+/// Parse an environment value into the JSON type of the setting's default.
+fn parse_env_value(name: &str, raw: &str, like: &Value) -> Result<Value, ConfigError> {
+    let bad = |what: &str| ConfigError::Env(format!("{name} is not {what}"));
+    let t = raw.trim();
+    Ok(match like {
+        Value::Bool(_) => match t.to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Value::Bool(true),
+            "false" | "0" | "no" | "off" => Value::Bool(false),
+            _ => return Err(bad("a boolean (true / false)")),
+        },
+        Value::Number(n) if n.is_f64() => {
+            let f: f64 = t.parse().map_err(|_| bad("a number"))?;
+            serde_json::Number::from_f64(f).map(Value::Number).ok_or_else(|| bad("a finite number"))?
+        }
+        Value::Number(_) => match t.parse::<u64>() {
+            Ok(u) => Value::from(u),
+            Err(_) => Value::from(t.parse::<i64>().map_err(|_| bad("an integer"))?),
+        },
+        Value::Array(_) => Value::Array(t.split(',').map(str::trim).filter(|s| !s.is_empty()).map(|s| Value::String(s.to_string())).collect()),
+        Value::Null if t.is_empty() => Value::Null,
+        Value::Null | Value::String(_) => Value::String(raw.to_string()),
+        Value::Object(_) => return Err(bad("a single setting")),
+    })
+}
+
+fn set_leaf(tree: &mut Value, path: &str, value: Value) {
+    let mut cur = tree;
+    let mut parts = path.split('.').peekable();
+    while let Some(p) = parts.next() {
+        if parts.peek().is_none() {
+            if let Value::Object(m) = cur {
+                m.insert(p.to_string(), value);
+            }
+            return;
+        }
+        match cur.get_mut(p) {
+            Some(next) => cur = next,
+            None => return,
+        }
+    }
+}
+
 impl Config {
     /// Parse TOML (refusing embedded API keys).
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
@@ -497,37 +847,41 @@ impl Config {
         Ok(c)
     }
 
+    /// Apply the environment overrides (one variable per setting, see the module docs) and
+    /// return the names that were applied.
+    pub fn apply_env(self, env: &dyn Fn(&str) -> Option<String>) -> Result<(Self, Vec<String>), ConfigError> {
+        let mut tree = serde_json::to_value(&self).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+        let mut applied = Vec::new();
+        for (name, path, default) in env_settings() {
+            // The alias first, then the canonical name (which wins when both are set).
+            let alias = ENV_ALIASES.iter().find(|(_, canon)| *canon == name).map(|(a, _)| *a);
+            for var in alias.into_iter().chain(std::iter::once(name.as_str())) {
+                if let Some(raw) = env(var) {
+                    set_leaf(&mut tree, &path, parse_env_value(var, &raw, &default)?);
+                    applied.push(var.to_string());
+                }
+            }
+        }
+        let cfg: Config = serde_json::from_value(tree).map_err(|e| {
+            // serde names the offending field; the message may quote a value, but only one that
+            // already failed to be a URL-free scalar (an enum variant or a number out of range).
+            ConfigError::Env(format!("an override has the wrong type or range: {e}"))
+        })?;
+        Ok((cfg, applied))
+    }
+
     /// Apply environment overrides and key substitution, then validate.
-    pub fn finalize(mut self, env: &dyn Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-        if let Some(v) = env("HD_CRANK_RPC_URL") {
-            self.rpc_url = v;
-        }
-        if let Some(v) = env("HD_CRANK_WS_URL") {
-            self.ws_url = Some(v);
-        }
-        if let Some(v) = env("HD_CRANK_KEYPAIR") {
-            self.keypair_path = Some(PathBuf::from(v));
-        }
-        if let Some(v) = env("HD_CRANK_LISTEN") {
-            self.listen = v;
-        }
-        if let Some(v) = env("HD_CRANK_TX_FORMAT") {
-            self.dig.tx_format = match v.as_str() {
-                "legacy" => TxFormat::Legacy,
-                "v0" => TxFormat::V0,
-                "v1" => TxFormat::V1,
-                other => return Err(ConfigError::Invalid(format!("HD_CRANK_TX_FORMAT={other}"))),
-            };
-        }
+    pub fn finalize(self, env: &dyn Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let (mut cfg, _) = self.apply_env(env)?;
         let key = env("HELIUS_API_KEY");
-        self.rpc_url = substitute_key(&self.rpc_url, key.as_deref())?;
-        let ws = self.ws_url.clone().unwrap_or_else(|| derive_ws_url(&self.rpc_url));
-        self.ws_url = Some(substitute_key(&ws, key.as_deref())?);
-        if let Some(s) = &self.sender.helius_sender_url {
-            self.sender.helius_sender_url = Some(substitute_key(s, key.as_deref())?);
+        cfg.rpc_url = substitute_key(&cfg.rpc_url, key.as_deref())?;
+        let ws = cfg.ws_url.clone().unwrap_or_else(|| derive_ws_url(&cfg.rpc_url));
+        cfg.ws_url = Some(substitute_key(&ws, key.as_deref())?);
+        if let Some(s) = &cfg.sender.helius_sender_url {
+            cfg.sender.helius_sender_url = Some(substitute_key(s, key.as_deref())?);
         }
-        self.validate()?;
-        Ok(self)
+        cfg.validate()?;
+        Ok(cfg)
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -580,6 +934,9 @@ impl Config {
         if s.cu_price_micro_lamports > self.dig.max_cu_price_micro_lamports {
             return bad("signals.cu_price_micro_lamports exceeds dig.max_cu_price_micro_lamports");
         }
+        if s.window_margin_secs < 0 {
+            return bad("signals.window_margin_secs must be >= 0");
+        }
         let r = &self.record;
         if r.every_rounds == 0 || r.max_rigs_per_tx == 0 || r.max_rigs_per_tx > hd::MAX_RIGS_PER_IX {
             return bad("record.every_rounds must be >= 1 and record.max_rigs_per_tx 1..=32");
@@ -588,12 +945,62 @@ impl Config {
         if e.max_per_pass == 0 || e.poll_secs == 0 || e.grace_secs < 0 || e.cu_limit == 0 {
             return bad("end_shift.max_per_pass and end_shift.poll_secs must be >= 1, end_shift.grace_secs >= 0");
         }
+        let k = &self.stack;
+        if k.max_seats_per_tx == 0 || k.max_seats_per_tx > crate::skr::MAX_SEATS {
+            return bad("stack.max_seats_per_tx must be 1..=8");
+        }
+        if k.pass_interval_ms < 200 || k.discover_secs == 0 || k.max_tables == 0 || k.max_txs_per_pass == 0 {
+            return bad("stack.pass_interval_ms must be >= 200; stack.discover_secs, stack.max_tables and stack.max_txs_per_pass >= 1");
+        }
+        if k.max_attempts_per_round == 0 || k.settle_max_attempts == 0 || k.settle_retry_secs == 0 {
+            return bad("stack.max_attempts_per_round, stack.settle_max_attempts and stack.settle_retry_secs must be >= 1");
+        }
+        if k.settle_cu_limit == 0 || k.settle_cu_limit > crate::tx::MAX_COMPUTE_UNITS || k.cu_base == 0 {
+            return bad("stack.settle_cu_limit must be 1..=1400000 and stack.cu_base >= 1");
+        }
+        if k.cu_price_micro_lamports > self.dig.max_cu_price_micro_lamports {
+            return bad("stack.cu_price_micro_lamports exceeds dig.max_cu_price_micro_lamports");
+        }
+        let c = &self.cleanup;
+        if c.poll_secs == 0 || c.max_per_pass == 0 || c.gift_grace_secs < 0 || c.forfeit_cu_limit == 0 || c.refund_cu_limit == 0 {
+            return bad("cleanup.poll_secs and cleanup.max_per_pass must be >= 1, cleanup.gift_grace_secs >= 0, the CU limits >= 1");
+        }
         Ok(())
     }
 
     /// Program id as an address (validated).
     pub fn program_id(&self) -> Address {
         self.program_id.parse().unwrap_or(hd::PROGRAM_ID)
+    }
+
+    /// The effective configuration without anything secret: every URL is cut down to scheme
+    /// and host (keys live in the query, the path or the userinfo). This is what the binary
+    /// logs at start and what `{:?}` prints.
+    pub fn public_json(&self) -> Value {
+        fn redact(v: &mut Value) {
+            match v {
+                Value::String(s) if s.contains("://") => *s = redact_url(s),
+                Value::Array(a) => a.iter_mut().for_each(redact),
+                Value::Object(m) => m.values_mut().for_each(redact),
+                _ => {}
+            }
+        }
+        let mut tree = serde_json::to_value(self).unwrap_or(Value::Null);
+        redact(&mut tree);
+        tree
+    }
+
+    /// Strings that must never appear in a log line: the API keys inside the configured URLs
+    /// (after `{HELIUS_API_KEY}` was substituted).
+    pub fn secrets(&self) -> Vec<String> {
+        let mut out: Vec<String> = std::iter::once(&self.rpc_url)
+            .chain(self.ws_url.as_ref())
+            .chain(self.sender.helius_sender_url.as_ref())
+            .flat_map(|u| api_keys_in(u))
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 }
 
@@ -610,6 +1017,7 @@ mod tests {
         let c = Config::from_toml("").unwrap().finalize(&no_env).unwrap();
         assert_eq!(c.ws_url.as_deref(), Some("wss://api.mainnet-beta.solana.com"));
         assert_eq!(c.program_id(), hd::PROGRAM_ID);
+        assert!(c.secrets().is_empty());
     }
 
     #[test]
@@ -624,7 +1032,48 @@ mod tests {
         let embedded = r#"rpc_url = "https://mainnet.helius-rpc.com/?api-key=deadbeef""#;
         assert!(Config::from_toml(embedded).unwrap_err().to_string().contains("HELIUS_API_KEY"));
         let evil = |k: &str| (k == "HELIUS_API_KEY").then(|| "a&b=c".to_string());
-        assert!(Config::from_toml(toml).unwrap().finalize(&evil).is_err());
+        let err = Config::from_toml(toml).unwrap().finalize(&evil).unwrap_err().to_string();
+        assert!(!err.contains("a&b"), "an error never echoes the key: {err}");
+    }
+
+    #[test]
+    fn the_helius_websocket_url_is_built_from_the_key_and_never_printed() {
+        let key = "5ecre7-k3y_ABCDEF0123456789";
+        let env = |k: &str| (k == "HELIUS_API_KEY").then(|| key.to_string());
+        // The WebSocket URL is derived from the RPC URL ...
+        let derived = Config::from_toml(r#"rpc_url = "https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}""#).unwrap().finalize(&env).unwrap();
+        // ... or given with its own placeholder.
+        let explicit = Config::from_toml(
+            "rpc_url = \"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}\"\nws_url = \"wss://atlas-mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}\"",
+        )
+        .unwrap()
+        .finalize(&env)
+        .unwrap();
+        for c in [&derived, &explicit] {
+            let ws = c.ws_url.clone().unwrap();
+            assert!(ws.starts_with("wss://") && ws.ends_with(&format!("api-key={key}")), "the builder puts the key in");
+            // Nothing printable carries it: Debug, the public view, the startup log's fields.
+            let debug = format!("{c:?}");
+            assert!(!debug.contains(key), "{debug}");
+            let public = c.public_json().to_string();
+            assert!(!public.contains(key) && !public.contains("api-key"), "{public}");
+            assert!(public.contains("helius-rpc.com"), "the host stays visible: {public}");
+            assert_eq!(redact_url(&ws).matches(key).count(), 0);
+            // The key is registered as a secret for the log scrubber.
+            assert_eq!(c.secrets(), vec![key.to_string()]);
+        }
+        assert_eq!(derived.public_json()["ws_url"], "wss://mainnet.helius-rpc.com/<redacted>");
+        assert_eq!(explicit.public_json()["ws_url"], "wss://atlas-mainnet.helius-rpc.com/<redacted>");
+        // A key given through HD_CRANK_WS_URL (no placeholder) is a secret as well.
+        let direct = |k: &str| (k == "HD_CRANK_WS_URL").then(|| format!("wss://example.org/?api-key={key}&x=1"));
+        let c = Config::from_toml("").unwrap().finalize(&direct).unwrap();
+        assert_eq!(c.secrets(), vec![key.to_string()]);
+        assert!(!format!("{c:?}").contains(key));
+        assert_eq!(api_keys_in("https://h/?a=1&API-KEY=k1#frag"), vec!["k1".to_string()]);
+        assert!(api_keys_in("https://h/?api-key={HELIUS_API_KEY}").is_empty());
+        // The sender's Debug is redacted too.
+        let s = SenderConfig { helius_sender_url: Some(format!("https://sender.helius-rpc.com/fast?api-key={key}")), ..SenderConfig::default() };
+        assert!(!format!("{s:?}").contains(key));
     }
 
     #[test]
@@ -647,6 +1096,133 @@ mod tests {
             .finalize(&no_env)
             .is_err(), "sender without tip accounts");
         assert!(Config::from_toml("program_id = \"nope\"").unwrap().finalize(&no_env).is_err());
+        let bad = |k: &str| (k == "HD_CRANK_TX_FORMAT").then(|| "v2".to_string());
+        assert!(Config::from_toml("").unwrap().finalize(&bad).is_err());
+    }
+
+    #[test]
+    fn every_setting_has_one_environment_variable() {
+        let settings = env_settings();
+        // Names are unique, upper case, and cover every section.
+        let names: std::collections::HashSet<&str> = settings.iter().map(|(n, _, _)| n.as_str()).collect();
+        assert_eq!(names.len(), settings.len(), "no two settings share a variable");
+        assert!(settings.iter().all(|(n, _, _)| n.starts_with(ENV_PREFIX) && *n == n.to_ascii_uppercase()));
+        for want in [
+            "HD_CRANK_RPC_URL",
+            "HD_CRANK_WS_URL",
+            "HD_CRANK_KEYPAIR_PATH",
+            "HD_CRANK_LISTEN",
+            "HD_CRANK_LOG_JSON",
+            "HD_CRANK_STATE_DIR",
+            "HD_CRANK_SHUTDOWN_GRACE_SECS",
+            "HD_CRANK_DIG_TX_FORMAT",
+            "HD_CRANK_DIG_CU_ESTIMATE_PER_RIG",
+            "HD_CRANK_INTAKE_TRUST_FORWARDED_FOR",
+            "HD_CRANK_ALT_TABLES",
+            "HD_CRANK_SENDER_HELIUS_SENDER_URL",
+            "HD_CRANK_SIGNALS_STREAK_PROTECTION",
+            "HD_CRANK_RECORD_EVERY_ROUNDS",
+            "HD_CRANK_END_SHIFT_MAX_LAMPORTS_PER_DAY",
+            "HD_CRANK_STACK_MAX_LAMPORTS_PER_TABLE",
+            "HD_CRANK_STACK_CU_PRICE_MICRO_LAMPORTS",
+            "HD_CRANK_CLEANUP_REFUND_GIFTS",
+        ] {
+            assert!(names.contains(want), "{want}");
+        }
+        // The aliases point at real settings, and the reserved names are not settings.
+        for (alias, canon) in ENV_ALIASES {
+            assert!(names.contains(canon) && !names.contains(alias), "{alias} -> {canon}");
+        }
+        assert!(RESERVED_ENV.iter().all(|r| !names.contains(r)));
+
+        // Overriding EVERY setting through its variable changes exactly that setting: the
+        // override of each leaf is a value of its own type that differs from the default.
+        let other = |default: &Value, path: &str| -> String {
+            match default {
+                Value::Bool(b) => (!b).to_string(),
+                Value::Number(n) if n.is_f64() => format!("{}", n.as_f64().unwrap() + 0.5),
+                Value::Number(n) => match path {
+                    "dig.priority_fee_percentile" => "50".into(),
+                    _ => (n.as_u64().unwrap_or(0) + 1).to_string(),
+                },
+                Value::Array(_) => "11111111111111111111111111111111,So11111111111111111111111111111111111111112".into(),
+                Value::Null if path.ends_with("url") => "https://example.org/x".into(),
+                Value::Null => "/tmp/kp.json".into(),
+                Value::String(_) => match path {
+                    "commitment" => "finalized".into(),
+                    "program_id" => "11111111111111111111111111111111".into(),
+                    "dig.tx_format" => "legacy".into(),
+                    "rpc_url" => "https://rpc.example.org".into(),
+                    "listen" => "127.0.0.1:1".into(),
+                    _ => "other".into(),
+                },
+                Value::Object(_) => unreachable!(),
+            }
+        };
+        let base = serde_json::to_value(Config::default()).unwrap();
+        for (name, path, default) in &settings {
+            let value = other(default, path);
+            let env = |k: &str| (k == name).then(|| value.clone());
+            let (cfg, applied) = Config::default().apply_env(&env).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(applied, vec![name.clone()]);
+            let tree = serde_json::to_value(&cfg).unwrap();
+            // Exactly one leaf differs from the defaults: this one.
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            walk_leaves(&base, &mut Vec::new(), &mut a);
+            walk_leaves(&tree, &mut Vec::new(), &mut b);
+            let changed: Vec<&String> = a.iter().zip(&b).filter(|(x, y)| x.2 != y.2).map(|(x, _)| &x.1).collect();
+            assert_eq!(changed, vec![path], "{name} changes only {path}");
+        }
+        assert!(settings.len() > 110, "{} settings", settings.len());
+    }
+
+    #[test]
+    fn env_values_parse_by_type_and_errors_never_echo_them() {
+        let env = |k: &str| match k {
+            "HD_CRANK_LOG_JSON" => Some("YES".to_string()),
+            "HD_CRANK_STACK_ENABLED" => Some("off".to_string()),
+            "HD_CRANK_DIG_CLOCK_MARGIN_SECS" => Some(" 9 ".to_string()),
+            "HD_CRANK_INTAKE_IP_PER_SECOND" => Some("4".to_string()),
+            "HD_CRANK_ALT_TABLES" => Some("11111111111111111111111111111111, So11111111111111111111111111111111111111112".to_string()),
+            "HD_CRANK_STACK_MAX_LAMPORTS_PER_TABLE" => Some("0".to_string()),
+            "HD_CRANK_KEYPAIR" => Some("/a.json".to_string()),
+            "HD_CRANK_KEYPAIR_PATH" => Some("/b.json".to_string()),
+            _ => None,
+        };
+        let c = Config::from_toml("log_json = false\n[stack]\nenabled = true").unwrap().finalize(&env).unwrap();
+        assert!(c.log_json && !c.stack.enabled, "the environment wins over the file");
+        assert_eq!(c.dig.clock_margin_secs, 9);
+        assert_eq!(c.intake.ip_per_second, 4.0);
+        assert_eq!(c.alt.tables.len(), 2);
+        assert_eq!(c.stack.max_lamports_per_table, 0);
+        assert_eq!(c.keypair_path, Some(PathBuf::from("/b.json")), "the canonical name wins over its alias");
+        // An optional setting is cleared by an empty value.
+        let clear = |k: &str| (k == "HD_CRANK_KEYPAIR_PATH").then(String::new);
+        let c = Config::from_toml("keypair_path = \"/x.json\"").unwrap().finalize(&clear).unwrap();
+        assert_eq!(c.keypair_path, None);
+        // Bad values: the error names the variable and never the value.
+        for (name, value) in [
+            ("HD_CRANK_LOG_JSON", "s3cr3t-maybe"),
+            ("HD_CRANK_DIG_MAX_RIGS_PER_TX", "s3cr3t-twelve"),
+            ("HD_CRANK_INTAKE_IP_PER_SECOND", "s3cr3t-fast"),
+            ("HD_CRANK_DIG_CLOCK_MARGIN_SECS", "s3cr3t-1.5"),
+        ] {
+            let env = |k: &str| (k == name).then(|| value.to_string());
+            let err = Config::from_toml("").unwrap().finalize(&env).unwrap_err().to_string();
+            assert!(err.contains(name), "{err}");
+            assert!(!err.contains("s3cr3t"), "{err}");
+        }
+        // Out of range for the field's type, and invalid after validation.
+        let env = |k: &str| (k == "HD_CRANK_DIG_PRIORITY_FEE_PERCENTILE").then(|| "300".to_string());
+        assert!(Config::from_toml("").unwrap().finalize(&env).is_err());
+        let env = |k: &str| (k == "HD_CRANK_STACK_MAX_SEATS_PER_TX").then(|| "9".to_string());
+        assert!(Config::from_toml("").unwrap().finalize(&env).unwrap_err().to_string().contains("stack.max_seats_per_tx"));
+        // Negative integers parse where the field is signed, and validation still applies.
+        let env = |k: &str| (k == "HD_CRANK_END_SHIFT_GRACE_SECS").then(|| "-1".to_string());
+        assert!(Config::from_toml("").unwrap().finalize(&env).unwrap_err().to_string().contains("grace_secs"));
+        // Typos are reported by name; settings, aliases and reserved names are not.
+        let unknown = unknown_env_overrides(["HD_CRANK_DIG_ENABELD", "HD_CRANK_DIG_ENABLED", "HD_CRANK_KEYPAIR", "HD_CRANK_CONFIG", "HD_CRANK_KEYPAIR_JSON", "PATH", "HELIUS_API_KEY"]);
+        assert_eq!(unknown, vec!["HD_CRANK_DIG_ENABELD".to_string()]);
     }
 
     #[test]
@@ -664,16 +1240,70 @@ mod tests {
         assert!(Config::from_toml("[signals]\ncu_limit = 0").unwrap().finalize(&no_env).is_err());
         assert!(Config::from_toml("[end_shift]\ngrace_secs = -1").unwrap().finalize(&no_env).is_err());
         assert!(Config::from_toml("[signals]\nsurprise = 1").is_err());
+        assert!(Config::from_toml("[signals]\nwindow_margin_secs = -1").unwrap().finalize(&no_env).is_err());
+    }
+
+    #[test]
+    fn stack_and_cleanup_sections() {
+        let c = Config::from_toml("").unwrap().finalize(&no_env).unwrap();
+        assert!(c.stack.enabled && c.stack.settle && c.cleanup.enabled && c.signals.streak_protection);
+        assert_eq!(c.stack.cu(), CheckinCu::default());
+        assert_eq!(c.stack.retry().max_attempts, 4);
+        assert_eq!(c.stack.send_policy().late_slots, 40);
+        let t = "[stack]\nenabled = false\nmax_lamports_per_table = 123\nmark_broken = false\n[cleanup]\nrefund_gifts = false\nmax_per_pass = 1\n";
+        let c = Config::from_toml(t).unwrap().finalize(&no_env).unwrap();
+        assert!(!c.stack.enabled && !c.stack.mark_broken && !c.cleanup.refund_gifts);
+        assert_eq!((c.stack.max_lamports_per_table, c.cleanup.max_per_pass), (123, 1));
+        for bad in [
+            "[stack]\nmax_seats_per_tx = 0",
+            "[stack]\nmax_seats_per_tx = 9",
+            "[stack]\npass_interval_ms = 10",
+            "[stack]\nmax_attempts_per_round = 0",
+            "[stack]\ncu_price_micro_lamports = 999999999",
+            "[stack]\nsurprise = 1",
+            "[cleanup]\npoll_secs = 0",
+            "[cleanup]\ngift_grace_secs = -5",
+        ] {
+            assert!(Config::from_toml(bad).and_then(|c| c.finalize(&no_env)).is_err(), "{bad}");
+        }
     }
 
     #[test]
     fn the_example_config_is_valid_and_matches_the_defaults() {
         let env = |k: &str| (k == "HELIUS_API_KEY").then(|| "abc".to_string());
         let c = Config::from_toml(include_str!("../crank.example.toml")).unwrap().finalize(&env).unwrap();
-        let d = Config::default();
-        assert_eq!(c.signals.est_fee(), d.signals.est_fee());
-        assert_eq!((c.signals.cu_limit, c.signals.max_lamports_per_hour), (d.signals.cu_limit, d.signals.max_lamports_per_hour));
-        assert_eq!((c.record.every_rounds, c.record.cu_base, c.record.cu_per_rig), (d.record.every_rounds, d.record.cu_base, d.record.cu_per_rig));
-        assert_eq!((c.end_shift.cu_limit, c.end_shift.max_lamports_per_day), (d.end_shift.cu_limit, d.end_shift.max_lamports_per_day));
+        // Every setting the example spells out is the default (except the Helius URLs).
+        let mut got = Vec::new();
+        let mut want = Vec::new();
+        walk_leaves(&serde_json::to_value(&c).unwrap(), &mut Vec::new(), &mut got);
+        walk_leaves(&serde_json::to_value(Config::default()).unwrap(), &mut Vec::new(), &mut want);
+        for (g, w) in got.iter().zip(&want) {
+            if matches!(g.1.as_str(), "rpc_url" | "ws_url") {
+                continue;
+            }
+            assert_eq!(g.2, w.2, "{} in crank.example.toml differs from the default", g.1);
+        }
+    }
+
+    #[test]
+    fn the_railway_config_parses_and_stays_overridable() {
+        // deploy/railway/crank/crank.toml is baked into the image; the entrypoint passes
+        // --config, --keypair, HD_CRANK_LISTEN (from PORT), HELIUS_API_KEY and RUST_LOG.
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../deploy/railway/crank/crank.toml");
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return; // the crank can be built without the deploy directory
+        };
+        let env = |k: &str| match k {
+            "HELIUS_API_KEY" => Some("railway-key-0123456789".to_string()),
+            "HD_CRANK_LISTEN" => Some("[::]:8787".to_string()),
+            "HD_CRANK_STACK_MAX_LAMPORTS_PER_HOUR" => Some("5000000".to_string()),
+            _ => None,
+        };
+        let c = Config::from_toml(&text).unwrap().finalize(&env).unwrap();
+        assert_eq!(c.listen, "[::]:8787");
+        assert!(c.log_json && c.intake.trust_forwarded_for);
+        assert_eq!(c.stack.max_lamports_per_hour, 5_000_000);
+        assert!(c.stack.enabled && c.cleanup.enabled, "the new duties are on by default on Railway");
+        assert!(!format!("{c:?}").contains("railway-key"));
     }
 }
