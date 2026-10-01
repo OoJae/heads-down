@@ -258,9 +258,24 @@ harness load `target/deploy-v3` and `target/deploy-devnet-v3`): all 107 fork tes
 pass, including the golden vectors, which are byte-identical to the v0 run, and the
 fuzzers. Compute is marginally lower: deterministic paths drop by 2 to 52 CU (for
 example `stack_checkin` with 4 verified seats 8,846 → 8,794; `settle_stack` 5,250 →
-5,245; heads_down's share of a 1-rig `dig` 19,310 → 19,301). So heads_down already
-works as SBPFv3 under LiteSVM 0.17 (Agave 4.3); deploying it to a cluster needs that
-cluster to accept v3 deployments.
+5,245; heads_down's share of a 1-rig `dig` 19,310 → 19,301). Its CPIs into the
+SBPFv0 ORE, ORE stake and SPL Token programs all work from v3.
+
+**On a real validator (2026-10-01).** On a bare `solana-test-validator` 4.1.2 (every
+feature active, so SIMD-0500 is on), the default v0 build is **refused** at deploy
+("Detected sbpf_version required by the executable which are not enabled"), while the
+`--arch v3` build **deploys** at `HDn4vgLW…` and executes: `initialize_config` read the
+upgrade authority from the real loader's ProgramData and created the Config (256 B,
+bump 253), `init_bury_vault` created the BuryVault (192 B, bump 255), and an unknown tag
+failed cleanly with `Custom(0)`.
+
+**Mainnet feature gates (queried 2026-10-01):** SBPFv3 deployment and execution
+(SIMD-0178/0189/0377, `5cC3foj7…`) is **active** since epoch 993; SIMD-0500 (no more
+v0/v1/v2 deploys, `B8JJXCy5…`) is **inactive**. So heads_down can be deployed to
+mainnet as SBPFv3 today, and once SIMD-0500 activates the v0 build will no longer
+deploy. `scripts/build.sh` still builds v0 by default (the devstack clones mainnet's
+feature set and deploys that build); switching the mainnet deploy to `--arch v3` is
+recommended.
 
 ## Security
 
