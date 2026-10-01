@@ -26,11 +26,12 @@ class RigBindingStore @Inject constructor(
 
     override fun current(): RigBinding {
         cached?.let { return it }
-        val authority = prefs.getString(KEY_AUTHORITY, null)
-            ?.let { runCatching { Pubkey.fromBase58(it) }.getOrNull() }
-            ?: return RigBinding.UNREGISTERED
+        val authority = authority() ?: return RigBinding.UNREGISTERED
         return bind(authority).also { cached = it }
     }
+
+    /** The bound wallet, or null before the first confirmed clock-in. */
+    fun authority(): Pubkey? = prefs.getString(KEY_AUTHORITY, null)?.let { runCatching { Pubkey.fromBase58(it) }.getOrNull() }
 
     fun save(authority: Pubkey) {
         prefs.edit(commit = true) { putString(KEY_AUTHORITY, authority.toBase58()) }

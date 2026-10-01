@@ -65,9 +65,9 @@ class CleartextConfigTest {
 
     @Test
     fun `loopback transports exist only in the localdev source set`() {
-        val offenders = listOf("main", "debug", "release").flatMap { set ->
+        val offenders = listOf("main", "debug", "release", "devtools").flatMap { set ->
             File("src/$set").walkTopDown().filter { it.isFile && it.extension == "kt" }
-                .filter { f -> f.readText().let { "LoopbackJsonRpcTransport" in it || "LoopbackUplink" in it } }
+                .filter { f -> f.readText().let { "LoopbackJsonRpcTransport" in it || "LoopbackUplink" in it || "LoopbackJsonHttp" in it } }
                 .map { it.path }
                 .toList()
         }

@@ -8,8 +8,14 @@ enum class EndpointKind(val secureScheme: String, val cleartextScheme: String) {
     /** Solana JSON-RPC. */
     RPC("https", "http"),
 
-    /** The crank's heartbeat intake (WebSocket). */
+    /** The crank's heartbeat intake (WebSocket, contract A). */
     CRANK("wss", "ws"),
+
+    /** The Key Attestation registrar (SIWS + vouchers). */
+    REGISTRAR("https", "http"),
+
+    /** The indexer's morning-haul API (contract B). */
+    INDEXER("https", "http"),
 }
 
 sealed interface EndpointVerdict {
@@ -19,7 +25,10 @@ sealed interface EndpointVerdict {
     /** `http` / `ws` to 127.0.0.1 or localhost: the `localdev` build only (adb reverse). */
     data object LoopbackCleartext : EndpointVerdict
 
-    /** An empty crank URL: a local-only build (heartbeats stay on the phone, no digs). */
+    /**
+     * An empty URL where the service is optional: a local-only crank (no digs), no registrar
+     * (every rig a guest), no indexer (no morning haul).
+     */
     data object Disabled : EndpointVerdict
 
     data class Refused(val reason: String) : EndpointVerdict
@@ -42,7 +51,7 @@ object EndpointPolicy {
 
     fun check(kind: EndpointKind, url: String, allowLoopbackCleartext: Boolean): EndpointVerdict {
         if (url.isEmpty()) {
-            return if (kind == EndpointKind.CRANK) EndpointVerdict.Disabled else EndpointVerdict.Refused("empty RPC URL")
+            return if (kind == EndpointKind.RPC) EndpointVerdict.Refused("empty RPC URL") else EndpointVerdict.Disabled
         }
         val uri = try {
             URI(url)
