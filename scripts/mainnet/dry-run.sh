@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Rehearse the whole mainnet runbook against a clean local mainnet fork, end to end:
 #
-#   keys.sh -> preflight.sh -> deploy.sh -> init-config.sh -> scripts/devstack/smoke.sh -> governance pause
+#   keys.sh -> preflight.sh -> deploy.sh -> init-config.sh -> scripts/devstack/smoke.sh
+#   -> deploy.sh --mode upgrade -> deploy.sh --mode buffer (Squads) -> governance pause
 #
 #   scripts/mainnet/dry-run.sh [--keep] [--no-build] [--skip-smoke] [--allow-dirty]
 #
@@ -100,13 +101,24 @@ if [[ $SMOKE == 1 ]]; then
   fi
 fi
 
-step "6. rollback drill: governance.sh pause (immediate), then show"
+step "6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show"
+run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode upgrade --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
+run "$MAINNET_SCRIPTS/solana.sh" --cluster localnet --keys-dir "$DRY_KEYS" -- program show "$HD_PROGRAM_ID"
+ok "6 deploy.sh --mode upgrade: upgraded in place from a fresh buffer, bytes verified, receipt written"
+
+step "7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
+run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode buffer \
+  --buffer-authority "$(pubkey_of "$DRY_KEYS/governance.json")" --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
+ok "7 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written"
+
+step "8. rollback drill: governance.sh pause (immediate), then show"
 run "$MAINNET_SCRIPTS/governance.sh" --cluster localnet --keys-dir "$DRY_KEYS" pause
-run "$MAINNET_SCRIPTS/governance.sh" --cluster localnet --keys-dir "$DRY_KEYS" show
-if HD_DEVSTACK_RPC="http://127.0.0.1:$HD_RPC_PORT" "$REPO_ROOT/scripts/devstack/tool/target/release/hd-devstack" status | grep -q 'paused true'; then
-  ok "6 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock"
+STATUS_OUT="$(HD_DEVSTACK_RPC="http://127.0.0.1:$HD_RPC_PORT" "$REPO_ROOT/scripts/devstack/tool/target/release/hd-devstack" status)"
+printf '%s\n' "$STATUS_OUT" | tee -a "$LOG"
+if [[ "$STATUS_OUT" == *"paused true"* ]]; then
+  ok "8 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock"
 else
-  SUMMARY+=("FAIL  6 Config.paused did not read back as true")
+  SUMMARY+=("FAIL  8 Config.paused did not read back as true")
   exit 1
 fi
 [[ $SMOKE_RC -eq 0 ]] || exit "$SMOKE_RC"
