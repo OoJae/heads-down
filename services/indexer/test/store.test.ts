@@ -16,7 +16,7 @@ const sig = (n: number) => encodeBase58(Uint8Array.from({ length: 64 }, (_, i) =
 let db: Db;
 beforeAll(async () => {
   db = await openDb("pglite://memory");
-  expect(await migrate(db)).toEqual(["001_init.sql"]);
+  expect(await migrate(db)).toEqual(["001_init.sql", "002_v1_1.sql"]);
   expect(await migrate(db)).toEqual([]); // idempotent
 });
 afterAll(async () => {
@@ -109,7 +109,8 @@ describe("Store", () => {
         lifetimeDarkRounds: 10n, lifetimeRoundsDug: 2n, lifetimeLamportsDeployed: 2_000_000n, streak: 1, freezesLeft: 2, lastShiftDay: 0n,
       };
       const data = encodeRig(account);
-      expect(decodeRig(data)).toEqual(account);
+      // v1.1 §3.3 fields (the former reserved bytes) decode as zero when unset.
+      expect(decodeRig(data)).toEqual({ ...account, shiftOpen: 0, breakReason: 0, oreAutomationBump: 0, oreMinerBump: 0, shiftStartTs: 0n });
       return { address, account, data };
     };
     const a = mk(addr(31));
@@ -123,6 +124,32 @@ describe("Store", () => {
     // An older scan cannot resurrect or overwrite newer state.
     await store.replaceAccounts({ rigs: [b], shiftLogs: [], seats: [], config: null }, 150);
     expect((await store.loadMetricsInput()).rigs.find((r) => r.address === b.address)?.closed).toBe(true);
+  });
+
+  it("orders ORE rounds by the numeric id, not by its text (99,999 comes before 100,000)", async () => {
+    const store = await Store.bind(db, { name: "devnet", programId: HD, executorPda: EXECUTOR_PDA });
+    const dig = (n: number, roundId: bigint) =>
+      buildDigTx({
+        signature: sig(n), slot: 2000 + n, blockTime: 1_790_900_000 + n, cranker: addr(9), programId: HD, configPda: CONFIG_PDA, executorPda: EXECUTOR_PDA,
+        roundAccount: addr(10), roundId,
+        rigs: [{ rig: addr(1), authority: addr(11), automation: addr(12), miner: addr(13), outcome: { kind: "dug", perTile: 1_000n, mask: 1, emaEv: 1n } }],
+      });
+    expect(await store.ingestTxs([dig(40, 99_999n), dig(41, 100_000n), dig(42, 9n)].map((t) => extractTransaction(t, OPTS)), "test")).toBe(3);
+    expect(await store.dugRoundsWithoutReset(10)).toEqual([100_000n, 99_999n, 9n]);
+    expect(await store.roundsToResolve(10, false)).toEqual([100_000n, 99_999n, 9n]);
+    expect(await store.roundsToResolve(2, true)).toEqual([100_000n, 99_999n]);
+    const reset = (roundId: bigint) => ({
+      resetSignature: sig(200 + Number(roundId % 100n)),
+      event: {
+        kind: "OreReset" as const, roundId, startSlot: 1n, endSlot: 2n, winningSquare: 0, topMiner: addr(77), totalMiners: 5n, motherlode: 0n, totalDeployed: 10n,
+        totalVaulted: 1n, totalWinnings: 1n, totalMinted: 100_000_000_000n, ts: 1_790_900_000n + roundId, rng: 0n, deployedWinningSquare: 1n,
+      },
+    });
+    await store.upsertRounds([reset(100_000n), reset(9n), reset(99_999n)], "test");
+    expect((await store.loadMetricsInput()).rounds.map((r) => r.roundId)).toEqual([9n, 99_999n, 100_000n]);
+    expect((await store.roundOutcomeRows(0n, 200_000n)).resets.map((r) => r.roundId)).toEqual([9n, 99_999n, 100_000n]);
+    expect((await store.roundOutcomeRows(50n, 60n, [100_000n, 9n])).resets.map((r) => r.roundId)).toEqual([9n, 100_000n]);
+    expect(await store.dugRoundsWithoutReset(10)).toEqual([]);
   });
 
   it("cursors round-trip", async () => {

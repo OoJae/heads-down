@@ -80,6 +80,14 @@ export interface RigAccount {
   streak: number;
   freezesLeft: number;
   lastShiftDay: bigint;
+  /** v1.1 (§3.3, the former reserved bytes): 1 from arm_shift to end_shift. Optional for v1-shaped fixtures (0). */
+  shiftOpen?: number;
+  /** BREAK / shift-interrupting FREEZE reason, written into the ShiftLog by end_shift. */
+  breakReason?: number;
+  oreAutomationBump?: number;
+  oreMinerBump?: number;
+  /** unix time of arm_shift (becomes ShiftLog.start_ts). */
+  shiftStartTs?: bigint;
 }
 
 export function decodeRig(data: Uint8Array): RigAccount {
@@ -139,7 +147,14 @@ export function decodeRig(data: Uint8Array): RigAccount {
     lastShiftDay: (r.skip(3), r.i64()),
   };
   if (r.position !== 336) throw new DecodeError("BAD_LENGTH", `Rig layout drift: at ${r.position}, expected 336`);
-  r.skip(48, "reserved");
+  // v1.1 §3.3: the v1 reserved[48] at 336 now holds these (still zero on a v1-era account).
+  rig.shiftOpen = r.u8("shift_open");
+  rig.breakReason = r.u8("break_reason");
+  rig.oreAutomationBump = r.u8("ore_automation_bump");
+  rig.oreMinerBump = r.u8("ore_miner_bump");
+  r.skip(4);
+  rig.shiftStartTs = r.i64("shift_start_ts");
+  r.skip(32, "reserved");
   r.end("Rig");
   return rig;
 }
@@ -305,6 +320,7 @@ export function encodeRig(x: RigAccount): Uint8Array {
   w.u64(x.shiftStartRound).u64(x.shiftDarkRounds).u64(x.shiftRoundsDug);
   w.u64(x.lifetimeDarkRounds).u64(x.lifetimeRoundsDug).u64(x.lifetimeLamportsDeployed);
   w.u32(x.streak).u8(x.freezesLeft).skip(3).i64(x.lastShiftDay);
+  w.u8(x.shiftOpen ?? 0).u8(x.breakReason ?? 0).u8(x.oreAutomationBump ?? 0).u8(x.oreMinerBump ?? 0).skip(4).i64(x.shiftStartTs ?? 0n);
   return w.finish();
 }
 

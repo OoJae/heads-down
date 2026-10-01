@@ -23,10 +23,14 @@ export interface ProgramDataEntry {
   data: Uint8Array;
   /** Zero-based position among ALL `Program data:` lines of the transaction. */
   lineIndex: number;
+  /** Ordinal of the invocation frame that wrote the line (see {@link ProgramDataParse.frames}). */
+  frame: number;
 }
 
 export interface ProgramDataParse {
   entries: ProgramDataEntry[];
+  /** Every invocation, in execution order: frame `k` is the k-th `invoke` line. */
+  frames: { programId: string; depth: number }[];
   truncated: boolean;
   /** Structural anomalies (unbalanced invoke/success). The parse is still best-effort. */
   anomalies: string[];
@@ -45,7 +49,8 @@ export const MAX_EVENT_BYTES = 10_240;
 
 export function parseProgramData(logs: readonly string[]): ProgramDataParse {
   const stack: string[] = [];
-  const out: ProgramDataParse = { entries: [], truncated: false, anomalies: [], badData: [] };
+  const frameStack: number[] = [];
+  const out: ProgramDataParse = { entries: [], frames: [], truncated: false, anomalies: [], badData: [] };
   if (logs.length > MAX_LOG_LINES) {
     throw new DecodeError("BAD_LENGTH", `${logs.length} log lines exceeds ${MAX_LOG_LINES}`);
   }
@@ -65,11 +70,14 @@ export function parseProgramData(logs: readonly string[]): ProgramDataParse {
       const depth = Number(m[2]);
       if (depth !== stack.length + 1) out.anomalies.push(`line ${i}: invoke depth ${depth} at stack ${stack.length}`);
       stack.push(m[1]!);
+      frameStack.push(out.frames.length);
+      out.frames.push({ programId: m[1]!, depth: stack.length });
       continue;
     }
     m = SUCCESS_RE.exec(line) ?? FAILED_RE.exec(line);
     if (m) {
       const top = stack.pop();
+      frameStack.pop();
       if (top !== m[1]) out.anomalies.push(`line ${i}: ${m[1]} returned while ${top ?? "nothing"} was executing`);
       continue;
     }
@@ -92,7 +100,7 @@ export function parseProgramData(logs: readonly string[]): ProgramDataParse {
           data.set(p, o);
           o += p.length;
         }
-        out.entries.push({ programId: top, depth: stack.length, data, lineIndex });
+        out.entries.push({ programId: top, depth: stack.length, data, lineIndex, frame: frameStack[frameStack.length - 1]! });
       } catch (e) {
         out.badData.push({ line: i, error: e instanceof Error ? e.message : String(e) });
       }

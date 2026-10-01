@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constants.ts";
 import { computeSummary, computeMilestones, recentDigs, cohortReport } from "../src/metrics/metrics.ts";
+import { listRigShifts, loadHaul } from "../src/api/haul.ts";
 import { Rng, generateSimulation, runSimulation, type SimConfig } from "../src/sim/simulate.ts";
 import { migrate, openDb, type Db } from "../src/store/db.ts";
 import { Store } from "../src/store/store.ts";
@@ -69,9 +70,13 @@ describe("simulation through the real ingest path", () => {
     const input = await store.loadMetricsInput();
     const opts = { asOf: sim.asOf, tzOffsetMinutes: 60, programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA, teamCrankers: sim.teamCrankers };
     const s = computeSummary(input, opts);
-    expect(s.rigs.total).toBe(base.rigs);
-    expect(s.rigs.basis).toBe("accounts");
-    expect(s.rigs.seeker + s.rigs.guest).toBe(base.rigs);
+    // Rigs are counted from RigRegistered / RigClosed, and the account snapshot agrees.
+    expect(s.rigs.basis).toBe("lifecycle");
+    expect(s.rigs.everRegistered).toBe(base.rigs);
+    expect(s.rigs.total).toBe(base.rigs - s.rigs.closed);
+    expect(s.rigs.crossCheck).toEqual({ accounts: s.rigs.total, accountsSeeker: s.rigs.seeker, matches: true });
+    expect(s.rigs.seeker + s.rigs.guest).toBe(s.rigs.total);
+    expect(input.registered).toHaveLength(base.rigs);
     expect(s.roundsDug.rigRounds).toBeGreaterThan(0);
     expect(s.solDeployed.consistent).toBe(true);
     expect(s.consistency).toEqual({
@@ -87,5 +92,29 @@ describe("simulation through the real ingest path", () => {
     expect(recentDigs(input, HEADS_DOWN_PROGRAM_ID, 10)).toHaveLength(10);
     expect(cohortReport(input, opts).cohorts.length).toBeGreaterThan(0);
     expect(computeMilestones(input, s, opts).milestones).toHaveLength(3);
+
+    // Every ended shift has a final haul whose replayed leases give exactly ShiftEnded.dark_rounds,
+    // with SOL returned from the Round accounts and the rig's DeployEvents matching its RigDugs.
+    const deps = { store, dataset: "simulated" as const, simulated: true, programId: HEADS_DOWN_PROGRAM_ID, market: null, link: () => null };
+    let hauls = 0;
+    let mined = 0n;
+    const reasons = new Set<number>();
+    for (const rig of new Set(input.registered!.map((r) => r.rig))) {
+      for (const sh of await listRigShifts(store, rig)) {
+        const h = await loadHaul(deps, rig, BigInt(sh.shiftId));
+        expect(h.status, `${rig} shift ${sh.shiftId}`).toBe(200);
+        if (h.status !== 200) continue;
+        expect(h.diagnostics, `${rig} shift ${sh.shiftId}`).toMatchObject({ darkMatches: true, solReturnedExact: true, deploysMatchDigs: true });
+        expect(h.haul.rounds.filter((r) => r.dark).length).toBe(Number(h.haul.dark_rounds));
+        expect(h.haul.rounds.filter((r) => r.dug_mask !== 0).length).toBe(Number(h.haul.rounds_dug));
+        expect(h.haul.explorer).toEqual({ shift_log: null, sample_digs: [] });
+        mined += BigInt(h.haul.ore_mined_atoms);
+        reasons.add(h.haul.break_reason);
+        hauls++;
+      }
+    }
+    expect(hauls).toBe(input.ends.length);
+    expect(mined).toBeGreaterThan(0n);
+    expect(reasons.has(0)).toBe(true);
   });
 });

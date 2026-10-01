@@ -29,6 +29,32 @@ export interface SkipRow {
   errorCode: number;
 }
 
+export interface RegisteredRow {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  rig: string;
+  authority: string;
+  tier: number;
+  attestationLevel: number;
+}
+
+export interface ClosedRow {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  rig: string;
+}
+
+export interface BrokenRow {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  rig: string;
+  shiftId: bigint;
+  reason: number;
+}
+
 export interface ArmRow {
   signature: string;
   blockTime: number | null;
@@ -43,12 +69,19 @@ export interface EndRow {
   shiftId: bigint;
   darkRounds: bigint;
   roundsDug: bigint;
+  /** spent_shift: SOL on squares plus Automation fees. */
   lamports: bigint;
   reason: number;
+  /** 10 when the row came from ShiftEndedV2 (then the three fields below are set), 4 for a v1 ShiftEnded. */
+  tag?: 4 | 10;
+  startRound?: bigint | null;
+  endRound?: bigint | null;
+  mode?: number | null;
 }
 
 export interface SeekerRow {
   signature: string;
+  slot?: number;
   blockTime: number | null;
   rig: string;
   sgtMint: string;
@@ -78,6 +111,13 @@ export interface RoundRow {
   totalMinted: bigint;
   deployedWinningSquare: bigint;
   resetSignature: string | null;
+}
+
+export interface RoundStateRow {
+  roundId: bigint;
+  /** Raw Round account bytes (re-decoded on use). */
+  data: Uint8Array;
+  contextSlot: number;
 }
 
 export interface RigRow {
@@ -114,6 +154,11 @@ export interface MetricsInput {
   arms: ArmRow[];
   ends: EndRow[];
   seekers: SeekerRow[];
+  /** v1.1 lifecycle events (optional so older callers and fixtures still type-check). */
+  registered?: RegisteredRow[];
+  closedRigs?: ClosedRow[];
+  /** ORE Round accounts read after their reset (exact per-square totals). */
+  roundStates?: RoundStateRow[];
   deploys: DeployRow[];
   rounds: RoundRow[];
   rigs: RigRow[];

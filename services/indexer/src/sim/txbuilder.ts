@@ -1,15 +1,17 @@
 /**
- * Builds `getTransaction`-shaped JSON for heads_down transactions, byte-for-byte in the form
- * the real program will produce (INTERFACE.md): `Program data:` lines for heads_down events,
- * and ORE's DeployEvent as an inner `Log` instruction signed by the Board.
+ * Builds `getTransaction`-shaped JSON for heads_down transactions, byte-for-byte in the form the
+ * real program produces (INTERFACE.md v1.1): real instruction data and account lists for the
+ * heads_down instruction, `Program data:` lines for its events, and ORE's DeployEvent as an inner
+ * `Log` instruction signed by the Board.
  *
- * Used by the simulator (so simulated data goes through the exact same decode path as real
- * data) and by tests. Nothing here is ever presented as real: the simulator tags every row
- * with dataset = "simulated".
+ * Used by the simulator (so simulated data goes through the exact same decode path as real data)
+ * and by tests. Nothing here is ever presented as real: the simulator tags every row with
+ * dataset = "simulated".
  */
 import { encodeBase58, decodeBase58 } from "../codec/base58.ts";
 import { ByteWriter } from "../codec/bytes.ts";
 import { encodeHdEvent, type HdEvent } from "../codec/events.ts";
+import { findProgramAddress, seed, addrBytes, u64le } from "../codec/pda.ts";
 import type { RawInstruction, RawTransaction } from "../codec/tx.ts";
 import { ORE_BOARD, ORE_CONFIG, ORE_PROGRAM_ID, ORE_TREASURY, ORE_LOG_IX_TAG } from "../constants.ts";
 
@@ -62,11 +64,103 @@ class KeyTable {
   }
 }
 
+// ------------------------------------------------------------------ instruction data (v1.1 §5)
+
+/** A heartbeat carried by a dig / record_heartbeats entry. null = reuse the current lease (hb_ix 0xFF). */
+export interface EntryHeartbeat {
+  counter: bigint;
+  round: bigint;
+  lease: number;
+}
+
+export function heartbeatEntriesData(tag: 6 | 7, entries: (EntryHeartbeat | null)[], hbIx: number): Uint8Array {
+  const w = new ByteWriter(2 + 20 * entries.length).u8(tag).u8(entries.length);
+  entries.forEach((e, i) => {
+    if (e === null) w.u8(0xff).u8(0).u64(0n).u64(0n).u8(0).u8(0);
+    else w.u8(hbIx).u8(i).u64(e.counter).u64(e.round).u8(e.lease).u8(0);
+  });
+  return w.finish();
+}
+
+export interface PlanInput {
+  maxEvCost: bigint;
+  digLamports: bigint;
+  split: number;
+  solo: number;
+  lease: number;
+  flags: number;
+  windowStart: bigint;
+  windowEnd: bigint;
+}
+
+export const DEFAULT_PLAN: PlanInput = {
+  maxEvCost: 700_000_000n,
+  digLamports: 1_000_000n,
+  split: 10,
+  solo: 0,
+  lease: 3,
+  flags: 0,
+  windowStart: 0n,
+  windowEnd: 4_102_444_800n,
+};
+
+export function armShiftData(p: PlanInput): Uint8Array {
+  return new ByteWriter(38)
+    .u8(5)
+    .u8(0)
+    .u64(p.maxEvCost)
+    .u64(p.digLamports)
+    .u8(p.split)
+    .u8(p.solo)
+    .u8(p.lease)
+    .u8(p.flags)
+    .i64(p.windowStart)
+    .i64(p.windowEnd)
+    .finish();
+}
+
+const shiftLogPda = (rig: string, shiftId: bigint, programId: string) =>
+  findProgramAddress([seed("shift"), addrBytes(rig), u64le(shiftId)], programId).address;
+const configPda = (programId: string) => findProgramAddress([seed("config")], programId).address;
+
+/** The heads_down instruction whose execution logs `events` (the first event decides). */
+function defaultIx(events: HdEvent[], signer: string, programId: string, plan?: PlanInput): { data: Uint8Array; accounts: string[] } {
+  const ev = events[0];
+  // No event: an instruction that logs none (set_caps).
+  if (!ev) return { data: new ByteWriter(41).u8(3).u64(0n).u64(0n).u64(0n).u64(0n).i64(0n).finish(), accounts: [signer, signer] };
+  switch (ev.kind) {
+    case "RigRegistered": {
+      const w = new ByteWriter(35).u8(1).u8(2).bytes(decodeBase58(ev.rig, 32)).u8(0);
+      return { data: w.finish(), accounts: [signer, ev.rig, configPda(programId), SYSTEM] };
+    }
+    case "SeekerVerified": {
+      const seat = findProgramAddress([seed("seeker"), addrBytes(ev.sgtMint)], programId).address;
+      return { data: Uint8Array.of(2), accounts: [signer, ev.rig, seat, ev.sgtMint, ev.sgtMint, SYSTEM] };
+    }
+    case "ShiftArmed":
+      return { data: armShiftData(plan ?? DEFAULT_PLAN), accounts: [ev.rig, signer, ORE_BOARD] };
+    case "ShiftEnded":
+    case "ShiftEndedV2":
+      return { data: Uint8Array.of(11), accounts: [signer, ev.rig, shiftLogPda(ev.rig, ev.shiftId, programId), ORE_BOARD, SYSTEM] };
+    case "ShiftBroken":
+      // A FREEZE that interrupts a shift logs ShiftBroken(3) from freeze_rig; every other reason is a BREAK.
+      return { data: ev.reason === 3 ? Uint8Array.of(9, 0, 3) : Uint8Array.of(8, 0, ev.reason), accounts: [ev.rig, signer] };
+    case "RigClosed":
+      return { data: Uint8Array.of(14), accounts: [signer, ev.rig] };
+    default:
+      throw new Error(`buildEventTx cannot infer the instruction for ${ev.kind}; pass ix`);
+  }
+}
+
+// ------------------------------------------------------------------ dig
+
 export interface DigRigInput {
   rig: string;
   authority: string;
   automation: string;
   miner: string;
+  /** The heartbeat this entry carries (default: a fresh heartbeat for the dig's round, lease 3). */
+  heartbeat?: EntryHeartbeat | null;
   /** Either a real dig (RigDug + ORE DeployEvent) or a skip (RigSkipped). */
   outcome:
     | { kind: "dug"; perTile: bigint; mask: number; emaEv: bigint }
@@ -90,7 +184,7 @@ export interface DigTxInput {
 
 export function buildDigTx(input: DigTxInput): RawTransaction {
   const t = new KeyTable();
-  // Fixed account order of `dig` (INTERFACE.md).
+  // Fixed account order of `dig` (INTERFACE.md §5).
   const fixed = [
     input.cranker,
     input.configPda,
@@ -166,6 +260,11 @@ export function buildDigTx(input: DigTxInput): RawTransaction {
   if (input.failed) logs.push(`Program ${input.programId} failed: custom program error: 0x7`);
   else logs.push(`Program ${input.programId} success`);
 
+  // Default: a fresh heartbeat signed for this round, lease 3, with a counter that grows with the round.
+  const entries = input.rigs.map((r, i) =>
+    r.heartbeat === undefined ? { counter: input.roundId * 64n + BigInt(i) + 1n, round: input.roundId, lease: 3 } : r.heartbeat,
+  );
+  const digAccounts = [...fixed, ...input.rigs.flatMap((r) => [r.rig, r.authority, r.automation, r.miner])].map((k) => t.idx(k));
   return {
     slot: input.slot,
     blockTime: input.blockTime,
@@ -177,7 +276,7 @@ export function buildDigTx(input: DigTxInput): RawTransaction {
         instructions: [
           { programIdIndex: cb, accounts: [], data: "3DTZbgwsozUF" },
           { programIdIndex: secp, accounts: [], data: "1" },
-          { programIdIndex: hd, accounts: [], data: "7" },
+          { programIdIndex: hd, accounts: digAccounts, data: encodeBase58(heartbeatEntriesData(6, entries, 1)) },
         ],
       },
     },
@@ -190,7 +289,60 @@ export function buildDigTx(input: DigTxInput): RawTransaction {
   };
 }
 
-/** A heads_down transaction that only emits events (arm_shift, end_shift, verify_seeker ...). */
+// ------------------------------------------------------------------ record_heartbeats
+
+export interface RecordRigInput {
+  rig: string;
+  heartbeat: EntryHeartbeat;
+  /** Accepted (HeartbeatsRecorded with the dark rounds it added) or refused (RigSkipped). */
+  outcome: { kind: "recorded"; darkRoundsAdded: bigint } | { kind: "skipped"; error: number };
+}
+
+export function buildRecordTx(input: {
+  signature: string;
+  slot: number;
+  blockTime: number;
+  cranker: string;
+  programId: string;
+  boardRound: bigint;
+  rigs: RecordRigInput[];
+}): RawTransaction {
+  const t = new KeyTable();
+  const accounts = [ORE_BOARD, IX_SYSVAR, ...input.rigs.map((r) => r.rig)];
+  t.idx(input.cranker);
+  for (const k of accounts) t.idx(k);
+  const hd = t.idx(input.programId);
+  const secp = t.idx(SECP256R1);
+  const logs = [`Program ${input.programId} invoke [1]`];
+  for (const r of input.rigs) {
+    const ev: HdEvent =
+      r.outcome.kind === "recorded"
+        ? { kind: "HeartbeatsRecorded", rig: r.rig, roundId: input.boardRound, darkRoundsAdded: r.outcome.darkRoundsAdded }
+        : { kind: "RigSkipped", rig: r.rig, roundId: input.boardRound, error: r.outcome.error };
+    logs.push(`Program data: ${b64(encodeHdEvent(ev))}`);
+  }
+  logs.push(`Program ${input.programId} consumed ${8000 * input.rigs.length} of 1400000 compute units`, `Program ${input.programId} success`);
+  return {
+    slot: input.slot,
+    blockTime: input.blockTime,
+    version: 0,
+    transaction: {
+      signatures: [input.signature],
+      message: {
+        accountKeys: t.keys,
+        instructions: [
+          { programIdIndex: secp, accounts: [], data: "1" },
+          { programIdIndex: hd, accounts: accounts.map((k) => t.idx(k)), data: encodeBase58(heartbeatEntriesData(7, input.rigs.map((r) => r.heartbeat), 0)) },
+        ],
+      },
+    },
+    meta: { err: null, logMessages: logs, innerInstructions: [], loadedAddresses: { writable: [], readonly: [] } },
+  };
+}
+
+// ------------------------------------------------------------------ events-only instructions
+
+/** A heads_down transaction whose single instruction logs `events` (arm_shift, end_shift, verify_seeker, ...). */
 export function buildEventTx(input: {
   signature: string;
   slot: number;
@@ -198,8 +350,16 @@ export function buildEventTx(input: {
   signer: string;
   programId: string;
   events: HdEvent[];
+  /** The instruction (default: inferred from the first event). */
+  ix?: { data: Uint8Array; accounts: string[] };
+  /** arm_shift plan when the instruction is inferred from a ShiftArmed. */
+  plan?: PlanInput;
 }): RawTransaction {
-  const keys = [input.signer, input.programId];
+  const ix = input.ix ?? defaultIx(input.events, input.signer, input.programId, input.plan);
+  const t = new KeyTable();
+  t.idx(input.signer);
+  const accounts = ix.accounts.map((k) => t.idx(k));
+  const hd = t.idx(input.programId);
   const logs = [`Program ${input.programId} invoke [1]`];
   for (const ev of input.events) logs.push(`Program data: ${b64(encodeHdEvent(ev))}`);
   logs.push(`Program ${input.programId} consumed 9000 of 200000 compute units`, `Program ${input.programId} success`);
@@ -209,7 +369,7 @@ export function buildEventTx(input: {
     version: 0,
     transaction: {
       signatures: [input.signature],
-      message: { accountKeys: keys, instructions: [{ programIdIndex: 1, accounts: [0], data: "1" }] },
+      message: { accountKeys: t.keys, instructions: [{ programIdIndex: hd, accounts, data: encodeBase58(ix.data) }] },
     },
     meta: { err: null, logMessages: logs, innerInstructions: [], loadedAddresses: { writable: [], readonly: [] } },
   };

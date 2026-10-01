@@ -102,7 +102,7 @@ describe("retention cohorts", () => {
     expect(rep.cohorts[0]!.cells[0]!.retained).toBe(0);
   });
 
-  it("an empty dataset yields no cohorts and null averages", () => {
+  it("an empty dataset has no cohorts and null averages", () => {
     const rep = computeCohorts({ arms: [], digs: [], ends: [] }, T0, WAT);
     expect(rep.cohorts).toEqual([]);
     expect(rep.average.every((a) => a.rate === null)).toBe(true);
@@ -245,8 +245,8 @@ describe("summary", () => {
     expect(s.gate.closedByCostGate).toBe(1);
     expect(s.gate.digShareOfDarkRounds).toBeCloseTo(3 / 400);
     expect(s.skips).toEqual([
-      { code: 1, name: "CostGate", count: 1 },
-      { code: 7, name: "StaleHeartbeat", count: 1 },
+      { code: 1, name: "CostGate", range: "heads_down", label: "price gate closed: mining cost more than the plan allows", count: 1 },
+      { code: 7, name: "StaleHeartbeat", range: "heads_down", label: "replay rejected: heartbeat counter not newer", count: 1 },
     ]);
     expect(s.crankers).toEqual({ distinct: 2, thirdParty: 1 });
     expect(s.consistency).toEqual({

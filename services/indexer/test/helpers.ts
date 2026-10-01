@@ -15,10 +15,12 @@ export interface FakeChain {
   throttleNext: number;
   /** Signatures getTransaction pretends not to have yet. */
   unavailable: Set<string>;
+  /** Signatures a short-history node no longer knows (getSignaturesForAddress `until` fails). */
+  pruned: Set<string>;
 }
 
 export function fakeChain(): FakeChain {
-  return { sigs: new Map(), txs: new Map(), accounts: [], slot: 1000, calls: [], throttleNext: 0, unavailable: new Set() };
+  return { sigs: new Map(), txs: new Map(), accounts: [], slot: 1000, calls: [], throttleNext: 0, unavailable: new Set(), pruned: new Set() };
 }
 
 export function addTx(chain: FakeChain, tx: RawTransaction, addresses: string[]) {
@@ -44,7 +46,10 @@ export function fakeRpcFetch(chain: FakeChain): typeof fetch {
     switch (req.method) {
       case "getSignaturesForAddress": {
         const [address, opts] = req.params as [string, { before?: string; until?: string; limit: number }];
-        const newestFirst = [...(chain.sigs.get(address) ?? [])].reverse();
+        if (opts.until && chain.pruned.has(opts.until)) {
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, error: { code: -32009, message: `Transaction ${opts.until} not found` } }), { status: 200 });
+        }
+        const newestFirst = [...(chain.sigs.get(address) ?? [])].reverse().filter((s) => !chain.pruned.has(s.signature));
         let start = 0;
         if (opts.before) start = newestFirst.findIndex((s) => s.signature === opts.before) + 1;
         let end = newestFirst.length;
@@ -58,6 +63,14 @@ export function fakeRpcFetch(chain: FakeChain): typeof fetch {
         const [s] = req.params as [string];
         if (chain.unavailable.has(s)) return ok(null);
         return ok(chain.txs.get(s) ?? null);
+      }
+      case "getMultipleAccounts": {
+        const [addresses] = req.params as [string[]];
+        const value = addresses.map((k) => {
+          const a = chain.accounts.find((x) => x.address === k);
+          return a ? { data: [Buffer.from(a.data).toString("base64"), "base64"], owner: a.owner, lamports: 1, executable: false, space: a.data.length } : null;
+        });
+        return ok({ context: { slot: chain.slot }, value });
       }
       case "getProgramAccounts": {
         const [, cfg] = req.params as [string, { filters: ({ dataSize?: number } | { memcmp?: { offset: number; bytes: string } })[] }];
