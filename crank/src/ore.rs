@@ -424,6 +424,25 @@ impl Miner {
     pub fn needs_checkpoint(&self) -> bool {
         self.checkpoint_id != self.round_id
     }
+
+    /// Squares the Miner holds **in `board_round_id`** (`deployed > 0`), which `dig` excludes
+    /// from its choice; 0 when the Miner's `deployed` belongs to another round.
+    pub fn held_mask(&self, board_round_id: u64) -> u32 {
+        if self.round_id != board_round_id {
+            return 0;
+        }
+        self.deployed.iter().enumerate().fold(0u32, |m, (i, v)| if *v > 0 { m | (1 << i) } else { m })
+    }
+
+    /// SOL the Miner already has on the board in `board_round_id` (0 for another round);
+    /// `None` on overflow. Zero means `dig` would be the rig's first deploy this round, which
+    /// is when ORE charges the Automation's fee.
+    pub fn deployed_in(&self, board_round_id: u64) -> Option<u64> {
+        if self.round_id != board_round_id {
+            return Some(0);
+        }
+        self.deployed.iter().try_fold(0u64, |a, v| a.checked_add(*v))
+    }
 }
 
 /// Parse the slot of the last upgrade from ORE's ProgramData header
@@ -500,24 +519,54 @@ pub fn distribution_mask(round_id: u64) -> u32 {
     indices[..SOLO_SQUARES].iter().fold(0u32, |m, &idx| m | (1u32 << idx))
 }
 
-/// The tile choice `heads_down::dig` makes (INTERFACE.md, `dig` step 6): the `split`
-/// least-crowded split squares and the `solo` least-crowded solo squares by
-/// `round.deployed`, ties to the lowest index. The crank predicts it for logs and metrics
-/// only; the program computes it on-chain and the crank has no say.
-pub fn select_tiles(round_id: u64, deployed: &[u64; SQUARES], split: u8, solo: u8) -> u32 {
+/// The tile choice `heads_down::dig` makes (INTERFACE §6.4, the program's
+/// `logic::select_tiles`): the `split` least-crowded split squares and the `solo`
+/// least-crowded solo squares by `round.deployed`, ties to the lowest index, never a square
+/// in `held` (the Miner already holds it this round, so ORE would skip it). The crank predicts
+/// it for logs and metrics only; the program computes it on-chain and the crank has no say.
+pub fn select_tiles_excluding(round_id: u64, deployed: &[u64; SQUARES], held: u32, split: u8, solo: u8) -> u32 {
     let solo_mask = distribution_mask(round_id);
-    let mut split_idx: Vec<usize> = (0..SQUARES).filter(|i| solo_mask & (1 << i) == 0).collect();
-    let mut solo_idx: Vec<usize> = (0..SQUARES).filter(|i| solo_mask & (1 << i) != 0).collect();
-    split_idx.sort_by_key(|&i| (deployed[i], i));
-    solo_idx.sort_by_key(|&i| (deployed[i], i));
+    let mut order: Vec<usize> = (0..SQUARES).collect();
+    // Stable: equal amounts keep index order.
+    order.sort_by_key(|&i| deployed[i]);
+    let (mut want_split, mut want_solo) = (split, solo);
     let mut mask = 0u32;
-    for &i in split_idx.iter().take(usize::from(split)) {
-        mask |= 1 << i;
-    }
-    for &i in solo_idx.iter().take(usize::from(solo)) {
-        mask |= 1 << i;
+    for i in order {
+        let bit = 1u32 << i;
+        if held & bit != 0 {
+            continue;
+        }
+        if solo_mask & bit != 0 {
+            if want_solo > 0 {
+                mask |= bit;
+                want_solo -= 1;
+            }
+        } else if want_split > 0 {
+            mask |= bit;
+            want_split -= 1;
+        }
+        if want_split == 0 && want_solo == 0 {
+            break;
+        }
     }
     mask
+}
+
+/// [`select_tiles_excluding`] for a Miner that holds nothing this round.
+pub fn select_tiles(round_id: u64, deployed: &[u64; SQUARES], split: u8, solo: u8) -> u32 {
+    select_tiles_excluding(round_id, deployed, 0, split, solo)
+}
+
+/// `k = popcount(mask)` of the squares `dig` will choose, without the Round: the choice
+/// takes `min(split, free split squares) + min(solo, free solo squares)` whatever the
+/// amounts on them, so the count only depends on the round's solo mask and `held`.
+pub fn tiles_available(round_id: u64, held: u32, split: u8, solo: u8) -> u32 {
+    let solo_mask = distribution_mask(round_id);
+    let board = (1u32 << SQUARES) - 1;
+    let free = board & !held;
+    let free_solo = (free & solo_mask).count_ones();
+    let free_split = (free & !solo_mask).count_ones();
+    u32::from(split).min(free_split) + u32::from(solo).min(free_solo)
 }
 
 #[cfg(test)]
@@ -564,6 +613,51 @@ mod tests {
         // All 15 split + all 10 solo = the whole board; asking for more is clamped.
         assert_eq!(select_tiles(rid, &deployed, 15, 10), (1 << 25) - 1);
         assert_eq!(select_tiles(rid, &deployed, 255, 255), (1 << 25) - 1);
+    }
+
+    #[test]
+    fn held_squares_are_excluded_and_k_is_the_popcount() {
+        let rid = 422_700;
+        let solo = distribution_mask(rid);
+        assert_eq!(solo, 0x124f304, "golden vectors' solo mask for round 422700");
+        let deployed = [100u64; SQUARES];
+        let first_split = (0..SQUARES).find(|i| solo & (1 << i) == 0).unwrap();
+        let held = 1u32 << first_split;
+        let m = select_tiles_excluding(rid, &deployed, held, 2, 0);
+        assert_eq!(m & held, 0, "a held square is never chosen");
+        assert_eq!(m.count_ones(), 2);
+        // Everything split but one square held: k is capped by what is free.
+        let all_split = ((1u32 << SQUARES) - 1) & !solo;
+        let held = all_split & !(1u32 << first_split);
+        assert_eq!(tiles_available(rid, held, 15, 0), 1);
+        assert_eq!(select_tiles_excluding(rid, &deployed, held, 15, 0).count_ones(), 1);
+        for (h, sp, so) in [(0u32, 10u8, 0u8), (0, 15, 10), (0, 255, 255), (held, 3, 4), (solo, 4, 4), (0x1ff_ffff, 1, 1)] {
+            assert_eq!(select_tiles_excluding(rid, &deployed, h, sp, so).count_ones(), tiles_available(rid, h, sp, so));
+        }
+        // The golden dig vectors: 10 split squares on the pinned round.
+        let golden = [
+            370_000_000u64, 381_000_000, 392_000_000, 378_000_000, 389_000_000, 375_000_000, 386_000_000, 372_000_000,
+            383_000_000, 394_000_000, 380_000_000, 391_000_000, 377_000_000, 388_000_000, 374_000_000, 385_000_000,
+            371_000_000, 382_000_000, 393_000_000, 379_000_000, 390_000_000, 376_000_000, 387_000_000, 373_000_000,
+            384_000_000,
+        ];
+        assert_eq!(select_tiles(rid, &golden, 10, 0), 0x008b04ab, "RigDug.mask of dig_fresh_heartbeat");
+        let mut m = Miner {
+            authority: Address::default(),
+            checkpoint_id: 0,
+            checkpoint_fee: 0,
+            deployed: [0; SQUARES],
+            round_id: rid,
+            rewards_ore: 0,
+        };
+        m.deployed[3] = 5;
+        m.deployed[7] = 6;
+        assert_eq!(m.held_mask(rid), (1 << 3) | (1 << 7));
+        assert_eq!(m.held_mask(rid + 1), 0);
+        assert_eq!(m.deployed_in(rid), Some(11));
+        assert_eq!(m.deployed_in(rid + 1), Some(0));
+        m.deployed[0] = u64::MAX;
+        assert_eq!(m.deployed_in(rid), None);
     }
 
     #[test]
