@@ -292,13 +292,13 @@ heads_down::dig                      [6, n, (hb_ix, hb_sig_index, counter, round
 ```
 
 Packing compiles and serializes every candidate batch (`wincode`), so limits are measured, not estimated.
-Executed with the **real program** on live ORE (`cargo test --features real-program --test fork`, two runs;
-CU varies with ORE's bump search on each wallet's PDAs):
+Executed with the **real program** on live ORE (`cargo test --features real-program --test fork`, three runs;
+CU varies with ORE's bump search on each wallet's PDAs, so treat the ranges as samples, not bounds):
 
 | Format | Fresh heartbeats per tx | Lease reuses per tx | Bytes | CU per rig |
 |---|---|---|---|---|
-| v0 + crank lookup table | **5** | **12** | 1,206 (5 fresh) / 650 (12 reuses) | 32.7k-34.5k / 32.3k-33.1k |
-| v1 | **11** | not measured | 3,845 | 34.1k-35.2k |
+| v0 + crank lookup table | **5** | **12** | 1,206 (5 fresh) / 650 (12 reuses) | 32.7k-34.5k / 32.3k-33.3k |
+| v1 | **11** | not measured | 3,845 | 34.1k-35.8k |
 | legacy / v0 without table | 2 | | 1,215 | 32.8k-35.1k |
 
 `record_heartbeats` packs 4 rigs per legacy transaction (1,111 bytes, ~1,545 CU per rig); a BREAK / FREEZE is
@@ -314,7 +314,7 @@ program, CU limit sized by simulation (+15% + 1,000), 1,000 micro-lamports/CU, `
 |---|---|---|---|---|
 | v0 + table, fresh heartbeat | 5 | 6,037-6,040 | 7,000 | **+960 to +962** |
 | v1, fresh heartbeat | 11 | 5,493-5,495 | 7,000 | **+1,504 to +1,506** |
-| v0 + table, lease reuse (`hb_ix = 0xFF`) | 12 | 453-454 | 7,000 | **+6,545 to +6,546** |
+| v0 + table, lease reuse (`hb_ix = 0xFF`) | 12 | 453-455 | 7,000 | **+6,545 to +6,546** |
 | legacy, fresh heartbeat | 2 | 7,538-7,541 | 7,000 | −538 to −541 |
 
 - **Reimbursement** is `Config.crank_fee`, paid by the program from the Executor PDA only after a real deploy,
@@ -446,3 +446,7 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   crank operator opts in (and pays for it).
 - Heartbeats, signal tracking and the ledger live in memory: a restart loses held heartbeats until phones send the
   next one (one round); on-chain counters keep everything idempotent.
+- `hd_crank_fees_lamports_total`, `hd_crank_signal_fees_lamports_total` and `hd_crank_record_fees_lamports_total`
+  read the fee from `getTransaction` after the landing (5 tries, about 4 s), so they can lag the landed counters
+  and miss a transaction the RPC never returns. The lamport budgets are unaffected: they are debited with the
+  computed fee before each transaction is sent (for a BREAK / FREEZE, when the phone's message is accepted).
