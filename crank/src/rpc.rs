@@ -136,6 +136,79 @@ pub struct TransactionInfo {
     pub logs: Vec<String>,
 }
 
+/// One compiled instruction of a fetched transaction, resolved to addresses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FetchedInstruction {
+    /// Program id.
+    pub program_id: Address,
+    /// Account addresses in instruction order.
+    pub accounts: Vec<Address>,
+    /// Instruction data.
+    pub data: Vec<u8>,
+}
+
+/// A fetched transaction: status, cost, logs and the top-level instructions.
+#[derive(Clone, Debug, Default)]
+pub struct FullTransaction {
+    /// Slot.
+    pub slot: u64,
+    /// Block time, if the node has it.
+    pub block_time: Option<i64>,
+    /// Error, if any.
+    pub err: Option<Value>,
+    /// Fee paid.
+    pub fee: u64,
+    /// CU consumed.
+    pub compute_units: Option<u64>,
+    /// Logs.
+    pub logs: Vec<String>,
+    /// Fee payer (the first account key).
+    pub fee_payer: Option<Address>,
+    /// Top-level instructions in order.
+    pub instructions: Vec<FetchedInstruction>,
+}
+
+impl FullTransaction {
+    /// Parse the `getTransaction` (`encoding: json`) result.
+    pub fn from_json(r: &Value) -> Result<Self, RpcError> {
+        let dec = |m: &str| RpcError::Decode(m.to_string());
+        let meta = &r["meta"];
+        let msg = &r["transaction"]["message"];
+        let parse_keys = |v: &Value| -> Result<Vec<Address>, RpcError> {
+            v.as_array()
+                .map(|a| a.iter().map(|k| k.as_str().and_then(|s| s.parse().ok()).ok_or_else(|| dec("account key"))).collect())
+                .unwrap_or_else(|| Ok(Vec::new()))
+        };
+        let mut keys = parse_keys(&msg["accountKeys"])?;
+        keys.extend(parse_keys(&meta["loadedAddresses"]["writable"])?);
+        keys.extend(parse_keys(&meta["loadedAddresses"]["readonly"])?);
+        let key_at = |i: &Value| -> Result<Address, RpcError> {
+            let i = usize::try_from(i.as_u64().ok_or_else(|| dec("index"))?).map_err(|_| dec("index"))?;
+            keys.get(i).copied().ok_or_else(|| dec("index out of range"))
+        };
+        let mut instructions = Vec::new();
+        for ix in msg["instructions"].as_array().into_iter().flatten() {
+            let program_id = key_at(&ix["programIdIndex"])?;
+            let accounts = ix["accounts"].as_array().into_iter().flatten().map(&key_at).collect::<Result<Vec<_>, _>>()?;
+            let data = bs58::decode(ix["data"].as_str().unwrap_or("")).into_vec().map_err(|_| dec("instruction data"))?;
+            instructions.push(FetchedInstruction { program_id, accounts, data });
+        }
+        Ok(FullTransaction {
+            slot: r["slot"].as_u64().unwrap_or(0),
+            block_time: r["blockTime"].as_i64(),
+            err: meta.get("err").filter(|e| !e.is_null()).cloned(),
+            fee: meta["fee"].as_u64().unwrap_or(0),
+            compute_units: meta["computeUnitsConsumed"].as_u64(),
+            logs: meta["logMessages"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|l| l.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            fee_payer: keys.first().copied(),
+            instructions,
+        })
+    }
+}
+
 #[derive(Deserialize)]
 struct RpcResponse {
     result: Option<Value>,
@@ -385,6 +458,21 @@ impl RpcClient {
         }))
     }
 
+    /// `getTransaction` with the instructions and the full account-key list (static keys, then
+    /// the lookup-table writable and readonly addresses, which is how instructions index them).
+    pub async fn get_transaction_full(&self, sig: &str) -> Result<Option<FullTransaction>, RpcError> {
+        let r = self
+            .call(
+                "getTransaction",
+                json!([sig, { "encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 1 }]),
+            )
+            .await?;
+        if r.is_null() {
+            return Ok(None);
+        }
+        FullTransaction::from_json(&r).map(Some)
+    }
+
     /// `getMinimumBalanceForRentExemption`.
     pub async fn get_minimum_balance_for_rent_exemption(&self, len: usize) -> Result<u64, RpcError> {
         self.call("getMinimumBalanceForRentExemption", json!([len, { "commitment": self.commitment }]))
@@ -493,7 +581,29 @@ mod tests {
     }
 
     #[test]
-    fn open_shift_filter_targets_shift_open() {
+    fn full_transaction_resolves_lookup_table_keys() {
+        let payer = Address::new_from_array([1; 32]);
+        let prog = Address::new_from_array([2; 32]);
+        let looked_w = Address::new_from_array([3; 32]);
+        let looked_r = Address::new_from_array([4; 32]);
+        let v = json!({
+            "slot": 9, "blockTime": 1_790_000_000,
+            "meta": { "err": null, "fee": 10_000, "computeUnitsConsumed": 1234, "logMessages": ["a"],
+                      "loadedAddresses": { "writable": [looked_w.to_string()], "readonly": [looked_r.to_string()] } },
+            "transaction": { "message": {
+                "accountKeys": [payer.to_string(), prog.to_string()],
+                "instructions": [ { "programIdIndex": 1, "accounts": [0, 2, 3], "data": bs58::encode([6u8, 1]).into_string() } ]
+            } }
+        });
+        let t = FullTransaction::from_json(&v).unwrap();
+        assert_eq!(t.fee_payer, Some(payer));
+        assert_eq!(t.instructions[0].program_id, prog);
+        assert_eq!(t.instructions[0].accounts, vec![payer, looked_w, looked_r]);
+        assert_eq!(t.instructions[0].data, vec![6, 1]);
+        assert_eq!((t.fee, t.compute_units, t.slot, t.block_time), (10_000, Some(1234), 9, Some(1_790_000_000)));
+        let mut bad = v.clone();
+        bad["transaction"]["message"]["instructions"][0]["accounts"] = json!([7]);
+        assert!(FullTransaction::from_json(&bad).is_err(), "index out of range");
         let f = open_shift_filters();
         assert_eq!(f[2], Filter::Memcmp { offset: 336, bytes: vec![1] });
     }

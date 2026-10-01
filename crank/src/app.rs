@@ -20,7 +20,7 @@ use crate::mirror::{HeartbeatMirror, NoMirror};
 use crate::rpc::{redact_url, RpcClient, RpcRigSource};
 use crate::sender::Submitter;
 use crate::signal::SignalHub;
-use crate::{gate, hd, keys, ore};
+use crate::{demo, gate, hd, keys, ore};
 
 /// Run the crank until the chain watcher stops (the binary adds Ctrl-C handling).
 pub async fn run(cfg: Config) -> anyhow::Result<()> {
@@ -176,4 +176,21 @@ pub async fn check(cfg: Config) -> anyhow::Result<()> {
     let open = rpc.get_program_accounts(&program_id, &crate::rpc::open_shift_filters()).await?.len();
     println!("open shifts    {open}");
     Ok(())
+}
+
+/// `hd-crank decode <signature>`: the heads_down events of a transaction, for captions.
+pub async fn decode(cfg: Config, signature: String, json: bool) -> anyhow::Result<()> {
+    let rpc = RpcClient::new(cfg.rpc_url.clone(), cfg.commitment.clone(), Duration::from_secs(15))?;
+    demo::decode(&rpc, &cfg.program_id(), &signature, json).await
+}
+
+/// `hd-crank replay --signature <sig>`: resubmit a landed dig's heartbeats (see [`demo`]).
+pub async fn replay(cfg: Config, opts: demo::ReplayOpts) -> anyhow::Result<()> {
+    let path = cfg
+        .keypair_path
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no keypair: pass --keypair or set HD_CRANK_KEYPAIR (it pays the replay's fee)"))?;
+    let key = keys::load_keypair(&path)?;
+    let rpc = RpcClient::new(cfg.rpc_url.clone(), cfg.commitment.clone(), Duration::from_secs(15))?;
+    demo::replay(&rpc, &cfg.program_id(), &key, opts).await
 }

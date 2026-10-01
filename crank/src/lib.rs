@@ -21,6 +21,7 @@
 //! | [`sender`], [`ledger`] | submit, confirm, retry with a fresh blockhash, idempotent per (rig, round) |
 //! | [`breaker`], [`metrics`] | circuit breaker on ORE layout drift; Prometheus text metrics |
 //! | [`crank`] | the loop: digs, `record_heartbeats`, BREAK / FREEZE landing, permissionless `end_shift` |
+//! | [`demo`] | `replay` (a landed dig's heartbeat, refused as stale) and `decode` (captions) |
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -33,6 +34,7 @@ pub mod bytes;
 pub mod chain;
 pub mod config;
 pub mod crank;
+pub mod demo;
 pub mod gate;
 pub mod hd;
 pub mod heartbeat;
