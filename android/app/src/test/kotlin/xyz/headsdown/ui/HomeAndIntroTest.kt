@@ -28,9 +28,13 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import xyz.headsdown.core.chain.uplink.AckReason
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
 import xyz.headsdown.feature.reveal.haul.HonestCopy
+import xyz.headsdown.feature.shift.CrankAck
+import xyz.headsdown.feature.shift.CrankLinkStatus
 import xyz.headsdown.feature.shift.ShiftMode
+import xyz.headsdown.feature.shift.refusalLine
 import xyz.headsdown.feature.shift.ShiftSnapshot
 import xyz.headsdown.feature.shift.ShiftSpec
 import xyz.headsdown.feature.shift.ShiftState
@@ -116,6 +120,34 @@ class HomeAndIntroTest {
         rule.onNodeWithTag(HomeTags.SENSOR_LAB).performScrollTo().performClick()
         rule.onNodeWithTag(HomeTags.PREVIEW_REVEAL).performScrollTo().performClick()
         assertEquals(listOf(1, 1, 1), listOf(widget, lab, reveal))
+    }
+
+    @Test
+    fun `a crank refusal is shown on the rig card, plainly`() {
+        val refused = CrankLinkStatus(
+            configured = true,
+            accepted = 3,
+            lastAck = CrankAck(9uL, "heartbeat", ok = false, reason = AckReason.BAD_SIGNATURE, atWallMillis = 0),
+        )
+        rule.setContent {
+            HeadsDownTheme {
+                HomeScreen(
+                    snapshot = ShiftSnapshot.IDLE, onboarding = OnboardingState(), health = ShiftHealth.NoRecentShift,
+                    onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {}, crank = refused,
+                    onOpenRigDebug = {},
+                )
+            }
+        }
+        rule.onNodeWithTag(HomeTags.CRANK_REFUSAL).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText(refused.refusalLine()!!).assertExists()
+        rule.onNodeWithTag(HomeTags.RIG_DEBUG).performScrollTo().assertExists()
+        screenTexts().forEach { assertTrue("banned words in: $it", HonestCopy.violations(it).isEmpty()) }
+    }
+
+    @Test
+    fun `accepted acks show nothing`() {
+        home()
+        rule.onAllNodesWithTag(HomeTags.CRANK_REFUSAL).assertCountEquals(0)
     }
 
     @Test
