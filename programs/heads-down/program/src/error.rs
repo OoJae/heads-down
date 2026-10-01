@@ -3,7 +3,7 @@
 //! Codes 0..=31 are fixed by `INTERFACE.md` §8 (24..=31 were added for the
 //! `dig` pre-flight skips and state-machine violations; they are frozen in
 //! v1.1). Codes 32..=48 are the additive v1.2 SKR codes (§11.10) and codes
-//! 49..=50 the additive v1.3 codes (§12.10). Errors raised inside the shared
+//! 49..=50 the additive v1.3 codes (§12.9). Errors raised inside the shared
 //! crates keep their own namespaces:
 //! `p256-introspect` = `0x2560_00xx`, `sgt-verify` = `0x5347_00xx`.
 

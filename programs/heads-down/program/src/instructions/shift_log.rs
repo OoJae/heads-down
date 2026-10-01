@@ -1,5 +1,5 @@
 //! `close_shift_log` (tag 31, v1.3): return a sealed ShiftLog's rent 30 days
-//! after its shift ended. `INTERFACE.md` §12.6 is the contract.
+//! after its shift ended. `INTERFACE.md` §12.5 is the contract.
 //!
 //! Accounts:
 //! 0. `[writable]` ShiftLog (closed)

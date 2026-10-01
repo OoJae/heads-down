@@ -353,7 +353,7 @@ struct SeatState {
     attested_at: Option<u64>,
 }
 
-/// The per-seat rule, in order (INTERFACE.md §11.5 and §12.7). Nothing is
+/// The per-seat rule, in order (INTERFACE.md §11.5 and §12.6). Nothing is
 /// written to the rig unless a heartbeat in the entry verifies.
 fn checkin_one(
     g: &mut Rig,

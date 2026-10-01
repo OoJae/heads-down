@@ -242,7 +242,7 @@ pub fn update_streak(
 /// A rig's registrar attestation is live at `slot` iff it carries a level
 /// (1 TEE, 2 StrongBox) and its voucher has not expired (`expiry_slot >
 /// slot`). An expired attestation counts as none: wherever the program
-/// relies on the level, it asks this (INTERFACE.md §12.7).
+/// relies on the level, it asks this (INTERFACE.md §12.6).
 pub fn attestation_live(level: u8, expiry_slot: u64, slot: u64) -> bool {
     level != 0 && expiry_slot > slot
 }

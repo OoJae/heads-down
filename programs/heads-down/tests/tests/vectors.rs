@@ -236,6 +236,90 @@ fn interface_md_v12_tables_match_the_program() {
 }
 
 #[test]
+fn interface_md_v13_tables_match_the_program() {
+    use heads_down_tests::hd::{self, error::HdError, events};
+    let doc = std::fs::read_to_string(root().join("INTERFACE.md")).unwrap();
+    assert!(doc.starts_with("# `heads_down` program: interface contract v1.3\n"));
+
+    // §12.8 events 24..=27: name and exact length; no tag is left undocumented.
+    let rows = subsection_rows(&doc, "### 12.8 Events");
+    assert_eq!(rows.len(), 4, "one row per v1.3 event tag");
+    for (i, r) in rows.iter().enumerate() {
+        let tag: usize = r[0].parse().unwrap();
+        assert_eq!(tag, 24 + i);
+        assert_eq!(r[1], vectors::event_name(tag as u8), "event tag {tag} name");
+        let len: usize = r[3].parse().unwrap();
+        assert_eq!(len, events::LEN[tag], "INTERFACE.md event tag {tag} length");
+    }
+    assert_eq!(events::LEN.len(), 24 + rows.len(), "every event tag is in a table");
+
+    // §12.9 errors 49..=50 with the program's variant names.
+    let all = [HdError::ShiftLogNotExpired, HdError::ShiftLogInUse];
+    let rows = subsection_rows(&doc, "### 12.9 Errors");
+    assert_eq!(rows.len(), all.len(), "one row per v1.3 error code");
+    for (e, r) in all.iter().zip(&rows) {
+        assert_eq!(r[0].parse::<u32>().unwrap(), e.code());
+        assert_eq!(r[1], format!("{e:?}"), "error {}", e.code());
+    }
+
+    // §12.3 instructions 28..=31: name and data length vs the executed vectors.
+    let ix: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("vectors/instructions.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ix["interface_version"], "1.3");
+    let vectors = ix["instructions"].as_array().unwrap();
+    let rows = subsection_rows(&doc, "### 12.3 Instructions");
+    assert_eq!(rows.len(), 4, "one row per v1.3 instruction tag");
+    for (i, r) in rows.iter().enumerate() {
+        let tag: u64 = r[0].parse().unwrap();
+        assert_eq!(tag, 28 + i as u64);
+        let name = r[1].trim_matches('`');
+        let mine: Vec<&serde_json::Value> = vectors.iter().filter(|v| v["tag"] == tag).collect();
+        assert!(!mine.is_empty(), "tag {tag} has vectors");
+        for v in &mine {
+            assert_eq!(v["instruction"], name, "tag {tag} name");
+            assert_eq!(
+                v["data_len"].as_u64().unwrap(),
+                r[3].parse::<u64>().unwrap(),
+                "{name}"
+            );
+        }
+    }
+    // The tags the program dispatches are exactly the ones the three tables
+    // list: 0..=14 (§5), 15..=27 (§11.4), 28..=31 (§12.3).
+    assert_eq!(hd::tag::CLOSE_SHIFT_LOG, 31);
+    let tags: std::collections::BTreeSet<u64> =
+        vectors.iter().map(|v| v["tag"].as_u64().unwrap()).collect();
+    assert_eq!(tags, (0..=31).collect());
+
+    // §12.2: the offsets the document gives are the ones the layouts have.
+    use core::mem::{offset_of, size_of};
+    use hd::state::{Config, RigTombstone, ShiftLog};
+    for (needle, value) in [
+        ("| 192 | pending_governance | Address |", offset_of!(Config, pending_governance)),
+        (
+            "| 224 | pending_governance_eta_slot | u64 |",
+            offset_of!(Config, pending_governance_eta_slot),
+        ),
+        ("| 232 | reserved | [u8;24] |", offset_of!(Config, reserved)),
+        ("| 8 | shift_id | u64 | `Rig.shift_id` at close |", offset_of!(RigTombstone, shift_id)),
+        (
+            "| 16 | hb_counter | u64 | `Rig.hb_counter` at close |",
+            offset_of!(RigTombstone, hb_counter),
+        ),
+        ("| 112 | payer_prefix | [u8;16] |", offset_of!(ShiftLog, payer_prefix)),
+    ] {
+        assert!(doc.contains(needle), "INTERFACE.md row missing: {needle}");
+        let off: usize = needle.split('|').nth(1).unwrap().trim().parse().unwrap();
+        assert_eq!(off, value, "{needle}");
+    }
+    assert!(doc.contains("**RigTombstone (32 bytes, tag 10)**"));
+    assert_eq!(size_of::<RigTombstone>(), 32);
+    assert_eq!(hd::state::tag::RIG_TOMBSTONE, 10);
+}
+
+#[test]
 fn generation_is_deterministic() {
     let a = vectors::generate();
     let b = vectors::generate();

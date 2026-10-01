@@ -17,7 +17,7 @@
 //! | 10 | ShiftEndedV2 | ShiftEnded's fields, then start_round u64, end_round u64, mode u8 | 83 |
 //!
 //! v1.2 (SKR), additive: tags 11..=23, see [`tag`] and `INTERFACE.md` §11.9.
-//! v1.3, additive: tags 24..=27 (governance rotation, ShiftLog close), §12.9.
+//! v1.3, additive: tags 24..=27 (governance rotation, ShiftLog close), §12.8.
 //!
 //! A tag's length never changes: the indexer decodes by exact length, so no
 //! field is ever appended to an existing tag. `ShiftEnded` (tag 4) is still
