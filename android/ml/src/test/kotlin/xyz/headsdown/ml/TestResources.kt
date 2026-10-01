@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import xyz.headsdown.ml.pickup.Stream
 import java.io.File
 
 /** Test fixtures: the Python-generated vectors and model files, and the shipped assets. */
@@ -32,6 +33,18 @@ object TestResources {
             AccelSample(t[i], row.f(0), row.f(1), row.f(2))
         }
         return MotionWindow(input["trigger_ns"]!!.jsonPrimitive.long, samples)
+    }
+
+    /** A `{t_ns, xyz}` object (the vectors' `trigger` stream, or a window's `input`) as a sample stream. */
+    fun stream(e: JsonElement): Stream {
+        val t = e.jsonObject["t_ns"]!!.jsonArray.map { it.jsonPrimitive.long }
+        val xyz = e.jsonObject["xyz"]!!.jsonArray.map { it.jsonArray }
+        return Stream(
+            t.toLongArray(),
+            FloatArray(t.size) { xyz[it].f(0) },
+            FloatArray(t.size) { xyz[it].f(1) },
+            FloatArray(t.size) { xyz[it].f(2) },
+        )
     }
 
     /** JSON number -> double -> float (what the phone's parser does); null -> NaN. */
