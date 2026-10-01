@@ -4,15 +4,20 @@
  * three crank digs, the wallet's end_shift, the ORE Round accounts of the shift, and the haul the
  * live indexer served for it. This test re-derives that haul offline from the raw transactions and
  * checks the `decode` output used for demo captions.
+ *
+ * A second capture (test/fixtures/devstack-reregister-localnet.json) is one wallet that clocks in,
+ * ends its shift, closes its rig and clocks in again: a real RigClosed, a rig registered twice, and
+ * shift ids that restart at 1.
  */
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadHaul } from "../src/api/haul.ts";
+import { listRigShifts, loadHaul, shiftLogAddress } from "../src/api/haul.ts";
 import { explorerUrl } from "../src/api/explorer.ts";
 import { decodeOreRound } from "../src/codec/round.ts";
 import { extractTransaction, type RawTransaction } from "../src/codec/tx.ts";
 import { EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constants.ts";
 import { describeTransaction, formatDescribed } from "../src/decode.ts";
+import { computeSummary, rigLifecycle } from "../src/metrics/metrics.ts";
 import { MarketPrice, fixedSource } from "../src/sources/market.ts";
 import { migrate, openDb, type Db } from "../src/store/db.ts";
 import { Store } from "../src/store/store.ts";
@@ -199,5 +204,100 @@ describe("the live haul, re-derived offline", () => {
     ]);
     expect(h.diagnostics.solReturnedLamports).toBe(2_692_800n);
     expect((await store.health()).problems).toEqual([]);
+  });
+});
+
+describe("a rig closed and registered again (real devstack transactions)", () => {
+  interface Rereg extends Fixture {
+    shift_log: string;
+    refused_end_shift: { err: unknown; logs: string[] };
+  }
+  const g = JSON.parse(readFileSync(new URL("./fixtures/devstack-reregister-localnet.json", import.meta.url), "utf8")) as Rereg;
+  const of = (name: string) => g.transactions.find((t) => t.name === name)!.tx;
+  let db: Db;
+  beforeAll(async () => {
+    db = await openDb("pglite://memory");
+    await migrate(db);
+  });
+  afterAll(async () => db.close());
+
+  it("decodes close_rig, and both registrations arm shift 1", () => {
+    const xs = g.transactions.map((t) => extractTransaction(t.tx, OPTS));
+    expect(xs.flatMap((x) => x.problems)).toEqual([]);
+    expect(g.transactions.map((t) => t.name)).toEqual(["clock_in_first", "end_shift_first", "close_rig", "clock_in_again"]);
+    expect(xs.map((x) => x.hdEvents.map((e) => e.event.kind))).toEqual([["RigRegistered", "ShiftArmed"], ["ShiftEndedV2"], ["RigClosed"], ["RigRegistered", "ShiftArmed"]]);
+    expect(xs[2]!.hdInstructions.map((i) => i.ix.name)).toEqual(["close_rig"]);
+    expect(xs[2]!.hdEvents[0]!.event).toEqual({ kind: "RigClosed", rig: g.rig });
+    // The new Rig account starts over: shift ids restart with it.
+    expect(xs[0]!.hdEvents[1]!.event).toEqual({ kind: "ShiftArmed", rig: g.rig, shiftId: 1n });
+    expect(xs[3]!.hdEvents[1]!.event).toEqual({ kind: "ShiftArmed", rig: g.rig, shiftId: 1n });
+    const text = formatDescribed(describeTransaction(of("close_rig"), OPTS), () => null);
+    expect(text).toContain("heads_down close_rig");
+    expect(text).toMatch(/RigClosed: rig \S+$/m);
+  });
+
+  it("counts the rig once and open, and serves the haul of the shift it ended", async () => {
+    const store = await Store.bind(db, { name: "localnet", ...OPTS });
+    expect(await store.ingestTxs(g.transactions.map((t) => extractTransaction(t.tx, OPTS)), "fixture")).toBe(4);
+    await store.upsertRoundStates(
+      g.round_accounts.map((r) => {
+        const data = Uint8Array.from(Buffer.from(r.data_base64, "base64"));
+        return { address: r.address, account: decodeOreRound(data), data, contextSlot: g.round_accounts_context_slot };
+      }),
+      "fixture",
+    );
+    const input = await store.loadMetricsInput();
+    expect(input.registered).toHaveLength(2);
+    expect(input.closedRigs).toHaveLength(1);
+    const life = rigLifecycle(input)!;
+    expect([...life.open]).toEqual([g.rig]);
+    expect(life.closed.size).toBe(0);
+    expect(life.registered.size).toBe(1);
+    const endTs = Number(g.haul.end_ts);
+    const s = computeSummary(input, { asOf: endTs + 60, tzOffsetMinutes: 60, programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA, teamCrankers: [] });
+    expect(s.rigs).toMatchObject({ total: 1, guest: 1, seeker: 0, closed: 0, basis: "lifecycle", everRegistered: 1 });
+
+    const h = await loadHaul(
+      {
+        store,
+        dataset: "localnet",
+        simulated: false,
+        programId: HEADS_DOWN_PROGRAM_ID,
+        market: new MarketPrice([fixedSource(BigInt(g.haul.market_lamports_per_ore), g.haul.market_source)]),
+        link: (kind, id) => explorerUrl("localnet", kind, id, LOCAL_RPC),
+        now: () => endTs + 60, // fresh: the end round must be resolved, and its Round account is in the fixture
+      },
+      g.rig,
+      "latest",
+    );
+    expect(h.status).toBe(200);
+    if (h.status !== 200) return;
+    expect(h.haul).toEqual(g.haul);
+    expect(g.haul_checks).toBe("dark=match; sol-returned=exact; deploys=match");
+    // Ended by the wallet one slot after arming: no heartbeat, so no dark round and reason lease_lapse.
+    expect(h.haul).toMatchObject({
+      shift_id: 1, start_round: 422812, end_round: 422812, dark_rounds: 0, rounds_dug: 0, sol_placed_lamports: 0, fees_lamports: 0,
+      ore_mined_atoms: "0", effective_lamports_per_ore: null, break_reason: 4, streak_before: 0, streak_after: 0,
+    });
+    expect(h.haul.rounds).toEqual([{ round_id: 422812, dark: false, dug_mask: 0, winning_square: 16, motherlode: false, split: false }]);
+    expect(h.haul.explorer.shift_log).toContain(g.shift_log);
+    // The second shift 1 is still open on chain, so one finished shift is listed.
+    expect(await listRigShifts(store, g.rig)).toHaveLength(1);
+    expect((await store.health()).problems).toEqual([]);
+  });
+
+  it("records what the program answered when the second shift 1 was ended: its ShiftLog PDA already exists", () => {
+    // Shift ids restart with the new Rig account, the ShiftLog address is ["shift", rig, shift_id], and end_shift
+    // creates it init-only: the ShiftLog of the first shift 1 is in the way. A program-side finding, kept here as data.
+    expect(g.refused_end_shift.err).toEqual({ InstructionError: [0, "AccountAlreadyInitialized"] });
+    expect(shiftLogAddress(g.rig, 1n, HEADS_DOWN_PROGRAM_ID)).toBe(g.shift_log);
+    expect(extractTransaction(of("end_shift_first"), OPTS).hdInstructions[0]!.accounts[2]).toBe(g.shift_log);
+    const refused = structuredClone(of("end_shift_first")) as RawTransaction;
+    refused.meta!.err = g.refused_end_shift.err;
+    refused.meta!.logMessages = g.refused_end_shift.logs;
+    const d = describeTransaction(refused, OPTS);
+    expect(d.failure).toBe("instruction 0 failed: AccountAlreadyInitialized");
+    expect(d.instructions.map((i) => i.name)).toEqual(["end_shift"]);
+    expect(d.events).toEqual([]);
   });
 });
