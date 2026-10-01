@@ -23,7 +23,7 @@ object ForemanModels {
 
     /**
      * The pickup classifier from the model JSON (and optionally its `.tflite`, run through LiteRT
-     * when [preferLiteRt] and a runtime exist). Malformed input yields the fail-closed classifier.
+     * when [preferLiteRt] and a runtime exist). Malformed input gives the fail-closed classifier.
      */
     fun pickupClassifier(modelJson: String?, tflite: ByteArray? = null, preferLiteRt: Boolean = false): PickupClassifier {
         val doc = modelJson?.let { parseOrNull(it) } ?: return FailClosedPickupClassifier

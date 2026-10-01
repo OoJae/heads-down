@@ -125,7 +125,7 @@ data class NightBudget(val window: ShiftWindow?, val expectedIdleRounds: Double,
 data class ShiftPlan(
     /** The next 24 hours from the slot containing now. */
     val slots: List<IdleSlot>,
-    /** The best window starting within the next 24 hours, ending by the next alarm. */
+    /** The best window starting within the next 24 hours (tonight's, when planned in the evening), ending by the next alarm. */
     val nextWindow: ShiftWindow?,
     /** The next 7 nights (index 0 = [nextWindow]) with the budget split when caps were given. */
     val week: List<NightBudget>,
