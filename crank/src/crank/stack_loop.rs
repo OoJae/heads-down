@@ -77,7 +77,12 @@ pub(crate) struct StackRuntime {
     pub notes: HashMap<Address, RoundNote>,
     /// The notes of the round before, until its misses are accounted for.
     pub prev_notes: Option<(u64, HashMap<Address, RoundNote>)>,
+    /// Check-ins that count a round, per `(seat, round)`.
     pub ledger: CheckinLedger,
+    /// Check-ins that record a break (result 42), per `(seat, round)`. Kept apart from
+    /// `ledger`: a seat that already counted the round must still be marked when its shift
+    /// breaks afterwards, and that mark has its own retries.
+    pub marks: CheckinLedger,
     /// Rigs whose heartbeat is in an unconfirmed verify-mode check-in: `(counter, sent slot)`.
     pub hb_in_flight: HashMap<Address, (u64, u64)>,
     /// Lamports spent per table (estimated at send).
@@ -92,7 +97,8 @@ pub(crate) struct StackRuntime {
     pub settling: HashSet<Address>,
     pub lost_alerted: HashSet<Address>,
     pub last_pass: Option<Instant>,
-    /// The round in which nothing was left to do at the last pass.
+    /// The round in which the last pass left nothing that only time can change: every seat is
+    /// counted, skipped, or waiting for its phone (whose heartbeat wakes the loop).
     pub idle_round: u64,
 }
 
@@ -102,6 +108,16 @@ impl StackRuntime {
             return u64::MAX;
         }
         cap.saturating_sub(self.spend.get(table).copied().unwrap_or(0))
+    }
+
+    /// The ledger an entry belongs to: `marks` for a break being recorded, `ledger` for a
+    /// round being counted.
+    fn ledger_of(&mut self, mark: bool) -> &mut CheckinLedger {
+        if mark {
+            &mut self.marks
+        } else {
+            &mut self.ledger
+        }
     }
 
     /// What was read does not match the cache: refresh, unless the cache is fresh already
@@ -245,10 +261,14 @@ impl Crank {
     pub(crate) async fn stack_discover(&self) -> anyhow::Result<()> {
         let tables = self.rpc.get_program_accounts(&self.program_id, &rpc::open_stack_table_filters()).await?;
         let seats = self.rpc.get_program_accounts(&self.program_id, &rpc::pending_stack_seat_filters(None)).await?;
+        let live_round = self.chain.borrow().board.map(|b| b.round_id);
         let mut map: HashMap<Address, TableEntry> = HashMap::new();
         for (addr, acc) in tables {
             if let Ok(t) = StackTable::decode(&self.program_id, &acc.owner, &acc.data) {
-                if t.status == skr::status::OPEN {
+                // A table nobody joined whose window is over has nothing to pay out and nothing
+                // to bury: it stays Open on-chain for good and is not worth tracking.
+                let empty_and_over = t.seat_count == 0 && live_round.is_some_and(|r| r > t.end_round);
+                if t.status == skr::status::OPEN && !empty_and_over {
                     map.insert(addr, TableEntry { table: t, seats: Vec::new() });
                 }
             }
@@ -349,6 +369,7 @@ impl Crank {
                 st.round_seen = Some(now);
                 st.idle_round = 0;
                 st.ledger.prune(round.saturating_sub(2));
+                st.marks.prune(round.saturating_sub(2));
                 st.hb_in_flight.clear();
             }
             !flush && st.discovery_due(Duration::from_secs(c.discover_secs), new_round, round)
@@ -364,14 +385,13 @@ impl Crank {
         }
 
         // ---- which tables matter now ------------------------------------------------------
-        let (active, ended, prev) = {
-            let mut st = lock(&self.stack);
-            let prev = st.prev_notes.take();
+        let (active, ended) = {
+            let st = lock(&self.stack);
             let mut active: Vec<(Address, TableEntry)> =
                 st.tables.iter().filter(|(_, e)| e.table.in_window(round) && !e.seats.is_empty()).map(|(a, e)| (*a, e.clone())).collect();
             active.sort_by_key(|(a, e)| (std::cmp::Reverse(e.table.total_bonds), a.to_bytes()));
             let ended: Vec<(Address, TableEntry)> = st.tables.iter().filter(|(_, e)| e.table.settleable(round)).map(|(a, e)| (*a, e.clone())).collect();
-            (active, ended, prev)
+            (active, ended)
         };
         self.metrics.stack_tables_active.set_u64(active.len() as u64);
         if active.is_empty() && ended.is_empty() {
@@ -379,6 +399,8 @@ impl Crank {
             st.owned.clear();
             st.owned_round = round;
             st.idle_round = round;
+            // No table of the round before is left to compare its notes with.
+            st.prev_notes = None;
             self.metrics.stack_seats_active.set(0);
             self.metrics.stack_seats_pending.set(0);
             return Ok(());
@@ -390,6 +412,8 @@ impl Crank {
         let fresh = self.stack_read(&all).await?;
 
         // ---- the previous round: what was missed --------------------------------------------
+        // Taken only now, so a failed read does not lose the notes.
+        let prev = lock(&self.stack).prev_notes.take();
         if let Some((prev_round, notes)) = prev {
             self.stack_account_round(prev_round, &notes, &fresh);
         }
@@ -399,7 +423,7 @@ impl Crank {
         let retry = c.retry();
         let (round_age, block_height_needed) = {
             let st = lock(&self.stack);
-            (st.round_seen.map_or(Duration::ZERO, |t| t.elapsed()), !st.ledger.is_empty())
+            (st.round_seen.map_or(Duration::ZERO, |t| t.elapsed()), st.ledger.has_pending(round) || st.marks.has_pending(round))
         };
         // The blockhash expiry check only matters when something of this round is pending.
         let block_height = if block_height_needed { self.rpc.get_block_height().await.unwrap_or(0) } else { 0 };
@@ -431,6 +455,10 @@ impl Crank {
         let mut owned: HashSet<Address> = HashSet::new();
         let mut to_send: Vec<(Address, StackTable, Vec<tx::CheckinSeat>, TablePlan)> = Vec::new();
         let (mut seats_active, mut seats_pending) = (0u64, 0u64);
+        // Something only time changes is outstanding (a held batch, a transaction in flight):
+        // keep the short pass interval. Otherwise the loop sleeps until a nudge (a seated rig's
+        // heartbeat, a landing, a program event) or the idle interval.
+        let mut soon = block_height_needed;
         for (addr, entry) in &active {
             // The table may have been settled or refunded since the cache was filled.
             let Some(table) = fresh.tables.get(addr).filter(|t| t.in_window(round)) else {
@@ -442,6 +470,7 @@ impl Crank {
                 lock(&self.stack).soft_dirty();
             }
             let plan = stack::plan_table(round, table, seats, &heartbeats, &|rig: &Address| busy.contains(rig), &mut used);
+            soon |= plan.seats.iter().any(|(_, _, p)| matches!(p, SeatPlan::Wait(stack::Wait::InFlight)));
             let budget_left = lock(&self.stack).table_budget_left(addr, c.max_lamports_per_table);
             let exhausted = budget_left < tx::LAMPORTS_PER_SIGNATURE;
             {
@@ -486,17 +515,19 @@ impl Crank {
             let since_last = lock(&self.stack).last_send.get(addr).map(|t| t.elapsed());
             let policy = if flush { stack::SendPolicy::NOW } else { c.send_policy() };
             if !stack::should_send(&plan, round_age, since_last, view.slots_left(), &policy) {
+                // Held for a fuller batch: look again soon (the batch wait, or the late slots).
+                soon |= plan.has_work();
                 continue;
             }
+            // A break is recorded through its own ledger: the seat's count for this round may
+            // already be `Counted`, and that must not stop the mark.
             let entries: Vec<tx::CheckinSeat> = {
                 let st = lock(&self.stack);
-                plan.entries(c.mark_broken).into_iter().filter(|e| st.ledger.can_send(&e.seat, round, block_height, view.slot, retry)).collect()
+                let ledgers = stack::Ledgers { counts: &st.ledger, marks: &st.marks };
+                stack::sendable_entries(&plan, c.mark_broken, ledgers, round, block_height, view.slot, retry)
             };
             // A check-in is worth sending for a seat that counts, or for a decisive mark.
-            let worth = entries.iter().any(|e| {
-                matches!(plan.plan_of(&e.seat), Some(SeatPlan::Verify(_)) | Some(SeatPlan::Observe) | Some(SeatPlan::MarkBroken { decisive: true }))
-            });
-            if worth {
+            if stack::worth_sending(&plan, &entries) {
                 to_send.push((*addr, *table, entries, plan));
             }
         }
@@ -506,7 +537,7 @@ impl Crank {
             let mut st = lock(&self.stack);
             st.owned = owned;
             st.owned_round = round;
-            st.idle_round = if seats_pending == 0 && to_send.is_empty() { round } else { 0 };
+            st.idle_round = if !soon && to_send.is_empty() { round } else { 0 };
         }
 
         // ---- send ---------------------------------------------------------------------------------
@@ -570,6 +601,9 @@ impl Crank {
         let c = &self.cfg.stack;
         let round = base.round_id;
         let seats: Vec<Address> = batch.seats.iter().map(|s| s.seat).collect();
+        // Entries that record a break (their own ledger) rather than count the round.
+        let marks: HashSet<Address> =
+            seats.iter().filter(|s| matches!(plan.plan_of(s), Some(SeatPlan::MarkBroken { .. }))).copied().collect();
         let tip = self.submitter.tip_for(self.nonce.fetch_add(1, Ordering::Relaxed));
         let est_fee = tx::fee_for(batch.precompile_signatures, batch.cu_limit, base.cu_price_micro_lamports, tx::LAMPORTS_PER_SIGNATURE)
             .saturating_add(tip.map_or(0, |(_, l)| l));
@@ -627,7 +661,7 @@ impl Crank {
                     tracing::warn!(table = %table, round, err = ?sim.err, logs = ?tail, "a Stack check-in failed in simulation; not sent");
                     let mut st = lock(&self.stack);
                     for s in &seats {
-                        st.ledger.record_failed_attempt(s, round);
+                        st.ledger_of(marks.contains(s)).record_failed_attempt(s, round);
                     }
                     st.soft_dirty();
                     return Ok(false);
@@ -645,7 +679,9 @@ impl Crank {
         }
         {
             let mut st = lock(&self.stack);
-            st.ledger.mark_pending(&seats, round, lvbh, view.slot);
+            for s in &seats {
+                st.ledger_of(marks.contains(s)).mark_pending(std::slice::from_ref(s), round, lvbh, view.slot);
+            }
             for s in &batch.seats {
                 if let Some(h) = s.heartbeat {
                     st.hb_in_flight.insert(s.rig, (h.fields.counter, view.slot));
@@ -672,12 +708,22 @@ impl Crank {
                 max_wait: Duration::from_secs(60),
             };
             let outcome = this.submitter.confirm(&sig, &wire, lvbh, policy).await;
-            this.on_checkin_outcome(&sig, &table, round, &batch, est_fee, outcome).await;
+            this.on_checkin_outcome(&sig, &table, round, &batch, &marks, est_fee, outcome).await;
         });
         Ok(true)
     }
 
-    async fn on_checkin_outcome(&self, sig: &str, table: &Address, round: u64, batch: &CheckinBatch, est_fee: u64, outcome: Outcome) {
+    #[allow(clippy::too_many_arguments)]
+    async fn on_checkin_outcome(
+        &self,
+        sig: &str,
+        table: &Address,
+        round: u64,
+        batch: &CheckinBatch,
+        marks: &HashSet<Address>,
+        est_fee: u64,
+        outcome: Outcome,
+    ) {
         let clear = |this: &Self| {
             let mut st = lock(&this.stack);
             for s in &batch.seats {
@@ -693,7 +739,7 @@ impl Crank {
                 self.metrics.txs_confirmed.inc();
                 let max_version = if self.cfg.dig.tx_format == TxFormat::V1 { 1 } else { 0 };
                 let info = self.fetch_events(sig, max_version).await;
-                let (mut counted, mut refused) = (0u32, 0u32);
+                let (mut counted, mut marked, mut refused) = (0u32, 0u32, 0u32);
                 if let Some(i) = &info {
                     self.metrics.stack_fees_lamports.add(i.fee);
                     self.metrics.compute_units.add(i.compute_units.unwrap_or(0));
@@ -701,11 +747,16 @@ impl Crank {
                         let HdEvent::StackCheckin { table: t, rig, round_id, result, .. } = ev else { continue };
                         let Some(s) = batch.seats.iter().find(|s| s.rig == rig).filter(|_| t == *table) else { continue };
                         self.metrics.stack_checkins_landed.inc(hd::checkin_result_name(result));
-                        // The result is about the round the transaction landed in.
-                        let status = if result == 0 && round_id == round { CheckinStatus::Counted } else { CheckinStatus::NotCounted(result) };
-                        lock(&self.stack).ledger.mark(&s.seat, round, status);
+                        let mark = marks.contains(&s.seat);
+                        // The result is about the round the transaction landed in. A mark is done
+                        // when the program reports the seat broken; a count when it reports 0.
+                        let done = if mark { result == hd::code::STACK_SEAT_BROKEN } else { result == 0 && round_id == round };
+                        let status = if done { CheckinStatus::Counted } else { CheckinStatus::NotCounted(result) };
+                        lock(&self.stack).ledger_of(mark).mark(&s.seat, round, status);
                         if result == 0 {
                             counted += 1;
+                        } else if mark && done {
+                            marked += 1;
                         } else {
                             refused += 1;
                         }
@@ -715,14 +766,14 @@ impl Crank {
                     }
                 }
                 clear(self);
-                tracing::info!(%sig, slot, table = %table, round, counted, refused, "stack_checkin landed");
+                tracing::info!(%sig, slot, table = %table, round, counted, marked_broken = marked, refused, "stack_checkin landed");
             }
             Outcome::Landed { err: Some(err), slot } => {
                 self.metrics.stack_tx_failed.inc("onchain");
                 tracing::warn!(%sig, slot, table = %table, round, %err, "stack_checkin failed on-chain");
                 let mut st = lock(&self.stack);
                 for s in &batch.seats {
-                    st.ledger.mark(&s.seat, round, CheckinStatus::Failed);
+                    st.ledger_of(marks.contains(&s.seat)).mark(&s.seat, round, CheckinStatus::Failed);
                 }
                 st.soft_dirty();
                 drop(st);
@@ -737,7 +788,7 @@ impl Crank {
                     *v = v.saturating_sub(est_fee);
                 }
                 for s in &batch.seats {
-                    st.ledger.mark(&s.seat, round, CheckinStatus::Failed);
+                    st.ledger_of(marks.contains(&s.seat)).mark(&s.seat, round, CheckinStatus::Failed);
                 }
                 drop(st);
                 clear(self);
@@ -930,6 +981,12 @@ impl Crank {
     /// that moves SKR to the Bury lot needs both). Creates what is missing when
     /// `stack.init_bury_vault` allows; the crank pays the rent once and can never take it back.
     pub(crate) async fn ensure_bury_vault(&self) -> anyhow::Result<bool> {
+        if self.bury_ready.load(Ordering::Relaxed) {
+            return Ok(true);
+        }
+        // One caller at a time: a settle and a forfeit that both need the vault must not both
+        // pay to create it (the second `init_bury_vault` would fail).
+        let _one = self.bury_sync.lock().await;
         if self.bury_ready.load(Ordering::Relaxed) {
             return Ok(true);
         }

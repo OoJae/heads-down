@@ -294,6 +294,8 @@ pub struct Crank {
     /// Rigs whose fresh heartbeat is in an unconfirmed `record_heartbeats` transaction.
     record_in_flight: Mutex<HashSet<Address>>,
     bury_ready: AtomicBool,
+    /// One Bury setup at a time (a settle and a forfeit may both need it).
+    bury_sync: tokio::sync::Mutex<()>,
     cleanup_budget: FeeBudget,
     cleanup_tried: Mutex<HashMap<Address, Instant>>,
     cleanup_notify: Arc<Notify>,
@@ -361,6 +363,7 @@ impl Crank {
             nudge: wiring.nudge,
             record_in_flight: Mutex::new(HashSet::new()),
             bury_ready: AtomicBool::new(false),
+            bury_sync: tokio::sync::Mutex::new(()),
             cleanup_tried: Mutex::new(HashMap::new()),
             cleanup_notify: Arc::new(Notify::new()),
             events: Mutex::new(wiring.events),

@@ -156,10 +156,19 @@ impl Crank {
         for action in actions.into_iter().take(c.max_per_pass) {
             let (cu, ix, label) = match &action {
                 CleanupAction::Forfeit { address, bond, .. } => {
-                    // A forfeit moves the SKR into the Bury lot, which must exist.
-                    if !self.ensure_bury_vault().await? {
-                        self.metrics.cleanup_failed.inc("bury_vault");
-                        continue;
+                    // A forfeit moves the SKR into the Bury lot, which must exist. If it cannot
+                    // be made now, the refunds of this sweep still go ahead.
+                    match self.ensure_bury_vault().await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            self.metrics.cleanup_failed.inc("bury_vault");
+                            continue;
+                        }
+                        Err(e) => {
+                            self.metrics.cleanup_failed.inc("bury_vault");
+                            tracing::warn!(error = %e, "the Bury vault could not be created; the forfeit waits for the next sweep");
+                            continue;
+                        }
                     }
                     (c.forfeit_cu_limit, skr::forfeit_focus_bond_ix(&self.program_id, address, bond), "forfeit_focus_bond")
                 }

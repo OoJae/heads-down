@@ -483,6 +483,12 @@ impl CheckinLedger {
         matches!(self.status(seat, round), Some(CheckinStatus::Pending { .. }))
     }
 
+    /// True while any transaction of `round` may still land (the retry timing needs the block
+    /// height then, and only then).
+    pub fn has_pending(&self, round: u64) -> bool {
+        self.entries.iter().any(|((_, r), e)| *r == round && matches!(e.status, CheckinStatus::Pending { .. }))
+    }
+
     /// Record a submission (one more attempt for each seat).
     pub fn mark_pending(&mut self, seats: &[Address], round: u64, last_valid_block_height: u64, sent_slot: u64) {
         for s in seats {
@@ -527,6 +533,53 @@ impl CheckinLedger {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+/// The two ledgers of one round: check-ins that count it, and check-ins that record a break.
+/// They are kept apart because a seat that already counted the round (`Counted` in `counts`)
+/// must still be marked when its shift breaks afterwards, and that mark has retries of its own.
+#[derive(Clone, Copy, Debug)]
+pub struct Ledgers<'a> {
+    /// Per `(seat, round)`: the check-in that counts the round.
+    pub counts: &'a CheckinLedger,
+    /// Per `(seat, round)`: the check-in that records a break (result 42).
+    pub marks: &'a CheckinLedger,
+}
+
+impl Ledgers<'_> {
+    /// The ledger the plan of a seat belongs to.
+    pub fn of(&self, plan: Option<&SeatPlan>) -> &CheckinLedger {
+        if matches!(plan, Some(SeatPlan::MarkBroken { .. })) {
+            self.marks
+        } else {
+            self.counts
+        }
+    }
+}
+
+/// The entries of `plan` that may go into a transaction now: [`TablePlan::entries`] minus the
+/// seats whose own ledger says wait (in flight), done, or out of attempts.
+pub fn sendable_entries(
+    plan: &TablePlan,
+    mark_broken: bool,
+    ledgers: Ledgers<'_>,
+    round: u64,
+    block_height: u64,
+    slot: u64,
+    retry: CheckinRetry,
+) -> Vec<CheckinSeat> {
+    plan.entries(mark_broken)
+        .into_iter()
+        .filter(|e| ledgers.of(plan.plan_of(&e.seat)).can_send(&e.seat, round, block_height, slot, retry))
+        .collect()
+}
+
+/// Is a transaction with `entries` worth its fee? Yes when it counts a round for a seat or
+/// records a decisive break; a batch of only non-decisive marks is not.
+pub fn worth_sending(plan: &TablePlan, entries: &[CheckinSeat]) -> bool {
+    entries
+        .iter()
+        .any(|e| matches!(plan.plan_of(&e.seat), Some(SeatPlan::Verify(_)) | Some(SeatPlan::Observe) | Some(SeatPlan::MarkBroken { decisive: true })))
 }
 
 /// Should the held heartbeat be forgotten after a check-in reported `result` for its seat?
@@ -804,6 +857,69 @@ mod tests {
         assert_eq!(plan_break(&t, &s, Some(&rearmed)), None, "another shift: row 3 comes first");
         let ended = Rig { shift_open: false, ..picked_up };
         assert_eq!(plan_break(&t, &s, Some(&ended)), None, "the shift was ended: row 4 comes first");
+    }
+
+    #[test]
+    fn a_counted_seat_that_breaks_is_still_marked_through_its_own_ledger() {
+        // The crank counted end_round for the seat (its count ledger says Counted); then the
+        // phone was picked up and the BREAK landed. The decisive mark must go out although the
+        // seat's count for this round is done, exactly once while it is in flight, and again
+        // if it fails.
+        let t = table(ROUND - 2, ROUND, 0);
+        let retry = CheckinRetry { retry_after_slots: 8, max_attempts: 3 };
+        let counted = StackSeat { shift_id: 7, checked_rounds: 3, last_round: ROUND, ..seat(0) };
+        let picked_up = Rig { state: RigState::Cooling, break_reason: 1, lease_from_round: ROUND, lease_to_round: ROUND, ..rig() };
+        let seats = states(vec![(counted, Some(picked_up))]);
+        let seat_addr = seats[0].address;
+        let plan = plan_table(ROUND, &t, &seats, &HashMap::new(), &|_| false, &mut HashSet::new());
+        assert_eq!(plan.seats[0].2, SeatPlan::MarkBroken { decisive: true });
+        let mut counts = CheckinLedger::new();
+        let mut marks = CheckinLedger::new();
+        counts.mark_pending(&[seat_addr], ROUND, 1_000, 50);
+        counts.mark(&seat_addr, ROUND, CheckinStatus::Counted);
+        assert!(!counts.can_send(&seat_addr, ROUND, 900, 60, retry), "the count itself is never sent twice");
+        let sendable = |counts: &CheckinLedger, marks: &CheckinLedger, slot: u64| sendable_entries(&plan, false, Ledgers { counts, marks }, ROUND, 900, slot, retry);
+        let entries = sendable(&counts, &marks, 60);
+        assert_eq!(entries.len(), 1, "Counted in the count ledger does not stop the mark");
+        assert!(entries[0].heartbeat.is_none(), "a mark is an observe-mode entry");
+        assert!(worth_sending(&plan, &entries));
+        // In flight: not sent again until the retry window passes.
+        marks.mark_pending(&[seat_addr], ROUND, 1_000, 60);
+        assert!(marks.has_pending(ROUND) && !counts.has_pending(ROUND));
+        assert!(sendable(&counts, &marks, 61).is_empty());
+        assert_eq!(sendable(&counts, &marks, 68).len(), 1, "unconfirmed after retry_after_slots");
+        // Failed: retried, up to the attempt cap.
+        marks.mark(&seat_addr, ROUND, CheckinStatus::Failed);
+        assert_eq!(sendable(&counts, &marks, 62).len(), 1);
+        marks.mark_pending(&[seat_addr], ROUND, 1_000, 62);
+        marks.mark(&seat_addr, ROUND, CheckinStatus::Failed);
+        marks.mark_pending(&[seat_addr], ROUND, 1_000, 64);
+        marks.mark(&seat_addr, ROUND, CheckinStatus::Failed);
+        assert!(sendable(&counts, &marks, 70).is_empty(), "3 attempts were made");
+        // Landed (the program reported StackSeatBroken): done for good.
+        let mut marks = CheckinLedger::new();
+        marks.mark_pending(&[seat_addr], ROUND, 1_000, 60);
+        marks.mark(&seat_addr, ROUND, CheckinStatus::Counted);
+        assert!(sendable(&counts, &marks, 80).is_empty());
+        assert!(!marks.has_pending(ROUND));
+
+        // A non-decisive mark alone is not worth a transaction, but rides along with a count.
+        let t = table(ROUND, ROUND + 5, 0);
+        let bound_broke = StackSeat { shift_id: 7, checked_rounds: 1, last_round: ROUND - 1, ..seat(1) };
+        let seats = states(vec![(seat(0), Some(rig())), (bound_broke, Some(Rig { state: RigState::Cooling, break_reason: 2, ..rig() }))]);
+        let (counts, marks) = (CheckinLedger::new(), CheckinLedger::new());
+        let ledgers = Ledgers { counts: &counts, marks: &marks };
+        let alone = plan_table(ROUND, &t, &seats, &HashMap::new(), &|_| false, &mut HashSet::new());
+        assert_eq!(alone.seats[1].2, SeatPlan::MarkBroken { decisive: false });
+        let entries = sendable_entries(&alone, true, ledgers, ROUND, 0, 10, retry);
+        assert_eq!(entries.len(), 1);
+        assert!(!worth_sending(&alone, &entries), "nobody to count: the mark waits");
+        let hbs: HashMap<Address, VerifiedHeartbeat> = [(rig_addr(0), hb(0, 11, ROUND))].into();
+        let with_count = plan_table(ROUND, &t, &seats, &hbs, &|_| false, &mut HashSet::new());
+        let entries = sendable_entries(&with_count, true, ledgers, ROUND, 0, 10, retry);
+        assert_eq!(entries.len(), 2);
+        assert!(worth_sending(&with_count, &entries));
+        assert_eq!(sendable_entries(&with_count, false, ledgers, ROUND, 0, 10, retry).len(), 1, "stack.mark_broken = false leaves it out");
     }
 
     fn states(seats: Vec<(StackSeat, Option<Rig>)>) -> Vec<SeatState> {
