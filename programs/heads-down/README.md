@@ -145,10 +145,10 @@ schedule is pinned to the suite's clock). heads_down is loaded at its real progr
 id through the upgradeable loader, with a test upgrade authority written into its
 ProgramData. SKR and ORE balances are account surgery: the fork cannot mint either.
 
-Last run, `bash scripts/test.sh` (2026-10-01): **136 passed, 0 failed, 1 ignored**
-(30 unit + 106 fork; the ignored one is `crosscheck`). `cargo +1.97.1 clippy
+Last run, `bash scripts/test.sh` (2026-10-01): **137 passed, 0 failed, 1 ignored**
+(30 unit + 107 fork; the ignored one is `crosscheck`). `cargo +1.97.1 clippy
 --workspace --all-targets -- -D warnings` is clean. `bash scripts/test-v3.sh` runs the
-same 106 fork tests against the SBPFv3 builds: all pass.
+same 107 fork tests against the SBPFv3 builds: all pass.
 
 | Suite | Tests | What it proves |
 |---|---|---|
@@ -166,7 +166,7 @@ same 106 fork tests against the SBPFv3 builds: all pass.
 | `events_v11` | 5 | v1.1: BREAK 7 unplugged → Cooling (a fresh heartbeat resumes), 8 unlocked → Broken and sealed with reason 8; ShiftBroken on BREAK and on a shift-interrupting FREEZE only; HeartbeatsRecorded reports only the rounds added; ShiftEndedV2 mode; every reason code → state |
 | `registrar_voucher` | 3 | a voucher built exactly like `registrar/src/voucher.rs` (111-byte HDreg, 223-byte Ed25519SigVerify, `IX_HEADER`) is accepted by `register_rig` and `rotate_key`; level 0, level 3, expired, another wallet, a non-registrar key and a mismatched level are refused |
 | `vectors` | 4 | the committed golden vectors are byte-identical to a fresh LiteSVM generation; generation is deterministic; INTERFACE.md's event, error and instruction tables match the program, for v1.1 (§5, §7, §8) and v1.2 (§11.4, §11.9, §11.10) |
-| `skr_stack` | 12 | **v1.2 Stack:** a six-seat table settled from real P-256 check-ins (finish, grace, broken, too many gaps, missed end round) with the exact 80/20 split, rounding dust to Bury, conservation and single claims; bury-only and nobody-finishes tables; the timeout refund; join gating (time, room, signature, uniqueness, canonical seat, guest cap, attested-only, remote Seekers with a re-verified real SGT, one seat per SGT); classic SPL Token only (Token-2022 look-alikes, fake mints, wrong owners, swapped vaults); check-in rules (lease 1, late and replayed heartbeats, shift binding, no binding to a broken shift, observe mode after a real dig, FREEZE); settle needs every seat once |
+| `skr_stack` | 13 | **v1.2 Stack:** a six-seat table settled from real P-256 check-ins (finish, grace, broken, too many gaps, missed end round) with the exact 80/20 split, rounding dust to Bury, conservation and single claims; bury-only and nobody-finishes tables; the timeout refund; join gating (time, room, signature, uniqueness, canonical seat, guest cap, attested-only, remote Seekers with a re-verified real SGT, one seat per SGT); classic SPL Token only (Token-2022 look-alikes, fake mints, wrong owners, swapped vaults); check-in rules (lease 1, late and replayed heartbeats, shift binding, no binding to a broken shift, observe mode after a real dig, FREEZE, a closed rig cannot sink a batch); settle needs every seat once |
 | `skr_bond` | 6 | **v1.2 Focus Bond:** release to the owner only after `completed`; forfeit to the Bury lot after a hard break; a resumed pickup keeps the bond; bonds on a rig closed mid-shift (then re-registered) are abandoned and forfeit; lock gating |
 | `skr_gift` | 4 | **v1.2 Gift a Rig:** a wallet gift claimed in the same transaction as the recipient's ORE `automate` and `register_rig`; an SGT gift that follows a real SGT to its current holder; refunds from day 30 to the stored sender only; argument checks, one escrow per (sender, nonce), pre-funding |
 | `skr_bury` | 6 | **v1.2 Bury auction:** lots from real forfeits sold through the **live ORE `bury` and ORE stake programs** (supply −90%, stake Treasury +10%); price decay, restarts, floor, one-atom minimum; slippage and amount guards; every pinned account; a TEST-ONLY mock ORE that returns Ok without taking the ORE, or takes it without burning, is caught (`BuryMismatch`) |
@@ -254,7 +254,7 @@ round.
 `cargo build-sbf --arch v3` builds heads_down as SBPFv3 (ELF `e_flags` 3; 177 KB
 against 180 KB for the default v0). `bash scripts/test-v3.sh` builds both variants
 that way and runs the **whole fork suite** against them (`HD_SBF_ARCH=v3` makes the
-harness load `target/deploy-v3` and `target/deploy-devnet-v3`): all 106 fork tests
+harness load `target/deploy-v3` and `target/deploy-devnet-v3`): all 107 fork tests
 pass, including the golden vectors, which are byte-identical to the v0 run, and the
 fuzzers. Compute is marginally lower: deterministic paths drop by 2 to 52 CU (for
 example `stack_checkin` with 4 verified seats 8,846 → 8,794; `settle_stack` 5,250 →

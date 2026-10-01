@@ -1764,6 +1764,9 @@ The ranges come from the PDA bump search on random test keys.
   an early cancel for a table nobody joined.
 * An on-chain link between Stack seats and Nearby co-presence: "in-person" is
   a policy (bond caps, guests), not something the chain verifies.
+* A seat allowlist: anyone who can see a table on-chain can take an open seat
+  by posting the bond (the host can open another table; the squatter risks
+  its own bond).
 * The bond caps, the auction constants and the refund timeout are
   compile-time constants (`src/skr.rs`), not Config fields.
 * The SPEC's SKR fuel (an SKR→SOL swap inside a refuel) and an Executor-surplus
