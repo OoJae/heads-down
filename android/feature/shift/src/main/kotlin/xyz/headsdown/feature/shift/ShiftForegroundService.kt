@@ -158,10 +158,10 @@ class ShiftForegroundService : LifecycleService() {
         if (before == machine.state) return // already in a shift
         journal.onArmed(spec, System.currentTimeMillis())
         acquireWakeLock()
-        startTicker()
+        startTicker(spec.leaseRounds)
     }
 
-    private fun startTicker() {
+    private fun startTicker(leaseRounds: Int) {
         tickerJob?.cancel()
         val signer = signerProvider.messageSigner()
         snapshot = snapshot.copy(signing = signer != null, localOnly = !bindingProvider.current().isRegistered)
@@ -175,6 +175,7 @@ class ShiftForegroundService : LifecycleService() {
             binding = bindingProvider::current,
             signer = signer,
             sink = sink,
+            leaseRounds = leaseRounds,
             onResult = { _, result -> mainHandler.post { onTick(result) } },
         )
         ticker = t
@@ -230,7 +231,9 @@ class ShiftForegroundService : LifecycleService() {
                 mainHandler.postDelayed({ dispatch(ShiftEvent.Tick) }, delay)
             }
             is ShiftEffect.SignBreak ->
-                relaySignal { it.signBreak(effect.spec.shiftId, effect.reason.wireReason) }
+                if (effect.spec.breakStillUseful(System.currentTimeMillis() / 1000)) {
+                    relaySignal { it.signBreak(effect.spec.shiftId, effect.reason.wireReason) }
+                }
             // The FREEZE preimage carries the rig's on-chain shift_id; with no shift running
             // that is the last one armed (journaled), or 0 before any.
             is ShiftEffect.SignFreeze ->
