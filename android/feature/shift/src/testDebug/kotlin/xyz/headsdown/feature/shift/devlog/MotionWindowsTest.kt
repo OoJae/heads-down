@@ -2,7 +2,9 @@ package xyz.headsdown.feature.shift.devlog
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import xyz.headsdown.ml.pickup.MotionTrigger
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -13,15 +15,30 @@ class MotionWindowsTest {
     /** Face-down at rest, with a little sensor noise. */
     private fun rest(i: Int) = AccelSample(i * stepNanos, i * stepNanos, 0.02f * ((i % 3) - 1), 0.01f, -g)
 
+    /** The lab feeds the app's trigger exactly as [SensorLabService] does. */
+    private fun MotionTrigger.onSample(s: AccelSample) = onSample(s.tNanos, s.x, s.y, s.z)
+
+    @Test
+    fun `the lab has no trigger of its own`() {
+        // One source of truth: the trigger the shift service runs (:ml), nothing in devlog.
+        try {
+            Class.forName("xyz.headsdown.feature.shift.devlog.MotionTrigger")
+            fail("the sensor lab still has its own MotionTrigger")
+        } catch (_: ClassNotFoundException) {
+            // expected
+        }
+        assertEquals("xyz.headsdown.ml.pickup.MotionTrigger", MotionTrigger::class.java.name)
+    }
+
     @Test
     fun `stillness never triggers`() {
-        val trigger = MotionTrigger()
+        val trigger = MotionTrigger.live()
         assertEquals(0, (0 until 50 * 60).count { trigger.onSample(rest(it)) })
     }
 
     @Test
     fun `a nightstand bump triggers once`() {
-        val trigger = MotionTrigger()
+        val trigger = MotionTrigger.live()
         val fired = (0 until 500).count { i ->
             val s = if (i in 200..203) rest(i).copy(z = -g - 4f, x = 2f) else rest(i)
             trigger.onSample(s)
@@ -31,7 +48,7 @@ class MotionWindowsTest {
 
     @Test
     fun `a slow lift that keeps about 1 g still triggers on tilt`() {
-        val trigger = MotionTrigger()
+        val trigger = MotionTrigger.live()
         var firedAt = -1
         for (i in 0 until 400) {
             // From face-down, rotate about the x axis by up to 70 degrees over 2 s, magnitude unchanged.
@@ -44,13 +61,33 @@ class MotionWindowsTest {
 
     @Test
     fun `refractory period merges one jostle into one trigger`() {
-        val trigger = MotionTrigger(MotionTrigger.Config(refractoryMillis = 3_000))
+        val trigger = MotionTrigger.live(MotionTrigger.Config(refractoryMillis = 3_000))
         val fired = (0 until 300).count { i ->
             // Two jolts 0.6 s apart, then another 4 s later.
             val jolt = i == 50 || i == 80 || i == 280
             trigger.onSample(if (jolt) rest(i).copy(z = -g - 5f) else rest(i))
         }
         assertEquals(2, fired)
+    }
+
+    @Test
+    fun `a session started in the hand records the lay-down and then goes quiet`() {
+        // Tap Start holding the phone face-up, turn it over onto the table, leave it: the plain
+        // trigger would fire every 3 s from here on, and every "window" would be a still phone.
+        val trigger = MotionTrigger.live()
+        val windows = mutableListOf<MotionWindow>()
+        val recorder = WindowRecorder(onWindow = { windows += it })
+        var fires = 0
+        for (i in 0 until 50 * 60) {
+            val angle = Math.toRadians(if (i < 100) 150.0 else maxOf(0.0, 150.0 - (i - 100) * 3.0))
+            val s = AccelSample(i * stepNanos, i * stepNanos, 0f, (g * sin(angle)).toFloat(), (-g * cos(angle)).toFloat())
+            val fired = trigger.onSample(s)
+            if (fired) fires++
+            recorder.onSample(s, fired)
+        }
+        assertTrue("the lay-down, and at most one re-fire while it settles: $fires", fires in 1..2)
+        assertEquals("one window: the lay-down", 1, windows.size)
+        assertEquals(1, trigger.settles)
     }
 
     @Test
