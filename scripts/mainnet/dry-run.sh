@@ -46,13 +46,15 @@ LOG="$HD_DEVSTACK_HOME/dry-run.log"
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*" | tee -a "$LOG"; }
 run() { "$@" 2>&1 | tee -a "$LOG"; return "${PIPESTATUS[0]}"; }
 
-STARTED=0
+STARTED=0 SUMMARY=() SMOKE_RC=0
 finish() {
   local rc=$?
   if [[ $STARTED == 1 && $KEEP == 0 ]]; then
     printf '\n\033[1;36m== stop the stack ==\033[0m\n' | tee -a "$LOG"
     "$DEVSTACK/down.sh" 2>&1 | tee -a "$LOG" || true
   fi
+  printf '\n\033[1msummary\033[0m\n' | tee -a "$LOG"
+  for s in ${SUMMARY[@]+"${SUMMARY[@]}"}; do printf '  %s\n' "$s" | tee -a "$LOG"; done
   if [[ $rc -eq 0 ]]; then
     printf '\n\033[1;32mDRY RUN PASSED\033[0m (log %s)\n' "$LOG"
   else
@@ -60,10 +62,12 @@ finish() {
   fi
 }
 trap finish EXIT
+ok() { SUMMARY+=("PASS  $*"); }
 
 step "0. local stack without heads_down (up.sh --no-deploy, RPC :$HD_RPC_PORT, home $HD_DEVSTACK_HOME)"
 STARTED=1
 run "$DEVSTACK/up.sh" --no-deploy ${UP_ARGS[@]+"${UP_ARGS[@]}"}
+ok "0 up.sh --no-deploy: fork, driver, crank, indexer up; no heads_down"
 
 step "1. keys.sh (throwaway deploy keys in $DRY_KEYS)"
 run "$MAINNET_SCRIPTS/keys.sh" --cluster localnet --keys-dir "$DRY_KEYS" --no-funding
@@ -71,22 +75,38 @@ run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/deployer.json")" 5
 run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/governance.json")" 1
 run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/crank-payer.json")" 1
 run "$MAINNET_SCRIPTS/keys.sh" --cluster localnet --keys-dir "$DRY_KEYS"
+ok "1 keys.sh: keys created (600 in a 700 dir), public keys and funding printed"
 
 step "2. preflight.sh --cluster localnet (read-only)"
 run "$MAINNET_SCRIPTS/preflight.sh" --cluster localnet --keys-dir "$DRY_KEYS"
+ok "2 preflight.sh: GO"
 
 step "3. deploy.sh --cluster localnet (build, preflight, deploy, verify, receipt)"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
+ok "3 deploy.sh: fresh deploy of HDn4vg… with max-len $HD_MAX_LEN, bytes verified, receipt written"
 
 step "4. init-config.sh --cluster localnet (initialize_config + Executor float)"
 run "$MAINNET_SCRIPTS/init-config.sh" --cluster localnet --keys-dir "$DRY_KEYS" --yes
 run "$MAINNET_SCRIPTS/governance.sh" --cluster localnet --keys-dir "$DRY_KEYS" show
+ok "4 init-config.sh: Config created and read back, Executor float funded, receipt written"
 
 if [[ $SMOKE == 1 ]]; then
   step "5. scripts/devstack/smoke.sh against the deployed + initialized program"
-  run "$DEVSTACK/smoke.sh" --keep
+  if run "$DEVSTACK/smoke.sh" --keep; then
+    ok "5 smoke.sh: SMOKE PASSED"
+  else
+    SMOKE_RC=$?
+    SUMMARY+=("FAIL  5 smoke.sh exited $SMOKE_RC (its output is above)")
+  fi
 fi
 
 step "6. rollback drill: governance.sh pause (immediate), then show"
 run "$MAINNET_SCRIPTS/governance.sh" --cluster localnet --keys-dir "$DRY_KEYS" pause
 run "$MAINNET_SCRIPTS/governance.sh" --cluster localnet --keys-dir "$DRY_KEYS" show
+if HD_DEVSTACK_RPC="http://127.0.0.1:$HD_RPC_PORT" "$REPO_ROOT/scripts/devstack/tool/target/release/hd-devstack" status | grep -q 'paused true'; then
+  ok "6 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock"
+else
+  SUMMARY+=("FAIL  6 Config.paused did not read back as true")
+  exit 1
+fi
+[[ $SMOKE_RC -eq 0 ]] || exit "$SMOKE_RC"
