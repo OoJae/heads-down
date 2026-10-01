@@ -302,7 +302,12 @@ fn interface_md_v13_tables_match_the_program() {
             "| 224 | pending_governance_eta_slot | u64 |",
             offset_of!(Config, pending_governance_eta_slot),
         ),
-        ("| 232 | reserved | [u8;24] |", offset_of!(Config, reserved)),
+        (
+            "| 232 | pending_governance_eta_ts | i64 |",
+            offset_of!(Config, pending_governance_eta_ts),
+        ),
+        ("| 240 | pending_eta_ts | i64 |", offset_of!(Config, pending_eta_ts)),
+        ("| 248 | reserved | [u8;8] |", offset_of!(Config, reserved)),
         ("| 8 | shift_id | u64 | `Rig.shift_id` at close |", offset_of!(RigTombstone, shift_id)),
         (
             "| 16 | hb_counter | u64 | `Rig.hb_counter` at close |",

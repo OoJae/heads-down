@@ -58,9 +58,14 @@ Kotlin `HeadsDownProgram.ID`). The deploy keypair lives **outside the repo** at
   `accept_governance`, `cancel_governance`, `close_shift_log`.
 * **1 account**, tag 10: RigTombstone (32 bytes, at the Rig PDA).
 * **4 events**, tags 24 to 27, and **2 errors**, codes 49 and 50.
-* **Config** uses 40 of its 69 tail padding bytes: `pending_governance` at
-  192 and `pending_governance_eta_slot` at 224. **ShiftLog** uses its 16
-  reserved bytes at 112: `payer_prefix`.
+* **Config** uses 56 of its 69 tail padding bytes: `pending_governance` at
+  192, `pending_governance_eta_slot` at 224, `pending_governance_eta_ts` at
+  232 and `pending_eta_ts` at 240. **ShiftLog** uses its 16 reserved bytes at
+  112: `payer_prefix`.
+* **Every timelock now also waits for 72 hours of cluster time**
+  (`Clock.unix_timestamp`), not only for 864,000 slots, which pass in about
+  64 hours at mainnet's present slot time. This covers the new rotation and
+  `apply_config` (§12.3).
 * **`close_rig`** leaves a RigTombstone and **`register_rig`** resumes from it,
   so a rig address never reuses a `shift_id` or accepts an old P-256 message
   again (the §10 re-registration bug, and two replays it hid).
@@ -214,7 +219,9 @@ are pinned by const assertions in `src/state.rs`.
 | 187 | _pad | [u8;5] | |
 | 192 | pending_governance | Address | **v1.3** (§12.3). All-zero = no rotation pending. Padding in v1.1 and v1.2 |
 | 224 | pending_governance_eta_slot | u64 | **v1.3**. First slot at which the pending governance may accept |
-| 232 | reserved | [u8;24] | zero → 256 |
+| 232 | pending_governance_eta_ts | i64 | **v1.3**. First cluster time (unix s) at which it may accept |
+| 240 | pending_eta_ts | i64 | **v1.3**. First cluster time (unix s) at which the pending config proposal may be applied (with `pending_eta_slot`); 0 in a proposal made by a v1.2 program |
+| 248 | reserved | [u8;8] | zero → 256 |
 
 `crank_fee <= executor_fee` is enforced at `initialize_config`,
 `propose_config` and `apply_config`. There is no withdraw path. The Executor's
@@ -736,7 +743,8 @@ Data:
 0 tag | 1 registrar[32] | 33 crank_fee u64 | 41 bury_bps u16 | 43 paused u8 (0/1)
 ```
 
-* It sets `pending_*` with `pending_eta_slot = slot + 864,000`. A new proposal
+* It sets `pending_*` with `pending_eta_slot = slot + 864,000` and, since
+  v1.3, `pending_eta_ts = unix_timestamp + 259,200` (§12.3). A new proposal
   replaces the pending one and restarts the clock.
 * `paused = 1` also sets `config.paused = 1` **immediately** (§6.6).
 * `executor_fee` cannot be changed.
@@ -746,9 +754,10 @@ Data:
 Accounts: `0 [w] Config`. Data: `0 tag`.
 
 It requires `pending_exists`, otherwise `InvalidInstruction`, and
-`slot >= pending_eta_slot`, otherwise `TimelockNotElapsed` (19). It applies the
-registrar, `crank_fee`, `bury_bps` and `paused` together, then clears the
-pending fields.
+`slot >= pending_eta_slot`, otherwise `TimelockNotElapsed` (19). Since v1.3 it
+also requires `unix_timestamp >= pending_eta_ts` (the same error; §12.3). It
+applies the registrar, `crank_fee`, `bury_bps` and `paused` together, then
+clears the pending fields.
 
 ### 14 `close_rig`
 
@@ -926,8 +935,9 @@ Two rules apply across these steps:
   `unfreeze_rig`, `end_shift`, `set_caps`, `rotate_key`, `register_rig`,
   `verify_seeker` and `close_rig`.
 * `propose_config` with `paused = 1` pauses **immediately**. Un-pausing, and
-  every other change, waits for `apply_config` after 864,000 slots. That is
-  72 h at 300 ms slots, or about 96 h at the nominal 400 ms.
+  every other change, waits for `apply_config` after the timelock: 864,000
+  slots and, since v1.3, 72 hours of cluster time, whichever ends later
+  (§12.3).
 
 ### 6.7 State machine (Cooling / Broken)
 
@@ -1841,13 +1851,14 @@ data and pay a recipient fixed by state).
 | Item | What it does | Section |
 |---|---|---|
 | Governance rotation | `Config.governance` can move, behind the 72 h timelock, and only when the successor itself accepts | §12.3 |
+| Timelock | every timelock waits for 72 hours of cluster time as well as for 864,000 slots | §12.3 |
 | Rig tombstone | `close_rig` keeps `shift_id` and `hb_counter` in a 32-byte account; `register_rig` resumes from it | §12.4 |
 | ShiftLog rent | `close_shift_log` returns a log's rent to whoever paid it, 30 days after the shift ended | §12.5 |
 | Attestation | an attested-only table counts a round only while the rig's attestation is live | §12.6 |
 | P-256 key uniqueness | evaluated, not built: the reasons | §12.7 |
 | Build | the mainnet artifact is SBPFv3 | §12.10 |
 
-Four v1.1 / v1.2 instructions keep their bytes and account lists and do
+Six v1.1 / v1.2 instructions keep their bytes and account lists and do
 something a client can observe differently:
 
 | Instruction | Before | v1.3 |
@@ -1856,6 +1867,8 @@ something a client can observe differently:
 | `register_rig` (1) | the Rig PDA must be System-owned and empty; `shift_id` and `hb_counter` start at 0 | it also accepts a RigTombstone, and then the new Rig starts at the tombstone's `shift_id` and `hb_counter` |
 | `end_shift` (11) | ShiftLog bytes 112..128 are zero | they hold the first 16 bytes of the caller's address |
 | `stack_checkin` (17) | attestation is checked at `join_stack` only | at an attested-only table the seat's result is 36 while the rig's attestation is not live |
+| `propose_config` (12) | sets `pending_eta_slot` | also sets `pending_eta_ts = unix_timestamp + 259,200` (Config offset 240) |
+| `apply_config` (13) | needs `slot >= pending_eta_slot` | also needs `unix_timestamp >= pending_eta_ts`. A proposal a v1.2 program made has `pending_eta_ts = 0` and applies on its slot bound |
 
 `accept_governance` also clears a pending `propose_config` proposal (§12.3).
 
@@ -1868,7 +1881,9 @@ something a client can observe differently:
 | 187 | _pad | [u8;5] | |
 | 192 | pending_governance | Address | the successor named by `propose_governance`; all-zero = no rotation pending |
 | 224 | pending_governance_eta_slot | u64 | first slot at which it may accept; 0 when nothing is pending |
-| 232 | reserved | [u8;24] | zero |
+| 232 | pending_governance_eta_ts | i64 | first cluster time (unix s) at which it may accept; 0 when nothing is pending |
+| 240 | pending_eta_ts | i64 | first cluster time (unix s) at which the pending `propose_config` proposal may be applied; 0 when none is pending |
+| 248 | reserved | [u8;8] | zero |
 
 **RigTombstone (32 bytes, tag 10)**, at the Rig PDA `["rig", authority]`:
 
@@ -1910,9 +1925,10 @@ Data: `0 tag | 1 new_governance [32]`.
 * The signer must be `Config.governance` (`Unauthorized`, 5).
 * `new_governance` must be neither all-zero nor the current governance
   (`InvalidInstruction`, 0).
-* It sets `pending_governance` and `pending_governance_eta_slot = slot +
-  864,000`, the timelock of `propose_config`. A new proposal replaces the
-  pending one and restarts the clock.
+* It sets `pending_governance`, `pending_governance_eta_slot = slot +
+  864,000` and `pending_governance_eta_ts = unix_timestamp + 259,200`: the
+  timelock of `propose_config`. A new proposal replaces the pending one and
+  restarts the clock.
 * Nothing else changes. Emits **GovernanceProposed**.
 
 #### 29 `accept_governance`
@@ -1922,8 +1938,10 @@ Accounts: `0 [s] the pending governance | 1 [w] Config`. Data: `0 tag`.
 * A rotation must be pending (`InvalidInstruction`).
 * The signer must be `pending_governance` (`Unauthorized`). Nobody else can
   complete a rotation: not the current governance, not a third party.
-* `slot >= pending_governance_eta_slot` (`TimelockNotElapsed`, 19).
-* `governance = pending_governance`; both rotation fields return to zero.
+* `slot >= pending_governance_eta_slot` and `unix_timestamp >=
+  pending_governance_eta_ts` (`TimelockNotElapsed`, 19).
+* `governance = pending_governance`; the three rotation fields return to
+  zero.
 * A pending `propose_config` proposal is cleared (`pending_exists = 0` and
   the other `pending_*` fields zero): it was the outgoing governance's, and
   the new one proposes its own. `paused` is not touched.
@@ -1934,14 +1952,30 @@ Accounts: `0 [s] the pending governance | 1 [w] Config`. Data: `0 tag`.
 Accounts: `0 [s] governance | 1 [w] Config`. Data: `0 tag`.
 
 The signer must be the **current** governance (`Unauthorized`), and a rotation
-must be pending (`InvalidInstruction`). Both rotation fields return to zero.
-Emits **GovernanceCancelled**.
+must be pending (`InvalidInstruction`). The three rotation fields return to
+zero. Emits **GovernanceCancelled**.
+
+**The timelock: slots and time.** A timelock (of a config proposal or of a
+rotation) has two halves and ends when **both** have passed:
+
+* 864,000 slots (`TIMELOCK_SLOTS`, the v1.1 rule);
+* 259,200 seconds, 72 hours, of `Clock.unix_timestamp` (`TIMELOCK_SECS`,
+  v1.3).
+
+v1.1 chose 864,000 slots as "72 h at 300 ms slots". Mainnet's slots are
+shorter than that now: 267.7 ms on average over 51,546 slots on 2026-10-01,
+so 864,000 of them pass in about 64 hours, and at 200 ms they would pass in
+48. A count of slots is only a duration while the slot time holds still. The
+time half makes every timelock at least 72 hours of cluster time whatever
+the slot time is; the slot half stays as a floor that does not depend on the
+cluster clock (it is the one that binds on a local validator at 400 ms:
+96 h). A client that waits for a timelock reads both etas.
 
 **What the two steps buy.**
 
 * A stolen governance key cannot move governance at once: the successor is
-  public in the Config for 864,000 slots (72 h at 300 ms slots, about 96 h at
-  400 ms), during which the real governance can cancel.
+  public in the Config for the whole timelock (at least 72 hours), during
+  which the real governance can cancel.
 * A mistyped successor cannot lose governance: an address nobody controls can
   never sign `accept_governance`, so `Config.governance` stays where it is.
 * **The emergency pause stays immediate.** Until the successor accepts, the
@@ -2115,7 +2149,7 @@ Same rules as §7.
 
 | Tag | Event | Layout (offset: field) | Length | Emitted by |
 |---|---|---|---|---|
-| 24 | GovernanceProposed | `1 governance (the current one) · 33 pending_governance · 65 eta_slot u64` | 73 | `propose_governance` |
+| 24 | GovernanceProposed | `1 governance (the current one) · 33 pending_governance · 65 eta_slot u64 · 73 eta_ts i64` | 81 | `propose_governance` |
 | 25 | GovernanceAccepted | `1 governance (the new one) · 33 previous_governance` | 65 | `accept_governance` |
 | 26 | GovernanceCancelled | `1 governance (the current one) · 33 cancelled_governance` | 65 | `cancel_governance` |
 | 27 | ShiftLogClosed | `1 shift_log · 33 rig · 65 shift_id u64 · 73 lamports u64 (the rent returned)` | 81 | `close_shift_log` |
@@ -2133,8 +2167,8 @@ earlier event changed. `StackCheckin.result` (tag 13) may now be 36.
 Existing codes with a new use: 0 `InvalidInstruction` (no rotation pending; a
 zero or unchanged successor), 5 `Unauthorized` (a wrong governance signer; a
 rent recipient the log does not name), 19 `TimelockNotElapsed`
-(`accept_governance` too early), 36 `StackIneligible` (as a `StackCheckin`
-result).
+(`accept_governance` too early; `apply_config` before its 72 hours of cluster
+time), 36 `StackIneligible` (as a `StackCheckin` result).
 
 ### 12.10 Build: SBPFv3
 
@@ -2142,13 +2176,16 @@ result).
 and `target/deploy/heads_down.so` is what the deploy scripts ship. Mainnet
 accepts SBPFv3 deployments, and SIMD-0500 will refuse new v0, v1 and v2
 deployments once it activates. Both arches run the whole fork suite and
-produce byte-identical golden vectors. The README records sizes and hashes.
+produce byte-identical golden vectors, and both were deployed to a real
+validator carrying mainnet's feature set and exercised there
+(`scripts/smoke-validator.sh`). The README records sizes, hashes and that run.
 
 ### 12.11 Measured (live ORE fork, `tests/tests/v13_capacity.rs` and the golden scenario)
 
 | Instruction | CU |
 |---|---|
-| `propose_governance` / `cancel_governance` / `accept_governance` | 617 / 453 / 594 |
+| `propose_governance` / `cancel_governance` / `accept_governance` | 764 / 454 / 615 |
+| `propose_config` / `apply_config` (with the time half of the timelock) | 345 / 292 (326 / 274 before it) |
 | `close_rig` leaving a tombstone | 712 (a full close was 527) |
 | `register_rig` over a tombstone | about 130 more than a first registration (12,866 against 12,737 for the same wallet) |
 | `close_shift_log` | 2,398 to 6,898 (one bump search for the bond PDA); 5,426 for a pre-v1.3 log (two searches) |

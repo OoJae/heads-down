@@ -508,6 +508,7 @@ pub fn event_layout(tag: u8) -> Vec<(&'static str, &'static str, usize, usize)> 
             ("governance", "pubkey", 32),
             ("pending_governance", "pubkey", 32),
             ("eta_slot", "u64", 8),
+            ("eta_ts", "i64", 8),
         ],
         ev::tag::GOVERNANCE_ACCEPTED => &[
             ("governance", "pubkey", 32),
@@ -873,10 +874,13 @@ fn pinned_json(env: &Env) -> Value {
         },
         "v1_3": {
             "governance_timelock_slots": s(hd::instructions::governance::TIMELOCK_SLOTS),
+            "governance_timelock_secs": s(hd::instructions::governance::TIMELOCK_SECS),
             "shift_log_ttl_secs": s(hd::instructions::shift_log::SHIFT_LOG_TTL_SECS),
             "rig_tombstone": {"account_tag": hd::state::tag::RIG_TOMBSTONE, "len": 32, "shift_id_offset": 8, "hb_counter_offset": 16},
             "config_pending_governance_offset": 192,
             "config_pending_governance_eta_slot_offset": 224,
+            "config_pending_governance_eta_ts_offset": 232,
+            "config_pending_eta_ts_offset": 240,
             "shift_log_payer_prefix_offset": 112,
         },
     })
@@ -1651,7 +1655,7 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
             name: "propose_config",
             instruction: "propose_config",
             auth: "governance",
-            description: "Propose crank_fee 4500 (<= executor_fee), bury_bps 250, paused 0: pending_* with pending_eta_slot = slot + 864000. (paused = 1 would also pause immediately.)",
+            description: "Propose crank_fee 4500 (<= executor_fee), bury_bps 250, paused 0: pending_* with pending_eta_slot = slot + 864000 and (v1.3) pending_eta_ts = unix_timestamp + 259200. (paused = 1 would also pause immediately.)",
             args: json!({"registrar": s(registrar.pubkey()), "crank_fee": "4500", "bury_bps": 250, "paused": 0}),
             fields: f,
             metas: h.accounts.clone(),
@@ -1662,16 +1666,18 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         &govk,
         &[],
     );
-    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS)");
+    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS) and, for apply_config only, unix_timestamp += 259200 (TIMELOCK_SECS, v1.3); the wall clock is put back right after it, so every later vector keeps its v1.2 bytes");
     let (slot_now, now) = (rec.env.slot, rec.env.now);
-    rec.env
-        .set_clock(slot_now + hd::instructions::governance::TIMELOCK_SLOTS, now);
+    rec.env.set_clock(
+        slot_now + hd::instructions::governance::TIMELOCK_SLOTS,
+        now + hd::instructions::governance::TIMELOCK_SECS,
+    );
     let h = ix_apply();
     rec.vector(
         Spec {
             name: "apply_config",
             instruction: "apply_config",
-            auth: "anyone, once slot >= pending_eta_slot",
+            auth: "anyone, once slot >= pending_eta_slot and (v1.3) unix_timestamp >= pending_eta_ts",
             description: "Apply the pending proposal after the timelock.",
             args: json!({}),
             fields: Fields::new(hd::tag::APPLY_CONFIG),
@@ -1683,6 +1689,8 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         &cranker,
         &[],
     );
+    rec.env
+        .set_clock(slot_now + hd::instructions::governance::TIMELOCK_SLOTS, now);
     let c = rec.env.config();
     assert_eq!((c.crank_fee.get(), c.bury_bps.get()), (4_500, 250));
 
@@ -1712,7 +1720,7 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
             "`transaction.instructions` is the whole transaction: companion instructions (compute budget, Secp256r1SigVerify, Ed25519SigVerify) are given in full so hb_ix / p256_ix / ed25519_ix are real top-level indices.",
             "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched.",
             "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned.",
-            "v1.3 (additive): tags 28..=31 follow the v1.2 vectors in the same scenario, with one more vector for tag 1 (`register_rig_resumed`: the same register_rig bytes over the RigTombstone that alice's close_rig left). Every v1.1 and v1.2 vector above them is byte-identical to its v1.2 form: no instruction data, account list or event of an existing tag changed."
+            "v1.3 (additive): tags 28..=31 follow the v1.2 vectors in the same scenario, with one more vector for tag 1 (`register_rig_resumed`: the same register_rig bytes over the RigTombstone that alice's close_rig left). Every v1.1 and v1.2 vector above them keeps its v1.2 instruction data, account list, transaction and events byte for byte; only the wording of two entries changed (`propose_config` description, `apply_config` auth), because the config timelock now also waits for 72 hours of cluster time (Config.pending_eta_ts)."
         ],
         "program_id": s(HD),
         "program_id_hex": hex(HD.as_ref()),
@@ -2530,7 +2538,7 @@ fn v13_vectors(rec: &mut Recorder, cranker: &Keypair, alice: &User, gov: &Keypai
             name: "propose_governance",
             instruction: "propose_governance",
             auth: "governance (the current one)",
-            description: "v1.3. The current governance names its successor: Config.pending_governance (offset 192) and pending_governance_eta_slot (offset 224) = slot + 864000. Nothing else changes; the current governance keeps every power, including the immediate pause. Emits GovernanceProposed.",
+            description: "v1.3. The current governance names its successor: Config.pending_governance (offset 192), pending_governance_eta_slot (offset 224) = slot + 864000 and pending_governance_eta_ts (offset 232) = unix_timestamp + 259200. Nothing else changes; the current governance keeps every power, including the immediate pause. Emits GovernanceProposed.",
             args: json!({"new_governance": s(new_gov.pubkey())}),
             fields: f,
             metas: h.accounts.clone(),
@@ -2547,7 +2555,7 @@ fn v13_vectors(rec: &mut Recorder, cranker: &Keypair, alice: &User, gov: &Keypai
             name: "cancel_governance",
             instruction: "cancel_governance",
             auth: "governance (the current one)",
-            description: "v1.3. The current governance drops the pending rotation: pending_governance and its eta return to zero. Emits GovernanceCancelled.",
+            description: "v1.3. The current governance drops the pending rotation: pending_governance and both etas return to zero. Emits GovernanceCancelled.",
             args: json!({}),
             fields: Fields::new(hd::tag::CANCEL_GOVERNANCE),
             metas: h.accounts.clone(),
@@ -2563,16 +2571,18 @@ fn v13_vectors(rec: &mut Recorder, cranker: &Keypair, alice: &User, gov: &Keypai
         gov,
         &[ix_propose_governance(&gov.pubkey(), &new_gov.pubkey())],
     );
-    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS)");
+    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS) and unix_timestamp += 259200 (TIMELOCK_SECS): both halves of the timelock");
     let (slot_now, now) = (rec.env.slot, rec.env.now);
-    rec.env
-        .set_clock(slot_now + hd::instructions::governance::TIMELOCK_SLOTS, now);
+    rec.env.set_clock(
+        slot_now + hd::instructions::governance::TIMELOCK_SLOTS,
+        now + hd::instructions::governance::TIMELOCK_SECS,
+    );
     let h = ix_accept_governance(&new_gov.pubkey());
     rec.vector(
         Spec {
             name: "accept_governance",
             instruction: "accept_governance",
-            auth: "the pending governance itself, once slot >= pending_governance_eta_slot",
+            auth: "the pending governance itself, once slot >= pending_governance_eta_slot and unix_timestamp >= pending_governance_eta_ts",
             description: "v1.3. The successor signs: it becomes Config.governance (offset 8), the rotation fields return to zero, and any pending config proposal of the outgoing governance is voided (paused is kept). Only the named successor can do this, so a mistyped address can never take governance. Emits GovernanceAccepted.",
             args: json!({}),
             fields: Fields::new(hd::tag::ACCEPT_GOVERNANCE),

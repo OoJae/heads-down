@@ -1274,7 +1274,7 @@
     {
       "tag": 24,
       "event": "GovernanceProposed",
-      "length": 73,
+      "length": 81,
       "layout": [
         {
           "name": "tag",
@@ -1299,17 +1299,24 @@
           "type": "u64",
           "offset": 65,
           "size": 8
+        },
+        {
+          "name": "eta_ts",
+          "type": "i64",
+          "offset": 73,
+          "size": 8
         }
       ],
       "sample": {
         "captured_from": "propose_governance",
-        "hex": "188a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c1a96071b00000000",
-        "base64": "GIqHX/8es4RRV3rNWv7kBUVlaN18ieCQhjoFV7x69J8X6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iwalgcbAAAAAA==",
+        "hex": "188a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c1a96071b000000000262e76a00000000",
+        "base64": "GIqHX/8es4RRV3rNWv7kBUVlaN18ieCQhjoFV7x69J8X6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iwalgcbAAAAAAJi52oAAAAA",
         "fields": {
           "tag": 24,
           "governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
           "pending_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
-          "eta_slot": "453482010"
+          "eta_slot": "453482010",
+          "eta_ts": "1793548802"
         }
       }
     },
