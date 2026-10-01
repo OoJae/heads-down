@@ -57,9 +57,11 @@ data exists, so there is nothing honest to plot. Milestone "regions" are time-zo
   route; it is not a return on capital.
 - **The haul says what happened, not what it is worth.** The verdict compares the shift's own
   effective price with a market quote and says "Buying was the cheaper route" as plainly as
-  "Mining was the cheaper route". A shift that mined nothing shows no price instead of a zero. The market quote carries its
-  source's name and is the only figure not read from the chain. A haul whose `simulated` flag
-  disagrees with the pinned dataset is rejected.
+  "Mining was the cheaper route". A shift that mined nothing shows no price instead of a zero.
+  The market quote carries its source's name and is the only figure not read from the chain. A
+  haul from localnet or devnet says under its verdict that few miners share the board there, so
+  its price per ORE says nothing about mainnet (on the local fork a rig mines whole ORE for
+  dust). A haul whose `simulated` flag disagrees with the pinned dataset is rejected.
 - **u64 stays exact.** Amounts arrive as decimal strings and are formatted with BigInt. Non-zero
   dust shows as `<0.001`, never as `0`.
 
