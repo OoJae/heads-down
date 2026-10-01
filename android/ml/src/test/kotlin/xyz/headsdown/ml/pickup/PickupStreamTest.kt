@@ -345,6 +345,35 @@ class PickupStreamTest {
         assertEquals(StreamBuilder.G * kotlin.math.sin(Math.toRadians(15.0)), tracker.restX, 0.05)
     }
 
+    // ------------------------------------------------------------------ why re-fires must not be classified
+
+    @Test
+    fun `what the shipped model says about a window with no motion in it - reported`() {
+        // Not a requirement on the model: a record of why callers classify onsets only. The model
+        // was trained on windows cut at the start of a motion; a re-fire window of a phone that
+        // has come to rest is outside that, and this is what it answers there.
+        val classifier = ModelPickupClassifier(PickupModelDocument.parse(TestResources.asset("pickup_model.json").readText()))
+        val lines = ArrayList<String>()
+        for (tilt in listOf(0.0, 13.0, 30.0)) {
+            for (noise in listOf(0.005, 0.02, 0.04)) {
+                var pickups = 0
+                var highest = Double.NEGATIVE_INFINITY
+                val n = 200
+                for (seed in 0 until n) {
+                    val s = StreamBuilder(seed = seed.toLong(), noise = noise).rotateTo(tilt, 0.02).rest(5.2).build()
+                    val samples = ArrayList<AccelSample>(s.size)
+                    s.forEach { t, x, y, z -> samples += AccelSample(t, x, y, z) }
+                    val d = classifier.classify(MotionWindow(s.t[0] + 2_000_000_000L, samples))
+                    assertTrue("a still window is usable, so the model itself answers", d.failClosed == null && d.calibratedLogit.isFinite())
+                    if (d.verdict == PickupVerdict.PICKUP) pickups++
+                    highest = maxOf(highest, d.calibratedLogit)
+                }
+                lines += "still at %2.0f deg, noise %.3f m/s2: PICKUP for %3d of %d windows (highest calibrated logit %+.2f)".format(tilt, noise, pickups, n, highest)
+            }
+        }
+        println("the shipped model on windows with no motion:\n" + lines.joinToString("\n"))
+    }
+
     // ------------------------------------------------------------------ robustness
 
     @Test
