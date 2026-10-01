@@ -23,6 +23,16 @@ sealed interface ShiftEvent {
     /** Charger plugged/unplugged (`BatteryManager.EXTRA_PLUGGED != 0`). Hard signal. */
     data class Power(val charging: Boolean) : ShiftEvent
 
+    /**
+     * The Foreman pickup classifier judged a motion of the hot rig a pickup (the phone was
+     * lifted without tilting past the [FaceDownDetector]'s exit angle, or a window was unusable:
+     * fail-closed). It can only ADD a break: a DOWN rig breaks at once with [BreakReason.LIFTED]
+     * (BREAK reason 1), and every other state ignores it. It changes no signal, so it can never
+     * make a rig dark, re-arm a broken shift or end a cooling one early. There is no event for
+     * the classifier's other answer: "not a pickup" is nothing happening.
+     */
+    data object PickupDetected : ShiftEvent
+
     /** Time passing; used to expire the cooling grace window. */
     data object Tick : ShiftEvent
 
@@ -62,8 +72,9 @@ data class Transition(
     val effects: List<ShiftEffect>,
 ) {
     /**
-     * The phone was picked up after going dark: lifted out of Down, unlocked, or the shift was
-     * ended by hand while running. Screen-on alone (a notification) is not a pickup.
+     * The phone was picked up after going dark: lifted out of Down (the detector's tilt rule, or
+     * the classifier's verdict), unlocked, or the shift was ended by hand while running.
+     * Screen-on alone (a notification) is not a pickup.
      */
     val isPickup: Boolean
         get() = effects.any { it is ShiftEffect.CoolingStarted && it.reason == CoolReason.LIFTED } ||
@@ -78,7 +89,7 @@ data class Transition(
  *   Idle --Arm--> Armed --dark--> Down --not dark--> Cooling --dark again < 10 s--> Down
  *                                   |                   |
  *                                   |                   +--grace expired--> Broken --Arm--> Armed
- *                                   +--unlock (hard)-----------------------> Broken
+ *                                   +--unlock (hard), classifier pickup----> Broken
  *   any --Freeze--> Frozen --Unfreeze (wallet)--> Idle        any --End--> Idle
  * ```
  *
@@ -91,6 +102,9 @@ data class Transition(
  *   sensor debounce. The grace window then absorbs a notification waking the screen of a
  *   phone that never moved.
  * - `USER_PRESENT` (unlock) cannot happen by accident: it breaks immediately.
+ * - A classifier pickup ([ShiftEvent.PickupDetected]) breaks a DOWN rig immediately and does
+ *   nothing anywhere else. The model can add that one break; it has no way to remove one, to
+ *   heat a rig or to soften the three rules above.
  * - Late events cannot resurrect an expired grace window: every event first applies expiry,
  *   so a posture sample that arrives after the deadline (CPU was asleep) still breaks.
  *
@@ -168,6 +182,13 @@ class ShiftStateMachine(
                 ShiftEvent.UserPresent -> when (current) {
                     is ShiftState.Down -> breakNow(current.spec, BreakReason.UNLOCKED, now, effects)
                     is ShiftState.Cooling -> breakNow(current.spec, BreakReason.UNLOCKED, now, effects)
+                    else -> current
+                }
+
+                // Deliberately not routed through settle(): this event must never move a rig
+                // toward DOWN, whatever the signals say.
+                ShiftEvent.PickupDetected -> when (current) {
+                    is ShiftState.Down -> breakNow(current.spec, BreakReason.LIFTED, now, effects)
                     else -> current
                 }
 
