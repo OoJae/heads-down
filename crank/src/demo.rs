@@ -246,7 +246,102 @@ pub fn caption(e: &HdEvent) -> String {
                 thousands(*lamports)
             )
         }
+        HdEvent::StackOpened { table, host, table_id, bond, start_round, end_round, grace_gaps, flags, max_seats } => format!(
+            "StackOpened         table {}  host {}  id {table_id}  bond {} SKR  rounds {start_round}..{end_round}  grace {grace_gaps}  {}  up to {max_seats} seats",
+            short(table),
+            short(host),
+            skr(*bond),
+            crate::skr::flags_name(*flags)
+        ),
+        HdEvent::StackJoined { table, rig, bond, seat_index, sgt_mint, .. } => format!(
+            "StackJoined         table {}  rig {}  seat {seat_index}  bond {} SKR{}",
+            short(table),
+            short(rig),
+            skr(*bond),
+            if *sgt_mint == Address::default() { String::new() } else { format!("  sgt {}", short(sgt_mint)) }
+        ),
+        HdEvent::StackCheckin { table, rig, round_id, checked_rounds, result } => format!(
+            "StackCheckin        table {}  rig {}  round {round_id}  {} ({result:#x})  {checked_rounds} rounds counted",
+            short(table),
+            short(rig),
+            hd::checkin_result_name(*result)
+        ),
+        HdEvent::StackSettled { table, total_bonds, finisher_bonds, payouts_total, bury_amount, seats, finishers } => format!(
+            "StackSettled        table {}  {finishers} of {seats} seats finished  bonds {} SKR (finishers {})  payouts {}  to the Bury lot {}",
+            short(table),
+            skr(*total_bonds),
+            skr(*finisher_bonds),
+            skr(*payouts_total),
+            skr(*bury_amount)
+        ),
+        HdEvent::StackClaimed { table, rig, amount, kind, .. } => format!(
+            "StackClaimed        table {}  rig {}  {} SKR ({})",
+            short(table),
+            short(rig),
+            skr(*amount),
+            if *kind == hd::CLAIM_REFUND { "timeout refund" } else { "payout" }
+        ),
+        HdEvent::FocusBondLocked { bond, rig, shift_id, amount, .. } => {
+            format!("FocusBondLocked     bond {}  rig {}  shift {shift_id}  {} SKR", short(bond), short(rig), skr(*amount))
+        }
+        HdEvent::FocusBondReleased { bond, rig, shift_id, amount } => format!(
+            "FocusBondReleased   bond {}  rig {}  shift {shift_id}  {} SKR back to the owner",
+            short(bond),
+            short(rig),
+            skr(*amount)
+        ),
+        HdEvent::FocusBondForfeited { bond, rig, shift_id, amount, reason } => format!(
+            "FocusBondForfeited  bond {}  rig {}  shift {shift_id}  {} SKR to the Bury lot  {} ({reason})",
+            short(bond),
+            short(rig),
+            skr(*amount),
+            hd::bond_reason_name(*reason)
+        ),
+        HdEvent::GiftCreated { gift, sender, recipient, lamports, expiry_ts, recipient_kind } => format!(
+            "GiftCreated         gift {}  from {}  for {} {}  {} lamports  expires {expiry_ts}",
+            short(gift),
+            short(sender),
+            if *recipient_kind == 1 { "sgt" } else { "wallet" },
+            short(recipient),
+            thousands(*lamports)
+        ),
+        HdEvent::GiftClaimed { gift, claimer, lamports, .. } => {
+            format!("GiftClaimed         gift {}  by {}  {} lamports", short(gift), short(claimer), thousands(*lamports))
+        }
+        HdEvent::GiftRefunded { gift, sender, lamports } => {
+            format!("GiftRefunded        gift {}  to {}  {} lamports", short(gift), short(sender), thousands(*lamports))
+        }
+        HdEvent::BuryLotAdded { source, amount, lot_skr, start_price, start_slot, source_kind } => format!(
+            "BuryLotAdded        from {} {}  +{} SKR  lot {} SKR  auction restarts at {} ORE atoms per SKR (slot {start_slot})",
+            if *source_kind == hd::LOT_FROM_BOND { "bond" } else { "table" },
+            short(source),
+            skr(*amount),
+            skr(*lot_skr),
+            thousands(*start_price)
+        ),
+        HdEvent::BuryAuctionSold { buyer, skr_amount, price, ore_paid, ore_burned, ore_shared, lot_remaining } => format!(
+            "BuryAuctionSold     buyer {}  {} SKR at {} ORE atoms per SKR  paid {} ORE atoms: {} burned, {} to ORE's stake program  lot left {} SKR",
+            short(buyer),
+            skr(*skr_amount),
+            thousands(*price),
+            thousands(*ore_paid),
+            thousands(*ore_burned),
+            thousands(*ore_shared),
+            skr(*lot_remaining)
+        ),
         HdEvent::Other { tag, body } => format!("Event tag {tag}       {} bytes", body.len() + 1),
+    }
+}
+
+/// SKR base units (6 decimals) as a decimal string: whole SKR with thousands separators, and
+/// the fraction only when there is one.
+fn skr(base_units: u64) -> String {
+    let whole = thousands(base_units / crate::skr::ONE_SKR);
+    let frac = base_units % crate::skr::ONE_SKR;
+    if frac == 0 {
+        whole
+    } else {
+        format!("{whole}.{}", format!("{frac:06}").trim_end_matches('0'))
     }
 }
 
@@ -286,6 +381,60 @@ pub fn event_json(e: &HdEvent) -> Value {
             "event": "ShiftEndedV2", "rig": rig.to_string(), "shift_id": s(*shift_id), "dark_rounds": s(*dark_rounds),
             "rounds_dug": s(*rounds_dug), "lamports": s(*lamports), "reason": reason, "reason_name": hd::reason_name(*reason),
             "start_round": s(*start_round), "end_round": s(*end_round), "mode": mode, "mode_name": hd::mode_name(*mode)
+        }),
+        HdEvent::StackOpened { table, host, table_id, bond, start_round, end_round, grace_gaps, flags, max_seats } => json!({
+            "event": "StackOpened", "table": table.to_string(), "host": host.to_string(), "table_id": s(*table_id),
+            "bond": s(*bond), "start_round": s(*start_round), "end_round": s(*end_round), "grace_gaps": grace_gaps,
+            "flags": flags, "flags_name": crate::skr::flags_name(*flags), "max_seats": max_seats
+        }),
+        HdEvent::StackJoined { table, rig, authority, sgt_mint, bond, seat_index } => json!({
+            "event": "StackJoined", "table": table.to_string(), "rig": rig.to_string(), "authority": authority.to_string(),
+            "sgt_mint": sgt_mint.to_string(), "bond": s(*bond), "seat_index": seat_index
+        }),
+        HdEvent::StackCheckin { table, rig, round_id, checked_rounds, result } => json!({
+            "event": "StackCheckin", "table": table.to_string(), "rig": rig.to_string(), "round_id": s(*round_id),
+            "checked_rounds": s(*checked_rounds), "result": result, "result_name": hd::checkin_result_name(*result)
+        }),
+        HdEvent::StackSettled { table, total_bonds, finisher_bonds, payouts_total, bury_amount, seats, finishers } => json!({
+            "event": "StackSettled", "table": table.to_string(), "total_bonds": s(*total_bonds),
+            "finisher_bonds": s(*finisher_bonds), "payouts_total": s(*payouts_total), "bury_amount": s(*bury_amount),
+            "seats": seats, "finishers": finishers
+        }),
+        HdEvent::StackClaimed { table, rig, authority, amount, kind } => json!({
+            "event": "StackClaimed", "table": table.to_string(), "rig": rig.to_string(), "authority": authority.to_string(),
+            "amount": s(*amount), "kind": kind, "kind_name": if *kind == hd::CLAIM_REFUND { "refund" } else { "payout" }
+        }),
+        HdEvent::FocusBondLocked { bond, rig, authority, shift_id, amount } => json!({
+            "event": "FocusBondLocked", "bond": bond.to_string(), "rig": rig.to_string(), "authority": authority.to_string(),
+            "shift_id": s(*shift_id), "amount": s(*amount)
+        }),
+        HdEvent::FocusBondReleased { bond, rig, shift_id, amount } => json!({
+            "event": "FocusBondReleased", "bond": bond.to_string(), "rig": rig.to_string(), "shift_id": s(*shift_id),
+            "amount": s(*amount)
+        }),
+        HdEvent::FocusBondForfeited { bond, rig, shift_id, amount, reason } => json!({
+            "event": "FocusBondForfeited", "bond": bond.to_string(), "rig": rig.to_string(), "shift_id": s(*shift_id),
+            "amount": s(*amount), "reason": reason, "reason_name": hd::bond_reason_name(*reason)
+        }),
+        HdEvent::GiftCreated { gift, sender, recipient, lamports, expiry_ts, recipient_kind } => json!({
+            "event": "GiftCreated", "gift": gift.to_string(), "sender": sender.to_string(), "recipient": recipient.to_string(),
+            "lamports": s(*lamports), "expiry_ts": expiry_ts.to_string(), "recipient_kind": recipient_kind
+        }),
+        HdEvent::GiftClaimed { gift, claimer, lamports, recipient_kind } => json!({
+            "event": "GiftClaimed", "gift": gift.to_string(), "claimer": claimer.to_string(), "lamports": s(*lamports),
+            "recipient_kind": recipient_kind
+        }),
+        HdEvent::GiftRefunded { gift, sender, lamports } => json!({
+            "event": "GiftRefunded", "gift": gift.to_string(), "sender": sender.to_string(), "lamports": s(*lamports)
+        }),
+        HdEvent::BuryLotAdded { source, amount, lot_skr, start_price, start_slot, source_kind } => json!({
+            "event": "BuryLotAdded", "source": source.to_string(), "amount": s(*amount), "lot_skr": s(*lot_skr),
+            "start_price": s(*start_price), "start_slot": s(*start_slot), "source_kind": source_kind
+        }),
+        HdEvent::BuryAuctionSold { buyer, skr_amount, price, ore_paid, ore_burned, ore_shared, lot_remaining } => json!({
+            "event": "BuryAuctionSold", "buyer": buyer.to_string(), "skr_amount": s(*skr_amount), "price": s(*price),
+            "ore_paid": s(*ore_paid), "ore_burned": s(*ore_burned), "ore_shared": s(*ore_shared),
+            "lot_remaining": s(*lot_remaining)
         }),
         HdEvent::Other { tag, body } => json!({ "event": "Other", "tag": tag, "hex": hex::encode(body) }),
     }
