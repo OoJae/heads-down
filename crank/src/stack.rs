@@ -368,6 +368,12 @@ impl Default for SendPolicy {
     }
 }
 
+impl SendPolicy {
+    /// Never hold: whatever is ready goes out at once. Used by the last pass of a process
+    /// that is shutting down, where a held heartbeat would be lost with the process.
+    pub const NOW: SendPolicy = SendPolicy { batch_wait: Duration::ZERO, straggler_wait: Duration::ZERO, late_slots: u64::MAX };
+}
+
 /// Send now, or hold for a fuller batch? Never holds when nothing more can arrive, when the
 /// round is nearly over, or when a break must be recorded.
 pub fn should_send(
@@ -899,6 +905,11 @@ mod tests {
         // Nothing ready: nothing to send, however late.
         let none = plan_table(ROUND, &t, &two, &HashMap::new(), &|_| false, &mut HashSet::new());
         assert!(!should_send(&none, secs(60), None, Some(0), &p));
+        // A process that is shutting down never holds a ready seat (the heartbeat would be
+        // lost with it), whatever the round's age, and still sends nothing when nothing is ready.
+        assert!(should_send(&partial, secs(0), Some(secs(0)), Some(200), &SendPolicy::NOW));
+        assert!(should_send(&partial, secs(0), Some(secs(0)), None, &SendPolicy::NOW));
+        assert!(!should_send(&none, secs(0), None, Some(200), &SendPolicy::NOW));
         // A decisive mark goes out at once, even with a seat still waiting.
         let end = table(ROUND - 1, ROUND, 0);
         let done_then_broke = StackSeat { shift_id: 7, checked_rounds: 2, last_round: ROUND, ..seat(0) };

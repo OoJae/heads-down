@@ -27,6 +27,23 @@ impl HeartbeatMirror for NoMirror {
     fn mirror(&self, _hb: &VerifiedHeartbeat) {}
 }
 
+/// Passes every accepted heartbeat on to `inner`, and wakes the Stack loop when the rig is
+/// seated at an open table: a seat's check-in should leave within moments of its phone's
+/// heartbeat for the round, not at the next timer tick.
+pub struct NudgeMirror {
+    /// The mirror proper.
+    pub inner: std::sync::Arc<dyn HeartbeatMirror>,
+    /// Shared with the crank loop.
+    pub nudge: crate::crank::StackNudge,
+}
+
+impl HeartbeatMirror for NudgeMirror {
+    fn mirror(&self, hb: &VerifiedHeartbeat) {
+        self.inner.mirror(hb);
+        self.nudge.heartbeat(&hb.rig);
+    }
+}
+
 /// The unsigned NIP-01 event a mirror would publish (kind 30078, replaceable per rig).
 pub fn nostr_event_template(hb: &VerifiedHeartbeat, created_at: i64) -> Value {
     json!({

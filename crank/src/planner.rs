@@ -58,6 +58,9 @@ pub enum Skip {
     AlreadySubmitted,
     /// A phone-signed BREAK / FREEZE for this rig is being landed.
     SignalPending,
+    /// The rig is seated at a Stack table and its heartbeat for this round goes into the
+    /// seat's check-in first; the dig reuses the lease once the check-in has landed.
+    StackCheckinPending,
     /// No covering on-chain lease and no usable heartbeat.
     NoLease,
     /// Caps expired (with the clock margin).
@@ -106,6 +109,7 @@ impl Skip {
             Skip::AlreadyDug => "already_dug",
             Skip::AlreadySubmitted => "already_submitted",
             Skip::SignalPending => "signal_pending",
+            Skip::StackCheckinPending => "stack_checkin_pending",
             Skip::NoLease => "no_lease",
             Skip::CapsExpired => "caps_expired",
             Skip::OutsideWindow => "outside_window",
@@ -566,6 +570,7 @@ mod tests {
             Skip::AlreadyDug,
             Skip::AlreadySubmitted,
             Skip::SignalPending,
+            Skip::StackCheckinPending,
             Skip::NoLease,
             Skip::CapsExpired,
             Skip::OutsideWindow,
