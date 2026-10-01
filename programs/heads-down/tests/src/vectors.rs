@@ -2340,7 +2340,7 @@ fn skr_vectors(rec: &mut Recorder, cranker: &Keypair) -> Vec<Value> {
             name: "bury_auction_buy",
             instruction: "bury_auction_buy",
             auth: "buyer wallet (signs the ORE payment)",
-            description: "A quarter of the way through the window the price is 75,002,500 ORE atoms per SKR. rhea buys 10 SKR for 750,025,000 atoms (0.0075 ORE, max_ore = exactly that): the ORE moves into the BuryVault's ORE ATA, the program CPIs ORE bury (tag 24) signed by the BuryVault PDA (live ORE: 90% burned, 10% to ORE stakers through the live ORE stake program), checks the vault lost exactly the payment and the ORE supply fell by 675,022,500 atoms, then sends the 10 SKR to rhea. Emits BuryAuctionSold.",
+            description: "A quarter of the way through the window the price is 75,002,500 ORE atoms per SKR. rhea buys 10 SKR for 750,025,000 atoms (0.0075 ORE, max_ore = exactly that): the ORE moves into the BuryVault's ORE ATA, the program CPIs ORE bury (tag 24) signed by the BuryVault PDA (live ORE: 90% burned, 10% to ORE's stake program through the live ORE stake program), checks the vault lost exactly the payment and the ORE supply fell by 675,022,500 atoms, then sends the 10 SKR to rhea. Emits BuryAuctionSold.",
             args: json!({"skr_amount": s(skr_amount), "max_ore": s(cost), "price": s(price)}),
             fields: f,
             metas: h.accounts.clone(),

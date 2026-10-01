@@ -581,7 +581,7 @@ pub struct BuryVault {
     pub total_ore_paid: U64,
     /// Lifetime ORE burned by `bury` (90%).
     pub total_ore_burned: U64,
-    /// Lifetime ORE `bury` sent to ORE stakers (10%).
+    /// Lifetime ORE `bury` sent to ORE's stake program (10%).
     pub total_ore_shared: U64,
     /// Deposits (each restarts the auction).
     pub lots: U64,

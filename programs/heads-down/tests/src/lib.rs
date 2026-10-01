@@ -524,7 +524,7 @@ pub enum Event {
         ore_paid: u64,
         /// ORE burned.
         ore_burned: u64,
-        /// ORE to stakers.
+        /// ORE sent to ORE's stake program.
         ore_shared: u64,
         /// Lot left.
         lot_remaining: u64,

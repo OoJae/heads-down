@@ -624,7 +624,7 @@ pub struct BuryAccounts<'a> {
 }
 
 /// CPI ORE `bury(amount)` signed by the BuryVault PDA (`seeds`). ORE moves
-/// `min(sender.amount, amount)` to its Treasury, sends 10% to ORE stakers
+/// `min(sender.amount, amount)` to its Treasury, sends 10% to ORE's stake program
 /// through `distribute` and burns 90% (`bury.rs:35-74`). The caller re-reads
 /// the sender balance and the mint supply afterwards.
 pub fn cpi_bury(a: &BuryAccounts<'_>, amount: u64, signer: Signer<'_, '_>) -> ProgramResult {

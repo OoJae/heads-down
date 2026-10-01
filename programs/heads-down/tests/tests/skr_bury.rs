@@ -1,6 +1,6 @@
 //! v1.2 Bury auction on the live-ORE fork: forfeited SKR becomes a pooled
 //! lot sold in a no-oracle Dutch auction; the buyer's ORE goes through ORE's
-//! real permissionless `bury` (90% burned, 10% to ORE stakers via the real
+//! real permissionless `bury` (90% burned, 10% to ORE's stake program via the real
 //! ORE stake program), signed by the BuryVault PDA, and is checked after
 //! the CPI before the SKR is handed over.
 
@@ -87,7 +87,7 @@ fn a_forfeit_becomes_a_lot_that_sells_for_ore_that_ore_buries() {
     assert_eq!(cost, 400 * price);
     let b1 = buyer(&mut env, ONE_ORE);
     let supply = env.mint_supply(&ORE_MINT);
-    let stakers = env.token_balance(&stake_treasury_ore());
+    let stake_ore = env.token_balance(&stake_treasury_ore());
     let treasury = env.token_balance(&treasury_ore());
     let meta = ok(buy(&mut env, &b1, first, cost));
     println!("bury_auction_buy: {} CU", meta.compute_units_consumed);
@@ -104,10 +104,10 @@ fn a_forfeit_becomes_a_lot_that_sells_for_ore_that_ore_buries() {
             lot_remaining: lot - first,
         }]
     );
-    // ORE's own accounting: 90% burned (supply), 10% to ORE stakers, the
+    // ORE's own accounting: 90% burned (supply), 10% to ORE's stake program, the
     // Treasury's ORE ATA unchanged, and nothing left in the vault.
     assert_eq!(env.mint_supply(&ORE_MINT), supply - burned);
-    assert_eq!(env.token_balance(&stake_treasury_ore()), stakers + shared);
+    assert_eq!(env.token_balance(&stake_treasury_ore()), stake_ore + shared);
     assert_eq!(env.token_balance(&treasury_ore()), treasury);
     assert_eq!(env.token_balance(&ata(&BURY, &ORE_MINT)), 0);
     assert_eq!(env.token_balance(&ata(&b1.pubkey(), &ORE_MINT)), ONE_ORE - cost);

@@ -1076,7 +1076,7 @@ mints SKR, pays a return for holding it, or touches Solana Mobile's SKR
 staking program. Every SKR that leaves a vault goes back to the wallet that
 put it there, to a finisher at the same table (out of other players'
 forfeits), or into the Bury auction, where it is sold for ORE that ORE's own
-`bury` instruction burns (90%) and distributes to ORE stakers (10%).
+`bury` instruction burns (90%) and distributes to ORE's stake program (10%).
 
 ### 11.1 External programs and accounts (pinned)
 
@@ -1228,7 +1228,7 @@ BuryVault 9. All offsets are pinned by const assertions in `src/state.rs`.
 | 128 | total_skr_sold | u64 | |
 | 136 | total_ore_paid | u64 | every atom of it went through ORE `bury` |
 | 144 | total_ore_burned | u64 | 90% |
-| 152 | total_ore_shared | u64 | 10%, to ORE stakers |
+| 152 | total_ore_shared | u64 | 10%, to ORE's stake program |
 | 160 | lots | u64 | deposits |
 | 168 | sales | u64 | |
 | 176 | reserved | [u8;16] | |
@@ -1686,9 +1686,9 @@ design.
 * **Partial buys** are allowed. The price schedule carries on, and the last
   sale's price becomes `last_clear_price`.
 * **What happens to the ORE.** ORE `bury` moves it to ORE's Treasury, sends
-  `cost / 10` to ORE stakers through the stake program's `distribute`, and
+  `cost / 10` to ORE's stake program through the stake program's `distribute`, and
   burns the rest (`bury.rs:35-74`). heads_down checks the burn against the
-  ORE supply. Reports must say "90% burned, 10% to ORE stakers", never "100%
+  ORE supply. Reports must say "90% burned, 10% to ORE's stake program", never "100%
   burned".
 * The "grams" address `GHRBYPA4…` is not used (docs/ORE.md §10).
 

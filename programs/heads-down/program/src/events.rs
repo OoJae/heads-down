@@ -561,7 +561,7 @@ pub struct BurySale {
     pub ore_paid: u64,
     /// ORE atoms burned by `bury` (90%).
     pub ore_burned: u64,
-    /// ORE atoms `bury` sent to ORE stakers (10%).
+    /// ORE atoms `bury` sent to ORE's stake program (10%).
     pub ore_shared: u64,
     /// SKR left in the lot.
     pub lot_remaining: u64,
