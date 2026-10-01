@@ -46,6 +46,7 @@ pub mod mirror;
 pub mod ore;
 pub mod planner;
 pub mod ratelimit;
+pub mod redact;
 pub mod rpc;
 pub mod sender;
 pub mod signal;
