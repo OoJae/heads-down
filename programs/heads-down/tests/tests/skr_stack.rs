@@ -1041,3 +1041,216 @@ fn guests_join_in_person_tables_only_under_the_guest_cap() {
     env.set_attestation(&guest.rig, 1, env.slot + 1_000);
     ok(join(&mut env, &guest, &t3));
 }
+
+/// A registrar voucher (level, expiry) carried by `rotate_key` for `key`.
+fn rotate_with_voucher(env: &mut Env, u: &User, key: &User, level: u8, expiry: u64) -> TxResult {
+    let registrar = env.registrar.insecure_clone();
+    let (_, _, voucher) =
+        vectors::registrar_voucher(&registrar, &u.pubkey(), &key.p256(), level, expiry);
+    let w = u.wallet.insecure_clone();
+    env.send_as(
+        &w,
+        &[
+            voucher,
+            ix_rotate_key(
+                &w.pubkey(),
+                &key.p256(),
+                Some(AttestationArg {
+                    ix: 0,
+                    sig: 0,
+                    level,
+                    expiry_slot: expiry,
+                }),
+            ),
+        ],
+        &[],
+    )
+}
+
+#[test]
+fn attested_tables_recheck_the_attestation_at_every_check_in() {
+    let mut env = Env::new();
+    let plan = stack_plan();
+    let mut a = player(&mut env, 1, &plan);
+    let mut b = player(&mut env, 2, &plan);
+    let mut c = player(&mut env, 3, &plan);
+    let r0 = env.board_round;
+    let s0 = env.slot;
+    let mut p = params(&env, 1, 6, 5);
+    p.flags = stack_flags::ATTESTED_ONLY;
+    let table = table_pda(&a.pubkey(), 1);
+    ok(open(&mut env, &a, &p));
+
+    // Joins: a live attestation only (the v1.2 rule, now through the shared
+    // helper). `expiry_slot == Clock.slot` is already expired; one slot more
+    // is live.
+    for u in [&a, &b, &c] {
+        assert_hd(&join(&mut env, u, &table), 0, HdError::StackIneligible);
+    }
+    env.set_attestation(&a.rig, 1, s0);
+    assert_hd(&join(&mut env, &a, &table), 0, HdError::StackIneligible);
+    env.set_attestation(&a.rig, 1, s0 + 1);
+    ok(join(&mut env, &a, &table));
+    // A level-0 rig is never attested, whatever expiry it stores.
+    env.set_attestation(&b.rig, 0, u64::MAX);
+    assert_hd(&join(&mut env, &b, &table), 0, HdError::StackIneligible);
+    // b gets a real voucher (through rotate_key, same key) valid for 100 slots.
+    ok(rotate_with_voucher(&mut env, &b, &b, 2, s0 + 100));
+    ok(join(&mut env, &b, &table));
+    env.set_attestation(&c.rig, 2, s0 + 1_000_000);
+    ok(join(&mut env, &c, &table));
+    env.set_attestation(&a.rig, 1, s0 + 1_000_000);
+
+    // Round 1: every attestation is live; all three count.
+    env.set_board_round(r0 + 1);
+    let meta = ok(checkin(&mut env, &table, &mut [&mut a, &mut b, &mut c]));
+    assert!(results(&meta.logs).iter().all(|(_, r)| *r == 0));
+
+    // Round 2. b's voucher has expired (the clock reached its expiry slot).
+    // c rotated to a software key after joining: rotate_key without a voucher
+    // resets its level to 0, and its scripted heartbeats stop counting.
+    env.set_board_round(r0 + 2);
+    env.set_clock(s0 + 100, env.now);
+    let wc = c.wallet.insecure_clone();
+    let software = User::from_wallet(wc.insecure_clone(), 99);
+    ok(env.send_as(
+        &wc,
+        &[ix_rotate_key(&wc.pubkey(), &software.p256(), None)],
+        &[],
+    ));
+    assert_eq!(env.rig(&c.rig).attestation_level, 0);
+    c.key = software.key.clone();
+    let before = (
+        env.rig(&b.rig).hb_counter.get(),
+        env.rig(&c.rig).hb_counter.get(),
+    );
+    let meta = ok(checkin(&mut env, &table, &mut [&mut a, &mut b, &mut c]));
+    let ineligible = HdError::StackIneligible.code();
+    assert_eq!(
+        results(&meta.logs),
+        vec![(a.rig, 0), (b.rig, ineligible), (c.rig, ineligible)]
+    );
+    // Neither seat is broken, neither counted, and the heartbeats were not
+    // consumed (they can still land through record_heartbeats).
+    for u in [&b, &c] {
+        let s = env.stack_seat(&seat(&table, u));
+        assert_eq!((s.checked_rounds.get(), s.broken), (1, 0));
+    }
+    assert_eq!(
+        (
+            env.rig(&b.rig).hb_counter.get(),
+            env.rig(&c.rig).hb_counter.get()
+        ),
+        before
+    );
+    assert_eq!(
+        events(&meta.logs)
+            .iter()
+            .filter(|e| matches!(e, Event::HeartbeatsRecorded { .. }))
+            .count(),
+        1
+    );
+    // Observe mode is gated the same way: b's lease is live in this round
+    // (its heartbeat lands through record_heartbeats), but its seat does not
+    // count it.
+    let hb = b.heartbeat(1, r0 + 2, 1);
+    let meta = ok(env.send(
+        &[
+            secp_ix_for(&[hb]),
+            ix_record(&[(b.rig, entry_for(&hb, 0, 0))]),
+            ix_stack_checkin(&table, &[(seat(&table, &b), b.rig, reuse_lease())]),
+        ],
+        &[],
+    ));
+    assert_eq!(results(&meta.logs), vec![(b.rig, ineligible)]);
+
+    // Round 3: b re-attests (a fresh voucher) and counts again; c attests
+    // its new key and counts again too.
+    env.set_board_round(r0 + 3);
+    ok(rotate_with_voucher(&mut env, &b, &b, 1, s0 + 1_000_000));
+    ok(rotate_with_voucher(&mut env, &c, &c, 1, s0 + 1_000_000));
+    let meta = ok(checkin(&mut env, &table, &mut [&mut a, &mut b, &mut c]));
+    assert!(results(&meta.logs).iter().all(|(_, r)| *r == 0));
+    let s = env.stack_seat(&seat(&table, &b));
+    assert_eq!((s.checked_rounds.get(), s.last_round.get()), (2, r0 + 3));
+
+    // A table that is not attested-only never looks at the attestation: the
+    // same rig with an expired voucher counts there, in the same transaction
+    // in which the attested table refuses it.
+    let p2 = StackParams {
+        table_id: 2,
+        start_round: r0 + 4,
+        end_round: r0 + 5,
+        grace_gaps: 0,
+        flags: 0,
+        ..p
+    };
+    let t2 = table_pda(&a.pubkey(), 2);
+    ok(open(&mut env, &a, &p2));
+    ok(join(&mut env, &b, &t2));
+    env.set_attestation(&b.rig, 2, s0);
+    env.set_board_round(r0 + 4);
+    let hb = b.heartbeat(1, r0 + 4, 1);
+    let meta = ok(env.send(
+        &[
+            secp_ix_for(&[hb]),
+            ix_stack_checkin(&t2, &[(seat(&t2, &b), b.rig, entry_for(&hb, 0, 0))]),
+            ix_stack_checkin(&table, &[(seat(&table, &b), b.rig, reuse_lease())]),
+        ],
+        &[],
+    ));
+    assert_eq!(results(&meta.logs), vec![(b.rig, 0), (b.rig, ineligible)]);
+}
+
+#[test]
+fn remote_tables_recheck_the_attestation_too() {
+    let mut env = Env::new();
+    let plan = stack_plan();
+    let host = player(&mut env, 1, &plan);
+    let mut seeker = player(&mut env, 3, &plan);
+    let r0 = env.board_round;
+    let s0 = env.slot;
+    let mut p = params(&env, 1, 3, 2);
+    p.flags = stack_flags::REMOTE;
+    p.bond = skr::REMOTE_BOND_CAP;
+    let table = table_pda(&host.pubkey(), 1);
+    ok(open(&mut env, &host, &p));
+    let (mint, sgt_account) = env.give_real_sgt("member-20", &seeker.pubkey());
+    let ws = seeker.wallet.insecure_clone();
+    env.set_attestation(&seeker.rig, 2, s0 + 50);
+    ok(env.send_as(
+        &ws,
+        &[
+            ix_verify_seeker(&ws.pubkey(), &sgt_account, &mint, None),
+            ix_join_stack(&ws.pubkey(), &table, &mint, Some((sgt_account, mint))),
+        ],
+        &[],
+    ));
+    let remote_seat = stack_seat_pda(&table, &mint);
+    let check = |env: &mut Env, u: &mut User| {
+        let hb = u.heartbeat(1, env.board_round, 1);
+        let meta = ok(env.send(
+            &[
+                secp_ix_for(&[hb]),
+                ix_stack_checkin(&table, &[(remote_seat, u.rig, entry_for(&hb, 0, 0))]),
+            ],
+            &[],
+        ));
+        results(&meta.logs)
+    };
+    env.set_board_round(r0 + 1);
+    assert_eq!(check(&mut env, &mut seeker), vec![(seeker.rig, 0)]);
+    // The voucher runs out inside the window: the seat stops counting until
+    // the rig is attested again.
+    env.set_board_round(r0 + 2);
+    env.set_clock(s0 + 50, env.now);
+    assert_eq!(
+        check(&mut env, &mut seeker),
+        vec![(seeker.rig, HdError::StackIneligible.code())]
+    );
+    env.set_board_round(r0 + 3);
+    env.set_attestation(&seeker.rig, 2, s0 + 51);
+    assert_eq!(check(&mut env, &mut seeker), vec![(seeker.rig, 0)]);
+    let s = env.stack_seat(&remote_seat);
+    assert_eq!((s.checked_rounds.get(), s.last_round.get()), (2, r0 + 3));
+}

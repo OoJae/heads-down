@@ -239,6 +239,14 @@ pub fn update_streak(
     (1, freezes, today)
 }
 
+/// A rig's registrar attestation is live at `slot` iff it carries a level
+/// (1 TEE, 2 StrongBox) and its voucher has not expired (`expiry_slot >
+/// slot`). An expired attestation counts as none: wherever the program
+/// relies on the level, it asks this (INTERFACE.md §12.7).
+pub fn attestation_live(level: u8, expiry_slot: u64, slot: u64) -> bool {
+    level != 0 && expiry_slot > slot
+}
+
 /// Seconds in the spend week.
 pub const WEEK_SECONDS: i64 = 7 * 24 * 60 * 60;
 
@@ -455,6 +463,18 @@ mod tests {
         assert_eq!(update_streak(5, 0, 20_009, 20_011, true), (6, 1, 20_011));
         // Clock going backwards changes nothing.
         assert_eq!(update_streak(5, 1, 20_011, 20_010, true), (5, 1, 20_011));
+    }
+
+    #[test]
+    fn an_attestation_is_live_only_with_a_level_and_before_its_expiry() {
+        assert!(attestation_live(1, 101, 100));
+        assert!(attestation_live(2, u64::MAX, 100));
+        // The expiry slot itself is already too late.
+        assert!(!attestation_live(1, 100, 100));
+        assert!(!attestation_live(2, 99, 100));
+        // No level: never live, whatever the stored expiry.
+        assert!(!attestation_live(0, u64::MAX, 0));
+        assert!(!attestation_live(0, 0, 0));
     }
 
     #[test]

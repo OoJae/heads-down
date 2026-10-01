@@ -22,6 +22,12 @@
 //! rest, and every bond if nobody finishes, becomes a Bury lot. Claims are
 //! pull-based and close the seat; a table nobody settles by
 //! `refund_after_ts` refunds every bond.
+//!
+//! v1.3: at an attested-only table (every remote table is one) a round
+//! counts only while the rig's registrar attestation is live, checked at
+//! **every** check-in and not just at the join. Otherwise a seat could join
+//! with an attested key and then `rotate_key` to a software key (which
+//! resets the level to 0) to script the rest of the window.
 
 use pinocchio::{
     cpi::Signer, error::ProgramError, instruction::seeds, AccountView, Address, ProgramResult,
@@ -31,7 +37,7 @@ use crate::{
     error::HdError,
     events::{self, log_data},
     instructions::{apply_heartbeat, bury, HeartbeatEntry, ENTRY_LEN, NO_HEARTBEAT},
-    ore, pda,
+    logic, ore, pda,
     skr::{self, GUEST_BOND_CAP, MAX_SEATS, MIN_SEATS},
     state::{
         self, rig_state, seat_outcome, stack_flags, stack_status, Header, Rig, StackSeat,
@@ -222,7 +228,9 @@ pub fn process_join(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
     require_writable(table)?;
 
     let remote = flags & stack_flags::REMOTE != 0;
-    if flags & stack_flags::ATTESTED_ONLY != 0 && (level == 0 || expiry <= clk.slot) {
+    if flags & stack_flags::ATTESTED_ONLY != 0
+        && !logic::attestation_live(level, expiry, clk.slot)
+    {
         return Err(HdError::StackIneligible.into());
     }
     let needs_sgt = remote || bond > GUEST_BOND_CAP;
@@ -333,18 +341,30 @@ impl Checkin {
     }
 }
 
-/// The per-seat rule, in order (INTERFACE.md §11.3). Nothing is written to
-/// the rig unless a heartbeat in the entry verifies.
+/// What a check-in knows about the seat before it looks at the rig.
+#[derive(Clone, Copy)]
+struct SeatState {
+    /// The shift the seat is bound to (0 = not bound yet).
+    shift: u64,
+    /// The seat is already broken.
+    broken: bool,
+    /// `Some(Clock.slot)` at an attested-only table: the rig's attestation
+    /// must be live at that slot for the round to count (v1.3).
+    attested_at: Option<u64>,
+}
+
+/// The per-seat rule, in order (INTERFACE.md §11.5 and §12.7). Nothing is
+/// written to the rig unless a heartbeat in the entry verifies.
 fn checkin_one(
     g: &mut Rig,
     rig_address: &Address,
     ix_sysvar: &AccountView,
     entry: &HeartbeatEntry,
     board_round: u64,
-    seat_shift: u64,
-    seat_broken: bool,
+    seat: SeatState,
 ) -> Checkin {
-    if seat_broken {
+    let seat_shift = seat.shift;
+    if seat.broken {
         return Checkin::skip(HdError::StackSeatBroken.code());
     }
     if seat_shift != 0 && g.shift_id.get() != seat_shift {
@@ -370,6 +390,14 @@ fn checkin_one(
     }
     if g.plan_lease_rounds != 1 {
         return Checkin::skip(HdError::StackLeaseTooLong.code());
+    }
+    // v1.3: an attested-only table counts a round only for a rig whose
+    // attestation is live now (a key rotated to an unattested one, or a
+    // voucher that expired, stops counting; the heartbeat is not consumed).
+    if let Some(slot) = seat.attested_at {
+        if !logic::attestation_live(g.attestation_level, g.attestation_expiry_slot.get(), slot) {
+            return Checkin::skip(HdError::StackIneligible.code());
+        }
     }
     let mut heartbeat = None;
     if entry.hb_ix != NO_HEARTBEAT {
@@ -427,7 +455,7 @@ pub fn process_checkin(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     };
     let board_round = ore::read_board(board)?.round_id;
     p256_introspect::check_instructions_sysvar(ix_sysvar)?;
-    {
+    let attested_only = {
         let t = state::load::<StackTable>(table)?;
         if t.status != stack_status::OPEN
             || board_round < t.start_round.get()
@@ -435,7 +463,14 @@ pub fn process_checkin(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         {
             return Err(HdError::InvalidStackState.into());
         }
-    }
+        t.flags & stack_flags::ATTESTED_ONLY != 0
+    };
+    // The Clock is read only where it is needed, so other tables pay nothing.
+    let attested_at = if attested_only {
+        Some(clock()?.slot)
+    } else {
+        None
+    };
     let table_address = *table.address();
 
     // Seats and rigs are each unique in the batch.
@@ -493,8 +528,11 @@ pub fn process_checkin(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
                 ix_sysvar,
                 &entry,
                 board_round,
-                seat_shift,
-                seat_broken,
+                SeatState {
+                    shift: seat_shift,
+                    broken: seat_broken,
+                    attested_at,
+                },
             )
         };
         let checked = {
