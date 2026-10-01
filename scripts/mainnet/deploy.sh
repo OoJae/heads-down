@@ -102,7 +102,7 @@ confirm "deploy heads_down to mainnet" "this $MODE spends real SOL from $DEPLOYE
 solana_cfg "$K_DEPLOYER"
 BAL_BEFORE="$(scli balance "$DEPLOYER" --lamports | awk '{print $1}')"
 OUT="$HD_STATE/deploy-$CLUSTER-$TS.out"
-COMMON=(--use-rpc --with-compute-unit-price "$HD_CU_PRICE" --max-sign-attempts "$HD_MAX_SIGN_ATTEMPTS" --commitment confirmed --output json)
+COMMON=(--use-rpc --with-compute-unit-price "$HD_CU_PRICE" --max-sign-attempts "$HD_MAX_SIGN_ATTEMPTS" --commitment confirmed --output json-compact)
 recover_hint() {
   cat >&2 <<EOF
 
@@ -138,16 +138,20 @@ if [[ $RC -ne 0 ]]; then
 fi
 SIG="$(python3 - "$OUT" <<'PY'
 import json, sys
-for line in reversed(open(sys.argv[1]).read().splitlines()):
-    line = line.strip()
-    if line.startswith("{"):
+# The CLI's result object: the last JSON object in the output (one line with json-compact,
+# several with json), after any progress lines.
+text = open(sys.argv[1]).read()
+lines = text.splitlines()
+for i in range(len(lines) - 1, -1, -1):
+    if lines[i].lstrip().startswith("{"):
         try:
-            print(json.loads(line).get("signature") or "")
+            print(json.loads("\n".join(lines[i:])).get("signature") or "")
             break
         except ValueError:
-            pass
+            continue
 PY
 )"
+[[ -n "$SIG" || "$MODE" == buffer ]] || warn "no transaction signature in the CLI output ($OUT); the receipt will not carry one"
 if [[ "$MODE" == buffer && -n "$BUFFER_AUTHORITY" ]]; then
   log "handing the buffer to $BUFFER_AUTHORITY"
   scli program set-buffer-authority "$BUFFER" --new-buffer-authority "$BUFFER_AUTHORITY" --keypair "$K_DEPLOYER" \
@@ -157,7 +161,11 @@ fi
 # ---- 6. verify the bytes and write the receipt ------------------------------------------------------
 mkdir -p "$RECEIPTS/$CLUSTER"
 RECEIPT="$RECEIPTS/$CLUSTER/$TS-$MODE-${COMMIT:0:12}.json"
-VERIFY=(--mode "$MODE" --so "$HD_SO" --program-id "$HD_PROGRAM_ID" --deployer "$DEPLOYER" --balance-before "$BAL_BEFORE"
+# The receipt is public: record the build's path relative to the repository, not this machine's.
+cd "$REPO_ROOT"
+SO_ARG="$HD_SO"
+if [[ "$HD_SO" == "$REPO_ROOT"/* ]]; then SO_ARG="${HD_SO#"$REPO_ROOT"/}"; fi
+VERIFY=(--mode "$MODE" --so "$SO_ARG" --program-id "$HD_PROGRAM_ID" --deployer "$DEPLOYER" --balance-before "$BAL_BEFORE"
   --meta "git_commit=$COMMIT" --meta "git_dirty=$DIRTY" --meta "build_script=programs/heads-down/scripts/build.sh"
   --meta "cargo_features=mainnet" --meta "solana_cli=$SOLANA_VER" --meta "cargo_build_sbf=$SBF_VER"
   --meta "cu_price_micro_lamports=$HD_CU_PRICE" --meta "preflight=GO" --out "$RECEIPT")
