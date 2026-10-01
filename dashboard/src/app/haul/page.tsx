@@ -101,7 +101,7 @@ function HaulPage() {
                 </div>
               );
             }
-            return <HaulView haul={r.haul} simulated={simulated || r.haul.simulated} />;
+            return <HaulView haul={r.haul} simulated={simulated || r.haul.simulated} dataset={r.dataset} />;
           }}
         </Loadable>
       )}

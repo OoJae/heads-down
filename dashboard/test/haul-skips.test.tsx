@@ -149,6 +149,17 @@ describe("HaulView (simulated fixture)", () => {
     expect(screen.queryByRole("note")).toBeNull();
   });
 
+  it("says that a price from a local fork or devnet is not a mainnet price", () => {
+    const real: HaulSummary = { ...haul, simulated: false, explorer: { shift_log: null, sample_digs: [] } };
+    render(<HaulView haul={real} simulated={false} dataset="localnet" />);
+    expect(screen.getByRole("note").textContent).toBe(
+      "This shift ran on localnet, not mainnet. Few miners share the board there, so its price per ORE says nothing about mining on mainnet.",
+    );
+    cleanup();
+    render(<HaulView haul={real} simulated={false} dataset="mainnet" />);
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
   it("says so when nothing was dug", () => {
     const closed: HaulSummary = {
       ...haul,

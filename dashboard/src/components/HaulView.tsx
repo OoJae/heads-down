@@ -14,7 +14,7 @@ import {
   verdictLine,
   type RoundView,
 } from "@/lib/haul";
-import type { HaulSummary } from "@/lib/types";
+import type { DatasetName, HaulSummary } from "@/lib/types";
 import { StatTile } from "./StatTile";
 
 /**
@@ -126,7 +126,7 @@ function RoundStrip({ rounds, selected, onSelect }: { rounds: RoundView[]; selec
 }
 
 /** The phone's morning reveal, on the web: the night replayed, the counts, the price against market, the streak. */
-export function HaulView({ haul, simulated }: { haul: HaulSummary; simulated: boolean }) {
+export function HaulView({ haul, simulated, dataset }: { haul: HaulSummary; simulated: boolean; dataset?: DatasetName }) {
   const rounds = useMemo(() => roundViews(haul), [haul]);
   const dug = rounds.filter((r) => r.dug);
   const hits = dug.filter((r) => r.hit);
@@ -260,6 +260,11 @@ export function HaulView({ haul, simulated }: { haul: HaulSummary; simulated: bo
         <p className="verdict" role="status">
           {verdictLine(v, when)}
         </p>
+        {dataset === "localnet" || dataset === "devnet" ? (
+          <p className="small pill-warn" role="note">
+            This shift ran on {dataset}, not mainnet. Few miners share the board there, so its price per ORE says nothing about mining on mainnet.
+          </p>
+        ) : null}
         {sharedMotherlode ? <p className="small">The rig&apos;s tile shared a Motherlode this shift.</p> : null}
         {nearMiss ? (
           <p className="small muted">
