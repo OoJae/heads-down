@@ -89,7 +89,7 @@ pub mod tag {
 pub const LEN: [usize; 28] = [
     0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83, // v1.1
     103, 138, 85, 67, 106, 113, 81, 82, 114, 74, 73, 66, 81, // v1.2 (SKR)
-    73, 65, 65, 81, // v1.3
+    81, 65, 65, 81, // v1.3
 ];
 
 /// `StackClaimed.kind`: a settled payout.
@@ -594,16 +594,19 @@ pub fn bury_auction_sold_bytes(buyer: &Address, s: &BurySale) -> [u8; 81] {
 // ---- v1.3 encoders ----------------------------------------------------------------
 
 /// GovernanceProposed bytes: `governance (current) · pending_governance ·
-/// eta_slot u64`.
+/// eta_slot u64 · eta_ts i64` (the successor may accept once both have
+/// passed).
 pub fn governance_proposed_bytes(
     governance: &Address,
     pending: &[u8; 32],
     eta_slot: u64,
-) -> [u8; 73] {
-    Buf::<73>::new(tag::GOVERNANCE_PROPOSED)
+    eta_ts: i64,
+) -> [u8; 81] {
+    Buf::<81>::new(tag::GOVERNANCE_PROPOSED)
         .put(governance.as_ref())
         .put(pending)
         .put(&eta_slot.to_le_bytes())
+        .put(&eta_ts.to_le_bytes())
         .done()
 }
 
@@ -740,7 +743,7 @@ mod tests {
     fn every_v13_encoder_fills_its_declared_length_exactly() {
         let a = Address::new_from_array([7; 32]);
         let all: [&[u8]; 4] = [
-            &governance_proposed_bytes(&a, &[9; 32], 0x0102),
+            &governance_proposed_bytes(&a, &[9; 32], 0x0102, 0x0708),
             &governance_accepted_bytes(&a, &[9; 32]),
             &governance_cancelled_bytes(&a, &[9; 32]),
             &shift_log_closed_bytes(&a, &[9; 32], 0x0304, 0x0506),

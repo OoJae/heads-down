@@ -6,7 +6,7 @@
 //! random test keys).
 
 use hd::{
-    instructions::{governance::TIMELOCK_SLOTS, shift_log::SHIFT_LOG_TTL_SECS},
+    instructions::shift_log::SHIFT_LOG_TTL_SECS,
     state::{plan_flags, stack_flags},
 };
 use heads_down_tests::*;
@@ -17,26 +17,6 @@ fn governance_tombstone_and_shift_log_instructions_are_cheap() {
     let gov = env.governance.insecure_clone();
     let new = Keypair::new();
     env.svm.airdrop(&new.pubkey(), SOL).unwrap();
-
-    let meta = ok(env.send_as(
-        &gov,
-        &[ix_propose_governance(&gov.pubkey(), &new.pubkey())],
-        &[],
-    ));
-    println!("propose_governance: {} CU", meta.compute_units_consumed);
-    assert!(meta.compute_units_consumed < 2_000);
-    let meta = ok(env.send_as(&gov, &[ix_cancel_governance(&gov.pubkey())], &[]));
-    println!("cancel_governance: {} CU", meta.compute_units_consumed);
-    assert!(meta.compute_units_consumed < 2_000);
-    ok(env.send_as(
-        &gov,
-        &[ix_propose_governance(&gov.pubkey(), &new.pubkey())],
-        &[],
-    ));
-    env.advance_slots(TIMELOCK_SLOTS);
-    let meta = ok(env.send_as(&new, &[ix_accept_governance(&new.pubkey())], &[]));
-    println!("accept_governance: {} CU", meta.compute_units_consumed);
-    assert!(meta.compute_units_consumed < 2_000);
 
     // A rig that armed a shift: close (tombstone), register again (resume).
     let u = User::new(&mut env, 1);
@@ -81,6 +61,27 @@ fn governance_tombstone_and_shift_log_instructions_are_cheap() {
     let meta = ok(env.send(&[ix_close_shift_log(&u.rig, 1, &w.pubkey())], &[]));
     println!("close_shift_log (pre-v1.3 log): {} CU", meta.compute_units_consumed);
     assert!(meta.compute_units_consumed < 60_000);
+
+    // Governance rotation (last: its timelock moves the clock by 72 hours).
+    let meta = ok(env.send_as(
+        &gov,
+        &[ix_propose_governance(&gov.pubkey(), &new.pubkey())],
+        &[],
+    ));
+    println!("propose_governance: {} CU", meta.compute_units_consumed);
+    assert!(meta.compute_units_consumed < 2_000);
+    let meta = ok(env.send_as(&gov, &[ix_cancel_governance(&gov.pubkey())], &[]));
+    println!("cancel_governance: {} CU", meta.compute_units_consumed);
+    assert!(meta.compute_units_consumed < 2_000);
+    ok(env.send_as(
+        &gov,
+        &[ix_propose_governance(&gov.pubkey(), &new.pubkey())],
+        &[],
+    ));
+    env.pass_timelock();
+    let meta = ok(env.send_as(&new, &[ix_accept_governance(&new.pubkey())], &[]));
+    println!("accept_governance: {} CU", meta.compute_units_consumed);
+    assert!(meta.compute_units_consumed < 2_000);
 }
 
 /// A four-seat verify-mode check-in (the most that fits a 1,232-byte packet)

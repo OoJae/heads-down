@@ -2,8 +2,9 @@
 //! break what v1.3 promises:
 //!
 //! * governance only ever moves to a key that accepted the rotation itself,
-//!   after the timelock, and a rotation is only ever proposed or cancelled
-//!   by the governance of that moment;
+//!   after both halves of the timelock (the clock moves by slots only, by
+//!   time only, or by both), and a rotation is only ever proposed or
+//!   cancelled by the governance of that moment;
 //! * a Rig PDA never loses its shift id or its P-256 counter: across any mix
 //!   of `close_rig` and `register_rig` they never go backwards, so an armed
 //!   shift can always be ended (its ShiftLog address is always free);
@@ -20,7 +21,10 @@
 //! every single transaction.
 
 use hd::{
-    instructions::{governance::TIMELOCK_SLOTS, shift_log::SHIFT_LOG_TTL_SECS},
+    instructions::{
+        governance::{TIMELOCK_SECS, TIMELOCK_SLOTS},
+        shift_log::SHIFT_LOG_TTL_SECS,
+    },
     tag,
 };
 use heads_down_tests::*;
@@ -205,6 +209,7 @@ struct Watch {
     governance: [u8; 32],
     pending: [u8; 32],
     eta: u64,
+    eta_ts: i64,
     /// `(shift_id, hb_counter)` at each Rig PDA (`live`, `gone`).
     counters: [(u64, u64); 2],
 }
@@ -232,6 +237,7 @@ impl Watch {
             governance: c.governance,
             pending: c.pending_governance,
             eta: c.pending_governance_eta_slot.get(),
+            eta_ts: c.pending_governance_eta_ts.get(),
             counters: [
                 counters(&w.env, &w.live.rig, "setup"),
                 counters(&w.env, &w.gone.rig, "setup"),
@@ -281,7 +287,7 @@ fn step(
     let fee = 5_000 * (1 + signers.len() as u64);
     let signed_by = |a: &[u8; 32]| *a == cranker.to_bytes() || signers.iter().any(|k| k.pubkey().to_bytes() == *a);
 
-    let slot = w.env.slot;
+    let (slot, now) = (w.env.slot, w.env.now);
     let payers_before: Vec<u64> = w.logs.iter().map(|l| w.env.lamports(&l.payer)).collect();
     let slots_before = [w.env.rig_slot(&w.live.rig), w.env.rig_slot(&w.gone.rig)];
     let res = w.env.send(&ixs, &signers);
@@ -291,16 +297,22 @@ fn step(
     // ---- governance -------------------------------------------------------
     let c = w.env.config();
     let (pending, eta) = (c.pending_governance, c.pending_governance_eta_slot.get());
+    let eta_ts = c.pending_governance_eta_ts.get();
     if c.governance != watch.governance {
         assert!(res.is_ok(), "{what}: governance moved in a failed transaction");
         assert_eq!(ix.data, [tag::ACCEPT_GOVERNANCE], "{what}: governance moved");
         assert_ne!(watch.pending, [0u8; 32], "{what}: no rotation was pending");
         assert_eq!(c.governance, watch.pending, "{what}: not the proposed key");
         assert!(signed_by(&c.governance), "{what}: the successor did not sign");
-        assert!(slot >= watch.eta, "{what}: accepted before the timelock");
-        assert_eq!((pending, eta), ([0u8; 32], 0), "{what}: rotation not cleared");
+        assert!(slot >= watch.eta, "{what}: accepted before the slot timelock");
+        assert!(now >= watch.eta_ts, "{what}: accepted before the 72 hours");
+        assert_eq!(
+            (pending, eta, eta_ts),
+            ([0u8; 32], 0, 0),
+            "{what}: rotation not cleared"
+        );
         reach.accepted += 1;
-    } else if (pending, eta) != (watch.pending, watch.eta) {
+    } else if (pending, eta, eta_ts) != (watch.pending, watch.eta, watch.eta_ts) {
         assert!(res.is_ok(), "{what}: rotation changed in a failed transaction");
         assert!(signed_by(&watch.governance), "{what}: governance did not sign");
         if ix.data.first() == Some(&tag::PROPOSE_GOVERNANCE) {
@@ -308,17 +320,23 @@ fn step(
             assert_eq!(pending[..], ix.data[1..], "{what}: not the key in the data");
             assert_ne!(pending, [0u8; 32], "{what}: proposed the zero key");
             assert_ne!(pending, c.governance, "{what}: proposed itself");
-            assert_eq!(eta, slot + TIMELOCK_SLOTS, "{what}: wrong timelock");
+            assert_eq!(eta, slot + TIMELOCK_SLOTS, "{what}: wrong slot timelock");
+            assert_eq!(eta_ts, now + TIMELOCK_SECS, "{what}: wrong time timelock");
             reach.proposed += 1;
         } else {
             assert_eq!(ix.data, [tag::CANCEL_GOVERNANCE], "{what}: rotation changed");
-            assert_eq!((pending, eta), ([0u8; 32], 0), "{what}: not cleared");
+            assert_eq!(
+                (pending, eta, eta_ts),
+                ([0u8; 32], 0, 0),
+                "{what}: not cleared"
+            );
             reach.cancelled += 1;
         }
     }
     watch.governance = c.governance;
     watch.pending = pending;
     watch.eta = eta;
+    watch.eta_ts = eta_ts;
 
     // ---- Rig PDAs: the counters never go backwards --------------------------
     let rigs = [w.live.rig, w.gone.rig];
@@ -377,6 +395,18 @@ fn step(
     }
 }
 
+/// Now and then move the clock by one half of the timelock, or by both: an
+/// `accept_governance` that goes through on one half alone trips the
+/// invariant in `step`.
+fn tick(env: &mut Env, rng: &mut Rng) {
+    match rng.below(12) {
+        0 => env.advance_slots(TIMELOCK_SLOTS),
+        1 => env.advance_time(TIMELOCK_SECS),
+        2 | 3 => env.pass_timelock(),
+        _ => {}
+    }
+}
+
 #[test]
 fn random_v13_instructions_never_abort() {
     let mut w = world();
@@ -427,9 +457,7 @@ fn random_v13_instructions_never_abort() {
             data,
         };
         step(&mut w, &mut watch, &mut reach, &[], ix, &format!("random #{i} tag {t}"));
-        if rng.below(6) == 0 {
-            w.env.advance_slots(TIMELOCK_SLOTS);
-        }
+        tick(&mut w.env, &mut rng);
     }
     println!(
         "{N} random v1.3 instructions: {} rejected cleanly, 0 aborts",
@@ -520,9 +548,7 @@ fn mutated_v13_instructions_never_abort_and_keep_the_invariants() {
             _ => {}
         }
         step(&mut w, &mut watch, &mut reach, &pre, ix, &format!("mutation #{i}"));
-        if rng.below(6) == 0 {
-            w.env.advance_slots(TIMELOCK_SLOTS);
-        }
+        tick(&mut w.env, &mut rng);
     }
     println!(
         "{N} mutated v1.3 instructions: {} rejected cleanly, 0 aborts; {} rotations proposed, {} \

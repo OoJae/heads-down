@@ -2,7 +2,10 @@
 //! the decoders for what `close_rig` now leaves behind, all following
 //! `INTERFACE.md` §12.
 
-use heads_down::state;
+use heads_down::{
+    instructions::governance::{TIMELOCK_SECS, TIMELOCK_SLOTS},
+    state,
+};
 
 use crate::*;
 
@@ -55,6 +58,12 @@ impl Env {
     /// Move the slot clock (same wall time).
     pub fn advance_slots(&mut self, slots: u64) {
         self.set_clock(self.slot + slots, self.now);
+    }
+
+    /// Let a timelock that starts now run out: both of its halves, 864,000
+    /// slots and 72 hours of cluster time.
+    pub fn pass_timelock(&mut self) {
+        self.set_clock(self.slot + TIMELOCK_SLOTS, self.now + TIMELOCK_SECS);
     }
 }
 

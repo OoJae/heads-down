@@ -195,12 +195,20 @@ pub struct Config {
     pub _pad2: [u8; 5],
     /// v1.3: the governance proposed by `propose_governance` (all-zero = no
     /// rotation pending). It becomes `governance` only when it signs
-    /// `accept_governance` itself, after `pending_governance_eta_slot`.
+    /// `accept_governance` itself, once both `pending_governance_eta_slot`
+    /// and `pending_governance_eta_ts` have passed.
     pub pending_governance: [u8; 32],
     /// v1.3: first slot at which the pending governance may accept.
     pub pending_governance_eta_slot: U64,
+    /// v1.3: first cluster time (unix s) at which the pending governance may
+    /// accept.
+    pub pending_governance_eta_ts: I64,
+    /// v1.3: first cluster time (unix s) at which the pending config proposal
+    /// may be applied, next to `pending_eta_slot`. Zero for a proposal made
+    /// by a v1.2 program: only its slot bound applies.
+    pub pending_eta_ts: I64,
     /// Reserved, zero (to 256).
-    pub reserved: [u8; 24],
+    pub reserved: [u8; 8],
 }
 
 /// A rig, PDA `[b"rig", authority]`, 384 bytes.
@@ -652,7 +660,9 @@ const _: () = {
     // v1.3: the governance rotation lives in the old tail padding.
     assert!(offset_of!(Config, pending_governance) == 192);
     assert!(offset_of!(Config, pending_governance_eta_slot) == 224);
-    assert!(offset_of!(Config, reserved) == 232);
+    assert!(offset_of!(Config, pending_governance_eta_ts) == 232);
+    assert!(offset_of!(Config, pending_eta_ts) == 240);
+    assert!(offset_of!(Config, reserved) == 248);
 
     assert!(size_of::<Rig>() == 384);
     assert!(offset_of!(Rig, authority) == 8);

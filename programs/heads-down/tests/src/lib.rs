@@ -551,6 +551,8 @@ pub enum Event {
         pending: Address,
         /// First slot it may accept.
         eta_slot: u64,
+        /// First cluster time (unix s) it may accept.
+        eta_ts: i64,
     },
     /// GovernanceAccepted (v1.3).
     GovernanceAccepted {
@@ -741,10 +743,11 @@ fn decode_event(d: &[u8]) -> Option<Event> {
             ore_shared: u64_at(d, 65),
             lot_remaining: u64_at(d, 73),
         },
-        (&tag::GOVERNANCE_PROPOSED, 73) => Event::GovernanceProposed {
+        (&tag::GOVERNANCE_PROPOSED, 81) => Event::GovernanceProposed {
             governance: addr_at(d, 1),
             pending: addr_at(d, 33),
             eta_slot: u64_at(d, 65),
+            eta_ts: u64_at(d, 73) as i64,
         },
         (&tag::GOVERNANCE_ACCEPTED, 65) => Event::GovernanceAccepted {
             governance: addr_at(d, 1),
