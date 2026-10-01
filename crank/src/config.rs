@@ -59,6 +59,8 @@ pub struct Config {
     pub sender: SenderConfig,
     /// Landing phone-signed BREAK / FREEZE.
     pub signals: SignalsConfig,
+    /// `record_heartbeats` for focus-only rigs.
+    pub record: RecordConfig,
 }
 
 impl Default for Config {
@@ -77,6 +79,7 @@ impl Default for Config {
             alt: AltConfig::default(),
             sender: SenderConfig::default(),
             signals: SignalsConfig::default(),
+            record: RecordConfig::default(),
         }
     }
 }
@@ -139,6 +142,63 @@ impl SignalsConfig {
             est_fee: self.est_fee(),
             queue: self.queue,
             max_rigs: 100_000,
+        }
+    }
+}
+
+/// `record_heartbeats` for focus-only rigs (`plan_flags` bit 0), so their dark rounds count
+/// on-chain. No deploy happens and nothing reimburses the crank: the fees are budgeted.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct RecordConfig {
+    /// Record heartbeats at all.
+    pub enabled: bool,
+    /// Record a rig at most every N rounds (from its on-chain `lease_from_round`). With N no
+    /// larger than the phone's lease, every round of the shift counts as dark.
+    pub every_rounds: u64,
+    /// Also record rigs whose cost gate is closed this round (off: the crank pays for them).
+    pub gate_closed_rigs: bool,
+    /// Seconds after a round is first seen before its record pass (the phone's heartbeat for
+    /// the new round arrives first).
+    pub delay_secs: u64,
+    /// Rigs per transaction at most (one precompile instruction holds 8).
+    pub max_rigs_per_tx: usize,
+    /// Fee budget for record transactions, lamports per hour.
+    pub max_lamports_per_hour: u64,
+    /// Compute limit: `base + per_rig × n`.
+    pub cu_base: u32,
+    /// Compute per recorded rig.
+    pub cu_per_rig: u32,
+}
+
+impl Default for RecordConfig {
+    fn default() -> Self {
+        RecordConfig {
+            enabled: true,
+            every_rounds: 3,
+            gate_closed_rigs: false,
+            delay_secs: 20,
+            max_rigs_per_tx: 8,
+            max_lamports_per_hour: 2_000_000,
+            // Measured with the real program: ~1,500 CU per recorded rig (fork suite).
+            cu_base: 3_000,
+            cu_per_rig: 4_000,
+        }
+    }
+}
+
+impl RecordConfig {
+    /// Compute estimate for record batches.
+    pub fn cu_estimate(&self) -> CuEstimate {
+        CuEstimate { base: self.cu_base, per_rig: self.cu_per_rig, per_checkpoint: 0 }
+    }
+
+    /// Planner policy.
+    pub fn policy(&self, clock_margin_secs: i64) -> crate::planner::RecordPolicy {
+        crate::planner::RecordPolicy {
+            every_rounds: self.every_rounds,
+            gate_closed_rigs: self.gate_closed_rigs,
+            clock_margin_secs,
         }
     }
 }
@@ -482,6 +542,10 @@ impl Config {
         if s.cu_price_micro_lamports > self.dig.max_cu_price_micro_lamports {
             return bad("signals.cu_price_micro_lamports exceeds dig.max_cu_price_micro_lamports");
         }
+        let r = &self.record;
+        if r.every_rounds == 0 || r.max_rigs_per_tx == 0 || r.max_rigs_per_tx > hd::MAX_RIGS_PER_IX {
+            return bad("record.every_rounds must be >= 1 and record.max_rigs_per_tx 1..=32");
+        }
         Ok(())
     }
 
@@ -544,13 +608,16 @@ mod tests {
     }
 
     #[test]
-    fn signals_section() {
+    fn signal_and_record_sections() {
         let c = Config::from_toml("").unwrap().finalize(&no_env).unwrap();
-        assert!(c.signals.enabled);
+        assert!(c.signals.enabled && c.record.enabled);
         assert_eq!(c.signals.est_fee(), 10_000 + 100, "2 signatures + 5k CU x 20,000 micro-lamports");
-        let t = "[signals]\nenabled = false\nmax_lamports_per_hour = 5\n";
+        let t = "[signals]\nenabled = false\nmax_lamports_per_hour = 5\n[record]\nevery_rounds = 1\ngate_closed_rigs = true\n";
         let c = Config::from_toml(t).unwrap().finalize(&no_env).unwrap();
         assert!(!c.signals.hub().enabled);
+        assert_eq!(c.record.policy(5).every_rounds, 1);
+        assert!(Config::from_toml("[record]\nevery_rounds = 0").unwrap().finalize(&no_env).is_err());
+        assert!(Config::from_toml("[record]\nmax_rigs_per_tx = 33").unwrap().finalize(&no_env).is_err());
         assert!(Config::from_toml("[signals]\ncu_limit = 0").unwrap().finalize(&no_env).is_err());
         assert!(Config::from_toml("[signals]\nsurprise = 1").is_err());
     }
@@ -562,5 +629,6 @@ mod tests {
         let d = Config::default();
         assert_eq!(c.signals.est_fee(), d.signals.est_fee());
         assert_eq!((c.signals.cu_limit, c.signals.max_lamports_per_hour), (d.signals.cu_limit, d.signals.max_lamports_per_hour));
+        assert_eq!((c.record.every_rounds, c.record.cu_base, c.record.cu_per_rig), (d.record.every_rounds, d.record.cu_base, d.record.cu_per_rig));
     }
 }

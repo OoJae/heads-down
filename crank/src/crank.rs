@@ -2,11 +2,12 @@
 //!
 //! ```text
 //! chain view ──► (new round) maintenance: prune, lookup-table sync, checkpoint sweep
-//!            └─► (slots_left <= deploy_margin) dig pass:
-//!                  getProgramAccounts(Armed, Down, Cooling) → keep rigs with a lease or a held heartbeat
-//!                  → getMultipleAccounts(Automations, Miners, Executor) → planner
-//!                  → pack → [simulate → size CU | bisect on failure] → sign → send
-//!                  → ledger (rig, round) pending → confirm task → events → ledger / metrics
+//!            ├─► (slots_left <= deploy_margin) dig pass:
+//!            │     getProgramAccounts(Armed, Down, Cooling) → keep rigs with a lease or a held heartbeat
+//!            │     → getMultipleAccounts(Automations, Miners, Executor) → planner
+//!            │     → pack → [simulate → size CU | bisect on failure] → sign → send
+//!            │     → ledger (rig, round) pending → confirm task → events → ledger / metrics
+//!            └─► (delay after the round starts) record pass: focus-only rigs → record_heartbeats
 //! intake ──► SignalHub ──► signal lander: phone-signed BREAK / FREEZE → break_shift / freeze_rig
 //! ```
 //!
@@ -17,7 +18,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use solana_address::Address;
 use solana_instruction::Instruction;
@@ -39,8 +40,8 @@ use crate::ore::{self, Miner, OreKind};
 use crate::planner::{self, Plan, Policy, Skip, SubmittedCheck};
 use crate::rpc::{self, Filter, RpcClient};
 use crate::sender::{ConfirmPolicy, Outcome, Submitter};
-use crate::signal::{SignalHub, SignalState};
-use crate::tx::{self, BuildParams, RigDig, TxFormat};
+use crate::signal::{FeeBudget, SignalHub, SignalState};
+use crate::tx::{self, BuildParams, RecordRig, RigDig, TxFormat};
 
 /// Slots between planning and the expected landing slot.
 pub const LANDING_LEAD_SLOTS: u64 = 2;
@@ -50,6 +51,8 @@ pub const MAX_SIMULATIONS_PER_PASS: usize = 16;
 pub const MAX_ALT_TXS_PER_ROUND: usize = 4;
 /// Checkpoint sweep transactions per sweep at most.
 pub const MAX_SWEEP_TXS: usize = 5;
+/// Record transactions per round at most.
+pub const MAX_RECORD_TXS_PER_ROUND: usize = 8;
 
 fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -79,7 +82,7 @@ pub async fn load_diggable_rigs(rpc: &RpcClient, program_id: &Address) -> anyhow
 pub struct Fetched {
     /// Candidate rigs after the cheap pre-filter.
     pub rigs: Vec<(Address, Rig)>,
-    /// All Armed/Down/Cooling rigs read (for lookup-table sync and the intake cache).
+    /// All Armed/Down/Cooling rigs read (lookup-table sync, the intake cache, the record pass).
     pub all_rigs: Vec<(Address, Rig)>,
     /// Automations.
     pub automations: HashMap<Address, Option<RawAccount>>,
@@ -195,6 +198,7 @@ pub struct Crank {
     rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
     nonce: AtomicU64,
     alt_sync: tokio::sync::Mutex<()>,
+    record_budget: FeeBudget,
 }
 
 impl Crank {
@@ -214,6 +218,7 @@ impl Crank {
     ) -> Arc<Self> {
         let program_id = cfg.program_id();
         Arc::new(Crank {
+            record_budget: FeeBudget::new(cfg.record.max_lamports_per_hour, Duration::from_secs(3600)),
             cfg,
             program_id,
             rpc,
@@ -257,6 +262,8 @@ impl Crank {
         }
         let mut chain = self.chain.clone();
         let mut current_round = 0u64;
+        let mut round_seen = Instant::now();
+        let mut recorded_round = 0u64;
         let mut last_pass_slot: Option<u64> = None;
         loop {
             if let Ok(Err(_)) = tokio::time::timeout(Duration::from_millis(400), chain.changed()).await {
@@ -266,11 +273,28 @@ impl Crank {
             let Some(board) = view.board.filter(|_| view.ready()) else { continue };
             if board.round_id != current_round {
                 current_round = board.round_id;
+                round_seen = Instant::now();
                 last_pass_slot = None;
                 let this = self.clone();
                 tokio::spawn(async move { this.on_new_round(board.round_id).await });
             }
-            if self.breaker.is_tripped() || !self.cfg.dig.enabled {
+            if self.breaker.is_tripped() {
+                continue;
+            }
+            // record_heartbeats once per round, once the phones' heartbeats for it are in.
+            if self.cfg.record.enabled
+                && recorded_round != current_round
+                && round_seen.elapsed() >= Duration::from_secs(self.cfg.record.delay_secs)
+            {
+                recorded_round = current_round;
+                let (this, v) = (self.clone(), view.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = this.record_pass(&v).await {
+                        tracing::warn!(error = %e, "record pass failed");
+                    }
+                });
+            }
+            if !self.cfg.dig.enabled {
                 continue;
             }
             let d = &self.cfg.dig;
@@ -740,6 +764,85 @@ impl Crank {
             }
         }
         self.signals.mark(&s.rig, s.counter, SignalState::Failed);
+    }
+
+    // ---- record_heartbeats ------------------------------------------------------------------
+
+    /// Record the held heartbeats of focus-only rigs (and, opt-in, gate-closed rigs) so their
+    /// dark rounds count on-chain. Budgeted: nothing reimburses these fees.
+    pub async fn record_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
+        let (Some(board), Some(treasury)) = (view.board, view.treasury) else { return Ok(()) };
+        let heartbeats: HashMap<Address, VerifiedHeartbeat> =
+            self.store.snapshot().into_iter().map(|h| (h.rig, h)).collect();
+        if heartbeats.is_empty() {
+            return Ok(());
+        }
+        let rigs = load_diggable_rigs(&self.rpc, &self.program_id).await?;
+        let policy = self.cfg.record.policy(self.cfg.dig.clock_margin_secs);
+        let (decisions, skips) = planner::plan_records(&board, &treasury, unix_now(), &rigs, &heartbeats, &policy);
+        for (_, s) in &skips {
+            if *s != planner::RecordSkip::NotEligible {
+                self.metrics.record_skipped.inc(s.label());
+            }
+        }
+        let decisions: Vec<_> = decisions.into_iter().filter(|d| !self.signals.is_pending(&d.rig)).collect();
+        if decisions.is_empty() {
+            return Ok(());
+        }
+        let alts = if self.alts_in_use() { self.usable_alts(view.slot) } else { vec![] };
+        let mut p = self.base_params(board.round_id, self.cfg.dig.cu_price_micro_lamports);
+        p.max_rigs_per_tx = self.cfg.record.max_rigs_per_tx;
+        let est = self.cfg.record.cu_estimate();
+        let rigs: Vec<RecordRig> = decisions.iter().map(|d| RecordRig { rig: d.rig, heartbeat: d.heartbeat }).collect();
+        let (batches, rejected) = tx::pack_records(&p, &est, &rigs, &alts);
+        for (r, m) in rejected {
+            tracing::warn!(rig = %r.rig, misfit = ?m, "record does not fit a transaction alone");
+        }
+        for b in batches.into_iter().take(MAX_RECORD_TXS_PER_ROUND) {
+            let fee = tx::fee_for(b.rigs.len(), b.cu_limit, p.cu_price_micro_lamports, tx::LAMPORTS_PER_SIGNATURE);
+            if !self.record_budget.try_take(fee) {
+                self.metrics.record_skipped.add("budget", b.rigs.len() as u64);
+                tracing::warn!(rigs = b.rigs.len(), fee, "record budget spent for now");
+                break;
+            }
+            let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
+            let t = tx::sign_record_batch(&p, &est, &b.rigs, &alts, bh, self.key.keypair())?;
+            let wire = tx::serialize(&t)?;
+            let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
+            if let Err(e) = self.submitter.send(&wire).await {
+                self.record_budget.refund(fee);
+                tracing::warn!(error = %e, "sending record_heartbeats failed");
+                continue;
+            }
+            self.metrics.record_txs_sent.inc();
+            tracing::info!(%sig, round = board.round_id, rigs = b.rigs.len(), "record_heartbeats sent");
+            let this = self.clone();
+            tokio::spawn(async move {
+                let out = this.submitter.confirm(&sig, &wire, lvbh, ConfirmPolicy::default()).await;
+                if let Outcome::Landed { err: None, .. } = out {
+                    let max_version = if this.cfg.dig.tx_format == TxFormat::V1 { 1 } else { 0 };
+                    if let Some(i) = this.fetch_events(&sig, max_version).await {
+                        this.metrics.record_fees_lamports.add(i.fee);
+                        for ev in hd::events_from_logs(&this.program_id, &i.logs) {
+                            match ev {
+                                HdEvent::HeartbeatsRecorded { rig, dark_rounds_added, .. } => {
+                                    this.metrics.heartbeats_recorded.inc();
+                                    this.metrics.record_dark_rounds.add(dark_rounds_added);
+                                    if let Some(r) = b.rigs.iter().find(|r| r.rig == rig) {
+                                        this.store.remove_if_counter_at_most(&rig, r.heartbeat.fields.counter);
+                                    }
+                                }
+                                HdEvent::RigSkipped { error, .. } => this.metrics.record_skipped.inc(hd::error_name(error)),
+                                _ => {}
+                            }
+                        }
+                    }
+                } else {
+                    tracing::warn!(%sig, outcome = ?out, "record_heartbeats did not land");
+                }
+            });
+        }
+        Ok(())
     }
 
     // ---- maintenance ---------------------------------------------------------------------

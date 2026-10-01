@@ -117,6 +117,11 @@ pub struct Metrics {
     pub signals_landed: LabeledCounter,
     pub signals_failed: LabeledCounter,
     pub signal_fees_lamports: Counter,
+    pub record_txs_sent: Counter,
+    pub heartbeats_recorded: Counter,
+    pub record_dark_rounds: Counter,
+    pub record_skipped: LabeledCounter,
+    pub record_fees_lamports: Counter,
 }
 
 fn counter(out: &mut String, name: &str, help: &str, v: u64) {
@@ -176,6 +181,11 @@ impl Metrics {
         labeled(&mut o, "hd_crank_signals_landed_total", "BREAK / FREEZE landed on-chain, by kind", "kind", &self.signals_landed);
         labeled(&mut o, "hd_crank_signals_failed_total", "BREAK / FREEZE not landed, by stage", "stage", &self.signals_failed);
         counter(&mut o, "hd_crank_signal_fees_lamports_total", "Fees paid landing BREAK / FREEZE", self.signal_fees_lamports.get());
+        counter(&mut o, "hd_crank_record_txs_sent_total", "record_heartbeats transactions sent", self.record_txs_sent.get());
+        counter(&mut o, "hd_crank_heartbeats_recorded_total", "HeartbeatsRecorded events observed", self.heartbeats_recorded.get());
+        counter(&mut o, "hd_crank_record_dark_rounds_total", "Dark rounds added by recorded heartbeats", self.record_dark_rounds.get());
+        labeled(&mut o, "hd_crank_record_skipped_total", "Rigs not recorded this round, by reason", "reason", &self.record_skipped);
+        counter(&mut o, "hd_crank_record_fees_lamports_total", "Fees paid for record_heartbeats", self.record_fees_lamports.get());
         o
     }
 }

@@ -1,6 +1,7 @@
 //! Planner decisions: one happy path per lease mode, every skip reason at its boundary, the
 //! v1.1 amount rule (the fee reserved inside every cap, `k = popcount(mask)` excluding the
-//! squares the Miner holds, the fee only on the round's first deploy) and Cooling.
+//! squares the Miner holds, the fee only on the round's first deploy), Cooling, and the
+//! `record_heartbeats` planner.
 
 mod common;
 
@@ -12,7 +13,7 @@ use hd_crank::gate;
 use hd_crank::hd::{self, HdConfig, HeartbeatFields, Rig, RigAccounts, RigState};
 use hd_crank::heartbeat::VerifiedHeartbeat;
 use hd_crank::ore::{self, Board, OreKind, Round, Treasury, ONE_ORE};
-use hd_crank::planner::{plan, Inputs, Plan, Policy, Skip, RENT_EXEMPT_ZERO_BYTES, WEEK_SECS};
+use hd_crank::planner::{plan, plan_records, Inputs, Plan, Policy, RecordPolicy, RecordSkip, Skip, RENT_EXEMPT_ZERO_BYTES, WEEK_SECS};
 use solana_address::Address;
 
 const ROUND: u64 = 422_601;
@@ -549,4 +550,64 @@ fn predicted_tiles_follow_the_round() {
     // A stale Round (different id) predicts nothing.
     w.round.as_mut().unwrap().id = ROUND - 1;
     assert_eq!(w.run().digs[0].predicted_mask, None);
+}
+
+// ---- record_heartbeats ------------------------------------------------------------------
+
+fn records(w: &World, policy: RecordPolicy) -> (Vec<hd_crank::planner::RecordDecision>, Vec<(Address, RecordSkip)>) {
+    plan_records(&w.board, &w.treasury, w.now, &w.rigs, &w.heartbeats, &policy)
+}
+
+#[test]
+fn focus_only_rigs_get_their_heartbeats_recorded_every_n_rounds() {
+    let mut w = World::new();
+    let focus = w.add(1, true);
+    let night = w.add(2, true);
+    w.rig_mut(&focus).plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+    w.rig_mut(&focus).shift_start_round = ROUND;
+    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    let (d, skips) = records(&w, policy);
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].rig, focus);
+    // Heartbeat for ROUND with lease 2, shift started at ROUND: 2 dark rounds.
+    assert_eq!((d[0].grant.from, d[0].grant.to, d[0].grant.dark_added), (ROUND, ROUND + 1, 2));
+    assert!(skips.contains(&(night, RecordSkip::NotEligible)), "night rigs dig instead");
+    // The lease landed: nothing to do until every_rounds have passed since lease_from.
+    w.rig_mut(&focus).lease_from_round = ROUND - 2;
+    w.rig_mut(&focus).lease_to_round = ROUND;
+    assert_eq!(records(&w, policy).1.iter().find(|(a, _)| *a == focus).unwrap().1, RecordSkip::NotDue);
+    w.rig_mut(&focus).lease_from_round = ROUND - 3;
+    assert!(records(&w, policy).0.iter().any(|d| d.rig == focus), "due again after 3 rounds");
+    // A heartbeat that would not extend the lease changes nothing on-chain: not sent.
+    w.rig_mut(&focus).lease_to_round = ROUND + 1;
+    assert_eq!(records(&w, policy).1.iter().find(|(a, _)| *a == focus).unwrap().1, RecordSkip::NoExtension);
+    w.rig_mut(&focus).lease_to_round = ROUND - 1;
+    // Stale heartbeat, outside the window, wrong state.
+    w.rig_mut(&focus).hb_counter = 51;
+    assert_eq!(records(&w, policy).1.iter().find(|(a, _)| *a == focus).unwrap().1, RecordSkip::NoHeartbeat);
+    w.rig_mut(&focus).hb_counter = 50;
+    w.rig_mut(&focus).plan_window_end_ts = NOW;
+    assert_eq!(records(&w, policy).1.iter().find(|(a, _)| *a == focus).unwrap().1, RecordSkip::OutsideWindow);
+    w.rig_mut(&focus).plan_window_end_ts = NOW + 3_600;
+    for s in [RigState::Idle, RigState::Broken, RigState::Frozen] {
+        w.rig_mut(&focus).state = s;
+        assert_eq!(records(&w, policy).1.iter().find(|(a, _)| *a == focus).unwrap().1, RecordSkip::State);
+    }
+    w.rig_mut(&focus).state = RigState::Cooling;
+    assert!(records(&w, policy).0.iter().any(|d| d.rig == focus), "a Cooling rig's fresh heartbeat is recorded");
+}
+
+#[test]
+fn gate_closed_rigs_are_recorded_only_when_asked() {
+    let mut w = World::new();
+    let night = w.add(2, true);
+    w.rig_mut(&night).plan_max_ev_cost = 1; // gate closed
+    let off = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    assert!(records(&w, off).0.is_empty());
+    let on = RecordPolicy { gate_closed_rigs: true, ..off };
+    assert_eq!(records(&w, on).0.len(), 1);
+    // Gate open: the dig carries the heartbeat instead.
+    w.rig_mut(&night).plan_max_ev_cost = u64::MAX;
+    w.rig_mut(&night).cap_max_cost = u64::MAX;
+    assert!(records(&w, on).0.is_empty());
 }

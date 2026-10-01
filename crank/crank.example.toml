@@ -82,3 +82,13 @@ cu_price_micro_lamports = 20000    # land within a slot or two
 simulate = true                    # a signal the program would refuse is not sent
 max_attempts = 3                   # fresh blockhash when one expires unconfirmed
 queue = 256
+
+[record]                           # record_heartbeats for focus-only rigs (plan_flags bit 0)
+enabled = true
+every_rounds = 3                   # per rig, from its on-chain lease_from_round; <= the phone's lease = every round dark
+gate_closed_rigs = false           # also record night/day rigs whose cost gate is closed (the crank pays)
+delay_secs = 20                    # after a round is first seen, so the phones' heartbeats are in
+max_rigs_per_tx = 8
+max_lamports_per_hour = 2000000    # ~6,300 lamports per recorded rig, not reimbursed
+cu_base = 3000                     # measured: ~1,500 CU per rig
+cu_per_rig = 4000

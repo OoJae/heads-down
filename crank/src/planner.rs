@@ -1,4 +1,4 @@
-//! Which rigs dig this round.
+//! Which rigs dig this round, and which focus-only rigs get their heartbeat recorded.
 //!
 //! The dig planner repeats, off-chain, **every** check `heads_down::dig` makes (INTERFACE v1.1
 //! §6.1-§6.5) and every ORE abort or no-op condition the program pre-flights, so the crank
@@ -15,8 +15,8 @@
 //! RigDug.lamports = per_tile·k             (SOL on squares only)
 //! ```
 //!
-//! It is a pure function of chain state, the held heartbeats and the ledger: no I/O, fully
-//! unit-tested. The program remains the authority; a stale read here costs at
+//! Both planners are pure functions of chain state, the held heartbeats and the ledger: no
+//! I/O, fully unit-tested. The program remains the authority; a stale read here costs at
 //! most a skipped rig (logged on-chain as `RigSkipped`), never a wrong deploy.
 
 use std::collections::HashMap;
@@ -427,6 +427,128 @@ fn decode_miner(m: Option<&Option<RawAccount>>) -> Result<Miner, Skip> {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// record_heartbeats: focus-only rigs (and, opt-in, rigs whose cost gate is closed).
+
+/// When to record a rig's held heartbeat with `record_heartbeats` (no deploy, no CPI).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordPolicy {
+    /// Record a rig at most every N rounds, measured from its on-chain `lease_from_round`
+    /// (the round of the last heartbeat that landed), so the rule survives restarts and holds
+    /// across cranks. With N ≤ the phone's lease (1..=3) every round of the shift is covered.
+    pub every_rounds: u64,
+    /// Also record night / day rigs whose cost gate is closed this round (they would otherwise
+    /// end the shift with no dark round). Off by default: the crank pays these fees.
+    pub gate_closed_rigs: bool,
+    /// Clock skew allowance for the plan window.
+    pub clock_margin_secs: i64,
+}
+
+impl Default for RecordPolicy {
+    fn default() -> Self {
+        RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 }
+    }
+}
+
+/// Why a rig's heartbeat is not recorded this round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordSkip {
+    /// Not focus-only (and not a gate-closed rig with `gate_closed_rigs`).
+    NotEligible,
+    /// Not Armed, Down or Cooling.
+    State,
+    /// Outside the plan window: dark rounds only count inside it, and the permissionless
+    /// `end_shift` needs the lease to lapse after it.
+    OutsideWindow,
+    /// Recorded less than `every_rounds` ago.
+    NotDue,
+    /// No held heartbeat that verifies against the rig now.
+    NoHeartbeat,
+    /// The heartbeat would not extend the on-chain lease (it would change nothing).
+    NoExtension,
+}
+
+impl RecordSkip {
+    /// Stable snake_case label.
+    pub fn label(self) -> &'static str {
+        match self {
+            RecordSkip::NotEligible => "not_eligible",
+            RecordSkip::State => "state",
+            RecordSkip::OutsideWindow => "outside_window",
+            RecordSkip::NotDue => "not_due",
+            RecordSkip::NoHeartbeat => "no_heartbeat",
+            RecordSkip::NoExtension => "no_extension",
+        }
+    }
+}
+
+/// One heartbeat to record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordDecision {
+    /// Rig PDA.
+    pub rig: Address,
+    /// The heartbeat.
+    pub heartbeat: VerifiedHeartbeat,
+    /// What the program will do to the lease (`dark_added` = `HeartbeatsRecorded.dark_rounds_added`).
+    pub grant: hd::LeaseGrant,
+}
+
+/// Plan `record_heartbeats` for this round.
+pub fn plan_records(
+    board: &Board,
+    treasury: &Treasury,
+    now_ts: i64,
+    rigs: &[(Address, Rig)],
+    heartbeats: &HashMap<Address, VerifiedHeartbeat>,
+    policy: &RecordPolicy,
+) -> (Vec<RecordDecision>, Vec<(Address, RecordSkip)>) {
+    let round_id = board.round_id;
+    let (mut out, mut skips) = (Vec::new(), Vec::new());
+    for (addr, rig) in rigs {
+        match check_record(board, treasury, now_ts, addr, rig, heartbeats.get(addr), policy, round_id) {
+            Ok(d) => out.push(d),
+            Err(s) => skips.push((*addr, s)),
+        }
+    }
+    out.sort_by_key(|d| d.rig.to_bytes());
+    (out, skips)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_record(
+    board: &Board,
+    treasury: &Treasury,
+    now_ts: i64,
+    addr: &Address,
+    rig: &Rig,
+    hb: Option<&VerifiedHeartbeat>,
+    policy: &RecordPolicy,
+    round_id: u64,
+) -> Result<RecordDecision, RecordSkip> {
+    let eligible = rig.focus_only()
+        || (policy.gate_closed_rigs
+            && !gate::gate_open(board.production_cost_ema, treasury.motherlode, rig.plan_max_ev_cost, rig.cap_max_cost));
+    if !eligible {
+        return Err(RecordSkip::NotEligible);
+    }
+    if !rig.state.accepts_heartbeat() {
+        return Err(RecordSkip::State);
+    }
+    let m = policy.clock_margin_secs;
+    if now_ts < rig.plan_window_start_ts.saturating_add(m) || now_ts.saturating_add(m) > rig.plan_window_end_ts {
+        return Err(RecordSkip::OutsideWindow);
+    }
+    if rig.lease_to_round != 0 && round_id < rig.lease_from_round.saturating_add(policy.every_rounds.max(1)) {
+        return Err(RecordSkip::NotDue);
+    }
+    let hb = hb.filter(|h| fresh_for(h, rig, round_id)).ok_or(RecordSkip::NoHeartbeat)?;
+    let grant = hd::lease_after(rig, &hb.fields).ok_or(RecordSkip::NoHeartbeat)?;
+    if rig.lease_to_round != 0 && grant.to <= rig.lease_to_round {
+        return Err(RecordSkip::NoExtension);
+    }
+    Ok(RecordDecision { rig: *addr, heartbeat: *hb, grant })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +585,16 @@ mod tests {
         ];
         let set: std::collections::HashSet<_> = all.iter().map(Skip::label).collect();
         assert_eq!(set.len(), all.len());
+        let rec = [
+            RecordSkip::NotEligible,
+            RecordSkip::State,
+            RecordSkip::OutsideWindow,
+            RecordSkip::NotDue,
+            RecordSkip::NoHeartbeat,
+            RecordSkip::NoExtension,
+        ];
+        let set: std::collections::HashSet<_> = rec.iter().map(|r| r.label()).collect();
+        assert_eq!(set.len(), rec.len());
     }
 
     #[test]
