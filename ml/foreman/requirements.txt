@@ -1,0 +1,12 @@
+# Foreman on-device models: python3.9 (the same interpreter as ml/forecaster).
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# numpy 2.0.x + macOS Accelerate emits spurious matmul FP warnings (same pin as ml/forecaster).
+numpy>=1.26,<2
+scipy>=1.11,<1.14
+# HistGradientBoosting internals (_predictors, _baseline_prediction) are read by the exporter;
+# test_models.py checks the exported trees against sklearn's own predictions.
+scikit-learn>=1.5,<1.7
+pytest>=7
+# Tiny 1D-CNN training and the .tflite export (LiteRT flatbuffer). The last TF release with
+# python3.9 wheels on macOS arm64 is 2.20.
+tensorflow==2.20.0
