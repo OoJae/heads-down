@@ -47,41 +47,45 @@ class FaceDownDetector(private val config: Config = Config()) {
         private set
 
     /** Last accepted sample time (ms, sensor timebase), or null before the first sample. */
-    var lastSampleMillis: Long? = null
-        private set
+    val lastSampleMillis: Long? get() = if (hasSample) lastMillis else null
 
     /** Current filtered tilt from "screen straight down", degrees; NaN before the first sample. */
     var tiltDegrees: Double = Double.NaN
         private set
 
+    // Primitive fields with flags, not nullable Longs: this runs for every accelerometer sample
+    // of a shift (50 Hz), and a boxed Long per sample is garbage the night does not need.
+    private var hasSample = false
+    private var lastMillis = 0L
     private var gx = 0.0
     private var gy = 0.0
     private var gz = 0.0
-    private var candidateSince: Long? = null
+    private var hasCandidate = false
+    private var candidateSince = 0L
 
-    /** Feeds one sample; returns the (debounced) face-down verdict. */
+    /** Feeds one sample; returns the (debounced) face-down verdict. Allocates nothing. */
     fun onSample(x: Float, y: Float, z: Float, timestampNanos: Long): Boolean {
         if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return isFaceDown
         val t = timestampNanos / 1_000_000
-        val last = lastSampleMillis
 
-        if (last == null || t - last > config.maxGapMillis) {
+        if (!hasSample || t - lastMillis > config.maxGapMillis) {
             gx = x.toDouble(); gy = y.toDouble(); gz = z.toDouble()
-            candidateSince = null
+            hasCandidate = false
         } else {
-            val dt = t - last
+            val dt = t - lastMillis
             if (dt <= 0) return isFaceDown // out-of-order or duplicate timestamp
             val alpha = dt.toDouble() / (config.timeConstantMillis + dt)
             gx += alpha * (x - gx)
             gy += alpha * (y - gy)
             gz += alpha * (z - gz)
         }
-        lastSampleMillis = t
+        lastMillis = t
+        hasSample = true
 
         val gravity = sqrt(gx * gx + gy * gy + gz * gz)
         tiltDegrees = if (gravity < 1e-6) 180.0 else Math.toDegrees(acos((-gz / gravity).coerceIn(-1.0, 1.0)))
         val raw = sqrt(x.toDouble() * x + y.toDouble() * y + z.toDouble() * z)
-        val atRest = raw in config.restMinMagnitude..config.restMaxMagnitude
+        val atRest = raw >= config.restMinMagnitude && raw <= config.restMaxMagnitude
 
         val wantsFlip = if (isFaceDown) {
             tiltDegrees > config.exitTiltDegrees || !atRest
@@ -90,29 +94,32 @@ class FaceDownDetector(private val config: Config = Config()) {
         }
 
         if (!wantsFlip) {
-            candidateSince = null
+            hasCandidate = false
             return isFaceDown
         }
-        val since = candidateSince ?: t.also { candidateSince = it }
+        if (!hasCandidate) {
+            hasCandidate = true
+            candidateSince = t
+        }
         val dwell = if (isFaceDown) config.exitDwellMillis else config.enterDwellMillis
-        if (t - since >= dwell) {
+        if (t - candidateSince >= dwell) {
             isFaceDown = !isFaceDown
-            candidateSince = null
+            hasCandidate = false
         }
         return isFaceDown
     }
 
     /** True if the last sample is recent enough to trust for a heartbeat decision. */
     fun isFresh(nowMillis: Long, maxAgeMillis: Long): Boolean {
-        val last = lastSampleMillis ?: return false
-        return nowMillis - last in 0..maxAgeMillis
+        if (!hasSample) return false
+        return nowMillis - lastMillis in 0..maxAgeMillis
     }
 
     fun reset() {
         isFaceDown = false
-        lastSampleMillis = null
+        hasSample = false
         tiltDegrees = Double.NaN
-        candidateSince = null
+        hasCandidate = false
     }
 
     companion object {
