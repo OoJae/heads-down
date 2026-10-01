@@ -63,6 +63,20 @@ function endedShifts(rs: RigShifts): (End & { epoch: number })[] {
   return [...byKey.values()].sort((a, b) => a.slot - b.slot || a.idx - b.idx);
 }
 
+/**
+ * The ShiftLog snapshot of an ended shift, if it is that shift's. Shift ids restart when a rig is closed
+ * and registered again while the ShiftLog PDA of an earlier shift with the same id may still exist, so a
+ * log is taken only when its rounds are the ones the ShiftEndedV2 event reports (a tag 4 event has none
+ * to compare: the id decides).
+ */
+function shiftLogOf(rs: RigShifts, e: End): RigShifts["shiftLogs"][number] | null {
+  return (
+    rs.shiftLogs.find(
+      (l) => l.shiftId === e.shiftId && !l.closed && (e.startRound === null || e.endRound === null || (l.startRound === e.startRound && l.endRound === e.endRound)),
+    ) ?? null
+  );
+}
+
 export async function loadHaul(deps: HaulDeps, rig: string, which: "latest" | bigint): Promise<HaulResponse> {
   const rs = await deps.store.rigShifts(rig);
   const ends = endedShifts(rs);
@@ -74,7 +88,7 @@ export async function loadHaul(deps: HaulDeps, rig: string, which: "latest" | bi
   // Shift ids restart when a rig is closed and registered again; the latest epoch wins.
   if (!end) return { status: 404, error: `no finished shift ${which} for this rig` };
 
-  const log = rs.shiftLogs.find((l) => l.shiftId === end.shiftId && !l.closed) ?? null;
+  const log = shiftLogOf(rs, end);
   const startRound = end.startRound ?? log?.startRound ?? null;
   const endRound = end.endRound ?? log?.endRound ?? null;
   const mode = end.mode ?? log?.mode ?? null;
@@ -106,7 +120,7 @@ export async function loadHaul(deps: HaulDeps, rig: string, which: "latest" | bi
 
   // Streak: replay every ended shift of the rig (end time from its ShiftLog, else its block time).
   const replay: EndedShift[] = ends.map((e) => {
-    const l = rs.shiftLogs.find((x) => x.shiftId === e.shiftId && !x.closed);
+    const l = shiftLogOf(rs, e);
     const t = e === end ? endTs : (l?.endTs ?? BigInt(e.blockTime ?? 0));
     return { shiftId: BigInt(e.epoch) * (1n << 64n) + e.shiftId, endTs: t, reason: e.reason, darkRounds: e.darkRounds, order: order(e.slot, e.idx) };
   });

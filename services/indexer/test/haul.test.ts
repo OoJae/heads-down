@@ -26,6 +26,7 @@ import { openApiDocument } from "../src/api/openapi.ts";
 import { createApiServer } from "../src/api/server.ts";
 import { shiftLogAddress } from "../src/api/haul.ts";
 import { HAUL_MAX_ROUNDS, lastListedRound } from "../src/metrics/haul.ts";
+import { encodeShiftLog, type ShiftLogAccount } from "../src/codec/accounts.ts";
 import { encodeOreRound, oreRoundPda, type OreRoundAccount } from "../src/codec/round.ts";
 import { extractTransaction, type RawTransaction } from "../src/codec/tx.ts";
 import { ByteWriter } from "../src/codec/bytes.ts";
@@ -307,6 +308,18 @@ describe("GET /v1/rigs/{rig}/haul/latest (hand-computed shift)", () => {
     expect(await store.roundsToResolve(10, true, 3)).toEqual([14_000n, 5001n, 2000n, 1003n, 5002n, 5000n, 3001n, 3000n]);
     expect(await store.roundsToResolve(10, false)).toEqual([14_000n, 5001n, 2000n, 1003n]);
     clock = T + 86_400;
+  });
+
+  it("ignores a ShiftLog snapshot that belongs to an earlier shift with the same id", async () => {
+    // Shift ids restart when a rig is closed and registered again; the ShiftLog PDA of the earlier shift 1
+    // can still be there. Its times and rounds are not this shift's.
+    const stale: ShiftLogAccount = {
+      kind: "ShiftLog", bump: 255, rig: R, shiftId: 1n, startRound: 500n, endRound: 510n, darkRounds: 9n, roundsDug: 9n, lamportsDeployed: 1n,
+      breakReason: 1, mode: 1, startTs: BigInt(T - 50_000), endTs: BigInt(T - 40_000),
+    };
+    await store.replaceAccounts({ rigs: [], shiftLogs: [{ address: shiftLogAddress(R, 1n, HD), account: stale, data: encodeShiftLog(stale) }], seats: [], config: null }, 10_000);
+    const h = await fetch(`${base}/v1/rigs/${R}/haul/1`).then((r) => r.json());
+    expect(h).toMatchObject({ shift_id: 1, mode: "night", start_ts: T, end_ts: T + 600, start_round: 1000, end_round: 1004, dark_rounds: 4, break_reason: 0, streak_before: 0, streak_after: 1 });
   });
 
   it("validates the rig and the shift id", async () => {
