@@ -96,21 +96,34 @@ export function groupDeploys(deploys: readonly DeployRow[]): { authority: string
 
 /**
  * Open / closed / Seeker rigs from the v1.1 lifecycle events, or null when none are indexed.
- * A rig is open when its latest RigRegistered is later than its latest RigClosed. It is
- * Seeker-tier when a SeekerVerified for it follows that registration and no later
- * SeekerVerified moved the same SGT to another rig (verify_seeker downgrades the previous rig).
+ * A rig is open when its latest RigRegistered is later than its latest RigClosed. When both are
+ * in the same slot (close_rig and register_rig can share a transaction) the rows do not say which
+ * came first, but a rig PDA alternates register, close, register: it is open iff it was registered
+ * more often than it was closed. It is Seeker-tier when a SeekerVerified for it follows that
+ * registration and no later SeekerVerified moved the same SGT to another rig (verify_seeker
+ * downgrades the previous rig).
  */
 export function rigLifecycle(input: Pick<MetricsInput, "registered" | "closedRigs" | "seekers">): { open: Set<string>; closed: Set<string>; registered: Set<string>; seeker: Set<string> } | null {
   const reg = input.registered ?? [];
   if (reg.length === 0) return null;
   const lastReg = new Map<string, number>();
-  for (const r of reg) lastReg.set(r.rig, Math.max(lastReg.get(r.rig) ?? -1, r.slot));
+  const regCount = new Map<string, number>();
+  for (const r of reg) {
+    lastReg.set(r.rig, Math.max(lastReg.get(r.rig) ?? -1, r.slot));
+    regCount.set(r.rig, (regCount.get(r.rig) ?? 0) + 1);
+  }
   const lastClose = new Map<string, number>();
-  for (const c of input.closedRigs ?? []) lastClose.set(c.rig, Math.max(lastClose.get(c.rig) ?? -1, c.slot));
+  const closeCount = new Map<string, number>();
+  for (const c of input.closedRigs ?? []) {
+    lastClose.set(c.rig, Math.max(lastClose.get(c.rig) ?? -1, c.slot));
+    closeCount.set(c.rig, (closeCount.get(c.rig) ?? 0) + 1);
+  }
   const open = new Set<string>();
   const closed = new Set<string>();
   for (const [rig, slot] of lastReg) {
-    if ((lastClose.get(rig) ?? -1) >= slot) closed.add(rig);
+    const c = lastClose.get(rig) ?? -1;
+    const isClosed = c > slot || (c === slot && (closeCount.get(rig) ?? 0) >= (regCount.get(rig) ?? 0));
+    if (isClosed) closed.add(rig);
     else open.add(rig);
   }
   // Latest holder of each SGT mint (by slot); it counts only while open and verified after its registration.

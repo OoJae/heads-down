@@ -11,6 +11,7 @@ import {
   pairDigs,
   recentDigs,
   rigForAuthority,
+  rigLifecycle,
   roundShares,
   shareByHour,
 } from "../src/metrics/metrics.ts";
@@ -318,5 +319,50 @@ describe("summary", () => {
   it("measures round length only from consecutive rounds", () => {
     expect(measuredRoundSeconds([round(1, { ts: 0 }), round(3, { ts: 500 })])).toBeNull();
     expect(measuredRoundSeconds([round(1, { ts: 0 }), round(2, { ts: 77 }), round(3, { ts: 156 })])).toBe(78);
+  });
+});
+
+describe("rigLifecycle (rigs = RigRegistered minus RigClosed)", () => {
+  const reg = (rig: number, slot: number, n = slot) => ({ signature: sig(n), slot, blockTime: T0 + slot, rig: addr(rig), authority: addr(rig + 100), tier: 0, attestationLevel: 0 });
+  const close = (rig: number, slot: number, n = slot + 500) => ({ signature: sig(n), slot, blockTime: T0 + slot, rig: addr(rig) });
+  const verified = (rig: number, mint: number, slot: number) => ({ signature: sig(slot + 900), slot, blockTime: T0 + slot, rig: addr(rig), sgtMint: addr(mint), memberNumber: 1n });
+
+  it("is null without lifecycle events, so older data falls back to the account snapshot", () => {
+    expect(rigLifecycle({ registered: [], closedRigs: [], seekers: [] })).toBeNull();
+    expect(rigLifecycle({ seekers: [] })).toBeNull();
+  });
+
+  it("a rig is open when its latest registration is later than its latest close; a re-registered rig counts once", () => {
+    const l = rigLifecycle({ registered: [reg(1, 10), reg(2, 11), reg(3, 12), reg(3, 40)], closedRigs: [close(2, 20), close(3, 30)], seekers: [] })!;
+    expect([...l.open].sort()).toEqual([addr(1), addr(3)].sort());
+    expect([...l.closed]).toEqual([addr(2)]);
+    expect(l.registered.size).toBe(3);
+  });
+
+  it("close_rig and register_rig in one slot: the counts decide the order", () => {
+    // Registered at 10, then closed and registered again in slot 50 (one transaction): open.
+    const again = rigLifecycle({ registered: [reg(1, 10), reg(1, 50, 51)], closedRigs: [close(1, 50)], seekers: [] })!;
+    expect([...again.open]).toEqual([addr(1)]);
+    expect(again.closed.size).toBe(0);
+    // Registered and closed in the same slot: closed.
+    const gone = rigLifecycle({ registered: [reg(2, 50)], closedRigs: [close(2, 50)], seekers: [] })!;
+    expect([...gone.closed]).toEqual([addr(2)]);
+    expect(gone.open.size).toBe(0);
+  });
+
+  it("Seeker tier needs a verification after the registration, by the SGT's latest holder, on an open rig", () => {
+    const l = rigLifecycle({
+      registered: [reg(1, 10), reg(2, 10, 12), reg(3, 10, 13), reg(3, 60, 61), reg(4, 10, 14), reg(5, 10, 15)],
+      closedRigs: [close(3, 50), close(4, 90)],
+      seekers: [
+        verified(1, 201, 20),
+        verified(2, 201, 30), // the same SGT moved to rig 2: rig 1 is a guest again
+        verified(3, 203, 20), // before rig 3 was closed and registered again
+        verified(4, 204, 20), // rig 4 was closed afterwards
+        verified(5, 205, 10), // same slot as the registration (register_rig + verify_seeker in one transaction)
+      ],
+    })!;
+    expect([...l.seeker].sort()).toEqual([addr(2), addr(5)].sort());
+    expect(l.open.size).toBe(4);
   });
 });
