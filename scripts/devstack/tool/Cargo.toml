@@ -34,6 +34,8 @@ hex = "0.4"
 sha2 = "0.10"
 sha3 = "0.10"
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
+# The process-wide TLS provider for keyed https RPCs (same crate and features as hd-crank).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 solana-address = { version = "2.7", features = ["curve25519", "decode"] }
 solana-hash = "4"

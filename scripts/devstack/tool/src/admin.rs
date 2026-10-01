@@ -1,6 +1,4 @@
-//! `init` (heads_down `initialize_config` + Executor float), `fund`, `status` and `probe`.
-
-use std::path::PathBuf;
+//! `fund`, `status` and `probe` (`init` lives in `ops.rs` with the other deploy operations).
 
 use anyhow::{anyhow, bail, Result};
 use hd_crank::hd::{self, HdConfig};
@@ -11,65 +9,10 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 
 use crate::hd as hdix;
+use crate::ops::{program_state, ProgramState};
 use crate::ore::{self, var};
 use crate::phone::Phone;
-use crate::util::{b32_at, read_keypair, u64_at, Chain, SOL};
-
-/// Options for [`init`].
-pub struct InitOpts {
-    /// JSON-RPC URL.
-    pub rpc: String,
-    /// heads_down upgrade authority (the local dev key that deployed it).
-    pub authority: PathBuf,
-    /// Governance address stored in Config.
-    pub governance: Address,
-    /// Registrar (Ed25519 attestation key) address stored in Config.
-    pub registrar: Address,
-    /// `Config.executor_fee`: the Discretionary fee every rig's Automation must use.
-    pub executor_fee: u64,
-    /// `Config.crank_fee`: reimbursed per real dig (≤ executor_fee).
-    pub crank_fee: u64,
-    /// Target Executor PDA float in lamports.
-    pub executor_float: u64,
-}
-
-/// Create the heads_down Config (idempotent) and fund the Executor PDA float.
-pub async fn init(o: InitOpts) -> Result<()> {
-    let chain = Chain::new(&o.rpc)?;
-    let auth = read_keypair(&o.authority)?;
-    if o.crank_fee > o.executor_fee {
-        bail!("crank_fee {} > executor_fee {}: the program refuses it", o.crank_fee, o.executor_fee);
-    }
-    match chain.data(&hdix::config()).await? {
-        Some((owner, data, _)) => {
-            let c = HdConfig::decode(&hd::PROGRAM_ID, &owner, &data).map_err(|e| anyhow!("existing Config: {e}"))?;
-            println!("init: Config {} already exists (executor_fee {}, crank_fee {})", hdix::config(), c.executor_fee, c.crank_fee);
-        }
-        None => {
-            let ix = hdix::initialize_config_ix(&auth.pubkey(), &o.governance, &o.registrar, o.crank_fee, o.executor_fee, 0);
-            let l = chain.send(&auth, &[ix]).await?;
-            println!(
-                "init: initialize_config tx {} -> Config {} (executor_fee {}, crank_fee {}, governance {}, registrar {})",
-                l.signature,
-                hdix::config(),
-                o.executor_fee,
-                o.crank_fee,
-                o.governance,
-                o.registrar
-            );
-        }
-    }
-    let ex = hdix::executor();
-    let have = chain.balance(&ex).await?;
-    if have < o.executor_float {
-        let ix = hd_crank::tx::system_transfer(&auth.pubkey(), &ex, o.executor_float - have);
-        let l = chain.send(&auth, &[ix]).await?;
-        println!("init: funded the Executor PDA {ex} to {} lamports (tx {})", o.executor_float, l.signature);
-    } else {
-        println!("init: Executor PDA {ex} holds {have} lamports");
-    }
-    Ok(())
-}
+use crate::util::{b32_at, u64_at, Chain, SOL};
 
 /// Airdrop `sol` to `to` on the local validator.
 pub async fn fund(rpc: &str, to: &Address, sol: f64) -> Result<()> {
@@ -113,10 +56,31 @@ pub async fn status(rpc: &str) -> Result<()> {
             u64_at(&vd, var::SAMPLES)
         );
     }
+    match program_state(&chain, &hd::PROGRAM_ID).await? {
+        ProgramState::Deployed { programdata, slot, authority, programdata_len, .. } => println!(
+            "program         {} ProgramData {programdata} ({programdata_len} bytes), last deploy slot {slot}, upgrade authority {}",
+            hd::PROGRAM_ID,
+            authority.map_or_else(|| "none (immutable)".to_string(), |a| a.to_string())
+        ),
+        ProgramState::Absent => println!("program         {} not deployed", hd::PROGRAM_ID),
+        ProgramState::Other(why) => println!("program         {}: {why}", hd::PROGRAM_ID),
+    }
     match chain.data(&hdix::config()).await? {
         Some((o, d, _)) => {
             let hc = HdConfig::decode(&hd::PROGRAM_ID, &o, &d).map_err(|e| anyhow!("Config: {e}"))?;
             println!("heads_down      Config {} executor_fee {} crank_fee {} paused {}", hdix::config(), hc.executor_fee, hc.crank_fee, hc.paused);
+            println!("governance      {} registrar {} bury_bps {}", hc.governance, hc.registrar, hc.bury_bps);
+            if let Some(p) = hdix::pending(&d).filter(|p| p.exists) {
+                println!(
+                    "pending         registrar {} crank_fee {} bury_bps {} paused {}; apply_config from slot {} ({} slots to go)",
+                    p.registrar,
+                    p.crank_fee,
+                    p.bury_bps,
+                    p.paused,
+                    p.eta_slot,
+                    p.eta_slot.saturating_sub(slot)
+                );
+            }
         }
         None => println!("heads_down      Config not initialized"),
     }

@@ -127,6 +127,81 @@ impl Chain {
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         self.rpc.call(method, params).await.map_err(|e| anyhow!("{method}: {e}"))
     }
+
+    /// `getGenesisHash`.
+    pub async fn genesis_hash(&self) -> Result<String> {
+        let v = self.call("getGenesisHash", json!([])).await?;
+        v.as_str().map(str::to_string).ok_or_else(|| anyhow!("getGenesisHash: not a string"))
+    }
+
+    /// `getMinimumBalanceForRentExemption(len)`: the cluster's own figure, not a formula.
+    pub async fn rent(&self, len: u64) -> Result<u64> {
+        self.call("getMinimumBalanceForRentExemption", json!([len]))
+            .await?
+            .as_u64()
+            .ok_or_else(|| anyhow!("getMinimumBalanceForRentExemption({len}): not a number"))
+    }
+
+    /// Like [`Chain::send`], with a compute-unit limit sized from a simulation (+20%) and,
+    /// when `cu_price > 0`, a priority fee of `cu_price` micro-lamports per CU. Mainnet
+    /// admin transactions use this so they land under load.
+    pub async fn send_budgeted(&self, payer: &Keypair, ixs: &[Instruction], cu_price: u64) -> Result<Landed> {
+        let mut probe = vec![tx::set_compute_unit_limit(tx::MAX_COMPUTE_UNITS)];
+        probe.extend_from_slice(ixs);
+        let (bh, _) = self.rpc.get_latest_blockhash().await.map_err(|e| anyhow!("getLatestBlockhash: {e}"))?;
+        let msg = VersionedMessage::Legacy(solana_message::Message::new_with_blockhash(&probe, Some(&payer.pubkey()), &bh));
+        let t = tx::make_transaction(msg, Some(payer)).map_err(|e| anyhow!("sign: {e}"))?;
+        let wire = tx::serialize(&t).map_err(|e| anyhow!("serialize: {e}"))?;
+        let sim = self.rpc.simulate_transaction(&wire).await.map_err(|e| anyhow!("simulate: {e}"))?;
+        if let Some(err) = sim.err {
+            bail!("simulation failed: {err}\n  {}", tail(&sim.logs, 25).join("\n  "));
+        }
+        let used = sim.units_consumed.unwrap_or(200_000);
+        let limit = u32::try_from(used.saturating_mul(12) / 10 + 1_000).unwrap_or(tx::MAX_COMPUTE_UNITS).min(tx::MAX_COMPUTE_UNITS);
+        let mut out = vec![tx::set_compute_unit_limit(limit)];
+        if cu_price > 0 {
+            out.push(tx::set_compute_unit_price(cu_price));
+        }
+        out.extend_from_slice(ixs);
+        self.send(payer, &out).await
+    }
+
+    /// Fee and error of a landed transaction (`getTransaction`, confirmed).
+    pub async fn tx_fee(&self, sig: &str) -> Result<(u64, u64, Option<Value>)> {
+        for _ in 0..20 {
+            if let Ok(Some(info)) = self.rpc.get_transaction(sig, 0).await {
+                return Ok((info.slot, info.fee, info.err));
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        bail!("getTransaction {sig}: not found")
+    }
+}
+
+/// Seconds since the Unix epoch.
+pub fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` for a Unix time (UTC; civil-from-days, no time-zone database).
+pub fn rfc3339(unix: i64) -> String {
+    let days = unix.div_euclid(86_400);
+    let secs = unix.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", secs / 3600, (secs / 60) % 60, secs % 60)
+}
+
+/// Lamports as SOL with 9 decimals (exact; no float).
+pub fn sol(lamports: u64) -> String {
+    format!("{}.{:09}", lamports / SOL, lamports % SOL)
 }
 
 /// The last `n` lines.
@@ -193,5 +268,31 @@ where
             bail!("timed out after {:?} waiting for {what}", timeout);
         }
         tokio::time::sleep(every).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rfc3339_known_dates() {
+        assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(rfc3339(1_790_812_800), "2026-10-01T00:00:00Z");
+        assert_eq!(rfc3339(1_790_899_199), "2026-10-01T23:59:59Z");
+    }
+
+    #[test]
+    fn sol_formatting_is_exact() {
+        assert_eq!(sol(0), "0.000000000");
+        assert_eq!(sol(1_369_595_760), "1.369595760");
+        assert_eq!(sol(u64::MAX), "18446744073.709551615");
+    }
+
+    #[test]
+    fn rent_formula_matches_known_values() {
+        assert_eq!(rent_exempt(0), 890_880);
+        assert_eq!(rent_exempt(256), 2_672_640);
     }
 }
