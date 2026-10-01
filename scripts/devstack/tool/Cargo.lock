@@ -834,6 +834,7 @@ dependencies = [
  "p256",
  "p256-introspect",
  "reqwest",
+ "rustls",
  "serde_json",
  "sha2 0.10.9",
  "sha3",

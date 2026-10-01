@@ -1,0 +1,13 @@
+# Receipts of local dry runs are not public records.
+receipts/localnet/
+# Secrets never live here; refuse them anyway.
+.env
+*.env
+!.env.example
+*keypair*.json
+*-payer.json
+deployer.json
+governance.json
+registrar.json
+buffer-*.json
+*-secret

@@ -2,7 +2,7 @@
 # One command: a local mainnet-fork Heads Down stack on this Mac.
 #
 #   scripts/devstack/up.sh [--engine test-validator|surfpool] [--refresh-fixtures] [--resume]
-#                          [--with-registrar] [--no-build]
+#                          [--with-registrar] [--no-build] [--no-deploy]
 #
 # 1. fork engine with the live mainnet ORE, entropy and ORE-mint programs + ORE state
 # 2. heads_down built with scripts/build.sh (mainnet feature) and deployed with the
@@ -10,10 +10,15 @@
 # 3. initialize_config + Executor PDA float
 # 4. ore-round-driver (rounds keep advancing), hd-crank, indexer (real RPC mode), optional registrar
 #
-# See docs/DEVSTACK.md.
+# --no-deploy skips 2 and 3: the fork, the driver, the crank and the indexer come up with no
+# heads_down program, so scripts/mainnet/deploy.sh + init-config.sh --cluster localnet can be
+# rehearsed against a clean validator (scripts/mainnet/dry-run.sh). The crank and indexer pick
+# the program and its Config up as soon as they exist.
+#
+# See docs/DEVSTACK.md and docs/DEPLOY.md.
 source "$(dirname "$0")/lib.sh"
 
-REFRESH=0 RESUME=0 REGISTRAR=0 BUILD=1
+REFRESH=0 RESUME=0 REGISTRAR=0 BUILD=1 DEPLOY=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine) HD_DEVSTACK_ENGINE="$2"; shift 2 ;;
@@ -21,7 +26,8 @@ while [[ $# -gt 0 ]]; do
     --resume) RESUME=1; shift ;;
     --with-registrar) REGISTRAR=1; shift ;;
     --no-build) BUILD=0; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    --no-deploy) DEPLOY=0; shift ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -55,7 +61,7 @@ rm -rf "$LOGS/prev" && mkdir -p "$LOGS/prev"
 for f in "$LOGS"/*.log; do if [[ -e "$f" ]]; then mv "$f" "$LOGS/prev/"; fi; done
 
 # ---- build ---------------------------------------------------------------------------------------
-if [[ $BUILD == 1 || ! -f "$HD_SO" ]]; then
+if [[ $DEPLOY == 1 ]] && [[ $BUILD == 1 || ! -f "$HD_SO" ]]; then
   log "building heads_down (programs/heads-down/scripts/build.sh, mainnet feature)"
   bash "$REPO_ROOT/programs/heads-down/scripts/build.sh" >"$LOGS/build-program.log" 2>&1 || die "program build failed: $LOGS/build-program.log"
 fi
@@ -129,19 +135,23 @@ if [[ "$HD_DEVSTACK_ENGINE" == "surfpool" ]]; then
 fi
 
 # ---- heads_down ------------------------------------------------------------------------------------
-UA="$(pubkey "$K_UPGRADE")"
-"$TOOL_BIN" --rpc "$RPC_URL" fund "$UA" 100 >/dev/null
-if rpc getAccountInfo "[\"$HD_PROGRAM_ID\",{\"encoding\":\"base64\"}]" | grep -q '"executable":true'; then
-  log "heads_down already deployed at $HD_PROGRAM_ID"
+if [[ $DEPLOY == 1 ]]; then
+  UA="$(pubkey "$K_UPGRADE")"
+  "$TOOL_BIN" --rpc "$RPC_URL" fund "$UA" 100 >/dev/null
+  if rpc getAccountInfo "[\"$HD_PROGRAM_ID\",{\"encoding\":\"base64\"}]" | grep -q '"executable":true'; then
+    log "heads_down already deployed at $HD_PROGRAM_ID"
+  else
+    log "deploying heads_down ($(wc -c <"$HD_SO" | tr -d ' ') bytes, sha256 $(shasum -a 256 "$HD_SO" | cut -c1-16)…) as $HD_PROGRAM_ID, upgrade authority $UA"
+    solana -u "$RPC_URL" program deploy --use-rpc --program-id "$HD_PROGRAM_KEYPAIR" --upgrade-authority "$K_UPGRADE" \
+      --keypair "$K_UPGRADE" "$HD_SO" >"$LOGS/deploy.log" 2>&1 || die "deploy failed: $LOGS/deploy.log"
+    wait_slots 2
+  fi
+  "$TOOL_BIN" --rpc "$RPC_URL" init --authority "$K_UPGRADE" --governance "$(pubkey "$K_GOVERNANCE")" \
+    --registrar "$(pubkey "$K_REGISTRAR")" --executor-fee "$HD_EXECUTOR_FEE" --crank-fee "$HD_CRANK_FEE" \
+    --executor-float "$HD_EXECUTOR_FLOAT" | tee -a "$LOGS/init.log"
 else
-  log "deploying heads_down ($(wc -c <"$HD_SO" | tr -d ' ') bytes, sha256 $(shasum -a 256 "$HD_SO" | cut -c1-16)…) as $HD_PROGRAM_ID, upgrade authority $UA"
-  solana -u "$RPC_URL" program deploy --use-rpc --program-id "$HD_PROGRAM_KEYPAIR" --upgrade-authority "$K_UPGRADE" \
-    --keypair "$K_UPGRADE" "$HD_SO" >"$LOGS/deploy.log" 2>&1 || die "deploy failed: $LOGS/deploy.log"
-  wait_slots 2
+  log "--no-deploy: heads_down is NOT deployed; next: scripts/mainnet/deploy.sh --cluster localnet, then init-config.sh"
 fi
-"$TOOL_BIN" --rpc "$RPC_URL" init --authority "$K_UPGRADE" --governance "$(pubkey "$K_GOVERNANCE")" \
-  --registrar "$(pubkey "$K_REGISTRAR")" --executor-fee "$HD_EXECUTOR_FEE" --crank-fee "$HD_CRANK_FEE" \
-  --executor-float "$HD_EXECUTOR_FLOAT" | tee -a "$LOGS/init.log"
 
 # ---- ore-round-driver ------------------------------------------------------------------------------
 start_bg driver "$LOGS/driver.log" "$TOOL_BIN" --rpc "$RPC_URL" driver --payer "$K_DRIVER" \
