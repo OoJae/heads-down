@@ -10,6 +10,8 @@ const LINKS = [
   { href: "/cohorts/", label: "Retention" },
   { href: "/share/", label: "Share of ORE miners" },
   { href: "/digs/", label: "Recent digs" },
+  { href: "/skips/", label: "Skips" },
+  { href: "/haul/", label: "Morning haul" },
   { href: "/milestones/", label: "ORE milestones" },
   { href: "/method/", label: "Method" },
 ];
