@@ -1,13 +1,18 @@
 //! Fork suite: the crank's verifier → planner → packer → signed transaction, executed by
 //! LiteSVM 0.17 against the **live mainnet ORE binary** and real Board / Config / Treasury /
 //! Var / Round accounts (`spikes/ore-executor/fetch-fixtures.sh`), with the mock
-//! `heads_down` program from `test-fixtures/mock-heads-down` (or the real program with
-//! `--features real-program` / `HD_PROGRAM_SO`).
+//! `heads_down` program from `test-fixtures/mock-heads-down`, or the real program with
+//! `--features real-program` (`HD_PROGRAM_SO`, default `programs/heads-down/target/deploy`).
+//!
+//! The mock implements `dig` only; the BREAK / FREEZE landing, `record_heartbeats`,
+//! permissionless `end_shift`, replay and cost tests run against the real program.
 //!
 //! ```sh
 //! spikes/ore-executor/fetch-fixtures.sh                     # or ORE_FIXTURES_DIR=...
 //! cargo build-sbf --manifest-path crank/test-fixtures/mock-heads-down/Cargo.toml
 //! cargo test --features fork --test fork -- --nocapture --test-threads=1
+//! bash programs/heads-down/scripts/build.sh
+//! cargo test --features real-program --test fork -- --nocapture --test-threads=1
 //! ```
 #![cfg(feature = "fork")]
 
@@ -105,7 +110,7 @@ impl Fork {
         svm.add_program(ore::ENTROPY_PROGRAM_ID, &entropy_so).unwrap();
         let so = program_so();
         let hd_so = std::fs::read(&so).unwrap_or_else(|_| {
-            panic!("missing {} — cargo build-sbf --manifest-path crank/test-fixtures/mock-heads-down/Cargo.toml", so.display())
+            panic!("missing {} — cargo build-sbf --manifest-path crank/test-fixtures/mock-heads-down/Cargo.toml (or programs/heads-down/scripts/build.sh)", so.display())
         });
         svm.add_program(hd::PROGRAM_ID, &hd_so).unwrap();
 
@@ -197,7 +202,7 @@ impl Fork {
     }
 
     /// A wallet runs ORE `automate` (executor = Executor PDA, Discretionary, fixed fee) and
-    /// has a registered, armed Rig.
+    /// has a registered, armed Rig (written directly, with the v1.1 cached ORE bumps).
     fn add_user(&mut self, i: u32) -> usize {
         let wallet = Keypair::new();
         self.svm.airdrop(&wallet.pubkey(), 2 * LAMPORTS_PER_SOL).unwrap();
@@ -238,14 +243,13 @@ impl Fork {
         self.svm.expire_blockhash();
 
         let phone = Phone::new(1000 + i);
+        let pda_bump = |seed: &[u8]| Address::find_program_address(&[seed, authority.as_ref()], &ore::ORE_PROGRAM_ID).1;
         let rig = Rig {
             bump: hd::rig_pda(&hd::PROGRAM_ID, &authority).1,
             authority,
             p256_pubkey: phone.pubkey(),
             attestation_level: 1,
-            tier: 0,
             state: RigState::Armed,
-            sgt_mint: Address::default(),
             attestation_expiry_slot: u64::MAX,
             cap_week: LAMPORTS_PER_SOL,
             cap_shift: LAMPORTS_PER_SOL / 10,
@@ -255,29 +259,18 @@ impl Fork {
             plan_max_ev_cost: u64::MAX,
             plan_dig_lamports: 1_000_000,
             plan_split_tiles: 15,
-            plan_solo_tiles: 0,
             plan_lease_rounds: 3,
-            plan_flags: 0,
             plan_window_start_ts: NOW - 3_600,
             plan_window_end_ts: NOW + 3_600,
             shift_id: 1,
-            hb_counter: 0,
-            lease_from_round: 0,
-            lease_to_round: 0,
-            gap_count: 0,
-            spent_shift: 0,
-            spent_week: 0,
             week_start_ts: NOW - 60,
-            last_dug_round: 0,
             shift_start_round: self.board.round_id - 10,
-            shift_dark_rounds: 0,
-            shift_rounds_dug: 0,
-            lifetime_dark_rounds: 0,
-            lifetime_rounds_dug: 0,
-            lifetime_lamports_deployed: 0,
-            streak: 0,
             freezes_left: 2,
-            last_shift_day: 0,
+            shift_open: true,
+            ore_automation_bump: pda_bump(ore::AUTOMATION_SEED),
+            ore_miner_bump: pda_bump(ore::MINER_SEED),
+            shift_start_ts: NOW - 3_600,
+            ..Rig::default()
         };
         self.svm
             .set_account(rig_addr, Account { lamports: 10_000_000, data: rig.encode(), owner: hd::PROGRAM_ID, executable: false, rent_epoch: u64::MAX })
@@ -286,32 +279,35 @@ impl Fork {
         self.users.len() - 1
     }
 
-    /// Phone → JSON → crank verifier → store, exactly as the WebSocket intake does.
-    fn heartbeat(&self, store: &Arc<HeartbeatStore>, u: usize, counter: u64, lease: u8) -> Result<(), hd_crank::heartbeat::Reject> {
-        let user = &self.users[u];
-        let rig = self.rig(u);
-        let f = HeartbeatFields { counter, shift_id: rig.shift_id, round_id: self.board.round_id, lease_rounds: lease };
-        let raw = user.phone.sign_raw(&hd::PROGRAM_ID, &user.rig, &f);
-        let sub = HeartbeatSubmission {
-            rig: user.rig.to_string(),
-            counter,
-            shift_id: f.shift_id,
-            round_id: f.round_id,
-            lease_rounds: lease,
-            sig64: base64::engine::general_purpose::STANDARD.encode(raw),
-            pubkey: Some(hex::encode(user.phone.pubkey())),
-        };
+    fn verifier(&self, store: &Arc<HeartbeatStore>) -> Verifier<MapSource> {
         let src = MapSource(Arc::new(Mutex::new(
             self.users.iter().enumerate().map(|(i, u)| (u.rig, self.rig(i))).collect(),
         )));
-        let v = Verifier {
+        Verifier {
             program_id: hd::PROGRAM_ID,
             rigs: RigCache::new(src, Duration::from_secs(60), Duration::from_secs(30), 100, 100.0),
             store: store.clone(),
-        };
+        }
+    }
+
+    /// Phone → JSON → crank verifier → store, exactly as the WebSocket intake does.
+    fn heartbeat(&self, store: &Arc<HeartbeatStore>, u: usize, counter: u64, lease: u8) -> Result<(), hd_crank::heartbeat::Reject> {
+        self.heartbeat_for(store, u, counter, lease, self.board.round_id)
+    }
+
+    fn heartbeat_for(&self, store: &Arc<HeartbeatStore>, u: usize, counter: u64, lease: u8, round_id: u64) -> Result<(), hd_crank::heartbeat::Reject> {
+        let user = &self.users[u];
+        let rig = self.rig(u);
+        let f = HeartbeatFields { counter, shift_id: rig.shift_id, round_id, lease_rounds: lease };
+        let raw = user.phone.sign_raw(&hd::PROGRAM_ID, &user.rig, &f);
+        let json = serde_json::json!({
+            "type": "heartbeat", "rig": user.rig.to_string(), "counter": counter, "shift_id": f.shift_id,
+            "round_id": f.round_id, "lease_rounds": lease, "sig64": base64::engine::general_purpose::STANDARD.encode(raw)
+        });
+        let sub: HeartbeatSubmission = serde_json::from_value(json).unwrap();
         let parsed = ParsedHeartbeat::parse(&sub)?;
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        rt.block_on(v.process(&parsed, Some(self.board.round_id))).map(|_| ())
+        rt.block_on(self.verifier(store).process(&parsed, Some(self.board.round_id))).map(|_| ())
     }
 
     fn plan(&self, store: &HeartbeatStore) -> Plan {
@@ -481,8 +477,9 @@ fn crank_digs_through_live_ore() {
         assert_eq!(ev, ema_ev, "program and crank agree on the gate value");
         assert_eq!(Some(mask), dec.predicted_mask, "crank predicted the program's tile choice");
         assert_eq!(mask.count_ones(), 15);
+        assert_eq!(u32::from(dec.tiles), mask.count_ones(), "k = popcount(mask)");
         assert_eq!(mask & ore::distribution_mask(r), 0, "split squares only");
-        assert_eq!(lamports, dec.expected_debit, "debit = per_tile * k + fee");
+        assert_eq!(lamports, dec.squares_lamports, "RigDug.lamports = SOL on squares, no fee (INTERFACE v1.1)");
         for (i, delta) in expected_delta.iter_mut().enumerate() {
             if mask & (1 << i) != 0 {
                 *delta += dec.per_tile;
@@ -494,10 +491,13 @@ fn crank_digs_through_live_ore() {
     }
     for (k, u) in [a, b, c].into_iter().enumerate() {
         let dec = plan.digs.iter().find(|x| x.dig.accounts.rig == f.users[u].rig).unwrap();
-        assert_eq!(before_auto[k] - f.automation(u).balance, dec.expected_debit);
+        assert_eq!(dec.fee_due, EXECUTOR_FEE, "first deploy of the round");
+        assert_eq!(before_auto[k] - f.automation(u).balance, dec.expected_debit, "Automation debit = squares + executor_fee");
         let rig = f.rig(u);
         assert_eq!(rig.last_dug_round, r);
         assert_eq!(rig.state, RigState::Down);
+        assert_eq!(rig.spent_shift, dec.expected_debit, "spent_shift counts the whole debit");
+        assert_eq!(rig.lifetime_lamports_deployed, dec.squares_lamports, "lifetime deployed counts squares only");
     }
     assert_eq!(f.rig(a).hb_counter, 1);
     assert_eq!((f.rig(a).lease_from_round, f.rig(a).lease_to_round), (r, r + 1));
@@ -584,15 +584,19 @@ fn heartbeat_binding_is_enforced_on_chain() {
 
     // (1) A heartbeat signed for another shift verifies in the precompile (it is a valid
     // signature over *its* digest), but the program rebuilds the preimage from rig.shift_id,
-    // so the rig is skipped with InvalidHeartbeat. The crank never builds this: its planner
-    // requires shift_id == rig.shift_id.
+    // so the rig is skipped with p256-introspect MessageMismatch (0x2560000e). The crank never
+    // builds this: its planner requires shift_id == rig.shift_id.
     let wrong = HeartbeatFields { counter: 1, shift_id: 99, round_id: f.board.round_id, lease_rounds: 1 };
     let ia = rigs.iter().position(|x| x.accounts.rig == f.users[a].rig).unwrap();
     rigs[ia].heartbeat = Some(f.users[a].phone.verified(&hd::PROGRAM_ID, &f.users[a].rig, wrong));
     let t = tx::sign_batch(&p, &rigs, &[], f.svm.latest_blockhash(), &f.cranker).unwrap();
     let meta = f.send(t).expect("tx lands; only rig A is skipped");
     let evs = hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs);
-    assert!(evs.iter().any(|e| matches!(e, HdEvent::RigSkipped { rig, error, .. } if *rig == f.users[a].rig && hd::error_name(*error) == "InvalidHeartbeat")), "{evs:?}");
+    assert!(
+        evs.iter().any(|e| matches!(e, HdEvent::RigSkipped { rig, error, .. } if *rig == f.users[a].rig && *error == 0x2560_000e)),
+        "{evs:?}"
+    );
+    assert_eq!(hd::error_name(0x2560_000e), "P256MessageMismatch");
     assert!(evs.iter().any(|e| matches!(e, HdEvent::RigDug { rig, .. } if *rig == f.users[b].rig)));
 
     // (2) A signature that does not verify sinks the whole batch in the precompile: this is
@@ -604,4 +608,364 @@ fn heartbeat_binding_is_enforced_on_chain() {
     rigs[ia].heartbeat = Some(forged);
     let t = tx::sign_batch(&p, &rigs, &[], f.svm.latest_blockhash(), &f.cranker).unwrap();
     assert!(f.send(t).is_err(), "precompile rejects the forged entry");
+}
+
+#[test]
+fn cooling_rig_digs_only_with_a_fresh_heartbeat() {
+    let mut f = Fork::new();
+    let store = Arc::new(HeartbeatStore::new(100));
+    let a = f.add_user(30);
+    let r = f.board.round_id;
+    f.set_rig(a, |rig| {
+        rig.state = RigState::Cooling;
+        rig.lease_from_round = r - 1;
+        rig.lease_to_round = r + 1;
+        rig.hb_counter = 5;
+        rig.break_reason = hd::reason::PICKUP;
+    });
+    // The planner refuses to reuse the lease, and so does the program.
+    let plan = f.plan(&store);
+    assert_eq!(plan.skips, vec![(f.users[a].rig, Skip::CoolingNeedsHeartbeat)]);
+    let p = f.params(TxFormat::Legacy);
+    let reuse = tx::RigDig { accounts: f.users[a].accounts, heartbeat: None, checkpoint_round: None };
+    let t = tx::sign_batch(&p, &[reuse], &[], f.svm.latest_blockhash(), &f.cranker).unwrap();
+    let meta = f.send(t).unwrap();
+    let evs = hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs);
+    assert!(matches!(evs[..], [HdEvent::RigSkipped { error: 13, .. }]), "RigNotArmed: {evs:?}");
+    // A fresh heartbeat (counter above the BREAK's) resumes it and digs.
+    assert_eq!(f.heartbeat(&store, a, 6, 1), Ok(()));
+    let plan = f.plan(&store);
+    assert_eq!(plan.digs.len(), 1);
+    let t = tx::sign_batch(&p, &[plan.digs[0].dig], &[], f.svm.latest_blockhash(), &f.cranker).unwrap();
+    let meta = f.send(t).unwrap();
+    assert!(hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs).iter().any(|e| matches!(e, HdEvent::RigDug { .. })));
+    assert_eq!(f.rig(a).state, RigState::Down);
+}
+
+// ---------------------------------------------------------------------------------------
+// Real program only: BREAK / FREEZE landing, record_heartbeats, end_shift, replay, costs.
+
+#[cfg(feature = "real-program")]
+mod real {
+    use super::*;
+    use hd_crank::demo;
+    use hd_crank::heartbeat::{ParsedSignal, SignalSubmission};
+    use hd_crank::rpc::FetchedInstruction;
+    use p256::ecdsa::{signature::Signer as _, Signature};
+
+    impl Fork {
+        fn balance(&self, a: &Address) -> u64 {
+            self.svm.get_balance(a).unwrap_or(0)
+        }
+
+        /// A phone-signed BREAK / FREEZE, verified by the crank exactly as the intake does.
+        fn signal(&self, u: usize, kind: hd::SignalKind, counter: u64, reason: u8) -> hd_crank::heartbeat::VerifiedSignal {
+            let rig = self.rig(u);
+            let digest = hd::digest(&hd::break_preimage(&hd::PROGRAM_ID, &self.users[u].rig, kind.message_kind(), counter, rig.shift_id, reason));
+            let sig: Signature = self.users[u].phone.sk.sign(&digest);
+            let raw: [u8; 64] = sig.to_bytes().into();
+            let sub = SignalSubmission {
+                rig: self.users[u].rig.to_string(),
+                counter,
+                shift_id: rig.shift_id,
+                reason: u64::from(reason),
+                sig64: base64::engine::general_purpose::STANDARD.encode(raw),
+            };
+            let parsed = ParsedSignal::parse(kind, &sub).unwrap();
+            let store = Arc::new(HeartbeatStore::new(10));
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(self.verifier(&store).process_signal(&parsed)).unwrap()
+        }
+
+        fn land_signal(&mut self, s: &hd_crank::heartbeat::VerifiedSignal) -> Result<litesvm::types::TransactionMetadata, String> {
+            let c = hd_crank::config::SignalsConfig::default();
+            let ixs = tx::signal_instructions(
+                &hd::PROGRAM_ID,
+                s.kind,
+                &s.rig,
+                &s.authority,
+                s.reason,
+                s.counter,
+                s.sig,
+                s.pubkey,
+                s.digest,
+                c.cu_limit,
+                c.cu_price_micro_lamports,
+            )
+            .unwrap();
+            let t = tx::sign_legacy(&ixs, &self.cranker, self.svm.latest_blockhash()).unwrap();
+            self.send(t)
+        }
+    }
+
+    #[test]
+    fn crank_lands_phone_signed_break_and_freeze() {
+        let mut f = Fork::new();
+        let store = Arc::new(HeartbeatStore::new(100));
+        let a = f.add_user(40);
+        let r = f.board.round_id;
+        f.set_rig(a, |rig| {
+            rig.state = RigState::Down;
+            rig.lease_from_round = r;
+            rig.lease_to_round = r + 2;
+            rig.hb_counter = 3;
+        });
+        // BREAK pickup (1): Down → Cooling, ShiftBroken(1), counter consumed.
+        let brk = f.signal(a, hd::SignalKind::Break, 4, hd::reason::PICKUP);
+        let before = f.balance(&f.cranker.pubkey());
+        let meta = f.land_signal(&brk).expect("BREAK lands");
+        let fee = before - f.balance(&f.cranker.pubkey());
+        println!("BREAK: {} CU, fee {fee} lamports (1 tx + 1 secp256r1 signature + priority)", meta.compute_units_consumed);
+        let c = hd_crank::config::SignalsConfig::default();
+        assert_eq!(fee, c.est_fee(), "2 signatures + the priority fee at the default CU limit");
+        assert!(meta.compute_units_consumed < u64::from(c.cu_limit), "the signal CU limit fits");
+        let evs = hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs);
+        assert_eq!(evs, vec![HdEvent::ShiftBroken { rig: f.users[a].rig, shift_id: 1, reason: 1 }]);
+        let rig = f.rig(a);
+        assert_eq!((rig.state, rig.hb_counter, rig.break_reason), (RigState::Cooling, 4, 1));
+        // Idempotent on-chain: the same signal again is refused (StaleHeartbeat fails the tx).
+        let again = f.land_signal(&brk).expect_err("a stale counter is never accepted twice");
+        assert!(again.contains("Custom(7)"), "{again}");
+        // The dig planner will not reuse the lease of a Cooling rig.
+        assert_eq!(f.plan(&store).skips, vec![(f.users[a].rig, Skip::CoolingNeedsHeartbeat)]);
+        // BREAK unlocked (8): Cooling → Broken.
+        let brk2 = f.signal(a, hd::SignalKind::Break, 5, hd::reason::UNLOCKED);
+        let meta = f.land_signal(&brk2).expect("BREAK unlocked lands");
+        assert!(matches!(hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs)[..], [HdEvent::ShiftBroken { reason: 8, .. }]));
+        assert_eq!(f.rig(a).state, RigState::Broken);
+        // FREEZE (3) interrupts the open shift: Frozen, ShiftBroken(3).
+        let frz = f.signal(a, hd::SignalKind::Freeze, 6, hd::reason::FREEZE);
+        let meta = f.land_signal(&frz).expect("FREEZE lands");
+        assert!(matches!(hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs)[..], [HdEvent::ShiftBroken { reason: 3, .. }]));
+        let rig = f.rig(a);
+        assert_eq!((rig.state, rig.hb_counter, rig.break_reason), (RigState::Frozen, 6, 3));
+        // A heartbeat below the signals' counters would be stale on-chain too.
+        assert_eq!(f.heartbeat(&store, a, 6, 1), Err(hd_crank::heartbeat::Reject::NotArmed));
+    }
+
+    #[test]
+    fn crank_records_heartbeats_of_focus_only_rigs() {
+        let mut f = Fork::new();
+        let store = Arc::new(HeartbeatStore::new(100));
+        let r = f.board.round_id;
+        let users: Vec<usize> = (0..9).map(|i| f.add_user(50 + i)).collect();
+        for &u in &users {
+            f.set_rig(u, |rig| {
+                rig.plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+                rig.plan_dig_lamports = 0;
+                rig.plan_split_tiles = 0;
+                rig.shift_start_round = r;
+            });
+            f.heartbeat(&store, u, 1, 3).unwrap();
+        }
+        // The dig planner leaves focus-only rigs alone ...
+        let plan = f.plan(&store);
+        assert!(plan.digs.is_empty());
+        assert!(plan.skips.iter().all(|(_, s)| *s == Skip::FocusOnly));
+        // ... and the record planner takes them.
+        let rigs: Vec<(Address, Rig)> = users.iter().map(|&u| (f.users[u].rig, f.rig(u))).collect();
+        let heartbeats = store.snapshot().into_iter().map(|h| (h.rig, h)).collect();
+        let (decisions, _) = planner::plan_records(&f.board, &f.treasury(), NOW, &rigs, &heartbeats, &planner::RecordPolicy::default());
+        assert_eq!(decisions.len(), 9);
+        assert!(decisions.iter().all(|d| d.grant.dark_added == 3));
+        let mut p = f.params(TxFormat::Legacy);
+        p.max_rigs_per_tx = 8;
+        let est = hd_crank::config::RecordConfig::default().cu_estimate();
+        let recs: Vec<tx::RecordRig> = decisions.iter().map(|d| tx::RecordRig { rig: d.rig, heartbeat: d.heartbeat }).collect();
+        let (batches, rejected) = tx::pack_records(&p, &est, &recs, &[]);
+        assert!(rejected.is_empty());
+        println!("record_heartbeats, legacy: rigs per tx = {:?}", batches.iter().map(|b| b.rigs.len()).collect::<Vec<_>>());
+        let mut recorded = 0;
+        for b in &batches {
+            let before = f.balance(&f.cranker.pubkey());
+            let t = tx::sign_record_batch(&p, &est, &b.rigs, &[], f.svm.latest_blockhash(), &f.cranker).unwrap();
+            let meta = f.send(t).expect("record_heartbeats lands");
+            let fee = before - f.balance(&f.cranker.pubkey());
+            let n = b.rigs.len() as u64;
+            println!(
+                "record_heartbeats: {n} rigs, {} bytes, {} CU ({} per rig), fee {fee} lamports ({} per rig)",
+                b.wire_size,
+                meta.compute_units_consumed,
+                meta.compute_units_consumed / n,
+                fee / n
+            );
+            assert_eq!(fee, (1 + n) * 5_000 + tx::priority_fee_lamports(b.cu_limit, p.cu_price_micro_lamports));
+            assert!(meta.compute_units_consumed <= u64::from(b.cu_limit));
+            for e in hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs) {
+                match e {
+                    HdEvent::HeartbeatsRecorded { round_id, dark_rounds_added, .. } => {
+                        assert_eq!((round_id, dark_rounds_added), (r, 3));
+                        recorded += 1;
+                    }
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+        }
+        assert_eq!(recorded, 9);
+        for &u in &users {
+            let rig = f.rig(u);
+            assert_eq!((rig.state, rig.hb_counter, rig.lease_from_round, rig.lease_to_round), (RigState::Down, 1, r, r + 2));
+            assert_eq!(rig.shift_dark_rounds, 3, "the focus-only shift's dark rounds count on-chain");
+            assert_eq!(rig.last_dug_round, 0, "nothing was deployed");
+        }
+        // Not due again until every_rounds after lease_from.
+        let rigs: Vec<(Address, Rig)> = users.iter().map(|&u| (f.users[u].rig, f.rig(u))).collect();
+        let (again, skips) = planner::plan_records(&f.board, &f.treasury(), NOW, &rigs, &heartbeats, &planner::RecordPolicy::default());
+        assert!(again.is_empty());
+        assert!(skips.iter().all(|(_, s)| *s == planner::RecordSkip::NotDue));
+    }
+
+    #[test]
+    fn crank_ends_stale_shifts_permissionlessly() {
+        let mut f = Fork::new();
+        let a = f.add_user(60);
+        let b = f.add_user(61);
+        let r = f.board.round_id;
+        // A: the window ended and the lease lapsed: anyone may end it.
+        f.set_rig(a, |rig| {
+            rig.state = RigState::Down;
+            rig.plan_window_end_ts = NOW - 120;
+            rig.lease_from_round = r - 3;
+            rig.lease_to_round = r - 1;
+            rig.shift_start_round = r - 5;
+            rig.shift_dark_rounds = 3;
+            rig.shift_rounds_dug = 2;
+            rig.spent_shift = 2_010_000;
+        });
+        // B: the window ended but the lease still covers the round: the crank may not.
+        f.set_rig(b, |rig| {
+            rig.state = RigState::Down;
+            rig.plan_window_end_ts = NOW - 120;
+            rig.lease_from_round = r;
+            rig.lease_to_round = r;
+        });
+        let cranker = f.cranker.pubkey();
+        let before = f.balance(&cranker);
+        let cu = hd_crank::config::EndShiftConfig::default().cu_limit;
+        let ixs = tx::end_shift_instructions(&hd::PROGRAM_ID, &cranker, &f.users[a].rig, 1, cu, 1_000);
+        let t = tx::sign_legacy(&ixs, &f.cranker, f.svm.latest_blockhash()).unwrap();
+        let meta = f.send(t).expect("permissionless end_shift lands");
+        let paid = before - f.balance(&cranker);
+        let log_addr = hd::shift_log_pda(&hd::PROGRAM_ID, &f.users[a].rig, 1).0;
+        let rent = f.balance(&log_addr);
+        println!("end_shift: {} CU, paid {paid} lamports = ShiftLog rent {rent} + fee {}", meta.compute_units_consumed, paid - rent);
+        assert_eq!(rent, 1_781_760, "128-byte ShiftLog at the default rent");
+        assert!(meta.compute_units_consumed < u64::from(cu));
+        let evs = hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs);
+        assert_eq!(evs.len(), 1, "tag 4 is dropped when tag 10 follows: {evs:?}");
+        match evs[0] {
+            HdEvent::ShiftEndedV2 { shift_id, dark_rounds, rounds_dug, lamports, reason, start_round, end_round, mode, .. } => {
+                assert_eq!((shift_id, dark_rounds, rounds_dug, lamports, reason, mode), (1, 3, 2, 2_010_000, 0, 0));
+                assert_eq!((start_round, end_round), (r - 5, r));
+            }
+            ref other => panic!("{other:?}"),
+        }
+        let log = f.account(&log_addr).unwrap();
+        let sl = hd::ShiftLog::decode(&hd::PROGRAM_ID, &log.owner, &log.data).unwrap();
+        assert_eq!((sl.shift_id, sl.break_reason, sl.mode, sl.end_ts), (1, 0, 0, NOW));
+        let rig = f.rig(a);
+        assert!(!rig.shift_open);
+        assert_eq!(rig.state, RigState::Idle);
+        // B is refused: its lease has not expired.
+        let ixs = tx::end_shift_instructions(&hd::PROGRAM_ID, &cranker, &f.users[b].rig, 1, 30_000, 1_000);
+        let t = tx::sign_legacy(&ixs, &f.cranker, f.svm.latest_blockhash()).unwrap();
+        let err = f.send(t).expect_err("lease still live");
+        assert!(err.contains("Custom(5)"), "Unauthorized: {err}");
+    }
+
+    #[test]
+    fn replaying_a_landed_dig_is_refused_as_stale() {
+        let mut f = Fork::new();
+        let store = Arc::new(HeartbeatStore::new(100));
+        let a = f.add_user(70);
+        let b = f.add_user(71);
+        f.heartbeat(&store, a, 1, 1).unwrap();
+        f.heartbeat(&store, b, 1, 1).unwrap();
+        // A normal dig for both lands first.
+        let plan = f.plan(&store);
+        let p = f.params(TxFormat::V0);
+        let rigs: Vec<_> = plan.digs.iter().map(|x| x.dig).collect();
+        let landed = tx::sign_batch(&p, &rigs, &[], f.svm.latest_blockhash(), &f.cranker).unwrap();
+        let msg_ixs = tx::build_instructions(&p, &rigs).unwrap();
+        f.send(landed).expect("the original dig lands");
+        // What `getTransaction` would return for it: the top-level instructions.
+        let fetched: Vec<FetchedInstruction> = msg_ixs
+            .iter()
+            .map(|ix| FetchedInstruction { program_id: ix.program_id, accounts: ix.accounts.iter().map(|m| m.pubkey).collect(), data: ix.data.clone() })
+            .collect();
+        let dig = demo::extract_dig(&hd::PROGRAM_ID, &fetched).unwrap();
+        assert_eq!(dig.heartbeats.len(), 2);
+        let rigs_now: Vec<(Address, Rig)> = [a, b].iter().map(|&u| (f.users[u].rig, f.rig(u))).collect();
+        let picked = demo::select_stale(&dig.heartbeats, &[f.users[a].rig], &rigs_now).unwrap();
+        assert_eq!(picked.len(), 1);
+        // Resubmit A's signed heartbeat with a fresh blockhash (naming the live round's PDA).
+        let ixs = demo::replay_instructions(&hd::PROGRAM_ID, &f.cranker.pubkey(), f.board.round_id, &picked, 400_000, 1_000).unwrap();
+        let t = tx::sign_legacy(&ixs, &f.cranker, f.svm.latest_blockhash()).unwrap();
+        let meta = f.send(t).expect("the replay lands");
+        let evs = hd::events_from_logs(&hd::PROGRAM_ID, &meta.logs);
+        assert_eq!(evs, vec![HdEvent::RigSkipped { rig: f.users[a].rig, round_id: f.board.round_id, error: 7 }]);
+        println!("replay: {}", demo::caption(&evs[0]));
+        assert_eq!(demo::expected_skip(&f.rig(a), &picked[0].entry, f.board.round_id), 7);
+        // A heartbeat that is not stale yet is refused by the tool (a replay must never dig).
+        let mut fresh = dig.heartbeats.clone();
+        fresh[0].entry.counter = 99;
+        assert!(matches!(demo::select_stale(&fresh, &[], &rigs_now), Err(demo::ReplayError::NotStale { .. })));
+        // A lease-reuse-only dig has nothing to replay.
+        let reuse = demo::LandedDig { rigs: dig.rigs.clone(), heartbeats: vec![] };
+        assert!(matches!(demo::select_stale(&reuse.heartbeats, &[], &rigs_now), Err(demo::ReplayError::NothingToReplay)));
+    }
+
+    /// Cost per rig per dig with the real program: signatures, priority fee at a
+    /// simulate-sized CU limit, and the crank_fee reimbursement.
+    #[test]
+    fn cost_per_rig_per_dig() {
+        for (format, fresh, n) in [(TxFormat::V0, true, 5usize), (TxFormat::V1, true, 11), (TxFormat::V0, false, 12), (TxFormat::Legacy, true, 2)] {
+            let mut f = Fork::new();
+            let store = Arc::new(HeartbeatStore::new(100));
+            let r = f.board.round_id;
+            for i in 0..n {
+                let u = f.add_user(100 + i as u32);
+                if fresh {
+                    f.heartbeat(&store, u, 1, 3).unwrap();
+                } else {
+                    f.set_rig(u, |rig| {
+                        rig.state = RigState::Down;
+                        rig.lease_from_round = r;
+                        rig.lease_to_round = r;
+                    });
+                }
+            }
+            let plan = f.plan(&store);
+            assert_eq!(plan.digs.len(), n);
+            if format == TxFormat::V0 {
+                f.make_alt();
+            }
+            let mut p = f.params(format);
+            let rigs: Vec<_> = plan.digs.iter().map(|x| x.dig).collect();
+            let (batches, _) = tx::pack(&p, &rigs, &f.alts);
+            assert_eq!(batches.len(), 1, "{format:?} fits {n}");
+            // Size the CU limit the way the crank does: simulate, +15% + 1,000.
+            let sim_tx = tx::sign_batch(&p, &batches[0].rigs, &f.alts, f.svm.latest_blockhash(), &f.cranker).unwrap();
+            let sim = f.svm.simulate_transaction(sim_tx).expect("simulates");
+            let used = sim.meta.compute_units_consumed;
+            p.cu_limit = Some(u32::try_from(used * 115 / 100 + 1_000).unwrap());
+            let before = f.balance(&f.cranker.pubkey());
+            let t = tx::sign_batch(&p, &batches[0].rigs, &f.alts, f.svm.latest_blockhash(), &f.cranker).unwrap();
+            let meta = f.send(t).expect("dig lands");
+            let net = i128::from(f.balance(&f.cranker.pubkey())) - i128::from(before);
+            let fee = (1 + if fresh { n } else { 0 }) as u64 * 5_000 + tx::priority_fee_lamports(p.cu_limit.unwrap(), p.cu_price_micro_lamports);
+            assert_eq!(net, i128::from(n as u64 * CRANK_FEE) - i128::from(fee));
+            println!(
+                "{format:?} {} x{n}: {} bytes, {} CU ({} per rig), fee {fee} ({} per rig), reimbursed {} ({} per rig), net {net:+} per tx ({:+} per rig)",
+                if fresh { "fresh heartbeat" } else { "lease reuse" },
+                batches[0].wire_size,
+                meta.compute_units_consumed,
+                meta.compute_units_consumed / n as u64,
+                fee / n as u64,
+                n as u64 * CRANK_FEE,
+                CRANK_FEE,
+                net / n as i128
+            );
+        }
+    }
 }

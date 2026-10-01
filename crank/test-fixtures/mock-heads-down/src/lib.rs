@@ -1,14 +1,17 @@
-//! **TEST FIXTURE. Never deploy.** A mock of `heads_down::dig` (tag 6) written only from
-//! `programs/heads-down/INTERFACE.md`, so the crank's dig transactions can be executed
-//! against the live mainnet ORE binary in LiteSVM before the real program lands.
+//! **TEST FIXTURE. Never deploy.** A mock of `heads_down::dig` (tag 6) written from the frozen
+//! contract `programs/heads-down/INTERFACE.md` v1.1, so the crank's dig transactions can be
+//! executed against the live mainnet ORE binary in LiteSVM and on a local validator without
+//! building the real program. The real program is the security boundary and the reference:
+//! `cargo test --features real-program` runs the same suite against it.
 //!
-//! It follows the contract's account order, entry layout, HEARTBEAT preimage + SHA-256 +
-//! p256-introspect verification, lease/idempotency/gate/amount rules, least-crowded tile
-//! choice, the Executor-PDA-signed ORE `deploy` CPI with post-CPI reload, crank
-//! reimbursement, and the RigDug / RigSkipped events. Where INTERFACE.md leaves a detail
-//! open (skip codes for some cases, event byte packing), the choice matches
-//! `crank/INTERFACE-NOTES.md`. It is deliberately not hardened beyond what the tests need:
-//! the real program is the security boundary.
+//! It follows v1.1 §6: the account checks that fail the transaction, the per-rig order of the
+//! skip checks, the precise skip codes (0..=31, and p256-introspect's `0x2560_00xx` unchanged),
+//! Cooling digging only with a fresh heartbeat in the same entry, "leases only move forward",
+//! the fee reserved inside every cap (`budget = min(plan_dig, min(caps) − fee)`), `k =
+//! popcount(mask)` with the Miner's held squares excluded, the fee due only on the rig's first
+//! deploy of the round, the ORE pre-flights (25, 26, 27, 28, 31), the post-CPI accounting
+//! (`RigDug.lamports` = SOL on squares; `spent_*` = the whole debit; 29 on an ORE no-op) and
+//! the reimbursement floor `rent(0) + 100,000 + crank_fee`. It implements `dig` only.
 #![no_std]
 
 use p256_introspect::verify_secp256r1_signature;
@@ -33,12 +36,15 @@ const TREASURY: Address = Address::from_str_const("45db2FSR4mcXdSVVZbKbwojU6uYDp
 const VAR: Address = Address::from_str_const("BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGzhxgm2E");
 const ENTROPY: Address = Address::from_str_const("3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X");
 const SYSTEM: Address = Address::from_str_const("11111111111111111111111111111111");
+const IX_SYSVAR: Address = Address::from_str_const("Sysvar1nstructions1111111111111111111111111");
 
 const CHECKPOINT_FEE: u64 = 10_000;
+const EXECUTOR_RESERVE: u64 = 10 * CHECKPOINT_FEE;
 const RENT_EXEMPT_ZERO: u64 = 890_880;
 const WEEK_SECS: i64 = 7 * 24 * 3600;
+const ONE_ORE: u64 = 100_000_000_000;
 
-// INTERFACE.md error codes.
+// INTERFACE v1.1 §8 error codes.
 const E_INVALID_INSTRUCTION: u32 = 0;
 const E_COST_GATE: u32 = 1;
 const E_INVALID_EXECUTOR: u32 = 2;
@@ -58,6 +64,13 @@ const E_PAUSED: u32 = 18;
 const E_MATH: u32 = 20;
 const E_DUPLICATE_RIG: u32 = 22;
 const E_STRATEGY: u32 = 23;
+const E_ROUND_NOT_ACTIVE: u32 = 25;
+const E_MINER_NOT_CHECKPOINTED: u32 = 26;
+const E_MOTHERLODE: u32 = 27;
+const E_INSUFFICIENT_BALANCE: u32 = 28;
+const E_ORE_NOOP: u32 = 29;
+const E_FOCUS_ONLY: u32 = 30;
+const E_EXECUTOR_UNDERFUNDED: u32 = 31;
 
 fn err(code: u32) -> ProgramError {
     ProgramError::Custom(code)
@@ -74,6 +87,13 @@ impl From<ProgramError> for RigErr {
     }
 }
 
+fn skip_code(e: ProgramError) -> u32 {
+    match e {
+        ProgramError::Custom(c) => c,
+        _ => u32::MAX,
+    }
+}
+
 fn rd<const N: usize>(d: &[u8], off: usize) -> Result<[u8; N], ProgramError> {
     d.get(off..off + N)
         .and_then(|s| s.try_into().ok())
@@ -84,6 +104,9 @@ fn rd_u64(d: &[u8], off: usize) -> Result<u64, ProgramError> {
 }
 fn rd_i64(d: &[u8], off: usize) -> Result<i64, ProgramError> {
     rd::<8>(d, off).map(i64::from_le_bytes)
+}
+fn rd_u32(d: &[u8], off: usize) -> Result<u32, ProgramError> {
+    rd::<4>(d, off).map(u32::from_le_bytes)
 }
 fn rd_u16(d: &[u8], off: usize) -> Result<u16, ProgramError> {
     rd::<2>(d, off).map(u16::from_le_bytes)
@@ -157,35 +180,48 @@ fn distribution_mask(round_id: u64) -> u32 {
     m
 }
 
-/// `split` least-crowded split squares + `solo` least-crowded solo squares, ties → lowest index.
-fn select_tiles(round_id: u64, deployed: &[u64; 25], split: u8, solo: u8) -> u32 {
-    let solo_mask = distribution_mask(round_id);
+/// The program's `logic::select_tiles`: stable order by `deployed` (ties → lowest index),
+/// skipping `exclude`, taking `solo` solo squares and `split` split squares.
+fn select_tiles(deployed: &[u64; 25], solo_mask: u32, exclude: u32, split: u8, solo: u8) -> u32 {
+    let mut order = [0usize; 25];
+    for (i, v) in order.iter_mut().enumerate() {
+        *v = i;
+    }
+    for i in 1..25 {
+        let mut j = i;
+        while j > 0 && deployed[order[j - 1]] > deployed[order[j]] {
+            order.swap(j - 1, j);
+            j -= 1;
+        }
+    }
+    let (mut want_split, mut want_solo) = (split, solo);
     let mut mask = 0u32;
-    for (want_solo, count) in [(false, split), (true, solo)] {
-        for _ in 0..count {
-            let mut best: Option<usize> = None;
-            for i in 0..25 {
-                let is_solo = solo_mask & (1 << i) != 0;
-                if is_solo != want_solo || mask & (1 << i) != 0 {
-                    continue;
-                }
-                if best.map_or(true, |b| deployed[i] < deployed[b]) {
-                    best = Some(i);
-                }
+    for &i in order.iter() {
+        let bit = 1u32 << i;
+        if exclude & bit != 0 {
+            continue;
+        }
+        if solo_mask & bit != 0 {
+            if want_solo > 0 {
+                mask |= bit;
+                want_solo -= 1;
             }
-            match best {
-                Some(b) => mask |= 1 << b,
-                None => break,
-            }
+        } else if want_split > 0 {
+            mask |= bit;
+            want_split -= 1;
+        }
+        if want_split == 0 && want_solo == 0 {
+            break;
         }
     }
     mask
 }
 
-fn ema_ev(ema: u64, pot: u64) -> Option<u64> {
-    let num = (ema as u128).checked_mul(6 * 500 * 100_000_000_000)?;
-    let den = (500u128 * 100_000_000_000).checked_add(pot as u128)?.checked_mul(5)?;
-    u64::try_from(num / den).ok()
+/// `ema · 6 · 500 · 10^11 / (5 · (500 · 10^11 + pot))`, u128.
+fn ema_ev(ema: u64, pot: u64) -> u128 {
+    let num = (ema as u128).saturating_mul(6 * 500 * 100_000_000_000);
+    let den = (500u128 * 100_000_000_000).saturating_add(pot as u128).saturating_mul(5);
+    num / den
 }
 
 fn check_ore(acc: &AccountView, len: usize, disc: u8) -> Result<(), ProgramError> {
@@ -197,6 +233,10 @@ fn check_ore(acc: &AccountView, len: usize, disc: u8) -> Result<(), ProgramError
         return Err(err(E_INVALID_ORE_ACCOUNT));
     }
     Ok(())
+}
+
+fn is_ore(acc: &AccountView, len: usize, disc: u8) -> bool {
+    acc.owned_by(&ORE) && acc.data_len() == len && acc.try_borrow().map(|d| d.first() == Some(&disc)).unwrap_or(false)
 }
 
 pub fn process_instruction(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -220,23 +260,20 @@ struct Ctx<'a> {
     entropy: &'a AccountView,
     ix_sysvar: &'a AccountView,
     round_id: u64,
-    start_slot: u64,
-    end_slot: u64,
-    ema_ev: Option<u64>,
+    ema_ev: u128,
+    solo_mask: u32,
     pot: u64,
     executor_fee: u64,
     crank_fee: u64,
-    paused: bool,
     executor_bump: u8,
     slot: u64,
     now: i64,
-    deployed: [u64; 25],
 }
 
 fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     let (&n, body) = args.split_first().ok_or(err(E_INVALID_INSTRUCTION))?;
     let n = n as usize;
-    if n == 0 || body.len() != n * 20 || accounts.len() != 12 + 4 * n {
+    if n == 0 || n > 32 || body.len() != n * 20 || accounts.len() != 12 + 4 * n {
         return Err(err(E_INVALID_INSTRUCTION));
     }
     let (fixed, rigs) = accounts.split_at_mut(12);
@@ -263,6 +300,10 @@ fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> Progr
         }
         (rd_u64(&d, 80)?, rd_u64(&d, 72)?, d[90] != 0, d[91])
     };
+    // v1.1 §6.6: pausing fails the whole transaction before any rig.
+    if paused {
+        return Err(err(E_PAUSED));
+    }
     let exec_pda = Address::create_program_address(&[b"executor", &[executor_bump]], program_id)
         .map_err(|_| err(E_INVALID_EXECUTOR))?;
     if executor.address() != &exec_pda || !executor.owned_by(&SYSTEM) || executor.data_len() != 0 {
@@ -278,23 +319,22 @@ fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> Progr
     {
         return Err(err(E_INVALID_ORE_ACCOUNT));
     }
+    if ix_sysvar.address() != &IX_SYSVAR {
+        return Err(err(0x2560_0001));
+    }
     check_ore(board, 40, 105)?;
     check_ore(treasury, 48, 104)?;
     check_ore(round, 952, 109)?;
-    let (round_id, start_slot, end_slot, ema) = {
+    let (round_id, ema) = {
         let d = board.try_borrow()?;
-        (rd_u64(&d, 8)?, rd_u64(&d, 16)?, rd_u64(&d, 24)?, rd_u64(&d, 32)?)
+        (rd_u64(&d, 8)?, rd_u64(&d, 32)?)
     };
     let pot = rd_u64(&treasury.try_borrow()?, 8)?;
     let round_pda = Address::find_program_address(&[b"round", &round_id.to_le_bytes()], &ORE).0;
-    let mut deployed = [0u64; 25];
     {
         let d = round.try_borrow()?;
         if round.address() != &round_pda || rd_u64(&d, 8)? != round_id {
             return Err(err(E_INVALID_ORE_ACCOUNT));
-        }
-        for (i, v) in deployed.iter_mut().enumerate() {
-            *v = rd_u64(&d, 16 + 8 * i)?;
         }
     }
     for i in 0..n {
@@ -305,7 +345,7 @@ fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> Progr
         }
     }
     let clock = Clock::get()?;
-    let mut ctx = Ctx {
+    let ctx = Ctx {
         program_id,
         cranker: &*cranker,
         executor: &*executor,
@@ -319,23 +359,20 @@ fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> Progr
         entropy: &*entropy,
         ix_sysvar: &*ix_sysvar,
         round_id,
-        start_slot,
-        end_slot,
         ema_ev: ema_ev(ema, pot),
+        solo_mask: distribution_mask(round_id),
         pot,
         executor_fee,
         crank_fee,
-        paused,
         executor_bump,
         slot: clock.slot,
         now: clock.unix_timestamp,
-        deployed,
     };
     for i in 0..n {
         let entry = &body[i * 20..(i + 1) * 20];
         let group = &mut rigs[4 * i..4 * i + 4];
         let rig_addr = *group[0].address();
-        match dig_one(&mut ctx, group, entry) {
+        match dig_one(&ctx, group, entry) {
             Ok((lamports, mask)) => {
                 let mut ev = [0u8; 61];
                 ev[0] = 1;
@@ -343,7 +380,7 @@ fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> Progr
                 ev[33..41].copy_from_slice(&round_id.to_le_bytes());
                 ev[41..49].copy_from_slice(&lamports.to_le_bytes());
                 ev[49..53].copy_from_slice(&mask.to_le_bytes());
-                ev[53..61].copy_from_slice(&ctx.ema_ev.unwrap_or(u64::MAX).to_le_bytes());
+                ev[53..61].copy_from_slice(&u64::try_from(ctx.ema_ev).unwrap_or(u64::MAX).to_le_bytes());
                 log_data(&ev);
             }
             Err(RigErr::Skip(code)) => {
@@ -360,23 +397,56 @@ fn dig(program_id: &Address, accounts: &mut [AccountView], args: &[u8]) -> Progr
     Ok(())
 }
 
-fn dig_one(c: &mut Ctx<'_>, group: &mut [AccountView], entry: &[u8]) -> Result<(u64, u32), RigErr> {
+struct MinerView {
+    authority: Address,
+    checkpoint_id: u64,
+    checkpoint_fee: u64,
+    round_id: u64,
+    sum: u64,
+    mask: u32,
+}
+
+fn read_miner(miner: &AccountView) -> Result<Option<MinerView>, ProgramError> {
+    if !is_ore(miner, 752, 103) {
+        return Ok(None);
+    }
+    let d = miner.try_borrow()?;
+    let mut sum = 0u64;
+    let mut mask = 0u32;
+    for i in 0..25 {
+        let v = rd_u64(&d, 64 + 8 * i)?;
+        sum = sum.checked_add(v).ok_or(err(E_MATH))?;
+        if v > 0 {
+            mask |= 1 << i;
+        }
+    }
+    Ok(Some(MinerView {
+        authority: Address::new_from_array(rd::<32>(&d, 8)?),
+        checkpoint_id: rd_u64(&d, 48)?,
+        checkpoint_fee: rd_u64(&d, 56)?,
+        round_id: rd_u64(&d, 664)?,
+        sum,
+        mask,
+    }))
+}
+
+#[allow(clippy::too_many_lines)]
+fn dig_one(c: &Ctx<'_>, group: &mut [AccountView], entry: &[u8]) -> Result<(u64, u32), RigErr> {
     let [rig, authority, automation, miner] = group else {
         return Err(RigErr::Fatal(ProgramError::NotEnoughAccountKeys));
     };
-    // 1. Account validation (fails the transaction).
+    // ---- 1. accounts (fail the transaction) -----------------------------------------------
     if !rig.owned_by(c.program_id) {
         return Err(RigErr::Fatal(err(E_INVALID_ACCOUNT_TAG)));
     }
-    let (rig_authority, pubkey, shift_id) = {
+    let (rig_authority, pubkey) = {
         let d = rig.try_borrow()?;
         if d.len() != 384 || d[0] != 2 || d[1] != 1 {
             return Err(RigErr::Fatal(err(E_INVALID_ACCOUNT_TAG)));
         }
-        (Address::new_from_array(rd::<32>(&d, 8)?), rd::<33>(&d, 40)?, rd_u64(&d, 200)?)
+        (Address::new_from_array(rd::<32>(&d, 8)?), rd::<33>(&d, 40)?)
     };
-    let rig_pda = Address::find_program_address(&[b"rig", rig_authority.as_ref()], c.program_id).0;
-    if rig.address() != &rig_pda || authority.address() != &rig_authority {
+    if authority.address() != &rig_authority {
         return Err(RigErr::Fatal(err(E_UNAUTHORIZED)));
     }
     let auto_pda = Address::find_program_address(&[b"automation", rig_authority.as_ref()], &ORE).0;
@@ -384,61 +454,102 @@ fn dig_one(c: &mut Ctx<'_>, group: &mut [AccountView], entry: &[u8]) -> Result<(
     if automation.address() != &auto_pda || miner.address() != &miner_pda {
         return Err(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT)));
     }
+    // ---- 1b. user-controlled ORE state (skip) -------------------------------------------------
+    if !is_ore(automation, 160, 100) {
+        return Err(RigErr::Skip(E_INVALID_EXECUTOR)); // closed / revoked
+    }
+    let (amount, balance_before, fee, min_ml, max_ml) = {
+        let d = automation.try_borrow()?;
+        let a_auth = Address::new_from_array(rd::<32>(&d, 16)?);
+        if a_auth != rig_authority {
+            return Err(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT)));
+        }
+        let a_exec = Address::new_from_array(rd::<32>(&d, 56)?);
+        if a_exec != *c.executor.address() {
+            return Err(RigErr::Skip(E_INVALID_EXECUTOR));
+        }
+        let fee = rd_u64(&d, 88)?;
+        if rd_u64(&d, 96)? != 2 || fee != c.executor_fee {
+            return Err(RigErr::Skip(E_STRATEGY));
+        }
+        (rd_u64(&d, 8)?, rd_u64(&d, 48)?, fee, rd_u16(&d, 144)?, rd_u16(&d, 146)?)
+    };
+    let m = match read_miner(miner)? {
+        Some(m) if m.authority == rig_authority => m,
+        _ => return Err(RigErr::Skip(E_INVALID_ORE_ACCOUNT)),
+    };
 
-    // 2. Lease.
+    // ---- 2. state + heartbeat + lease -----------------------------------------------------------
     let hb_ix = entry[0];
+    let rig_key = *rig.address();
+    let state = rd_u8(&rig.try_borrow()?, 75)?;
+    match state {
+        1 | 2 => {}
+        3 if hb_ix != 0xFF => {}
+        5 => return Err(RigErr::Skip(E_FROZEN)),
+        _ => return Err(RigErr::Skip(E_NOT_ARMED)),
+    }
     if hb_ix != 0xFF {
         let counter = rd_u64(entry, 2)?;
         let hb_round = rd_u64(entry, 10)?;
         let lease_rounds = entry[18];
+        if hb_round > c.round_id || lease_rounds == 0 {
+            return Err(RigErr::Skip(E_INVALID_HEARTBEAT));
+        }
+        let mut d = rig.try_borrow_mut()?;
+        if counter <= rd_u64(&d, 208)? {
+            return Err(RigErr::Skip(E_STALE_HEARTBEAT));
+        }
+        let shift_id = rd_u64(&d, 200)?;
         let mut pre = [0u8; 94];
         pre[0..4].copy_from_slice(b"HDv1");
         pre[4..36].copy_from_slice(c.program_id.as_ref());
-        pre[36..68].copy_from_slice(rig.address().as_ref());
+        pre[36..68].copy_from_slice(rig_key.as_ref());
         pre[68] = 1;
         pre[69..77].copy_from_slice(&counter.to_le_bytes());
         pre[77..85].copy_from_slice(&shift_id.to_le_bytes());
         pre[85..93].copy_from_slice(&hb_round.to_le_bytes());
         pre[93] = lease_rounds;
         let digest = sha256(&[&pre]);
-        if verify_secp256r1_signature(c.ix_sysvar, u16::from(hb_ix), entry[1], &pubkey, &digest).is_err() {
-            return Err(RigErr::Skip(E_INVALID_HEARTBEAT));
+        if let Err(e) = verify_secp256r1_signature(c.ix_sysvar, u16::from(hb_ix), entry[1], &pubkey, &digest) {
+            return Err(RigErr::Skip(skip_code(e)));
         }
-        let mut d = rig.try_borrow_mut()?;
-        let (hb_counter, plan_lease) = (rd_u64(&d, 208)?, rd_u8(&d, 178)?);
-        if counter <= hb_counter {
-            return Err(RigErr::Skip(E_STALE_HEARTBEAT));
+        // Grant the lease: leases only move forward; dark rounds and gaps from shift start.
+        let lease = lease_rounds.min(rd_u8(&d, 178)?);
+        let (cur_from, cur_to) = (rd_u64(&d, 216)?, rd_u64(&d, 224)?);
+        let shift_start = rd_u64(&d, 272)?;
+        let new_to = hb_round
+            .checked_add(u64::from(lease).checked_sub(1).ok_or(RigErr::Skip(E_INVALID_HEARTBEAT))?)
+            .ok_or(RigErr::Skip(E_MATH))?;
+        if !(cur_to != 0 && new_to <= cur_to) {
+            let covered_end = if cur_to != 0 && cur_to >= shift_start { cur_to } else { shift_start.saturating_sub(1) };
+            let start = hb_round.max(shift_start);
+            let first_new = start.max(covered_end.saturating_add(1));
+            let dark_added = if new_to >= first_new { new_to - first_new + 1 } else { 0 };
+            let gap_added = start.saturating_sub(covered_end.saturating_add(1));
+            let dark = rd_u64(&d, 280)?.saturating_add(dark_added);
+            let gaps = u64::from(rd_u32(&d, 232)?).saturating_add(gap_added);
+            wr(&mut d, 216, &hb_round.to_le_bytes())?;
+            wr(&mut d, 224, &new_to.to_le_bytes())?;
+            wr(&mut d, 280, &dark.to_le_bytes())?;
+            wr(&mut d, 232, &u32::try_from(gaps).unwrap_or(u32::MAX).to_le_bytes())?;
         }
-        if hb_round > c.round_id {
-            return Err(RigErr::Skip(E_INVALID_HEARTBEAT));
-        }
-        let len = lease_rounds.min(plan_lease);
-        if len == 0 {
-            return Err(RigErr::Skip(E_INVALID_HEARTBEAT));
-        }
-        let to = hb_round.checked_add(u64::from(len) - 1).ok_or(RigErr::Skip(E_MATH))?;
+        let _ = cur_from;
         wr(&mut d, 208, &counter.to_le_bytes())?;
-        wr(&mut d, 216, &hb_round.to_le_bytes())?;
-        wr(&mut d, 224, &to.to_le_bytes())?;
+        if state == 1 || state == 3 {
+            wr(&mut d, 75, &[2])?;
+        }
     }
-    let (state, lease_from, lease_to, last_dug) = {
-        let d = rig.try_borrow()?;
-        (rd_u8(&d, 75)?, rd_u64(&d, 216)?, rd_u64(&d, 224)?, rd_u64(&d, 264)?)
-    };
-    if !(lease_from <= c.round_id && c.round_id <= lease_to) {
+    let d = rig.try_borrow()?;
+    let (lease_from, lease_to) = (rd_u64(&d, 216)?, rd_u64(&d, 224)?);
+    if !(lease_to != 0 && lease_from <= c.round_id && c.round_id <= lease_to) {
         return Err(RigErr::Skip(E_LEASE_EXPIRED));
     }
-    match state {
-        1 | 2 => {}
-        5 => return Err(RigErr::Skip(E_FROZEN)),
-        _ => return Err(RigErr::Skip(E_NOT_ARMED)),
-    }
-    // 3. Idempotency.
-    if last_dug == c.round_id {
+    // ---- 3. idempotency ---------------------------------------------------------------------------
+    if rd_u64(&d, 264)? == c.round_id {
         return Err(RigErr::Skip(E_ALREADY_DUG));
     }
-    // 4. Gate, caps, window, pause.
-    let d = rig.try_borrow()?;
+    // ---- 4. caps, window, focus-only, gate --------------------------------------------------------
     let cap_week = rd_u64(&d, 120)?;
     let cap_shift = rd_u64(&d, 128)?;
     let cap_round = rd_u64(&d, 136)?;
@@ -455,87 +566,67 @@ fn dig_one(c: &mut Ctx<'_>, group: &mut [AccountView], entry: &[u8]) -> Result<(
     let mut spent_week = rd_u64(&d, 248)?;
     let mut week_start = rd_i64(&d, 256)?;
     drop(d);
-    if c.paused {
-        return Err(RigErr::Skip(E_PAUSED));
-    }
-    if flags & 1 != 0 {
-        return Err(RigErr::Skip(E_NOT_ARMED));
-    }
     if c.now > caps_expiry {
         return Err(RigErr::Skip(E_CAPS_EXPIRED));
     }
     if c.now < w_start || c.now > w_end {
         return Err(RigErr::Skip(E_OUTSIDE_WINDOW));
     }
-    match c.ema_ev {
-        Some(v) if v <= plan_max_ev.min(cap_max_cost) => {}
-        _ => return Err(RigErr::Skip(E_COST_GATE)),
+    if flags & 1 != 0 {
+        return Err(RigErr::Skip(E_FOCUS_ONLY));
     }
-    if c.now >= week_start.saturating_add(WEEK_SECS) {
+    if c.ema_ev > u128::from(plan_max_ev.min(cap_max_cost)) {
+        return Err(RigErr::Skip(E_COST_GATE));
+    }
+    // ---- 5. squares + amount (the fee reserved inside every cap) ------------------------------------
+    if week_start == 0 || c.now.saturating_sub(week_start) >= WEEK_SECS {
         spent_week = 0;
         week_start = c.now;
     }
-    // 5. Amount + ORE pre-flight.
-    let dig_lamports = plan_dig
-        .min(cap_round)
-        .min(cap_shift.saturating_sub(spent_shift))
-        .min(cap_week.saturating_sub(spent_week));
-    let k = u64::from(split) + u64::from(solo);
-    if k == 0 {
-        return Err(RigErr::Skip(E_BUDGET));
+    let same_round = m.round_id == c.round_id;
+    let held = if same_round { m.mask } else { 0 };
+    let mut deployed = [0u64; 25];
+    {
+        let d = c.round.try_borrow()?;
+        for (i, v) in deployed.iter_mut().enumerate() {
+            *v = rd_u64(&d, 16 + 8 * i)?;
+        }
     }
-    if check_ore(automation, 160, 100).is_err() {
-        return Err(RigErr::Skip(E_STRATEGY));
-    }
-    let (amount, balance_before, fee) = {
-        let d = automation.try_borrow()?;
-        let a_auth = Address::new_from_array(rd::<32>(&d, 16)?);
-        let a_exec = Address::new_from_array(rd::<32>(&d, 56)?);
-        let strategy = rd_u64(&d, 96)?;
-        let fee = rd_u64(&d, 88)?;
-        if a_exec != *c.executor.address() || a_auth != rig_authority {
-            return Err(RigErr::Skip(E_INVALID_EXECUTOR));
-        }
-        if strategy != 2 || fee != c.executor_fee {
-            return Err(RigErr::Skip(E_STRATEGY));
-        }
-        let min_ml = u64::from(rd_u16(&d, 144)?) * 100_000_000_000;
-        let max_ml = u64::from(rd_u16(&d, 146)?) * 100_000_000_000;
-        if c.pot > max_ml || c.pot < min_ml {
-            return Err(RigErr::Skip(E_COST_GATE));
-        }
-        (rd_u64(&d, 8)?, rd_u64(&d, 48)?, fee)
-    };
-    let per_tile = (dig_lamports / k).min(amount);
+    let mask = select_tiles(&deployed, c.solo_mask, held, split, solo);
+    let k = u64::from(mask.count_ones());
+    let headroom = cap_round.min(cap_shift.saturating_sub(spent_shift)).min(cap_week.saturating_sub(spent_week));
+    let budget = plan_dig.min(headroom.saturating_sub(fee));
+    let per_tile = budget.checked_div(k).unwrap_or(0).min(amount);
     if per_tile == 0 {
         return Err(RigErr::Skip(E_BUDGET));
     }
-    let need = per_tile.checked_mul(k).and_then(|v| v.checked_add(fee)).ok_or(RigErr::Skip(E_MATH))?;
+    let total = per_tile.checked_mul(k).ok_or(RigErr::Fatal(err(E_MATH)))?;
+    let sum_before = if same_round { m.sum } else { 0 };
+    let fee_due = if sum_before == 0 { fee } else { 0 };
+    let need = total.checked_add(fee_due).ok_or(RigErr::Fatal(err(E_MATH)))?;
     if balance_before < need {
-        return Err(RigErr::Skip(E_BUDGET));
+        return Err(RigErr::Skip(E_INSUFFICIENT_BALANCE));
     }
-    if c.end_slot != u64::MAX && !(c.start_slot <= c.slot && c.slot < c.end_slot) {
-        return Err(RigErr::Skip(E_OUTSIDE_WINDOW));
-    }
-    if check_ore(miner, 752, 103).is_err() {
-        return Err(RigErr::Skip(E_INVALID_ORE_ACCOUNT));
-    }
+    // ---- 5b. ORE pre-flight -----------------------------------------------------------------------
     {
-        let d = miner.try_borrow()?;
-        let m_auth = Address::new_from_array(rd::<32>(&d, 8)?);
-        let checkpoint_id = rd_u64(&d, 48)?;
-        let m_round = rd_u64(&d, 664)?;
-        if m_auth != rig_authority || !(m_round == c.round_id || checkpoint_id == m_round) {
-            return Err(RigErr::Skip(E_INVALID_ORE_ACCOUNT));
+        let d = c.board.try_borrow()?;
+        let (start, end) = (rd_u64(&d, 16)?, rd_u64(&d, 24)?);
+        if !(c.slot >= start && c.slot < end) {
+            return Err(RigErr::Skip(E_ROUND_NOT_ACTIVE));
         }
     }
-    if c.executor.lamports() < RENT_EXEMPT_ZERO + CHECKPOINT_FEE {
-        return Err(RigErr::Skip(E_INVALID_EXECUTOR));
+    if !(same_round || m.checkpoint_id == m.round_id) {
+        return Err(RigErr::Skip(E_MINER_NOT_CHECKPOINTED));
     }
-    // 6. Tiles.
-    let mask = select_tiles(c.round_id, &c.deployed, split, solo);
-    // 7. CPI ORE deploy, signed by the Executor PDA; authority always rig.authority.
+    if c.pot > u64::from(max_ml).saturating_mul(ONE_ORE) || c.pot < u64::from(min_ml).saturating_mul(ONE_ORE) {
+        return Err(RigErr::Skip(E_MOTHERLODE));
+    }
+    let checkpoint_due = m.checkpoint_fee == 0;
     let exec_before = c.executor.lamports();
+    if checkpoint_due && exec_before < RENT_EXEMPT_ZERO + CHECKPOINT_FEE {
+        return Err(RigErr::Skip(E_EXECUTOR_UNDERFUNDED));
+    }
+    // ---- 6. CPI ORE deploy, signed by the Executor PDA ------------------------------------------------
     let mut data = [0u8; 13];
     data[0] = 6;
     data[1..9].copy_from_slice(&per_tile.to_le_bytes());
@@ -565,43 +656,59 @@ fn dig_one(c: &mut Ctx<'_>, group: &mut [AccountView], entry: &[u8]) -> Result<(
         ],
         &[Signer::from(&signer_seeds)],
     )?;
-    // Reload after the CPI: the Automation may have closed; count only the real debit.
-    let balance_after = if automation.owned_by(&ORE) && automation.data_len() == 160 {
-        rd_u64(&automation.try_borrow()?, 48)?
-    } else {
-        0
-    };
-    let spent = balance_before.saturating_sub(balance_after);
-    if c.executor.lamports().saturating_add(CHECKPOINT_FEE) < exec_before {
+    // ---- 7. reload + accounting -------------------------------------------------------------------
+    let exec_after = c.executor.lamports();
+    if exec_after.saturating_add(CHECKPOINT_FEE) < exec_before || (!checkpoint_due && exec_after < exec_before) {
         return Err(RigErr::Fatal(err(E_INVALID_EXECUTOR)));
     }
-    {
-        let d = c.round.try_borrow()?;
-        for (i, v) in c.deployed.iter_mut().enumerate() {
-            *v = rd_u64(&d, 16 + 8 * i)?;
-        }
+    let cp_paid = if checkpoint_due { CHECKPOINT_FEE } else { 0 };
+    let fee_received = exec_after.saturating_add(cp_paid).saturating_sub(exec_before);
+    let m_after = match read_miner(miner)? {
+        Some(x) if x.authority == rig_authority => x,
+        _ => return Err(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT))),
+    };
+    let deployed_now = if m_after.round_id == c.round_id {
+        m_after.sum.checked_sub(sum_before).ok_or(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT)))?
+    } else if m_after.round_id == m.round_id {
+        0
+    } else {
+        return Err(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT)));
+    };
+    let debit = if is_ore(automation, 160, 100) {
+        let after = rd_u64(&automation.try_borrow()?, 48)?;
+        balance_before.checked_sub(after).ok_or(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT)))?
+    } else {
+        deployed_now.saturating_add(fee_received)
+    };
+    if deployed_now > total || debit > need {
+        return Err(RigErr::Fatal(err(E_INVALID_ORE_ACCOUNT)));
+    }
+    let new_spent_shift = spent_shift.checked_add(debit).ok_or(RigErr::Fatal(err(E_MATH)))?;
+    let new_spent_week = spent_week.checked_add(debit).ok_or(RigErr::Fatal(err(E_MATH)))?;
+    if debit > cap_round || new_spent_shift > cap_shift || new_spent_week > cap_week {
+        return Err(RigErr::Fatal(err(E_BUDGET)));
     }
     {
         let mut d = rig.try_borrow_mut()?;
-        wr(&mut d, 75, &[2])?;
-        wr(&mut d, 240, &spent_shift.saturating_add(spent).to_le_bytes())?;
-        wr(&mut d, 248, &spent_week.saturating_add(spent).to_le_bytes())?;
+        wr(&mut d, 240, &new_spent_shift.to_le_bytes())?;
+        wr(&mut d, 248, &new_spent_week.to_le_bytes())?;
         wr(&mut d, 256, &week_start.to_le_bytes())?;
-        wr(&mut d, 264, &c.round_id.to_le_bytes())?;
-        let dug = rd_u64(&d, 288)?.saturating_add(1);
-        wr(&mut d, 288, &dug.to_le_bytes())?;
-        let life = rd_u64(&d, 304)?.saturating_add(1);
-        wr(&mut d, 304, &life.to_le_bytes())?;
-        let lamports = rd_u64(&d, 312)?.saturating_add(spent);
-        wr(&mut d, 312, &lamports.to_le_bytes())?;
+        if deployed_now > 0 {
+            wr(&mut d, 264, &c.round_id.to_le_bytes())?;
+            let dug = rd_u64(&d, 288)?.saturating_add(1);
+            wr(&mut d, 288, &dug.to_le_bytes())?;
+            let life = rd_u64(&d, 304)?.saturating_add(1);
+            wr(&mut d, 304, &life.to_le_bytes())?;
+            let lamports = rd_u64(&d, 312)?.saturating_add(deployed_now);
+            wr(&mut d, 312, &lamports.to_le_bytes())?;
+        }
     }
-    if spent == 0 {
-        return Err(RigErr::Skip(E_BUDGET)); // ORE no-op: no reimbursement
+    if deployed_now == 0 {
+        return Err(RigErr::Skip(E_ORE_NOOP)); // no reimbursement, no dig counters
     }
-    // 8. Reimburse the cranker, keeping the Executor float.
-    if c.executor.lamports() >= RENT_EXEMPT_ZERO + CHECKPOINT_FEE + c.crank_fee {
-        Transfer { from: c.executor, to: c.cranker, lamports: c.crank_fee }
-            .invoke_signed(&[Signer::from(&signer_seeds)])?;
+    // ---- 8. reimburse the cranker, keeping rent + EXECUTOR_RESERVE ------------------------------------
+    if c.crank_fee > 0 && c.cranker.address() != c.executor.address() && c.executor.lamports() >= RENT_EXEMPT_ZERO + EXECUTOR_RESERVE + c.crank_fee {
+        Transfer { from: c.executor, to: c.cranker, lamports: c.crank_fee }.invoke_signed(&[Signer::from(&signer_seeds)])?;
     }
-    Ok((spent, mask))
+    Ok((deployed_now, mask))
 }

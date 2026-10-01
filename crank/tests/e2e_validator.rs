@@ -1,8 +1,12 @@
 //! End to end on a real validator: `solana-test-validator` loaded with the live mainnet ORE
-//! binary and accounts (fixtures), the mock `heads_down`, and the crank's own `app::run`
-//! wiring (WebSocket watcher, intake server, planner, lookup-table management, simulate →
-//! send → confirm → events). A "phone" talks to the intake over WebSocket exactly as the
-//! Android app will.
+//! binary and accounts (fixtures), heads_down (the mock, or the real program with
+//! `--features real-program`), and the crank's own `app::run` wiring (WebSocket watcher,
+//! intake server, planner, lookup-table management, simulate → send → confirm → events). A
+//! "phone" talks to the intake over WebSocket with contract-A frames, as the Android app will.
+//!
+//! With the real program it also covers the v1.1 duties through the same process: a
+//! phone-signed BREAK and FREEZE landed by the crank, a focus-only rig's heartbeat recorded
+//! with `record_heartbeats`, and a stale shift sealed by the permissionless `end_shift` sweep.
 //!
 //! The fixture Board is rewritten to a window `[0, END)` so the round is open on a fresh
 //! ledger; everything else is byte-for-byte mainnet.
@@ -10,6 +14,7 @@
 //! ```sh
 //! cargo build-sbf --manifest-path test-fixtures/mock-heads-down/Cargo.toml
 //! ORE_FIXTURES_DIR=... cargo test --features e2e --test e2e_validator -- --nocapture
+//! ORE_FIXTURES_DIR=... HD_PROGRAM_SO=... cargo test --features e2e,real-program --test e2e_validator -- --nocapture
 //! ```
 #![cfg(feature = "e2e")]
 
@@ -23,11 +28,12 @@ use base64::Engine;
 use common::Phone;
 use futures_util::{SinkExt, StreamExt};
 use hd_crank::config::Config;
-use hd_crank::hd::{self, HdConfig, HeartbeatFields, Rig, RigAccounts, RigState};
+use hd_crank::hd::{self, HdConfig, HeartbeatFields, Rig, RigAccounts, RigState, SignalKind};
 use hd_crank::ore;
 use hd_crank::rpc::RpcClient;
 use hd_crank::sender::{ConfirmPolicy, Submitter};
 use hd_crank::tx;
+use p256::ecdsa::{signature::Signer as _, Signature};
 use serde_json::{json, Value};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
@@ -40,11 +46,24 @@ const DEPLOY_MARGIN: u64 = 160;
 const EXECUTOR_FEE: u64 = 10_000;
 const CRANK_FEE: u64 = 7_000;
 const RIGS: usize = 3;
+const REAL: bool = cfg!(feature = "real-program");
 
 fn fixtures() -> PathBuf {
     std::env::var_os("ORE_FIXTURES_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../spikes/ore-executor/fixtures"))
+}
+
+fn program_so() -> PathBuf {
+    if let Some(p) = std::env::var_os("HD_PROGRAM_SO") {
+        return PathBuf::from(p);
+    }
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if REAL {
+        base.join("../programs/heads-down/target/deploy/heads_down.so")
+    } else {
+        base.join("test-fixtures/mock-heads-down/target/deploy/mock_heads_down.so")
+    }
 }
 
 fn agave_bin() -> PathBuf {
@@ -97,14 +116,13 @@ fn pick_ports() -> u16 {
 }
 
 fn rig_account(authority: Address, pubkey: [u8; 33], now: i64) -> Rig {
+    let bump = |seed: &[u8]| Address::find_program_address(&[seed, authority.as_ref()], &ore::ORE_PROGRAM_ID).1;
     Rig {
         bump: hd::rig_pda(&hd::PROGRAM_ID, &authority).1,
         authority,
         p256_pubkey: pubkey,
         attestation_level: 1,
-        tier: 0,
         state: RigState::Armed,
-        sgt_mint: Address::default(),
         attestation_expiry_slot: u64::MAX,
         cap_week: 1_000_000_000,
         cap_shift: 100_000_000,
@@ -114,29 +132,17 @@ fn rig_account(authority: Address, pubkey: [u8; 33], now: i64) -> Rig {
         plan_max_ev_cost: u64::MAX,
         plan_dig_lamports: 1_000_000,
         plan_split_tiles: 15,
-        plan_solo_tiles: 0,
         plan_lease_rounds: 3,
-        plan_flags: 0,
         plan_window_start_ts: now - 3_600,
         plan_window_end_ts: now + 86_400,
         shift_id: 1,
-        hb_counter: 0,
-        lease_from_round: 0,
-        lease_to_round: 0,
-        gap_count: 0,
-        spent_shift: 0,
-        spent_week: 0,
         week_start_ts: now - 60,
-        last_dug_round: 0,
-        shift_start_round: 0,
-        shift_dark_rounds: 0,
-        shift_rounds_dug: 0,
-        lifetime_dark_rounds: 0,
-        lifetime_rounds_dug: 0,
-        lifetime_lamports_deployed: 0,
-        streak: 0,
         freezes_left: 2,
-        last_shift_day: 0,
+        shift_open: true,
+        ore_automation_bump: bump(ore::AUTOMATION_SEED),
+        ore_miner_bump: bump(ore::MINER_SEED),
+        shift_start_ts: now - 3_600,
+        ..Rig::default()
     }
 }
 
@@ -180,12 +186,55 @@ async fn send_legacy(rpc: &RpcClient, payer: &Keypair, ixs: &[Instruction]) -> a
     }
 }
 
+type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn ask(ws: &mut Ws, v: Value) -> Value {
+    ws.send(Message::text(v.to_string())).await.unwrap();
+    loop {
+        if let Some(Ok(Message::Text(t))) = ws.next().await {
+            return serde_json::from_str(t.as_str()).unwrap();
+        }
+    }
+}
+
+fn heartbeat_frame(phone: &Phone, rig: &Address, counter: u64, round_id: u64) -> Value {
+    let f = HeartbeatFields { counter, shift_id: 1, round_id, lease_rounds: 3 };
+    let sig = phone.sign_raw(&hd::PROGRAM_ID, rig, &f);
+    json!({ "type": "heartbeat", "rig": rig.to_string(), "counter": counter, "shift_id": 1, "round_id": round_id,
+            "lease_rounds": 3, "sig64": base64::engine::general_purpose::STANDARD.encode(sig) })
+}
+
+fn signal_frame(phone: &Phone, rig: &Address, kind: SignalKind, counter: u64, reason: u8) -> Value {
+    let digest = hd::digest(&hd::break_preimage(&hd::PROGRAM_ID, rig, kind.message_kind(), counter, 1, reason));
+    let sig: Signature = phone.sk.sign(&digest);
+    let raw: [u8; 64] = sig.to_bytes().into();
+    json!({ "type": kind.name(), "rig": rig.to_string(), "counter": counter, "shift_id": 1, "reason": reason,
+            "sig64": base64::engine::general_purpose::STANDARD.encode(raw) })
+}
+
+async fn read_rig(rpc: &RpcClient, a: &Address) -> Rig {
+    let acc = rpc.get_account(a).await.unwrap().unwrap();
+    Rig::decode(&hd::PROGRAM_ID, &acc.owner, &acc.data).unwrap()
+}
+
+async fn wait_rig(rpc: &RpcClient, a: &Address, what: &str, deadline: Instant, ok: impl Fn(&Rig) -> bool) -> Rig {
+    loop {
+        let r = read_rig(rpc, a).await;
+        if ok(&r) {
+            return r;
+        }
+        assert!(Instant::now() < deadline, "{what}: rig {a} state {:?} counter {}", r.state, r.hb_counter);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn crank_digs_on_a_local_validator() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let _ = tracing_subscriber::fmt().with_env_filter("hd_crank=info,e2e_validator=info").with_test_writer().try_init();
-    let mock = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-fixtures/mock-heads-down/target/deploy/mock_heads_down.so");
-    assert!(mock.exists(), "build the mock first: cargo build-sbf --manifest-path test-fixtures/mock-heads-down/Cargo.toml");
+    let so = program_so();
+    assert!(so.exists(), "missing {} (build the mock or the real program first)", so.display());
+    println!("heads_down under test: {} ({})", so.display(), if REAL { "real program" } else { "mock" });
     let dir = tempfile::tempdir().unwrap();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
 
@@ -238,6 +287,26 @@ async fn crank_digs_on_a_local_validator() {
         add(&mut args, &rig_addr, account_json(dir.path(), &rig_addr, 10_000_000, &hd::PROGRAM_ID, &rig.encode()));
         users.push((wallet, phone, rig_addr));
     }
+    // A focus-only rig (record_heartbeats) and a rig whose shift is past its window (end_shift).
+    let focus_phone = Phone::new(7_100);
+    let focus_wallet = Address::new_from_array([0xF0; 32]);
+    let focus = hd::rig_pda(&hd::PROGRAM_ID, &focus_wallet).0;
+    let mut focus_rig = rig_account(focus_wallet, focus_phone.pubkey(), now);
+    focus_rig.plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+    focus_rig.plan_split_tiles = 0;
+    focus_rig.plan_dig_lamports = 0;
+    focus_rig.shift_start_round = round_id;
+    add(&mut args, &focus, account_json(dir.path(), &focus, 10_000_000, &hd::PROGRAM_ID, &focus_rig.encode()));
+    let stale_wallet = Address::new_from_array([0xF1; 32]);
+    let stale = hd::rig_pda(&hd::PROGRAM_ID, &stale_wallet).0;
+    let mut stale_rig = rig_account(stale_wallet, Phone::new(7_101).pubkey(), now);
+    stale_rig.state = RigState::Down;
+    stale_rig.plan_window_end_ts = now - 600;
+    stale_rig.shift_start_round = round_id - 5;
+    stale_rig.shift_dark_rounds = 2;
+    stale_rig.lease_from_round = round_id - 3;
+    stale_rig.lease_to_round = round_id - 2;
+    add(&mut args, &stale, account_json(dir.path(), &stale, 10_000_000, &hd::PROGRAM_ID, &stale_rig.encode()));
 
     // ---- validator ------------------------------------------------------------------------------
     let base = pick_ports();
@@ -254,7 +323,7 @@ async fn crank_digs_on_a_local_validator() {
         .args(["--bpf-program", &ore::ENTROPY_PROGRAM_ID.to_string()])
         .arg(fixtures().join("entropy.so"))
         .args(["--bpf-program", &hd::PROGRAM_ID.to_string()])
-        .arg(&mock)
+        .arg(&so)
         .args(&args)
         .stdout(Stdio::from(log.try_clone().unwrap()))
         .stderr(Stdio::from(log))
@@ -303,6 +372,12 @@ min_slots_left = 3
 ore_programdata_slot = 0
 checkpoint_sweep = false
 config_poll_secs = 5
+[record]
+delay_secs = 12
+[end_shift]
+poll_secs = 3
+grace_secs = 0
+enabled = {REAL}
 "#,
         ws = base + 1,
         state = dir.path().join("state").display(),
@@ -320,14 +395,6 @@ config_poll_secs = 5
             Err(e) => panic!("intake never came up: {e}"),
         }
     };
-    async fn ask(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, v: Value) -> Value {
-        ws.send(Message::text(v.to_string())).await.unwrap();
-        loop {
-            if let Some(Ok(Message::Text(t))) = ws.next().await {
-                return serde_json::from_str(t.as_str()).unwrap();
-            }
-        }
-    }
     let status = loop {
         let s = ask(&mut ws, json!({ "type": "status" })).await;
         if s["round_id"].is_u64() {
@@ -337,15 +404,12 @@ config_poll_secs = 5
     };
     assert_eq!(status["round_id"], round_id, "the phone learns Board.round_id from the crank");
     for (_, phone, rig) in &users {
-        let f = HeartbeatFields { counter: 1, shift_id: 1, round_id, lease_rounds: 3 };
-        let sig = phone.sign_raw(&hd::PROGRAM_ID, rig, &f);
-        let ack = ask(
-            &mut ws,
-            json!({ "type": "heartbeat", "rig": rig.to_string(), "counter": 1, "shift_id": 1, "round_id": round_id,
-                    "lease_rounds": 3, "sig64": base64::engine::general_purpose::STANDARD.encode(sig) }),
-        )
-        .await;
-        assert_eq!(ack["status"], "accepted", "{ack}");
+        let ack = ask(&mut ws, heartbeat_frame(phone, rig, 1, round_id)).await;
+        assert_eq!(ack, json!({ "type": "ack", "counter": 1, "ok": true, "reason": "accepted" }), "contract A ack");
+    }
+    if REAL {
+        let ack = ask(&mut ws, heartbeat_frame(&focus_phone, &focus, 1, round_id)).await;
+        assert_eq!(ack["ok"], true, "{ack}");
     }
     println!("heartbeats accepted at slot {}", rpc.get_slot("confirmed").await.unwrap());
 
@@ -369,18 +433,59 @@ config_poll_secs = 5
     assert!(dug_slot >= END_SLOT - DEPLOY_MARGIN, "digs happen late in the round, not before the window");
     assert!(dug_slot < END_SLOT + 32);
 
-    // ORE state moved: each Automation paid per_tile * 15 + fee.
+    // ORE state moved: each Automation paid per_tile * 15 on squares + the executor fee.
     for (wallet, _, _) in &users {
         let a = rpc.get_account(&ore::automation_pda(&wallet.pubkey())).await.unwrap().unwrap();
         let au = ore::Automation::decode(&a.owner, &a.data).unwrap();
         assert_eq!(au.balance, 100_000_000 - (1_000_000 / 15) * 15 - EXECUTOR_FEE);
     }
 
+    if REAL {
+        // ---- a phone-signed BREAK and FREEZE, landed by the crank ------------------------------
+        let (_, p0, r0) = &users[0];
+        let ack = ask(&mut ws, signal_frame(p0, r0, SignalKind::Break, 2, hd::reason::PICKUP)).await;
+        assert_eq!(ack, json!({ "type": "ack", "counter": 2, "ok": true, "reason": "accepted" }));
+        let t_break = Instant::now();
+        let r = wait_rig(&rpc, r0, "BREAK landed", Instant::now() + Duration::from_secs(60), |r| r.state == RigState::Cooling).await;
+        println!("BREAK pickup landed {:?} after the ack: rig Cooling, hb_counter {}", t_break.elapsed(), r.hb_counter);
+        assert_eq!((r.hb_counter, r.break_reason), (2, hd::reason::PICKUP));
+        // The same frame again: acknowledged, never resubmitted.
+        let again = ask(&mut ws, signal_frame(p0, r0, SignalKind::Break, 2, hd::reason::PICKUP)).await;
+        assert_eq!(again["ok"], true);
+        let (_, p1, r1) = &users[1];
+        let ack = ask(&mut ws, signal_frame(p1, r1, SignalKind::Freeze, 2, hd::reason::FREEZE)).await;
+        assert_eq!(ack["ok"], true, "{ack}");
+        let r = wait_rig(&rpc, r1, "FREEZE landed", Instant::now() + Duration::from_secs(60), |r| r.state == RigState::Frozen).await;
+        assert_eq!((r.hb_counter, r.break_reason), (2, hd::reason::FREEZE));
+
+        // ---- the focus-only rig's heartbeat, recorded without a deploy -------------------------
+        let r = wait_rig(&rpc, &focus, "record_heartbeats", Instant::now() + Duration::from_secs(90), |r| r.hb_counter == 1).await;
+        println!("focus-only rig recorded: state {:?}, lease [{}, {}], dark rounds {}", r.state, r.lease_from_round, r.lease_to_round, r.shift_dark_rounds);
+        assert_eq!((r.state, r.lease_from_round, r.lease_to_round, r.shift_dark_rounds, r.last_dug_round), (RigState::Down, round_id, round_id + 2, 3, 0));
+
+        // ---- the stale shift, sealed by the permissionless end_shift sweep --------------------
+        let r = wait_rig(&rpc, &stale, "end_shift", Instant::now() + Duration::from_secs(60), |r| !r.shift_open).await;
+        assert_eq!(r.state, RigState::Idle);
+        let log_addr = hd::shift_log_pda(&hd::PROGRAM_ID, &stale, 1).0;
+        let log = rpc.get_account(&log_addr).await.unwrap().expect("ShiftLog created by the crank");
+        let sl = hd::ShiftLog::decode(&hd::PROGRAM_ID, &log.owner, &log.data).unwrap();
+        println!("stale shift sealed: ShiftLog {log_addr} reason {} dark {} rounds {}..{}", hd::reason_name(sl.break_reason), sl.dark_rounds, sl.start_round, sl.end_round);
+        assert_eq!((sl.shift_id, sl.dark_rounds, sl.break_reason, sl.start_round, sl.end_round), (1, 2, 0, round_id - 5, round_id));
+        assert_eq!(log.lamports, 1_781_760, "the crank paid the ShiftLog rent");
+    }
+
     // Metrics and health from the running binary wiring.
     let metrics_url = format!("127.0.0.1:{listen_port}");
+    let want_landed = format!("hd_crank_digs_landed_total {RIGS}");
     let body = loop {
         let b = http_get(&metrics_url, "/metrics").await;
-        if b.contains(&format!("hd_crank_digs_landed_total {RIGS}")) || Instant::now() > deadline {
+        let complete = b.contains(&want_landed)
+            && (!REAL
+                || (b.contains("hd_crank_signals_landed_total{kind=\"break\"} 1")
+                    && b.contains("hd_crank_signals_landed_total{kind=\"freeze\"} 1")
+                    && b.contains("hd_crank_heartbeats_recorded_total 1")
+                    && b.contains("hd_crank_shifts_ended_total 1")));
+        if complete || Instant::now() > deadline {
             break b;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -388,9 +493,16 @@ config_poll_secs = 5
     for line in body.lines().filter(|l| l.starts_with("hd_crank_") && !l.starts_with("hd_crank_heartbeats_rejected")) {
         println!("  {line}");
     }
-    assert!(body.contains(&format!("hd_crank_digs_landed_total {RIGS}")), "{body}");
-    assert!(body.contains("hd_crank_heartbeats_accepted_total 3"));
+    assert!(body.contains(&want_landed), "{body}");
+    assert!(body.contains(&format!("hd_crank_squares_lamports_total {}", RIGS as u64 * (1_000_000 / 15) * 15)), "RigDug.lamports summed");
+    assert!(body.contains(&format!("hd_crank_heartbeats_accepted_total {}", if REAL { RIGS + 1 } else { RIGS })));
     assert!(body.contains("hd_crank_circuit_breaker_tripped 0"));
+    if REAL {
+        assert!(body.contains("hd_crank_signals_landed_total{kind=\"break\"} 1"), "{body}");
+        assert!(body.contains("hd_crank_signals_landed_total{kind=\"freeze\"} 1"), "{body}");
+        assert!(body.contains("hd_crank_heartbeats_recorded_total 1"), "{body}");
+        assert!(body.contains("hd_crank_shifts_ended_total 1"), "{body}");
+    }
     let state = std::fs::read_to_string(dir.path().join("state/lookup_tables.json")).expect("crank created a lookup table");
     println!("lookup tables: {state}");
     // The crank registered every rig's four accounts in its table as they appeared.
