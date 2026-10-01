@@ -116,6 +116,15 @@ PLAN (113):        "HDv1" | program_id(32) | rig(32) | kind=4 | counter u64 | ma
   `InstructionVectorsTest` (`HD_WRITE_VECTORS=1`), for the program's crosscheck
   (`programs/heads-down/vectors/crosscheck/run.sh`, step 1).
 - `core/keys/src/test/resources/vectors.json`: the RFC 6979 message vectors shared with Rust.
+- `core/chain` **DevstackClockInE2ETest** (opt-in, skipped by default) runs the phone's own code
+  against a live devstack: the composed clock-in lands on the fork, a contract-A heartbeat signed
+  like the Keystore key is acked by the real crank, and the crank's dig places the whole planned
+  dig with the executor fee taken inside `cap_round`:
+
+  ```sh
+  HD_DEVSTACK_RPC=http://127.0.0.1:8899 HD_DEVSTACK_CRANK_WS=ws://127.0.0.1:8787/ws \
+    ./gradlew :core:chain:testDebugUnitTest --tests '*DevstackClockInE2ETest*'
+  ```
 
 ## Clock-in (one wallet approval)
 
