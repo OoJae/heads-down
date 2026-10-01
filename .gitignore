@@ -41,3 +41,6 @@ spikes/**/fixtures/*.bin
 
 # Agent worktrees / local tooling
 .claude/
+
+# Browser-tool scratch output
+.playwright-mcp/
