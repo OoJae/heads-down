@@ -22,6 +22,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.FileProvider
 import androidx.core.graphics.toColorInt
+import xyz.headsdown.feature.shift.foreman.ForemanDiagnostics
 import xyz.headsdown.feature.shift.foreman.ForemanSettings
 import xyz.headsdown.ml.ForemanModels
 import java.text.SimpleDateFormat
@@ -155,7 +156,11 @@ class SensorLabActivity : Activity() {
     private fun renderClassifier() {
         val on = foremanSettings.pickupBreaksEnabled
         breaksSwitch.text = if (on) "Pickup breaks: ON (tap to switch off)" else "Pickup breaks: OFF (tap to switch on)"
-        classifierStatus.text = if (benchmarking) "Benchmarking…" else benchmarkLine
+        // What the shift service's pickup watch saw the last time it ran in this process: the
+        // delivered sample rate and how many windows were judged. Counts only.
+        val lastShift = ForemanDiagnostics.lastRun?.let { "Last shift: ${it.summary()}" }
+            ?: "No shift has run since the app started."
+        classifierStatus.text = (if (benchmarking) "Benchmarking…" else benchmarkLine) + "\n" + lastShift
     }
 
     /** Debug hook: per-window inference time on this device, off the main thread. */
@@ -184,6 +189,7 @@ class SensorLabActivity : Activity() {
     override fun onStart() {
         super.onStart()
         main.post(poll)
+        if (::classifierStatus.isInitialized) renderClassifier() // a shift may have ended meanwhile
     }
 
     override fun onStop() {

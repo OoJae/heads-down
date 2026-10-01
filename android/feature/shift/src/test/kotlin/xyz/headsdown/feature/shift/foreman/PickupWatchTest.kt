@@ -414,6 +414,32 @@ class PickupWatchTest {
         assertEquals(0, watch.stats.judged)
     }
 
+    // ------------------------------------------------------------------ what a night on a real phone can be checked by
+
+    @Test
+    fun `the watch counts the stream it was fed, and the debug summary reports the delivered rate`() {
+        val watch = PickupWatch({ Always(PickupVerdict.NOT_PICKUP) }, direct, onPickup = {})
+        assertEquals(0L, watch.samples)
+        assertEquals(0.0, watch.streamSeconds, 0.0)
+        watch.onRig(hot = true)
+        val stream = StreamBuilder(rateHz = 50.0).rest(60.0).knock().rest(59.94).build()
+        stream.forEach(watch::onSample)
+        assertEquals(stream.size.toLong(), watch.samples)
+        assertEquals(120.0, watch.streamSeconds, 0.1)
+
+        val run = ForemanDiagnostics.LastRun(0, "pickup_logistic", breaksEnabled = true, watch.stats, watch.samples, watch.streamSeconds)
+        assertEquals(50.0, run.deliveredHz, 0.1)
+        assertEquals(
+            "pickup_logistic: 50.0 Hz over 2 min; 1 triggers (0 re-fires, 0 while not hot, 0 interrupted), 1 judged, 0 pickups",
+            run.summary(),
+        )
+        // A stream the classifier cannot use shows up as its rate, and a switched-off classifier says so.
+        val sparse = ForemanDiagnostics.LastRun(0, "pickup_logistic", breaksEnabled = false, PickupWatch.Stats(triggers = 3, switchedOff = 3), 9_000, 600.0)
+        assertEquals(15.0, sparse.deliveredHz, 0.0)
+        assertTrue(sparse.summary().startsWith("pickup_logistic (breaks switched off, 3 windows not judged): 15.0 Hz over 10 min"))
+        assertEquals(0.0, ForemanDiagnostics.LastRun(0, "x", true, PickupWatch.Stats(), 0, 0.0).deliveredHz, 0.0)
+    }
+
     // ------------------------------------------------------------------ cost
 
     @Test

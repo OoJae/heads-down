@@ -11,7 +11,7 @@ they are allowed to do, and what is still untested. Package
 | `RhythmRecorder`, `PlannerLog` | Write the Shift Planner's log from the service's receivers, in app-private storage | Live |
 | `PlannerRepository` | Runs the planner, publishes `TonightPlan` (window, week's budget split, signable plan) as a `StateFlow` | Live; nothing shows it yet |
 | `AutoArmPolicy`, `PlanArmer`, `ForemanSettings.autoArmEnabled` | Decide when a phone on its charger may arm a shift by itself | **Groundwork only. Off by default, and nothing calls it** |
-| `PickupBenchmark` (debug) | Times the classifier on the device | Debug and localdev builds only |
+| `PickupBenchmark` (debug), `ForemanDiagnostics` | Time the classifier on the device; show what the watch saw in the last shift (counts and the delivered sample rate) | Sensor lab screen, debug and localdev builds only |
 
 Everything below was verified with JVM unit tests only. The Redmi 14C was not connected, so no
 part of this has run on a phone: see [the device checklist](#device-checklist).
@@ -223,12 +223,20 @@ Every line must hold. Anything unknown is a reason to hold.
 
 Not done: the Redmi 14C was not connected.
 
-1. **Delivered rate.** Sensor lab → record 30 s face-down with the screen off: about 50
-   samples a second. Under about 20 Hz every window is unusable, so every motion of a hot rig
-   breaks the shift (fail-closed). If that happens, switch pickup breaks off and report it.
+The sensor lab screen (debug and localdev builds) shows a "Last shift" line after every shift
+that ran since the app started: the model, the sample rate the accelerometer really delivered,
+and how many triggers were re-fires, not hot, interrupted, judged and called a pickup. Counts
+only, kept in memory.
+
+1. **Delivered rate.** Run a short shift with the screen off, then read "Last shift": it
+   should say about 50 Hz. Under about 20 Hz every window is unusable, so every motion of a
+   hot rig breaks the shift (fail-closed). If that happens, switch pickup breaks off and
+   report it.
 2. **Benchmark.** Sensor lab → "Benchmark the classifier on this phone".
-3. **A quiet night.** Arm, lay the phone down: the shift must still be hot after 10 minutes.
-4. **Bumps.** Knock the nightstand: no break.
+3. **A quiet night.** Arm, lay the phone down: the shift must still be hot after 10 minutes,
+   and "Last shift" should show few triggers and no pickup. Many re-fires would mean the rest
+   test is not settling the trigger on this sensor.
+4. **Bumps.** Knock the nightstand: no break, and one more window judged.
 5. **A flat carry.** Lift the phone without tilting it and walk away with the screen off: the
    shift breaks about 3 s later as "the phone was picked up".
 6. **The planner log.** `run-as xyz.headsdown cat files/foreman/planner.jsonl` after a shift.

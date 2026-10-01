@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import xyz.headsdown.core.keys.SignedShiftSignal
+import xyz.headsdown.feature.shift.foreman.ForemanDiagnostics
 import xyz.headsdown.feature.shift.foreman.ForemanRuntime
 import xyz.headsdown.feature.shift.foreman.ForemanSettings
 import xyz.headsdown.feature.shift.foreman.PickupWatch
@@ -200,11 +201,12 @@ class ShiftForegroundService : LifecycleService() {
             enabled = { settings.pickupBreaksEnabled },
         )
         // Read the model off the main thread now, not when the first motion window closes.
-        foremanExecutor.execute { foreman.pickupClassifier }
+        // (Nothing may escape a task on this thread: it would take the app down.)
+        foremanExecutor.execute { runCatching { foreman.pickupClassifier } }
         rhythm = RhythmRecorder(plannerLog, System::currentTimeMillis, foremanExecutor)
         rhythm.monitorStart(screenOn, charging, nextAlarmWallMillis())
         // Tonight's plan for whoever shows it, made once the lines above are on disk.
-        foremanExecutor.execute { planner.requestRefresh() }
+        foremanExecutor.execute { runCatching { planner.requestRefresh() } }
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -401,7 +403,7 @@ class ShiftForegroundService : LifecycleService() {
         // Close the planner log's session, re-plan from the night just observed (after every
         // line is on disk), then let the Foreman thread finish what is queued and end.
         if (::rhythm.isInitialized) rhythm.monitorStop()
-        runCatching { foremanExecutor.execute { planner.requestRefresh() } }
+        runCatching { foremanExecutor.execute { runCatching { wrapUpForeman() } } }
         foremanExecutor.shutdown()
         // Keep a finished shift's outcome (broken reason / frozen) visible; anything else is cold.
         val last = snapshot.state
@@ -409,6 +411,23 @@ class ShiftForegroundService : LifecycleService() {
             if (last is ShiftState.Broken || last is ShiftState.Frozen) snapshot else ShiftSnapshot.IDLE,
         )
         super.onDestroy()
+    }
+
+    /** Foreman thread, last task of the service: the plan for the next night, and the debug counts. */
+    private fun wrapUpForeman() {
+        planner.requestRefresh()
+        // Counts only, in memory, for the debug sensor lab screen: was the stream 50 Hz, and what
+        // did the classifier see?
+        if (::pickupWatch.isInitialized) {
+            ForemanDiagnostics.lastRun = ForemanDiagnostics.LastRun(
+                endedWallMillis = System.currentTimeMillis(),
+                model = foreman.pickupModelName,
+                breaksEnabled = settings.pickupBreaksEnabled,
+                stats = pickupWatch.stats,
+                samples = pickupWatch.samples,
+                streamSeconds = pickupWatch.streamSeconds,
+            )
+        }
     }
 
     private fun publish() {

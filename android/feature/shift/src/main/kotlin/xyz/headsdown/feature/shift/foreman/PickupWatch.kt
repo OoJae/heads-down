@@ -87,6 +87,17 @@ internal class PickupWatch(
 
     val stats: Stats get() = Stats(triggers, reFires, notHot, interruptedWindows + staleVerdicts, judged, pickups, switchedOff)
 
+    // The stream itself, for the one question a real phone has to answer: is it 50 Hz?
+    @Volatile private var sampleCount = 0L
+    @Volatile private var firstNanos = 0L
+    @Volatile private var lastNanos = 0L
+
+    /** Samples seen so far. */
+    val samples: Long get() = sampleCount
+
+    /** Sensor time between the first and the last sample, seconds. */
+    val streamSeconds: Double get() = if (sampleCount < 2) 0.0 else (lastNanos - firstNanos) / 1e9
+
     /** Main thread, after every transition: is the rig DOWN with the screen off? */
     fun onRig(hot: Boolean) {
         val now = epoch
@@ -99,7 +110,12 @@ internal class PickupWatch(
     }
 
     /** Sensor thread: every accelerometer sample of the service's life. */
-    fun onSample(tNanos: Long, x: Float, y: Float, z: Float) = collector.onSample(tNanos, x, y, z)
+    fun onSample(tNanos: Long, x: Float, y: Float, z: Float) {
+        if (sampleCount == 0L) firstNanos = tNanos
+        lastNanos = tNanos
+        sampleCount++
+        collector.onSample(tNanos, x, y, z)
+    }
 
     override fun onTrigger(triggerNanos: Long, onset: Boolean): Int {
         triggers++
