@@ -26,7 +26,7 @@ use hd::{
     events as ev,
     instructions::HeartbeatEntry,
     message::{self, kind, Plan},
-    state::{break_reason, plan_flags},
+    state::{break_reason, gift_kind, plan_flags},
 };
 use p256::ecdsa::{signature::Signer as _, DerSignature};
 use p256_introspect::client::der_to_low_s_raw;
@@ -127,6 +127,10 @@ impl Fields {
     }
     fn u16(mut self, name: &str, v: u16) -> Self {
         self.push(name, "u16", &v.to_le_bytes(), json!(v));
+        self
+    }
+    fn u32(mut self, name: &str, v: u32) -> Self {
+        self.push(name, "u32", &v.to_le_bytes(), json!(v));
         self
     }
     fn u64(mut self, name: &str, v: u64) -> Self {
@@ -252,6 +256,34 @@ fn pda_ata(owner: &Address, mint: &Address) -> Pda {
         .key("token_program", &token_2022_id())
         .key("mint", mint)
 }
+/// A classic SPL Token ATA (SKR, ORE).
+fn pda_spl_ata(owner: &Address, mint: &Address) -> Pda {
+    Pda::new(ATA_PROGRAM, "AssociatedToken")
+        .key("owner", owner)
+        .key("token_program", &SPL_TOKEN)
+        .key("mint", mint)
+}
+fn pda_table(host: &Address, table_id: u64) -> Pda {
+    hd_pda()
+        .lit("stack")
+        .key("host", host)
+        .u64("table_id", table_id)
+}
+fn pda_stack_seat(table: &Address, key_label: &str, key: &Address) -> Pda {
+    hd_pda().lit("stackseat").key("table", table).key(key_label, key)
+}
+fn pda_bond(rig: &Address, shift_id: u64) -> Pda {
+    hd_pda().lit("bond").key("rig", rig).u64("shift_id", shift_id)
+}
+fn pda_gift(sender: &Address, nonce: u64) -> Pda {
+    hd_pda().lit("gift").key("sender", sender).u64("nonce", nonce)
+}
+fn pda_bury() -> Pda {
+    hd_pda().lit("bury")
+}
+fn pda_stake(seed: &str) -> Pda {
+    Pda::new(ore_stake_id(), "ORE stake").lit(seed)
+}
 
 /// An account slot of a vector: role name and optional derivation.
 struct Slot {
@@ -295,6 +327,19 @@ pub fn event_name(tag: u8) -> &'static str {
         ev::tag::HEARTBEATS_RECORDED => "HeartbeatsRecorded",
         ev::tag::SHIFT_BROKEN => "ShiftBroken",
         ev::tag::SHIFT_ENDED_V2 => "ShiftEndedV2",
+        ev::tag::STACK_OPENED => "StackOpened",
+        ev::tag::STACK_JOINED => "StackJoined",
+        ev::tag::STACK_CHECKIN => "StackCheckin",
+        ev::tag::STACK_SETTLED => "StackSettled",
+        ev::tag::STACK_CLAIMED => "StackClaimed",
+        ev::tag::FOCUS_BOND_LOCKED => "FocusBondLocked",
+        ev::tag::FOCUS_BOND_RELEASED => "FocusBondReleased",
+        ev::tag::FOCUS_BOND_FORFEITED => "FocusBondForfeited",
+        ev::tag::GIFT_CREATED => "GiftCreated",
+        ev::tag::GIFT_CLAIMED => "GiftClaimed",
+        ev::tag::GIFT_REFUNDED => "GiftRefunded",
+        ev::tag::BURY_LOT_ADDED => "BuryLotAdded",
+        ev::tag::BURY_AUCTION_SOLD => "BuryAuctionSold",
         _ => "Unknown",
     }
 }
@@ -357,6 +402,104 @@ pub fn event_layout(tag: u8) -> Vec<(&'static str, &'static str, usize, usize)> 
             ("end_round", "u64", 8),
             ("mode", "u8", 1),
         ],
+        ev::tag::STACK_OPENED => &[
+            ("table", "pubkey", 32),
+            ("host", "pubkey", 32),
+            ("table_id", "u64", 8),
+            ("bond", "u64", 8),
+            ("start_round", "u64", 8),
+            ("end_round", "u64", 8),
+            ("grace_gaps", "u32", 4),
+            ("flags", "u8", 1),
+            ("max_seats", "u8", 1),
+        ],
+        ev::tag::STACK_JOINED => &[
+            ("table", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("authority", "pubkey", 32),
+            ("sgt_mint", "pubkey", 32),
+            ("bond", "u64", 8),
+            ("seat_index", "u8", 1),
+        ],
+        ev::tag::STACK_CHECKIN => &[
+            ("table", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("round_id", "u64", 8),
+            ("checked_rounds", "u64", 8),
+            ("result", "u32", 4),
+        ],
+        ev::tag::STACK_SETTLED => &[
+            ("table", "pubkey", 32),
+            ("total_bonds", "u64", 8),
+            ("finisher_bonds", "u64", 8),
+            ("payouts_total", "u64", 8),
+            ("bury_amount", "u64", 8),
+            ("seats", "u8", 1),
+            ("finishers", "u8", 1),
+        ],
+        ev::tag::STACK_CLAIMED => &[
+            ("table", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("authority", "pubkey", 32),
+            ("amount", "u64", 8),
+            ("kind", "u8", 1),
+        ],
+        ev::tag::FOCUS_BOND_LOCKED => &[
+            ("bond", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("authority", "pubkey", 32),
+            ("shift_id", "u64", 8),
+            ("amount", "u64", 8),
+        ],
+        ev::tag::FOCUS_BOND_RELEASED => &[
+            ("bond", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("shift_id", "u64", 8),
+            ("amount", "u64", 8),
+        ],
+        ev::tag::FOCUS_BOND_FORFEITED => &[
+            ("bond", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("shift_id", "u64", 8),
+            ("amount", "u64", 8),
+            ("reason", "u8", 1),
+        ],
+        ev::tag::GIFT_CREATED => &[
+            ("gift", "pubkey", 32),
+            ("sender", "pubkey", 32),
+            ("recipient", "pubkey", 32),
+            ("lamports", "u64", 8),
+            ("expiry_ts", "i64", 8),
+            ("recipient_kind", "u8", 1),
+        ],
+        ev::tag::GIFT_CLAIMED => &[
+            ("gift", "pubkey", 32),
+            ("claimer", "pubkey", 32),
+            ("lamports", "u64", 8),
+            ("recipient_kind", "u8", 1),
+        ],
+        ev::tag::GIFT_REFUNDED => &[
+            ("gift", "pubkey", 32),
+            ("sender", "pubkey", 32),
+            ("lamports", "u64", 8),
+        ],
+        ev::tag::BURY_LOT_ADDED => &[
+            ("source", "pubkey", 32),
+            ("amount", "u64", 8),
+            ("lot_skr", "u64", 8),
+            ("start_price", "u64", 8),
+            ("start_slot", "u64", 8),
+            ("source_kind", "u8", 1),
+        ],
+        ev::tag::BURY_AUCTION_SOLD => &[
+            ("buyer", "pubkey", 32),
+            ("skr_amount", "u64", 8),
+            ("price", "u64", 8),
+            ("ore_paid", "u64", 8),
+            ("ore_burned", "u64", 8),
+            ("ore_shared", "u64", 8),
+            ("lot_remaining", "u64", 8),
+        ],
         _ => &[],
     };
     let mut off = 1;
@@ -381,6 +524,7 @@ pub fn decode_with_layout(bytes: &[u8]) -> Value {
             "u8" => json!(b[0]),
             "u32" => json!(u32::from_le_bytes(b.try_into().unwrap())),
             "u64" => s(u64::from_le_bytes(b.try_into().unwrap())),
+            "i64" => s(i64::from_le_bytes(b.try_into().unwrap())),
             "pubkey" => s(Address::new_from_array(b.try_into().unwrap())),
             _ => unreachable!(),
         };
@@ -674,6 +818,30 @@ fn pinned_json(env: &Env) -> Value {
             "amount_per_square": s(TILE_CAP),
             "executor": s(EXECUTOR),
         },
+        "skr_v1_2": {
+            "ore_stake_program_sha256": "1ea52a5d8954b39b6a1bf876c2a937344ad9f84574bd1dc3c4a89769effddd6a (live mainnet ORE stake program, tests/fixtures/ore_stake.so, fetched 2026-10-01)",
+            "skr_mint": {"address": s(SKR_MINT), "token_program": "SPL Token", "decimals": 6},
+            "ore_mint": {"address": s(ORE_MINT), "token_program": "SPL Token", "decimals": 11},
+            "stake_vesting": "pinned fully vested, start_time = T0 - 7200, so ORE bury's distribute vests nothing",
+            "stack": {
+                "bond_cap_in_person": s(hd::skr::STACK_BOND_CAP),
+                "bond_cap_remote": s(hd::skr::REMOTE_BOND_CAP),
+                "guest_bond_cap": s(hd::skr::GUEST_BOND_CAP),
+                "finisher_bps": hd::skr::FINISHER_BPS,
+                "max_seats": hd::skr::MAX_SEATS,
+            },
+            "focus_bond_cap": s(hd::skr::FOCUS_BOND_CAP),
+            "max_gift_lamports": s(hd::skr::MAX_GIFT_LAMPORTS),
+            "gift_expiry_secs": s(hd::skr::GIFT_EXPIRY_SECS),
+            "bury_auction": {
+                "price_unit": "ORE atoms (1e-11 ORE) per whole SKR (1e6 base units)",
+                "initial_start_price": s(hd::skr::INITIAL_START_PRICE),
+                "start_multiplier": hd::skr::START_MULTIPLIER,
+                "max_start_price": s(hd::skr::MAX_START_PRICE),
+                "floor_price": s(hd::skr::FLOOR_PRICE),
+                "window_slots": s(hd::skr::WINDOW_SLOTS),
+            },
+        },
     })
 }
 
@@ -690,7 +858,7 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
     let erin = User::with_keys(&mut env, [0xE5; 32], [0x55; 32]);
     let frank = User::with_keys(&mut env, [0xF6; 32], [0x66; 32]);
     let grace = User::with_keys(&mut env, [0x97; 32], [0x77; 32]);
-    let users = json!([
+    let mut users = json!([
         user_json(
             "alice",
             &alice,
@@ -1480,24 +1648,29 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
     let c = rec.env.config();
     assert_eq!((c.crank_fee.get(), c.bury_bps.get()), (4_500, 250));
 
+    // ---- v1.2 (SKR), additive: appended so every v1.1 vector is unchanged --
+    let skr_users = skr_vectors(&mut rec, &cranker);
+    users.as_array_mut().unwrap().extend(skr_users);
+
     // Every tag appears.
     let tags: std::collections::BTreeSet<u8> = rec
         .vectors
         .iter()
         .map(|v| v["tag"].as_u64().unwrap() as u8)
         .collect();
-    assert_eq!(tags.len(), 15, "every instruction tag has a vector");
+    assert_eq!(tags.len(), 28, "every instruction tag has a vector");
 
     let doc = json!({
         "format": "heads-down/golden-instructions",
-        "interface_version": "1.1",
+        "interface_version": "1.2",
         "generated_by": "programs/heads-down/tests/src/vectors.rs (HD_WRITE_VECTORS=1 cargo +1.97.1 test -p heads-down-tests --test vectors)",
         "notes": [
             "Every vector below was executed, in the order of `scenario`, on the LiteSVM fork of live mainnet ORE with the mainnet heads_down build and signature verification on; `litesvm.result` is what happened.",
             "All integers little-endian. u64/i64 values are decimal strings. `data_layout` gives every field's offset and size inside the instruction data (tag at offset 0).",
             "`accounts` is the exact ordered AccountMeta list the program accepted; `pda` gives the seeds and program each derived address comes from (bump = canonical find_program_address bump).",
             "`transaction.instructions` is the whole transaction: companion instructions (compute budget, Secp256r1SigVerify, Ed25519SigVerify) are given in full so hb_ix / p256_ix / ed25519_ix are real top-level indices.",
-            "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched."
+            "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched.",
+            "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned."
         ],
         "program_id": s(HD),
         "program_id_hex": hex(HD.as_ref()),
@@ -1517,6 +1690,12 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
             "ed25519_program": s(ED25519),
             "compute_budget_program": s(compute_budget_id()),
             "token_2022_program": s(token_2022_id()),
+            "spl_token_program": s(SPL_TOKEN),
+            "associated_token_program": s(ATA_PROGRAM),
+            "skr_mint": s(SKR_MINT),
+            "ore_mint": s(ORE_MINT),
+            "ore_stake_program": s(ore_stake_id()),
+            "bury_vault": s(BURY),
         },
         "pinned_fork": pinned,
         "keys": keys,
@@ -1525,6 +1704,671 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         "instructions": rec.vectors,
     });
     (doc, rec.samples)
+}
+
+// ---- v1.2 (SKR) vectors -------------------------------------------------------------
+
+/// A plan whose window is `[now - 1 h, now + 8 h]`.
+fn plan_around(now: i64, lease: u8, flags: u8) -> Plan {
+    let mut p = standard_plan();
+    p.lease = lease;
+    p.flags = flags;
+    p.window_start = now - 3_600;
+    p.window_end = now + 8 * 3_600;
+    p
+}
+
+fn skr_slots(roles: &[(&str, Option<Pda>)]) -> Vec<Slot> {
+    roles.iter().map(|(r, p)| slot(r, p.clone())).collect()
+}
+
+/// Execute and record every v1.2 instruction (tags 15..=27), continuing the
+/// v1.1 scenario. Returns the users it introduced.
+#[allow(clippy::too_many_lines)]
+fn skr_vectors(rec: &mut Recorder, cranker: &Keypair) -> Vec<Value> {
+    let c = cranker.pubkey();
+    let round = u64_at(&rec.env.account(&BOARD).data, 8);
+    rec.env.set_board_round(round);
+    let now = rec.env.now;
+    let mut hana = User::with_keys(&mut rec.env, [0x81; 32], [0x18; 32]);
+    let mut ivan = User::with_keys(&mut rec.env, [0x82; 32], [0x28; 32]);
+    let mut judy = User::with_keys(&mut rec.env, [0x83; 32], [0x38; 32]);
+    let mut kai = User::with_keys(&mut rec.env, [0x84; 32], [0x48; 32]);
+    let lena = User::with_keys(&mut rec.env, [0x85; 32], [0x58; 32]);
+    let olga = User::with_keys(&mut rec.env, [0x86; 32], [0x68; 32]);
+    let pia = User::with_keys(&mut rec.env, [0x87; 32], [0x78; 32]);
+    let quinn = User::with_keys(&mut rec.env, [0x88; 32], [0x88; 32]);
+    let rhea = User::with_keys(&mut rec.env, [0x89; 32], [0x98; 32]);
+    let users = vec![
+        user_json("hana", &hana, 0x81, "[0x18; 32]"),
+        user_json("ivan", &ivan, 0x82, "[0x28; 32]"),
+        user_json("judy", &judy, 0x83, "[0x38; 32]"),
+        user_json("kai", &kai, 0x84, "[0x48; 32]"),
+        user_json("lena", &lena, 0x85, "[0x58; 32]"),
+        user_json("olga", &olga, 0x86, "[0x68; 32]"),
+        user_json("pia", &pia, 0x87, "[0x78; 32]"),
+        user_json("quinn", &quinn, 0x88, "[0x88; 32]"),
+        user_json("rhea", &rhea, 0x89, "[0x98; 32]"),
+    ];
+
+    // ---- 26 init_bury_vault ---------------------------------------------------
+    let h = ix_init_bury_vault(&c);
+    rec.vector(
+        Spec {
+            name: "init_bury_vault",
+            instruction: "init_bury_vault",
+            auth: "anyone (pays the rent); init-only, no admin",
+            description: "Create the singleton BuryVault [\"bury\"] with the auction constants (initial start 100,000,000 ORE atoms per SKR, floor 10,000, window 216,000 slots) and the addresses of its two vault ATAs, which the companions create with the ATA program.",
+            args: json!({}),
+            fields: Fields::new(hd::tag::INIT_BURY_VAULT),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("payer", None),
+                ("bury_vault", Some(pda_bury())),
+                ("system_program", None),
+            ]),
+            before: vec![
+                ("ata: CreateIdempotent(BuryVault, SKR mint)", ix_create_ata(&c, &BURY, &SKR_MINT)),
+                ("ata: CreateIdempotent(BuryVault, ORE mint)", ix_create_ata(&c, &BURY, &ORE_MINT)),
+            ],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+
+    // ---- Stack: hana (host), ivan, judy ------------------------------------------
+    let stack_plan = plan_around(now, 1, plan_flags::FOCUS_ONLY);
+    for u in [&hana, &ivan, &judy] {
+        let w = u.wallet.insecure_clone();
+        rec.send_setup(
+            "hana / ivan / judy: ORE automate + register_rig + set_caps + arm_shift (wallet; focus-only plan with one-round leases, what a Stack seat arms)",
+            &w,
+            &onboard_ixs(u, SOL / 20, Caps::standard(), &stack_plan),
+        );
+    }
+    rec.setup("SKR balances by fixture surgery (the fork cannot mint SKR): 1,000 SKR in the SKR ATAs of hana, ivan, judy, kai and lena");
+    for u in [&hana, &ivan, &judy, &kai, &lena] {
+        rec.env.fund_skr(&u.pubkey(), 1_000 * ONE_SKR);
+    }
+    let bond = 200 * ONE_SKR;
+    let table = table_pda(&hana.pubkey(), 1);
+    let p = StackParams {
+        table_id: 1,
+        bond,
+        start_round: round + 1,
+        end_round: round + 2,
+        grace_gaps: 0,
+        flags: 0,
+        max_seats: 4,
+    };
+    let f = Fields::new(hd::tag::OPEN_STACK)
+        .u64("table_id", p.table_id)
+        .u64("bond", p.bond)
+        .u64("start_round", p.start_round)
+        .u64("end_round", p.end_round)
+        .u32("grace_gaps", p.grace_gaps)
+        .u8("flags", p.flags)
+        .u8("max_seats", p.max_seats);
+    let h = ix_open_stack(&hana.pubkey(), &p);
+    let wh = hana.wallet.insecure_clone();
+    rec.vector(
+        Spec {
+            name: "open_stack",
+            instruction: "open_stack",
+            auth: "host wallet",
+            description: "Open an in-person table (flags 0: 80/20 split, guests allowed up to 500 SKR) bonding 200 SKR per seat for ORE rounds [r+1, r+2], grace 0, up to 4 seats. The table's SKR vault is its canonical SPL Token ATA, created by the companion. Emits StackOpened.",
+            args: json!({"table_id": "1", "bond": s(p.bond), "start_round": s(p.start_round), "end_round": s(p.end_round), "grace_gaps": 0, "flags": 0, "max_seats": 4}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("host", None),
+                ("stack_table", Some(pda_table(&hana.pubkey(), 1))),
+                ("table_skr_vault", Some(pda_spl_ata(&table, &SKR_MINT))),
+                ("ore_board", None),
+                ("system_program", None),
+            ]),
+            before: vec![("ata: CreateIdempotent(table, SKR mint), payer hana", ix_create_ata(&wh.pubkey(), &table, &SKR_MINT))],
+            harness: Some(h),
+        },
+        &wh,
+        &[],
+    );
+    let h = ix_join_stack(&hana.pubkey(), &table, &hana.rig, None);
+    rec.vector(
+        Spec {
+            name: "join_stack",
+            instruction: "join_stack",
+            auth: "rig wallet (signs the SKR bond transfer)",
+            description: "hana takes seat 0: the seat PDA is keyed by the rig (in-person table), and 200 SKR move from her SKR ATA to the table vault through an SPL Token Transfer CPI. No SGT accounts: the bond is within the guest cap. Emits StackJoined.",
+            args: json!({"table": s(table), "seat_key": s(hana.rig)}),
+            fields: Fields::new(hd::tag::JOIN_STACK),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("authority", None),
+                ("rig", Some(pda_rig(&hana.pubkey()))),
+                ("stack_table", Some(pda_table(&hana.pubkey(), 1))),
+                ("stack_seat", Some(pda_stack_seat(&table, "rig", &hana.rig))),
+                ("authority_skr", Some(pda_spl_ata(&hana.pubkey(), &SKR_MINT))),
+                ("table_skr_vault", Some(pda_spl_ata(&table, &SKR_MINT))),
+                ("ore_board", None),
+                ("token_program", None),
+                ("system_program", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        &wh,
+        &[],
+    );
+    for u in [&ivan, &judy] {
+        let w = u.wallet.insecure_clone();
+        rec.send_setup(
+            "ivan / judy: join_stack (seats 1 and 2)",
+            &w,
+            &[ix_join_stack(&w.pubkey(), &table, &u.rig, None)],
+        );
+    }
+    let seat_of = |u: &User| stack_seat_pda(&table, &u.rig);
+    let seat_slot = |i: usize, u: &User| {
+        vec![
+            (format!("stack_seat[{i}]"), Some(pda_stack_seat(&table, "rig", &u.rig))),
+            (format!("rig[{i}]"), Some(pda_rig(&u.pubkey()))),
+        ]
+    };
+    let host = hana.pubkey();
+    let checkin_slots = |us: &[&User]| {
+        let mut v = vec![
+            slot("ore_board", None),
+            slot("instructions_sysvar", None),
+            slot("stack_table", Some(pda_table(&host, 1))),
+        ];
+        for (i, u) in us.iter().enumerate() {
+            for (r, p) in seat_slot(i, u) {
+                v.push(slot(&r, p));
+            }
+        }
+        v
+    };
+
+    // Round r+1: one precompile, three HEARTBEATs verified inside the check-in.
+    rec.setup("Board.round_id -> r+1 (the table's start_round)");
+    rec.env.set_board_round(round + 1);
+    let r1 = round + 1;
+    let hbs = [
+        hana.heartbeat(1, r1, 1),
+        ivan.heartbeat(1, r1, 1),
+        judy.heartbeat(1, r1, 1),
+    ];
+    let es: Vec<HeartbeatEntry> = hbs
+        .iter()
+        .enumerate()
+        .map(|(i, hb)| entry_for(hb, 0, i as u8))
+        .collect();
+    let f = Fields::new(hd::tag::STACK_CHECKIN)
+        .u8("n", 3)
+        .entry(0, &es[0])
+        .entry(1, &es[1])
+        .entry(2, &es[2]);
+    let h = ix_stack_checkin(
+        &table,
+        &[
+            (seat_of(&hana), hana.rig, es[0]),
+            (seat_of(&ivan), ivan.rig, es[1]),
+            (seat_of(&judy), judy.rig, es[2]),
+        ],
+    );
+    rec.vector(
+        Spec {
+            name: "stack_checkin_heartbeat",
+            instruction: "stack_checkin",
+            auth: "anyone + P-256 HEARTBEATs (hb_ix = 0, lease 1)",
+            description: "Round r+1: three HEARTBEATs (lease 1, round = Board.round_id) verified by one secp256r1 instruction at index 0 and applied to the rigs exactly as record_heartbeats does; each seat binds to shift 1 and counts the round. Emits HeartbeatsRecorded then StackCheckin (result 0) per seat.",
+            args: json!({"n": 3, "entries": es.iter().map(heartbeat_args).collect::<Vec<_>>()}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: checkin_slots(&[&hana, &ivan, &judy]),
+            before: vec![("secp256r1: HEARTBEAT(hana), HEARTBEAT(ivan), HEARTBEAT(judy)", secp_ix_for(&hbs))],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+
+    // Round r+2: judy picks her phone up; hana's and ivan's heartbeats land
+    // through record_heartbeats; the check-in observes the leases.
+    rec.setup("Board.round_id -> r+2 (the table's end_round)");
+    rec.env.set_board_round(round + 2);
+    let r2 = round + 2;
+    let jc = judy.next_counter();
+    let (d, sg) = signal_signature(&judy, kind::BREAK, jc, 1, break_reason::PICKUP);
+    rec.send_setup(
+        "judy: P-256 BREAK reason 1 (pickup): Cooling, break_reason 1 recorded in shift 1",
+        cranker,
+        &[
+            secp_ix(&[(sg, judy.p256(), d.to_vec())]),
+            ix_break_p256(&judy.pubkey(), break_reason::PICKUP, jc, 0, 0),
+        ],
+    );
+    let hh = hana.heartbeat(1, r2, 1);
+    let hi = ivan.heartbeat(1, r2, 1);
+    rec.send_setup(
+        "record_heartbeats(hana, ivan) for round r+2 (lease 1): their leases now end at the live round",
+        cranker,
+        &[
+            secp_ix_for(&[hh, hi]),
+            ix_record(&[(hana.rig, entry_for(&hh, 0, 0)), (ivan.rig, entry_for(&hi, 0, 1))]),
+        ],
+    );
+    let reuse = reuse_lease();
+    let f = Fields::new(hd::tag::STACK_CHECKIN)
+        .u8("n", 3)
+        .entry(0, &reuse)
+        .entry(1, &reuse)
+        .entry(2, &reuse);
+    let h = ix_stack_checkin(
+        &table,
+        &[
+            (seat_of(&hana), hana.rig, reuse),
+            (seat_of(&ivan), ivan.rig, reuse),
+            (seat_of(&judy), judy.rig, reuse),
+        ],
+    );
+    rec.vector(
+        Spec {
+            name: "stack_checkin_observe",
+            instruction: "stack_checkin",
+            auth: "anyone, observe mode (hb_ix = 0xFF), no precompile",
+            description: "Round r+2: hana and ivan count the round because their rigs' one-round leases end at Board.round_id (a heartbeat for this round landed in this round); judy's bound shift recorded a BREAK, so her seat is broken for good (result 42 StackSeatBroken). Emits StackCheckin per seat.",
+            args: json!({"n": 3, "entries": [heartbeat_args(&reuse), heartbeat_args(&reuse), heartbeat_args(&reuse)]}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: checkin_slots(&[&hana, &ivan, &judy]),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+
+    // Round r+3: settle, then claims.
+    rec.setup("Board.round_id -> r+3 (> end_round: settle is open to anyone)");
+    rec.env.set_board_round(round + 3);
+    let seats = [seat_of(&hana), seat_of(&ivan), seat_of(&judy)];
+    let h = ix_settle_stack(&table, &seats);
+    let mut slots = skr_slots(&[
+        ("stack_table", Some(pda_table(&hana.pubkey(), 1))),
+        ("ore_board", None),
+        ("table_skr_vault", Some(pda_spl_ata(&table, &SKR_MINT))),
+        ("bury_vault", Some(pda_bury())),
+        ("bury_skr_vault", Some(pda_spl_ata(&BURY, &SKR_MINT))),
+        ("token_program", None),
+    ]);
+    for (i, u) in [&hana, &ivan, &judy].iter().enumerate() {
+        slots.push(slot(
+            &format!("stack_seat[{i}]"),
+            Some(pda_stack_seat(&table, "rig", &u.rig)),
+        ));
+    }
+    rec.vector(
+        Spec {
+            name: "settle_stack",
+            instruction: "settle_stack",
+            auth: "anyone, once Board.round_id > end_round",
+            description: "hana and ivan finish (2/2 rounds, end round checked, no break); judy forfeits. B = 600 SKR, W = 400, F = 200: each finisher's payout is 200 + 80 SKR (80% of F pro rata); 40 SKR (20%) moves to the BuryVault's SKR ATA as a new lot, restarting the auction. Every seat passed once. Emits BuryLotAdded then StackSettled.",
+            args: json!({"seats": seats.iter().map(s).collect::<Vec<_>>()}),
+            fields: Fields::new(hd::tag::SETTLE_STACK),
+            metas: h.accounts.clone(),
+            slots,
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+    let h = ix_claim_stack(&table, &seat_of(&hana), &hana.pubkey());
+    rec.vector(
+        Spec {
+            name: "claim_stack",
+            instruction: "claim_stack",
+            auth: "anyone (pays only the stored seat authority)",
+            description: "Pay hana's settled payout (280 SKR) from the table vault to her SKR ATA, close her seat (rent to her wallet). Emits StackClaimed (kind 0 payout).",
+            args: json!({"table": s(table), "seat": s(seat_of(&hana))}),
+            fields: Fields::new(hd::tag::CLAIM_STACK),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("stack_table", Some(pda_table(&hana.pubkey(), 1))),
+                ("stack_seat", Some(pda_stack_seat(&table, "rig", &hana.rig))),
+                ("seat_authority", None),
+                ("authority_skr", Some(pda_spl_ata(&hana.pubkey(), &SKR_MINT))),
+                ("table_skr_vault", Some(pda_spl_ata(&table, &SKR_MINT))),
+                ("token_program", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+    rec.send_setup(
+        "claim_stack for ivan (280 SKR) and judy (0 SKR: forfeited; her seat closes)",
+        cranker,
+        &[
+            ix_claim_stack(&table, &seat_of(&ivan), &ivan.pubkey()),
+            ix_claim_stack(&table, &seat_of(&judy), &judy.pubkey()),
+        ],
+    );
+
+    // ---- Focus Bond: kai (completed) and lena (broken) ----------------------------
+    let bond_plan = plan_around(now, 3, 0);
+    for u in [&kai, &lena] {
+        let w = u.wallet.insecure_clone();
+        rec.send_setup(
+            "kai / lena: ORE automate + register_rig + set_caps + arm_shift (wallet, lease 3)",
+            &w,
+            &onboard_ixs(u, SOL / 20, Caps::standard(), &bond_plan),
+        );
+    }
+    let kbond = bond_pda(&kai.rig, 1);
+    let amount = 500 * ONE_SKR;
+    let wk = kai.wallet.insecure_clone();
+    let f = Fields::new(hd::tag::LOCK_FOCUS_BOND)
+        .u64("shift_id", 1)
+        .u64("amount", amount);
+    let h = ix_lock_focus_bond(&kai.pubkey(), 1, amount);
+    rec.vector(
+        Spec {
+            name: "lock_focus_bond",
+            instruction: "lock_focus_bond",
+            auth: "rig wallet (signs the SKR transfer)",
+            description: "Lock 500 SKR on kai's open, clean shift 1 (armed, no BREAK yet). The ShiftLog [\"shift\", rig, 1] must not exist yet; the bond records the shift's start round and time so only that shift's log can resolve it. The vault is the bond's SPL Token ATA (companion). Emits FocusBondLocked.",
+            args: json!({"shift_id": "1", "amount": s(amount)}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("authority", None),
+                ("rig", Some(pda_rig(&kai.pubkey()))),
+                ("focus_bond", Some(pda_bond(&kai.rig, 1))),
+                ("authority_skr", Some(pda_spl_ata(&kai.pubkey(), &SKR_MINT))),
+                ("bond_skr_vault", Some(pda_spl_ata(&kbond, &SKR_MINT))),
+                ("shift_log", Some(pda_shift_log(&kai.rig, 1))),
+                ("token_program", None),
+                ("system_program", None),
+            ]),
+            before: vec![("ata: CreateIdempotent(bond, SKR mint), payer kai", ix_create_ata(&wk.pubkey(), &kbond, &SKR_MINT))],
+            harness: Some(h),
+        },
+        &wk,
+        &[],
+    );
+    let r3 = round + 3;
+    let hk = kai.heartbeat(1, r3, 3);
+    rec.send_setup(
+        "kai: record_heartbeats (round r+3, lease 3): one dark round",
+        cranker,
+        &[secp_ix_for(&[hk]), ix_record(&[(kai.rig, entry_for(&hk, 0, 0))])],
+    );
+    let wl = lena.wallet.insecure_clone();
+    let lbond = bond_pda(&lena.rig, 1);
+    let lamount = 300 * ONE_SKR;
+    rec.send_setup(
+        "lena: lock_focus_bond(shift 1, 300 SKR), then a wallet BREAK reason 6 (manual) and end_shift: ShiftLog reason 6",
+        &wl,
+        &[
+            ix_create_ata(&wl.pubkey(), &lbond, &SKR_MINT),
+            ix_lock_focus_bond(&wl.pubkey(), 1, lamount),
+            ix_break_wallet(&wl.pubkey(), break_reason::MANUAL),
+            ix_end_shift(&wl.pubkey(), &lena.rig, 1),
+        ],
+    );
+    let h = ix_forfeit_focus_bond(&lena.pubkey(), 1);
+    rec.vector(
+        Spec {
+            name: "forfeit_focus_bond",
+            instruction: "forfeit_focus_bond",
+            auth: "anyone, once the bonded shift sealed with a reason other than completed",
+            description: "lena's shift 1 sealed with reason 6 (manual): the 300 SKR move from the bond vault to the BuryVault's SKR ATA (a new lot: the auction restarts), the vault ATA and the bond close (both rents to lena's wallet). Emits BuryLotAdded then FocusBondForfeited (reason 6).",
+            args: json!({"authority": s(lena.pubkey()), "shift_id": "1"}),
+            fields: Fields::new(hd::tag::FORFEIT_FOCUS_BOND),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("focus_bond", Some(pda_bond(&lena.rig, 1))),
+                ("shift_log", Some(pda_shift_log(&lena.rig, 1))),
+                ("rig", Some(pda_rig(&lena.pubkey()))),
+                ("bond_skr_vault", Some(pda_spl_ata(&lbond, &SKR_MINT))),
+                ("bury_vault", Some(pda_bury())),
+                ("bury_skr_vault", Some(pda_spl_ata(&BURY, &SKR_MINT))),
+                ("authority", None),
+                ("token_program", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+    rec.setup("clock -> kai's plan window_end + 1; Board.round_id -> r+6 (kai's lease [r+3, r+5] has expired)");
+    let slot_now = rec.env.slot;
+    rec.env.set_clock(slot_now, bond_plan.window_end + 1);
+    rec.env.set_board_round(round + 6);
+    rec.send_setup(
+        "end_shift(kai, shift 1) by the cranker (permissionless after the window and the lease): ShiftLog reason 0 completed",
+        cranker,
+        &[ix_end_shift(&c, &kai.rig, 1)],
+    );
+    let h = ix_release_focus_bond(&kai.pubkey(), 1);
+    rec.vector(
+        Spec {
+            name: "release_focus_bond",
+            instruction: "release_focus_bond",
+            auth: "anyone, once the bonded shift sealed completed (pays only the stored owner)",
+            description: "kai's ShiftLog (same rig, shift id, start round and start time as the bond) says completed: the 500 SKR return to kai's SKR ATA; the vault ATA and the bond close (both rents to kai's wallet). Emits FocusBondReleased.",
+            args: json!({"authority": s(kai.pubkey()), "shift_id": "1"}),
+            fields: Fields::new(hd::tag::RELEASE_FOCUS_BOND),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("focus_bond", Some(pda_bond(&kai.rig, 1))),
+                ("shift_log", Some(pda_shift_log(&kai.rig, 1))),
+                ("bond_skr_vault", Some(pda_spl_ata(&kbond, &SKR_MINT))),
+                ("authority_skr", Some(pda_spl_ata(&kai.pubkey(), &SKR_MINT))),
+                ("authority", None),
+                ("token_program", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+
+    // ---- Gift a Rig: olga -> pia (wallet), olga -> quinn's SGT ---------------------
+    let wo = olga.wallet.insecure_clone();
+    let gift_lamports = SOL / 2;
+    let gift_slots = |nonce: u64| {
+        skr_slots(&[
+            ("sender", None),
+            ("gift_escrow", Some(pda_gift(&olga.pubkey(), nonce))),
+            ("system_program", None),
+        ])
+    };
+    let gift_fields = |nonce: u64, kind: u8, to: &Address| {
+        Fields::new(hd::tag::CREATE_GIFT)
+            .u64("nonce", nonce)
+            .u8("recipient_kind", kind)
+            .key("recipient", to)
+            .u64("lamports", gift_lamports)
+    };
+    let h = ix_create_gift(&olga.pubkey(), 1, gift_kind::WALLET, &pia.pubkey(), gift_lamports);
+    rec.vector(
+        Spec {
+            name: "create_gift_wallet",
+            instruction: "create_gift",
+            auth: "sender wallet",
+            description: "Escrow 0.5 SOL for pia's wallet in GiftEscrow [\"gift\", olga, 1]: the lamports sit on top of the escrow's rent; expiry = now + 30 days. (A sender paying in SKR adds a Jupiter SKR->SOL swap as a separate instruction before this one; the program only escrows SOL.) Emits GiftCreated.",
+            args: json!({"nonce": "1", "recipient_kind": 0, "recipient": s(pia.pubkey()), "lamports": s(gift_lamports)}),
+            fields: gift_fields(1, gift_kind::WALLET, &pia.pubkey()),
+            metas: h.accounts.clone(),
+            slots: gift_slots(1),
+            before: vec![],
+            harness: Some(h),
+        },
+        &wo,
+        &[],
+    );
+    let wp = pia.wallet.insecure_clone();
+    let g1 = gift_pda(&olga.pubkey(), 1);
+    let h = ix_claim_gift(&pia.pubkey(), &g1, &olga.pubkey(), None);
+    rec.vector(
+        Spec {
+            name: "claim_gift_wallet",
+            instruction: "claim_gift",
+            auth: "the recipient wallet (signs)",
+            description: "pia claims: 0.5 SOL move to her wallet and the escrow closes (rent back to olga). In the app the same transaction continues with ORE automate (executor = Executor PDA) and register_rig, so the gift arrives as a funded rig. Emits GiftClaimed.",
+            args: json!({"gift": s(g1)}),
+            fields: Fields::new(hd::tag::CLAIM_GIFT),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("claimer", None),
+                ("gift_escrow", Some(pda_gift(&olga.pubkey(), 1))),
+                ("sender", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        &wp,
+        &[],
+    );
+    rec.setup("quinn holds the real mainnet SGT member #121,035 (crates/sgt-verify/fixtures): a frozen Token-2022 ATA holding it for quinn");
+    let (mint, sgt_account) = rec.env.give_real_sgt("member-121035", &quinn.pubkey());
+    let h = ix_create_gift(&olga.pubkey(), 2, gift_kind::SGT_MINT, &mint, gift_lamports);
+    rec.vector(
+        Spec {
+            name: "create_gift_sgt",
+            instruction: "create_gift",
+            auth: "sender wallet",
+            description: "Escrow 0.5 SOL for whoever holds SGT mint 5pWbRnGU... (member #121,035) at claim time. Emits GiftCreated (recipient_kind 1).",
+            args: json!({"nonce": "2", "recipient_kind": 1, "recipient": s(mint), "lamports": s(gift_lamports)}),
+            fields: gift_fields(2, gift_kind::SGT_MINT, &mint),
+            metas: h.accounts.clone(),
+            slots: gift_slots(2),
+            before: vec![],
+            harness: Some(h),
+        },
+        &wo,
+        &[],
+    );
+    let wq = quinn.wallet.insecure_clone();
+    let g2 = gift_pda(&olga.pubkey(), 2);
+    let h = ix_claim_gift(&quinn.pubkey(), &g2, &olga.pubkey(), Some((sgt_account, mint)));
+    rec.vector(
+        Spec {
+            name: "claim_gift_sgt",
+            instruction: "claim_gift",
+            auth: "the current SGT holder (signs; SGT re-verified in-program with sgt-verify, mainnet anchors)",
+            description: "quinn proves he holds the gift's SGT right now (Token-2022 account owned by him, amount 1, real mint, group and authority anchors): 0.5 SOL to his wallet, escrow closed (rent to olga). Emits GiftClaimed (recipient_kind 1).",
+            args: json!({"gift": s(g2), "sgt_mint": s(mint), "sgt_token_account": s(sgt_account)}),
+            fields: Fields::new(hd::tag::CLAIM_GIFT),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("claimer", None),
+                ("gift_escrow", Some(pda_gift(&olga.pubkey(), 2))),
+                ("sender", None),
+                ("sgt_token_account", Some(pda_ata(&quinn.pubkey(), &mint))),
+                ("sgt_mint", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        &wq,
+        &[],
+    );
+    rec.send_setup(
+        "olga: create_gift(nonce 3, 0.5 SOL for pia's wallet), never claimed",
+        &wo,
+        &[ix_create_gift(&olga.pubkey(), 3, gift_kind::WALLET, &pia.pubkey(), gift_lamports)],
+    );
+    rec.setup("clock += 30 days (the gift's expiry_ts)");
+    let (slot_now, t) = (rec.env.slot, rec.env.now);
+    rec.env.set_clock(slot_now, t + hd::skr::GIFT_EXPIRY_SECS);
+    let g3 = gift_pda(&olga.pubkey(), 3);
+    let h = ix_refund_gift(&g3, &olga.pubkey());
+    rec.vector(
+        Spec {
+            name: "refund_gift",
+            instruction: "refund_gift",
+            auth: "anyone, from expiry_ts (pays only the stored sender)",
+            description: "Day 30: the unclaimed escrow closes and every lamport (gift and rent) returns to olga. Emits GiftRefunded.",
+            args: json!({"gift": s(g3)}),
+            fields: Fields::new(hd::tag::REFUND_GIFT),
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("gift_escrow", Some(pda_gift(&olga.pubkey(), 3))),
+                ("sender", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+
+    // ---- 27 bury_auction_buy ---------------------------------------------------------
+    rec.setup("rhea: an ORE ATA holding 1 ORE and an empty SKR ATA (fixture surgery)");
+    rec.env.fund_ore(&rhea.pubkey(), ONE_ORE);
+    rec.env.fund_skr(&rhea.pubkey(), 0);
+    rec.setup("slot += 54,000 (a quarter of the auction window since lena's lot restarted it)");
+    let (slot_now, t) = (rec.env.slot, rec.env.now);
+    rec.env.set_clock(slot_now + hd::skr::WINDOW_SLOTS / 4, t);
+    let v = rec.env.bury_vault();
+    let price = hd::skr::auction_price(
+        v.start_price.get(),
+        v.floor_price.get(),
+        v.auction_start_slot.get(),
+        v.window_slots.get(),
+        rec.env.slot,
+    );
+    let skr_amount = 10 * ONE_SKR;
+    let cost = hd::skr::purchase_cost(skr_amount, price).unwrap();
+    assert_eq!((price, cost), (75_002_500, 750_025_000));
+    let wr = rhea.wallet.insecure_clone();
+    let f = Fields::new(hd::tag::BURY_AUCTION_BUY)
+        .u64("skr_amount", skr_amount)
+        .u64("max_ore", cost);
+    let h = ix_bury_auction_buy(&rhea.pubkey(), skr_amount, cost);
+    rec.vector(
+        Spec {
+            name: "bury_auction_buy",
+            instruction: "bury_auction_buy",
+            auth: "buyer wallet (signs the ORE payment)",
+            description: "A quarter of the way through the window the price is 75,002,500 ORE atoms per SKR. rhea buys 10 SKR for 750,025,000 atoms (0.0075 ORE, max_ore = exactly that): the ORE moves into the BuryVault's ORE ATA, the program CPIs ORE bury (tag 24) signed by the BuryVault PDA (live ORE: 90% burned, 10% to ORE stakers through the live ORE stake program), checks the vault lost exactly the payment and the ORE supply fell by 675,022,500 atoms, then sends the 10 SKR to rhea. Emits BuryAuctionSold.",
+            args: json!({"skr_amount": s(skr_amount), "max_ore": s(cost), "price": s(price)}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: skr_slots(&[
+                ("buyer", None),
+                ("buyer_ore", Some(pda_spl_ata(&rhea.pubkey(), &ORE_MINT))),
+                ("buyer_skr", Some(pda_spl_ata(&rhea.pubkey(), &SKR_MINT))),
+                ("bury_vault", Some(pda_bury())),
+                ("bury_ore_vault", Some(pda_spl_ata(&BURY, &ORE_MINT))),
+                ("bury_skr_vault", Some(pda_spl_ata(&BURY, &SKR_MINT))),
+                ("ore_board", None),
+                ("ore_mint", None),
+                ("ore_treasury", None),
+                ("ore_treasury_ore", Some(pda_spl_ata(&TREASURY, &ORE_MINT))),
+                ("ore_stake_treasury", Some(pda_stake("treasury"))),
+                ("ore_stake_treasury_ore", Some(pda_spl_ata(&stake_treasury(), &ORE_MINT))),
+                ("ore_stake_vesting", Some(pda_stake("vesting"))),
+                ("token_program", None),
+                ("ore_program", None),
+                ("ore_stake_program", None),
+            ]),
+            before: vec![],
+            harness: Some(h),
+        },
+        &wr,
+        &[],
+    );
+    users
 }
 
 // ---- events.json ----------------------------------------------------------------
@@ -1829,7 +2673,7 @@ fn events_file(samples: BTreeMap<u8, (String, Vec<u8>)>) -> Value {
     let (_, _, _, first_skip) = &skips[0];
     all.entry(ev::tag::RIG_SKIPPED)
         .or_insert_with(|| ("skip_codes[0]".to_string(), first_skip.clone()));
-    assert_eq!(all.len(), 10, "every event tag captured: {:?}", all.keys());
+    assert_eq!(all.len(), 23, "every event tag captured: {:?}", all.keys());
     let evs: Vec<Value> = all
         .iter()
         .map(|(tag, (source, bytes))| {
@@ -1862,13 +2706,14 @@ fn events_file(samples: BTreeMap<u8, (String, Vec<u8>)>) -> Value {
         .collect();
     json!({
         "format": "heads-down/golden-events",
-        "interface_version": "1.1",
+        "interface_version": "1.2",
         "generated_by": "programs/heads-down/tests/src/vectors.rs",
         "notes": [
             "One `Program data: <base64>` log line per event: a single sol_log_data slice, byte 0 = tag, fields little-endian, no padding. Only lines emitted while heads_down is the innermost executing program are heads_down events.",
             "Every sample was captured from a real transaction on the pinned LiteSVM fork (samples come from instructions.json vectors unless noted).",
             "Lengths are exact and never change for a tag; new fields get a new tag. end_shift emits ShiftEnded (4) and then ShiftEndedV2 (10), its superset: a consumer that knows tag 10 should ignore tag 4.",
-            "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it."
+            "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it.",
+            "v1.2 (SKR, additive): tags 11..=23. StackCheckin.result is 0 when the round counted, else the reason (heads_down 0..=48 or a p256-introspect code). stack_checkin also emits HeartbeatsRecorded (8) for every heartbeat it verifies itself. BuryAuctionSold.ore_burned / ore_shared are ORE bury's 90/10 split, checked on-chain against the ORE supply."
         ],
         "events": evs,
         "skip_codes": skip_json,
@@ -2023,7 +2868,7 @@ fn messages_file() -> Value {
     assert_eq!(msgs[4]["preimage_len"], 113);
     json!({
         "format": "heads-down/golden-messages",
-        "interface_version": "1.1",
+        "interface_version": "1.2",
         "generated_by": "programs/heads-down/tests/src/vectors.rs",
         "notes": [
             "The P-256 key signs the 32-byte message = SHA-256(preimage) with SHA256withECDSA (Android Keystore); the secp256r1 precompile verifies ECDSA-P256 over SHA-256 of those 32 bytes. The program rebuilds the preimage from its own state + instruction data and requires byte-equality with the precompile's message.",
@@ -2128,7 +2973,7 @@ fn registrar_file() -> Value {
     ]);
     json!({
         "format": "heads-down/golden-registrar",
-        "interface_version": "1.1",
+        "interface_version": "1.2",
         "generated_by": "programs/heads-down/tests/src/vectors.rs",
         "notes": [
             "The registrar signs the raw 111-byte HDreg preimage with Ed25519 (not SHA-256 first). This matches registrar/INTERFACE-NOTES.md N2 byte for byte.",
