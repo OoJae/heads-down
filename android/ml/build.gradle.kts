@@ -17,6 +17,13 @@ android {
 // its own JNI libraries for three ABIs, so lint's "newer version available" warning stays.
 val litertApi = "1.4.1"
 
+// The sample-path tests count the bytes a thread allocates. HotSpot's escape analysis would
+// optimize a short-lived per-sample object away and hide it; ART does far less of that, so the
+// tests run without it and see every allocation the bytecode asks for.
+tasks.withType<Test>().configureEach {
+    jvmArgs("-XX:+IgnoreUnrecognizedVMOptions", "-XX:-DoEscapeAnalysis")
+}
+
 dependencies {
     // Model / parameter JSON (tree API only, no compiler plugin; the app already ships it).
     implementation(libs.kotlinx.serialization.json)

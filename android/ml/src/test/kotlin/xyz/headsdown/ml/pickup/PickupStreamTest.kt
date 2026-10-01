@@ -409,15 +409,19 @@ class PickupStreamTest {
     @Test
     fun `feeding samples allocates nothing while no window closes`() {
         assumeTrue("needs HotSpot's per-thread allocation counter", Allocations.supported)
-        val warm = StreamBuilder(seed = 3).rest(30.0).build()
-        val night = StreamBuilder(seed = 4, startNanos = warm.t.last() + 20_000_000).rest(400.0).build()
+        // Warm up past the JIT's tiering thresholds: while HotSpot recompiles a method it can
+        // charge a few hundred bytes of its own to the thread, which is not the code under test.
+        val warm = StreamBuilder(seed = 3).rest(800.0).build()
+        val night = StreamBuilder(seed = 4, startNanos = warm.t.last() + 20_000_000).rest(1_200.0).build()
 
         val trigger = MotionTrigger()
         val collector = PickupWindowCollector(trigger = MotionTrigger.live(), listener = Recorder())
+        val original = ReferenceTrigger()
         // Load every class and take every branch of the quiet path once before measuring.
         warm.forEach { t, x, y, z ->
             trigger.onSample(t, x, y, z)
             collector.onSample(t, x, y, z)
+            original.onSample(t, x, y, z)
         }
 
         val bytes = Allocations.during {
@@ -426,8 +430,15 @@ class PickupStreamTest {
                 collector.onSample(t, x, y, z)
             }
         }
-        println("sample path: $bytes bytes allocated over ${night.size} samples (plain trigger + collector with the live trigger)")
-        assertEquals("no allocation per sample", 0L, bytes)
+        // The counter does see a per-sample allocation when there is one: the trigger as first
+        // written made one small array per sample (the build disables escape analysis for tests,
+        // so HotSpot cannot optimize it away where ART would not).
+        val before = Allocations.during { night.forEach { t, x, y, z -> original.onSample(t, x, y, z) } }
+        println("sample path: $bytes bytes allocated over ${night.size} samples (plain trigger + collector with the live trigger); the original trigger alone: $before bytes")
+        // One boxed Long per sample would be ~960,000 bytes here, one per rest-tracker block
+        // ~38,000. The slack is for the JVM's own one-off allocations.
+        assertTrue("the sample path allocated $bytes bytes over ${night.size} samples", bytes <= 2_048)
+        assertTrue("the original trigger allocated per sample: $before", before >= 16L * night.size)
         assertEquals(0, collector.openWindows)
     }
 }
