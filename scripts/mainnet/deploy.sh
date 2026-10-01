@@ -158,8 +158,9 @@ SIG="$(signature_of "$OUT")"
 [[ -n "$SIG" || "$MODE" == buffer ]] || warn "no transaction signature in the CLI output ($OUT); the receipt will not carry one"
 if [[ "$MODE" == buffer && -n "$BUFFER_AUTHORITY" ]]; then
   log "handing the buffer to $BUFFER_AUTHORITY"
-  scli program set-buffer-authority "$BUFFER" --new-buffer-authority "$BUFFER_AUTHORITY" --keypair "$K_DEPLOYER" \
-    --with-compute-unit-price "$HD_CU_PRICE" | tee -a "$OUT"
+  # (set-buffer-authority takes no priority-fee flag; it is one small transaction.)
+  scli program set-buffer-authority "$BUFFER" --new-buffer-authority "$BUFFER_AUTHORITY" \
+    --buffer-authority "$K_DEPLOYER" --keypair "$K_DEPLOYER" --commitment confirmed | tee -a "$OUT"
 fi
 
 # ---- 6. verify the bytes and write the receipt ------------------------------------------------------
