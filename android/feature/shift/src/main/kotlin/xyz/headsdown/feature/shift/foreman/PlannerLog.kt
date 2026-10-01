@@ -14,10 +14,11 @@ import javax.inject.Singleton
  * The Shift Planner's log on disk (ml/foreman/planner/LOG_SCHEMA.md): JSON Lines, one event per
  * line, about this phone only (screen, unlock, charger, face-down, the next alarm, shifts).
  *
- * **It never leaves the device.** The files live in the app's private `filesDir/foreman`, which
- * no FileProvider path covers and which the app's data-extraction rules exclude from backup and
- * device transfer. This class has no network code and hands the events to nothing but the
- * on-device planner. Clearing the app's data deletes them, and so does [clear].
+ * **It never leaves the device.** The files live in the app's private `noBackupFilesDir/foreman`:
+ * Android never backs that directory up or transfers it to a new device (on top of the app's own
+ * rules, which exclude everything), and no FileProvider path of the app can reach it. This class
+ * has no network code and hands the events to nothing but the on-device planner. Clearing the
+ * app's data deletes them, and so does [clear].
  *
  * **It cannot grow without bound.** Lines go to `planner.jsonl`; when that segment would pass
  * [segmentBytes] it becomes `planner.1.jsonl`, the older ones shift up, and the oldest of
@@ -37,7 +38,7 @@ class PlannerLog internal constructor(
     private val segmentBytes: Long = SEGMENT_BYTES,
     private val segments: Int = SEGMENTS,
 ) {
-    @Inject constructor(@ApplicationContext context: Context) : this(File(context.filesDir, DIRECTORY))
+    @Inject constructor(@ApplicationContext context: Context) : this(File(context.noBackupFilesDir, DIRECTORY))
 
     init {
         require(segmentBytes > 0 && segments >= 2) { "at least two segments, so rotation never empties the log" }
@@ -148,7 +149,7 @@ class PlannerLog internal constructor(
     }
 
     companion object {
-        /** Under `filesDir`. No FileProvider path may ever include it. */
+        /** Under `noBackupFilesDir`. No FileProvider path may ever include it. */
         const val DIRECTORY = "foreman"
         const val SEGMENT_BYTES = 768L * 1024
         const val SEGMENTS = 4

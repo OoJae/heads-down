@@ -288,8 +288,10 @@ class PlannerLogTest {
 
     @Test
     fun `no FileProvider path in the app can reach the planner log`() {
-        // The log lives in filesDir/foreman. The app's FileProviders are declared by path XML
-        // files; none may expose filesDir as a whole, the foreman folder, or the storage root.
+        // The log lives in noBackupFilesDir/foreman, which only a root-path could reach. The
+        // app's FileProviders are declared by path XML files: none may expose the storage root,
+        // and (should the log ever move back under filesDir) none may expose filesDir as a whole
+        // or a foreman folder in it.
         // Gradle runs unit tests in the module directory: android/feature/shift.
         val module = File(checkNotNull(System.getProperty("user.dir")))
         val android = checkNotNull(module.parentFile?.parentFile) { "not inside android/: $module" }

@@ -130,12 +130,13 @@ what the service already receives:
 | A shift starts or stops running | `shift_armed`, `shift_ended` with the on-chain reason code |
 | Service stop | `monitor_stop` |
 
-* **Where.** `filesDir/foreman/planner.jsonl` plus up to three older segments.
+* **Where.** `noBackupFilesDir/foreman/planner.jsonl` plus up to three older segments.
 * **Size.** Four segments of 768 KiB: never more than 3 MiB, never less than 2.25 MiB kept
   after a rotation (26 weeks at the schema's busiest 12 KB a day).
-* **It never leaves the phone.** No code path sends it anywhere. The app excludes all of its
-  data from backup and device transfer, and `PlannerLogTest` scans every FileProvider path
-  file in the app to prove none can serve `filesDir/foreman`. `PlannerLog.clear()` deletes it.
+* **It never leaves the phone.** No code path sends it anywhere. Android never backs up or
+  transfers `noBackupFilesDir`, the app excludes all of its data from both anyway, and
+  `PlannerLogTest` scans every FileProvider path file in the app to prove none can serve the
+  folder. `PlannerLog.clear()` deletes it.
 * **One addition to the schema.** The charger state is written at start as well as the screen
   state. Without it a phone plugged in before the shift would show no charger event at all.
   Planner v1 ignores charger lines either way.
@@ -240,5 +241,6 @@ only, kept in memory.
    break, and one more window judged each time the trigger fired.
 5. **A flat carry.** Lift the phone without tilting it and walk away with the screen off: the
    shift breaks about 3 s later as "the phone was picked up".
-6. **The planner log.** `run-as xyz.headsdown cat files/foreman/planner.jsonl` after a shift.
+6. **The planner log.** `adb shell run-as xyz.headsdown cat no_backup/foreman/planner.jsonl`
+   after a shift (debug build).
 7. **Battery.** One night at 50 Hz against one at the old 5 Hz build.
