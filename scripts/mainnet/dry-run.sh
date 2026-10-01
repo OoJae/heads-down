@@ -5,9 +5,9 @@
 #
 #   scripts/mainnet/dry-run.sh [--keep] [--no-build] [--skip-smoke] [--allow-dirty]
 #
-# Isolation: its own dev-stack home, key directories and ports (RPC 18899, crank 18787, indexer
-# 18788, faucet 19900, gossip 28001+), so it never touches a dev stack already running on the
-# default ports, nor ~/.config/heads-down/mainnet. The deploy keys are a throwaway set in
+# Isolation: its own dev-stack home, key directories and ports (RPC 38899, crank 38787, indexer
+# 38788, faucet 39900, gossip 38001+; override with HD_DRYRUN_*_PORT), so it never touches a dev
+# stack already running on other ports, nor ~/.config/heads-down/mainnet. The deploy keys are a throwaway set in
 # ~/.config/heads-down/dryrun/keys (deployer funded by the local faucet). The fork is
 # `scripts/devstack/up.sh --no-deploy`: ORE and mainnet's feature set, no heads_down, so deploy.sh
 # runs its real fresh-deploy path (same program id HDn4vg…, --max-len, buffer, receipt).
@@ -29,14 +29,14 @@ done
 
 export HD_DEVSTACK_HOME="${HD_DRYRUN_HOME:-$HOME/.local/share/heads-down/dryrun}"
 export HD_DEVSTACK_KEYS="${HD_DRYRUN_DEVSTACK_KEYS:-$HOME/.config/heads-down/dryrun/devstack}"
-export HD_RPC_PORT="${HD_DRYRUN_RPC_PORT:-18899}"
+export HD_RPC_PORT="${HD_DRYRUN_RPC_PORT:-38899}"
 export HD_WS_PORT=$((HD_RPC_PORT + 1))
-export HD_CRANK_PORT="${HD_DRYRUN_CRANK_PORT:-18787}"
-export HD_INDEXER_PORT="${HD_DRYRUN_INDEXER_PORT:-18788}"
-export HD_REGISTRAR_PORT="${HD_DRYRUN_REGISTRAR_PORT:-18790}"
-export HD_FAUCET_PORT="${HD_DRYRUN_FAUCET_PORT:-19900}"
-export HD_GOSSIP_PORT="${HD_DRYRUN_GOSSIP_PORT:-28001}"
-export HD_DYNAMIC_PORTS="${HD_DRYRUN_DYNAMIC_PORTS:-28002-28040}"
+export HD_CRANK_PORT="${HD_DRYRUN_CRANK_PORT:-38787}"
+export HD_INDEXER_PORT="${HD_DRYRUN_INDEXER_PORT:-38788}"
+export HD_REGISTRAR_PORT="${HD_DRYRUN_REGISTRAR_PORT:-38790}"
+export HD_FAUCET_PORT="${HD_DRYRUN_FAUCET_PORT:-39900}"
+export HD_GOSSIP_PORT="${HD_DRYRUN_GOSSIP_PORT:-38001}"
+export HD_DYNAMIC_PORTS="${HD_DRYRUN_DYNAMIC_PORTS:-38002-38040}"
 export HD_STATE="$HD_DEVSTACK_HOME/deploy"
 DRY_KEYS="$HD_DRYRUN_KEYS"
 DEVSTACK="$REPO_ROOT/scripts/devstack"
