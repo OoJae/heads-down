@@ -479,8 +479,13 @@ pub fn process_checkin(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
             (s.shift_id.get(), s.broken != 0)
         };
         require_writable(seat)?;
+        require_writable(rig)?;
         let rig_address = *rig.address();
-        let c = {
+        let c = if !state::is_initialized::<Rig>(rig) {
+            // The seat's own wallet closed its rig: that seat simply cannot
+            // count rounds any more; it must not sink the other seats' batch.
+            Checkin::skip(HdError::RigNotArmed.code())
+        } else {
             let mut g = state::load_mut::<Rig>(rig)?;
             checkin_one(
                 &mut g,

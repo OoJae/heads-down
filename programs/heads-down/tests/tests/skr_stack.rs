@@ -785,6 +785,47 @@ fn a_break_before_the_seat_binds_only_delays_it() {
 }
 
 #[test]
+fn a_closed_rig_cannot_sink_the_other_seats_check_in() {
+    let mut env = Env::new();
+    let plan = stack_plan();
+    let mut a = player(&mut env, 1, &plan);
+    let b = player(&mut env, 2, &plan);
+    let r0 = env.board_round;
+    let p = params(&env, 1, 2, 1);
+    let table = table_pda(&a.pubkey(), 1);
+    ok(open(&mut env, &a, &p));
+    ok(join(&mut env, &a, &table));
+    ok(join(&mut env, &b, &table));
+    // b freezes and closes its rig before the window.
+    let w = b.wallet.insecure_clone();
+    ok(env.send_as(&w, &[ix_freeze_wallet(&w.pubkey())], &[]));
+    ok(env.send_as(&w, &[ix_close_rig(&w.pubkey(), None)], &[]));
+    env.set_board_round(r0 + 1);
+    let hb = a.heartbeat(1, r0 + 1, 1);
+    let meta = ok(env.send(
+        &[
+            secp_ix_for(&[hb]),
+            ix_stack_checkin(
+                &table,
+                &[
+                    (seat(&table, &a), a.rig, entry_for(&hb, 0, 0)),
+                    (seat(&table, &b), b.rig, reuse_lease()),
+                ],
+            ),
+        ],
+        &[],
+    ));
+    assert_eq!(
+        results(&meta.logs),
+        vec![(a.rig, 0), (b.rig, HdError::RigNotArmed.code())]
+    );
+    // The rig account must still be passed writable (a cranker error fails).
+    let mut ix = ix_stack_checkin(&table, &[(seat(&table, &b), b.rig, reuse_lease())]);
+    ix.accounts[4].is_writable = false;
+    assert_ix_err(&env.send(&[ix], &[]), 0, InstructionError::InvalidAccountData);
+}
+
+#[test]
 fn observe_mode_counts_a_dig_and_a_freeze_breaks_the_seat() {
     let mut env = Env::new();
     // A mining seat: the normal plan with one-round leases.

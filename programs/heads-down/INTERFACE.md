@@ -1333,9 +1333,11 @@ Data: `0 tag | 1 n u8 (1..=8) | 2 + 20i: entry i`, the `dig` entry (§5, tag 6).
 Exactly `3 + 2n` accounts. These fail the transaction: the table is not Open,
 or `Board.round_id` is outside `[start_round, end_round]`
 (`InvalidStackState`, 38); a seat whose `table` or `rig` does not match
-(`StackSeatMismatch`, 39); a seat or rig twice (`DuplicateRig`, 22). Per seat
-the rule of §11.5 runs, and one **StackCheckin** event carries its result; a
-heartbeat verified here also emits **HeartbeatsRecorded** (tag 8, v1.1 bytes).
+(`StackSeatMismatch`, 39); a seat or rig twice (`DuplicateRig`, 22); a seat or
+rig passed read-only (`InvalidAccountData`). Per seat the rule of §11.5 runs,
+and one **StackCheckin** event carries its result, so one seat (say, one whose
+wallet closed its rig) never sinks the batch; a heartbeat verified here also
+emits **HeartbeatsRecorded** (tag 8, v1.1 bytes).
 
 #### 18 `settle_stack`
 
@@ -1571,15 +1573,16 @@ round `r`. Per seat, in order (the first row that applies is the result):
 
 | # | Condition | Result | Effect on the seat |
 |---|---|---|---|
-| 1 | `seat.broken == 1` | 42 StackSeatBroken | none |
-| 2 | seat bound and `rig.shift_id ≠ seat.shift_id` | 40 StackShiftMismatch | none |
-| 3 | `rig.shift_open ≠ 1` | 13 RigNotArmed | none |
-| 4a | `rig.break_reason ≠ 0` or state ∉ {Armed, Down}, seat **unbound** | 24 InvalidRigState | none: end that shift and arm a fresh one |
-| 4b | the same, seat **bound** | 42 StackSeatBroken | `broken = 1`, for good |
-| 5 | `rig.plan_lease_rounds ≠ 1` | 41 StackLeaseTooLong | none (the heartbeat is not consumed) |
-| 6 | verify mode: the HEARTBEAT fails (§6.2 step 3, §6.3) | its code (6, 7, `0x2560_00xx`) | none |
-| 7 | not `lease_from_round == lease_to_round == r` | 8 LeaseExpired | none |
-| 8 | otherwise | 0 | bind to `rig.shift_id` if unbound; if `last_round < r`: `checked_rounds += 1`, `last_round = r` |
+| 1 | the rig account is no longer a Rig (its wallet closed it) | 13 RigNotArmed | none |
+| 2 | `seat.broken == 1` | 42 StackSeatBroken | none |
+| 3 | seat bound and `rig.shift_id ≠ seat.shift_id` | 40 StackShiftMismatch | none |
+| 4 | `rig.shift_open ≠ 1` | 13 RigNotArmed | none |
+| 5a | `rig.break_reason ≠ 0` or state ∉ {Armed, Down}, seat **unbound** | 24 InvalidRigState | none: end that shift and arm a fresh one |
+| 5b | the same, seat **bound** | 42 StackSeatBroken | `broken = 1`, for good |
+| 6 | `rig.plan_lease_rounds ≠ 1` | 41 StackLeaseTooLong | none (the heartbeat is not consumed) |
+| 7 | verify mode: the HEARTBEAT fails (§6.2 step 3, §6.3) | its code (6, 7, `0x2560_00xx`) | none |
+| 8 | not `lease_from_round == lease_to_round == r` | 8 LeaseExpired | none |
+| 9 | otherwise | 0 | bind to `rig.shift_id` if unbound; if `last_round < r`: `checked_rounds += 1`, `last_round = r` |
 
 **The Rig fields that prove it.** These are all v1.1 fields, read only. Stack
 adds no per-round state to the Rig and changes no Rig layout.
