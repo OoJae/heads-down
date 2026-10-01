@@ -25,6 +25,28 @@ export interface Config {
   oreApiEnabled: boolean;
   oreRoundsSince: number;
   oreApiVerifySample: number;
+  /** Market price sources for the haul, tried in order ([] = none). */
+  marketSources: string[];
+  /** ORE round resolver (Round accounts + reset transactions over RPC). */
+  resolveRounds: boolean;
+  resolveMaxRounds: number;
+  resolveResetLookups: number;
+  /** RPC shown in localnet explorer links (only when it is a loopback URL, never a keyed one). */
+  localExplorerRpc: string;
+}
+
+/** A loopback http(s) URL is safe to show in links; anything else may embed a key. */
+export function loopbackRpc(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if ((u.protocol === "http:" || u.protocol === "https:") && (u.hostname === "127.0.0.1" || u.hostname === "localhost") && !u.username && !u.password && !u.search) {
+      return `${u.protocol}//${u.host}`;
+    }
+  } catch {
+    /* not a URL */
+  }
+  return null;
 }
 
 function int(env: NodeJS.ProcessEnv, name: string, def: number, min: number, max: number): number {
@@ -64,8 +86,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     oreApiEnabled: env.ORE_API_ENABLED !== "0",
     oreRoundsSince: int(env, "ORE_ROUNDS_SINCE", Math.floor(Date.now() / 1000) - 14 * 86_400, 0, 4_102_444_800),
     oreApiVerifySample: int(env, "ORE_API_VERIFY_SAMPLE", 3, 0, 100),
+    marketSources: parseSources(env.MARKET_PRICE_SOURCES),
+    resolveRounds: env.RESOLVE_ROUNDS !== "0",
+    resolveMaxRounds: int(env, "RESOLVE_MAX_ROUNDS", 200, 0, 5000),
+    resolveResetLookups: int(env, "RESOLVE_RESET_LOOKUPS", 10, 0, 500),
+    localExplorerRpc: loopbackRpc(rpcUrl) ?? "http://127.0.0.1:8899",
     ...overrides,
   };
+}
+
+function parseSources(raw: string | undefined): string[] {
+  if (raw === undefined || raw === "") return ["jupiter", "ore-api"];
+  if (raw === "none") return [];
+  const list = raw.split(",").map((x) => x.trim()).filter(Boolean);
+  for (const x of list) if (x !== "jupiter" && x !== "ore-api") throw new Error("MARKET_PRICE_SOURCES must list jupiter and/or ore-api, or be none");
+  return list;
 }
 
 export function describeConfig(c: Config): Record<string, unknown> {
@@ -79,6 +114,8 @@ export function describeConfig(c: Config): Record<string, unknown> {
     nightTz: c.tzOffsetMinutes,
     ingestIntervalS: c.ingestIntervalS,
     oreApi: c.oreApiEnabled,
+    marketSources: c.marketSources,
+    roundResolver: c.resolveRounds,
   };
 }
 
