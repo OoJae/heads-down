@@ -7,10 +7,11 @@ import { Rng, generateSimulation, runSimulation, type SimConfig } from "../src/s
 import { migrate, openDb, type Db } from "../src/store/db.ts";
 import { Store } from "../src/store/store.ts";
 
+// Large enough to contain every kind of traffic the simulator models, including a closed rig.
 const base: SimConfig = {
   seed: "unit-test",
-  rigs: 14,
-  nights: 12,
+  rigs: 20,
+  nights: 14,
   startDay: "2026-09-10",
   programId: HEADS_DOWN_PROGRAM_ID,
   executorPda: EXECUTOR_PDA,
@@ -73,6 +74,8 @@ describe("simulation through the real ingest path", () => {
     // Rigs are counted from RigRegistered / RigClosed, and the account snapshot agrees.
     expect(s.rigs.basis).toBe("lifecycle");
     expect(s.rigs.everRegistered).toBe(base.rigs);
+    expect(s.rigs.closed).toBeGreaterThan(0);
+    expect(input.closedRigs).toHaveLength(s.rigs.closed);
     expect(s.rigs.total).toBe(base.rigs - s.rigs.closed);
     expect(s.rigs.crossCheck).toEqual({ accounts: s.rigs.total, accountsSeeker: s.rigs.seeker, matches: true });
     expect(s.rigs.seeker + s.rigs.guest).toBe(s.rigs.total);
@@ -85,9 +88,12 @@ describe("simulation through the real ingest path", () => {
     expect(BigInt(s.ore.mined.amount)).toBeGreaterThan(0n);
     expect(s.ore.mined.digsPendingRound).toBe(0);
     expect(s.gate.openRate).not.toBeNull();
-    // The Rig accounts' lifetime counters agree with the events.
+    // The Rig accounts' lifetime counters agree with the events (a closed rig's account is gone, its events are not).
+    const open = new Set(input.rigs.filter((r) => !r.closed).map((r) => r.address));
+    expect(open.size).toBe(s.rigs.total);
     const lifetime = input.rigs.reduce((a, r) => a + r.lifetimeRoundsDug, 0n);
-    expect(lifetime).toBe(BigInt(input.digs.length));
+    expect(lifetime).toBe(BigInt(input.digs.filter((d) => open.has(d.rig)).length));
+    expect(input.digs.some((d) => !open.has(d.rig))).toBe(true);
     // Feeds, cohorts and milestones all compute.
     expect(recentDigs(input, HEADS_DOWN_PROGRAM_ID, 10)).toHaveLength(10);
     expect(cohortReport(input, opts).cohorts.length).toBeGreaterThan(0);
@@ -115,6 +121,11 @@ describe("simulation through the real ingest path", () => {
     }
     expect(hauls).toBe(input.ends.length);
     expect(mined).toBeGreaterThan(0n);
+    // Completed shifts and phone-signed breaks (1 pickup, 2 screen_on) both occur.
     expect(reasons.has(0)).toBe(true);
+    expect(reasons.has(1) || reasons.has(2)).toBe(true);
+    // The skips a dashboard has to explain are all present: gate closed, replay refused, quiet phone.
+    const codes = new Set(input.skips.map((k) => k.errorCode));
+    for (const c of [1, 7, 8]) expect(codes.has(c), `skip code ${c}`).toBe(true);
   });
 });
