@@ -219,6 +219,9 @@ pub fn process_instruction(
         tag::REFUND_GIFT => gift::process_refund(accounts, rest),
         tag::INIT_BURY_VAULT => bury::process_init(accounts, rest),
         tag::BURY_AUCTION_BUY => bury::process_buy(accounts, rest),
+        tag::PROPOSE_GOVERNANCE => governance::process_propose_governance(accounts, rest),
+        tag::ACCEPT_GOVERNANCE => governance::process_accept_governance(accounts, rest),
+        tag::CANCEL_GOVERNANCE => governance::process_cancel_governance(accounts, rest),
         _ => Err(error::HdError::InvalidInstruction.into()),
     }
 }
