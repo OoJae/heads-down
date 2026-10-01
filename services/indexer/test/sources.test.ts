@@ -86,7 +86,7 @@ describe("RPC polling source", () => {
     const opts = { addresses: [HD, EXECUTOR_PDA], maxBackfill: 1000, concurrency: 2 };
     const first = await pollRpcOnce(ctx, rpc, opts);
     expect(first).toEqual({ ingested: 4, accounts: 1 });
-    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(sig(3));
+    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(`5003:${sig(3)}`);
     const m = await ctx.store.loadMetricsInput();
     expect(m.digs).toHaveLength(3);
     expect(m.arms).toHaveLength(1);
@@ -104,10 +104,28 @@ describe("RPC polling source", () => {
     addTx(chain, dig(5, rigPda), [HD, EXECUTOR_PDA]);
     chain.unavailable.add(sig(5));
     expect((await pollRpcOnce(ctx, rpc, opts)).ingested).toBe(1);
-    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(sig(4));
+    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(`5004:${sig(4)}`);
     chain.unavailable.clear();
     expect((await pollRpcOnce(ctx, rpc, opts)).ingested).toBe(1);
     expect((await ctx.store.loadMetricsInput()).digs).toHaveLength(5);
+  });
+
+  it("keeps polling after a short-history node forgets the cursor transaction", async () => {
+    const ctx = await ctxFor("localnet");
+    const chain = fakeChain();
+    const { address: rigPda } = findProgramAddress([seed("rig"), addrBytes(addr(11))], HD);
+    for (let n = 1; n <= 2; n++) addTx(chain, dig(n, rigPda), [HD]);
+    const rpc = new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: noSleep });
+    const opts = { addresses: [HD], maxBackfill: 1000, concurrency: 1 };
+    expect((await pollRpcOnce(ctx, rpc, opts)).ingested).toBe(2);
+    // solana-test-validator keeps ~10,000 shreds: the cursor transaction is purged...
+    chain.pruned.add(sig(2));
+    addTx(chain, dig(3, rigPda), [HD]);
+    // ...and `until` now fails with "not found": the poll falls back to the cursor's slot.
+    expect((await pollRpcOnce(ctx, rpc, opts)).ingested).toBe(1);
+    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(`5003:${sig(3)}`);
+    expect((await ctx.store.loadMetricsInput()).digs).toHaveLength(3);
+    expect((await ctx.store.health()).problems).toEqual([]);
   });
 
   it("skips failed signatures without fetching them", async () => {
