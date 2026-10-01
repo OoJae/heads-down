@@ -1,5 +1,7 @@
 package xyz.headsdown.ml.pickup
 
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -161,14 +163,15 @@ class PickupStreamTest {
     fun `a knock is an onset, and a posture that stays re-fires as not-an-onset`() {
         val stream = StreamBuilder().rest(4.0).knock().rest(6.0).rotateTo(25.0, 0.5).rest(10.0).build()
         val recorder = Recorder()
-        val collector = PickupWindowCollector(listener = recorder)
+        val trigger = MotionTrigger()
+        val collector = PickupWindowCollector(trigger = trigger, listener = recorder)
         stream.forEach(collector::onSample)
         assertEquals("the knock, the tip, and re-fires every 3 s while the phone stays tipped", 5, recorder.triggers.size)
         assertEquals(listOf(true, true, false, false, false), recorder.triggers.map { it.second })
         // Windows come back with the tag their trigger was given, in trigger order.
         assertEquals(listOf(1, 2, 3, 4), recorder.windows.map { it.second })
         assertEquals(recorder.triggers.take(4).map { it.first }, recorder.windows.map { it.first.triggerNanos })
-        assertEquals(0, collector.settles)
+        assertEquals("the plain trigger never re-rests", 0, trigger.settles)
     }
 
     @Test
@@ -185,7 +188,7 @@ class PickupStreamTest {
     // ------------------------------------------------------------------ coming back to rest
 
     @Test
-    fun `without a rest tracker a phone laid down in a new posture re-fires all night`() {
+    fun `the plain trigger re-fires all night once the phone is laid down in a new posture`() {
         // Armed in the hand (tilted 150 degrees from screen-down), then laid face-down.
         val stream = StreamBuilder().rotateTo(150.0, 0.02).sway(3.0).rotateTo(0.0, 1.0).rest(60.0).build()
         val recorder = Recorder()
@@ -195,13 +198,13 @@ class PickupStreamTest {
     }
 
     @Test
-    fun `with a rest tracker the trigger settles on the new posture and is ready for the next motion`() {
+    fun `the live trigger settles on the new posture and is ready for the next motion`() {
         val b = StreamBuilder().rotateTo(150.0, 0.02).sway(3.0).rotateTo(0.0, 1.0)
         val laidDown = b.nowNanos
         val stream = b.rest(30.0).knock().rest(10.0).rotateTo(20.0, 0.4).rest(20.0).knock().rest(6.0).build()
         val recorder = Recorder()
-        val trigger = MotionTrigger()
-        val collector = PickupWindowCollector(trigger = trigger, rest = RestTracker(), listener = recorder)
+        val trigger = MotionTrigger.live()
+        val collector = PickupWindowCollector(trigger = trigger, listener = recorder)
         stream.forEach(collector::onSample)
 
         val afterLayDown = recorder.triggers.filter { it.first > laidDown }
@@ -211,7 +214,7 @@ class PickupStreamTest {
         // the lay-down, once after the tip. Never again after that.
         assertTrue("re-fires only while settling: $afterLayDown", afterLayDown.count { !it.second } <= 2)
         assertTrue(onceSettled.count { !it.second } <= 1)
-        assertEquals("settled after the lay-down and after the tip", 2, collector.settles)
+        assertEquals("settled after the lay-down and after the tip", 2, trigger.settles)
         assertFalse(trigger.isMoving)
     }
 
@@ -222,11 +225,35 @@ class PickupStreamTest {
         for (offset in 0 until 25) {
             val stream = StreamBuilder(seed = offset.toLong()).rest(6.0 + offset * 0.02).knock(samples = 4).rest(8.0).build()
             val recorder = Recorder()
-            val collector = PickupWindowCollector(rest = RestTracker(), listener = recorder)
+            val trigger = MotionTrigger.live()
+            val collector = PickupWindowCollector(trigger = trigger, listener = recorder)
             stream.forEach(collector::onSample)
             assertEquals("offset $offset: one knock, one trigger", listOf(true), recorder.triggers.map { it.second })
-            assertEquals("offset $offset", 0, collector.settles)
+            assertEquals("offset $offset", 0, trigger.settles)
         }
+    }
+
+    @Test
+    fun `on streams that start at rest the live trigger fires exactly where the plain one does`() {
+        // Every training stream starts with the phone lying there, and its window is the first
+        // trigger. The live trigger must not move that sample.
+        val vectors = TestResources.json("/foreman/pickup_vectors.json")
+        var compared = 0
+        for (w in vectors["windows"]!!.jsonArray) {
+            val input = w.jsonObject["input"]!!
+            val stream = TestResources.stream(input)
+            val plain = MotionTrigger()
+            val live = MotionTrigger.live()
+            var first: Long? = null
+            var firstLive: Long? = null
+            stream.forEach { t, x, y, z ->
+                if (plain.onSample(t, x, y, z) && first == null) first = t
+                if (live.onSample(t, x, y, z) && firstLive == null) firstLive = t
+            }
+            assertEquals(w.jsonObject["name"].toString(), first, firstLive)
+            if (first != null) compared++
+        }
+        assertTrue(compared >= 20)
     }
 
     @Test
@@ -332,6 +359,14 @@ class PickupStreamTest {
         after.forEach(collector::onSample)
         assertEquals("the knock after the bad samples still fires", 1, windows.size)
         assertTrue(windows.single().samples.all { it.x.isFinite() && it.y.isFinite() && it.z.isFinite() })
+
+        // The trigger on its own (the sensor lab feeds it directly) ignores them too.
+        val trigger = MotionTrigger()
+        var fires = 0
+        stream.forEach { t, x, y, z -> if (trigger.onSample(t, x, y, z)) fires++ }
+        assertFalse(trigger.onSample(stream.t.last() + 20_000_000, 0f, 0f, Float.NaN))
+        after.forEach { t, x, y, z -> if (trigger.onSample(t, x, y, z)) fires++ }
+        assertEquals(1, fires)
     }
 
     @Test
@@ -378,23 +413,20 @@ class PickupStreamTest {
         val night = StreamBuilder(seed = 4, startNanos = warm.t.last() + 20_000_000).rest(400.0).build()
 
         val trigger = MotionTrigger()
-        val tracker = RestTracker()
-        val collector = PickupWindowCollector(rest = RestTracker(), listener = Recorder())
+        val collector = PickupWindowCollector(trigger = MotionTrigger.live(), listener = Recorder())
         // Load every class and take every branch of the quiet path once before measuring.
         warm.forEach { t, x, y, z ->
             trigger.onSample(t, x, y, z)
-            tracker.onSample(t, x, y, z)
             collector.onSample(t, x, y, z)
         }
 
         val bytes = Allocations.during {
             night.forEach { t, x, y, z ->
                 trigger.onSample(t, x, y, z)
-                tracker.onSample(t, x, y, z)
                 collector.onSample(t, x, y, z)
             }
         }
-        println("sample path: $bytes bytes allocated over ${night.size} samples (trigger + rest tracker + collector)")
+        println("sample path: $bytes bytes allocated over ${night.size} samples (plain trigger + collector with the live trigger)")
         assertEquals("no allocation per sample", 0L, bytes)
         assertEquals(0, collector.openWindows)
     }

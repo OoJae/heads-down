@@ -9,9 +9,8 @@ import xyz.headsdown.ml.MotionWindow
  * `ml/foreman/classifier/trigger.py:cut_window` reproduces.
  *
  * Samples whose timestamp does not increase are ignored (as [MotionTrigger] does), and so are
- * samples with a non-finite value (the feature pipeline would drop them anyway, and one would
- * poison the trigger's filters for good). Windows may overlap; each is emitted once, on the
- * sample that closes it.
+ * samples with a non-finite value (the feature pipeline would drop them anyway). Windows may
+ * overlap; each is emitted once, on the sample that closes it.
  *
  * Built for the shift service's sensor thread, which sees every sample of a night:
  * - [onSample] allocates nothing while no window closes. History lives in fixed primitive ring
@@ -20,9 +19,8 @@ import xyz.headsdown.ml.MotionWindow
  * - A window that needed more history than the ring holds loses its oldest samples. More than
  *   0.5 s of that fails the feature spec's gap check, so it is a PICKUP (fail-closed).
  *
- * With a [rest] tracker, a trigger left "moving" by a posture the phone has since settled into
- * gets that posture as its new resting reference ([MotionTrigger.settle]). Without one (the
- * default) the trigger behaves exactly as the Python reference does.
+ * On the phone, pass [MotionTrigger.live] as the [trigger]: the default plain trigger behaves
+ * exactly as the Python reference does, re-fires included.
  *
  * Pure Kotlin, single-threaded: feed it from one thread. The listener runs on that thread and
  * must not call back into the collector, except [reset].
@@ -32,7 +30,6 @@ class PickupWindowCollector(
     private val preNanos: Long = PRE_NANOS,
     private val postNanos: Long = POST_NANOS,
     private val maxSamplesPerWindow: Int = 4_096,
-    private val rest: RestTracker? = null,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -42,7 +39,7 @@ class PickupWindowCollector(
          * [onset] tells a fresh motion event from a re-fire: true when the phone was at its
          * resting posture on the sample before, false when it was already off it (the same
          * episode outlasting the refractory period, or a posture the trigger's reference has not
-         * followed). The classifier was trained on onsets only.
+         * followed yet). The classifier was trained on onsets only.
          *
          * The returned tag comes back with that window in [onWindow].
          */
@@ -52,14 +49,14 @@ class PickupWindowCollector(
         fun onWindow(window: MotionWindow, tag: Int)
     }
 
-    /** Every window, whatever fired it (what the vectors and the sensor lab expect). */
+    /** Every window, whatever fired it (what the vectors expect). */
     constructor(
         trigger: MotionTrigger = MotionTrigger(),
         preNanos: Long = PRE_NANOS,
         postNanos: Long = POST_NANOS,
         maxSamplesPerWindow: Int = 4_096,
         onWindow: (MotionWindow) -> Unit,
-    ) : this(trigger, preNanos, postNanos, maxSamplesPerWindow, null, WindowsOnly(onWindow))
+    ) : this(trigger, preNanos, postNanos, maxSamplesPerWindow, WindowsOnly(onWindow))
 
     private class WindowsOnly(private val sink: (MotionWindow) -> Unit) : Listener {
         override fun onWindow(window: MotionWindow, tag: Int) = sink(window)
@@ -94,10 +91,6 @@ class PickupWindowCollector(
 
     /** Number of windows currently waiting for their post-trigger samples. */
     val openWindows: Int get() = open
-
-    /** How often the [rest] tracker gave the trigger a new resting posture. */
-    var settles: Int = 0
-        private set
 
     fun onSample(s: AccelSample) = onSample(s.tNanos, s.x, s.y, s.z)
 
@@ -145,15 +138,6 @@ class PickupWindowCollector(
             openTag[open] = tag
             open++
         }
-        // "At rest" speaks for the blocks before this sample; "moving" for this sample. Only a
-        // trigger that was moving through all of that stillness is stuck on an old posture (a
-        // knock that lands on a block boundary is not).
-        if (rest != null && rest.onSample(tNanos, x, y, z) && trigger.isMoving &&
-            tNanos - trigger.movingSinceNanos >= rest.evidenceNanos
-        ) {
-            trigger.settle(rest.restX, rest.restY, rest.restZ)
-            settles++
-        }
     }
 
     /** Drops the history and any open window (a sensor restart). */
@@ -164,7 +148,6 @@ class PickupWindowCollector(
         open = 0
         lastNanos = Long.MIN_VALUE
         trigger.reset()
-        rest?.reset()
     }
 
     /** Samples [from]..[to] (numbers), as far as the ring still holds them. */

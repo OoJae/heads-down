@@ -10,9 +10,9 @@ import kotlin.math.sqrt
  * stay within a small angle and magnitude of the first one (about 2.5 s of stillness).
  *
  * Why it exists: [MotionTrigger]'s resting reference never follows a posture the phone settled
- * into (laid face-down after arming in the hand, tipped on a pillow), so its trigger would
- * re-fire every refractory period for the rest of the night. [PickupWindowCollector] uses this
- * test to hand such a new resting posture to [MotionTrigger.settle].
+ * into (laid face-down after arming in the hand, tipped on a pillow), so it would re-fire every
+ * refractory period for the rest of the night. [MotionTrigger.live] uses this test to take such
+ * a posture as its new resting reference.
  *
  * Block means, not single samples: a mean of ~25 samples is steady to a few hundredths of a
  * degree on the noisiest sensor profile the classifier was trained for, so the tolerances can be

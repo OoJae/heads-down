@@ -15,14 +15,22 @@ import kotlin.math.sqrt
  *
  * [onSample] allocates nothing: it runs for every accelerometer sample of a shift.
  *
- * The resting reference only follows the phone while it is still relative to that reference. A
- * phone that comes to rest in a new posture (laid down after arming, tipped on a pillow) is
- * therefore "moving" for good, and the trigger re-fires every refractory period. Two things
- * handle that on the phone, outside the arithmetic the vectors pin: [isMoving] lets the caller
- * tell a fresh motion event from such a re-fire, and [settle] restarts the reference once the
- * phone demonstrably lies still again (see [RestTracker]).
+ * **On a live stream, use [live].** The resting reference only follows the phone while it is
+ * still relative to that reference. A phone that comes to rest in a new posture (laid down after
+ * arming in the hand, tipped on a pillow) therefore stays "moving" for good, and the plain
+ * trigger re-fires every refractory period for the rest of the night. Two additions handle that
+ * without touching the arithmetic the vectors pin:
+ * - [isMoving] lets the caller tell a fresh motion event from such a re-fire;
+ * - with a [rest] tracker, a trigger that stayed "moving" through a stretch the tracker calls
+ *   rest takes that posture as its new resting reference ([settle]).
+ *
+ * The Python reference runs the plain trigger: every training stream starts with the phone
+ * already lying there, which is the state [live] restores on the phone.
  */
-class MotionTrigger(private val config: Config = Config()) {
+class MotionTrigger(
+    private val config: Config = Config(),
+    private val rest: RestTracker? = null,
+) {
 
     data class Config(
         /** |a| deviation from the resting magnitude that counts as motion, m/s². */
@@ -62,8 +70,13 @@ class MotionTrigger(private val config: Config = Config()) {
     var movingSinceNanos: Long = 0L
         private set
 
-    /** True if this sample starts a new motion event. */
+    /** How often the [rest] tracker gave the trigger a new resting posture. */
+    var settles: Int = 0
+        private set
+
+    /** True if this sample starts a new motion event. A sample with a non-finite value is ignored. */
     fun onSample(tNanos: Long, x: Float, y: Float, z: Float): Boolean {
+        if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return false // it would poison the filters for good
         val vx = x.toDouble()
         val vy = y.toDouble()
         val vz = z.toDouble()
@@ -78,6 +91,7 @@ class MotionTrigger(private val config: Config = Config()) {
             restMagnitude = mag
             lastNanos = tNanos
             started = true
+            rest?.onSample(tNanos, x, y, z)
             return false
         }
         if (tNanos <= lastNanos) return false // duplicate or out-of-order timestamp
@@ -103,11 +117,21 @@ class MotionTrigger(private val config: Config = Config()) {
         isMoving = moving
         val refractory = lastTriggerNanos != Long.MIN_VALUE &&
             tNanos - lastTriggerNanos < config.refractoryMillis * 1_000_000
+        var fired = false
         if (moving && !refractory) {
             lastTriggerNanos = tNanos
-            return true
+            fired = true
         }
-        return false
+        // "At rest" speaks for the blocks before this sample, "moving" for this sample. Only a
+        // trigger that was moving through all of that stillness is stuck on an old posture (a
+        // knock that lands on a block boundary is not).
+        if (rest != null && rest.onSample(tNanos, x, y, z) && moving &&
+            tNanos - movingSinceNanos >= rest.evidenceNanos
+        ) {
+            settle(rest.restX, rest.restY, rest.restZ)
+            settles++
+        }
+        return fired
     }
 
     /**
@@ -135,6 +159,7 @@ class MotionTrigger(private val config: Config = Config()) {
         restMagnitude = 0.0
         lastNanos = 0L
         lastTriggerNanos = Long.MIN_VALUE
+        rest?.reset()
     }
 
     /** Angle between the current posture and the resting posture, degrees. */
@@ -146,5 +171,13 @@ class MotionTrigger(private val config: Config = Config()) {
         // The constant java.lang.Math.toDegrees multiplies by on current runtimes (and the Python
         // port's RAD_TO_DEG), spelled out so every Android release computes the same value.
         return acos(cos) * PickupFeatures.RAD_TO_DEG
+    }
+
+    companion object {
+        /**
+         * The trigger as the phone runs it (shift service and sensor lab alike): the pinned
+         * arithmetic, plus coming back to rest after the phone settles in a new posture.
+         */
+        fun live(config: Config = Config()): MotionTrigger = MotionTrigger(config, RestTracker())
     }
 }
