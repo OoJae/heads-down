@@ -7,6 +7,11 @@
 #
 # Needs: the fork fixtures and SBF builds (programs/heads-down/scripts/test.sh
 # makes both), rustc 1.97.1, node >= 23.6 (type stripping).
+#
+# Every check prints one line starting with [MATCH], [MISMATCH], [UNKNOWN] (the
+# consumer does not decode it, safely) or [INFO], and each step ends with a
+# `TOTAL <consumer>: ...` line. Those TOTAL lines are the numbers in
+# CROSSCHECK.md.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PROGRAM="$(cd "$HERE/../.." && pwd)"
@@ -15,9 +20,9 @@ export VECTORS="$PROGRAM/vectors"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "== 1. android / crank vectors and event semantics, executed on the LiteSVM fork"
+echo "== 1. android / crank vectors executed on the LiteSVM fork, and the program facts"
 (cd "$PROGRAM" && cargo +1.97.1 test -p heads-down-tests --test crosscheck -- --ignored --nocapture 2>&1 \
-  | grep -E '^\[(MATCH|MISMATCH|INFO)\]|^MATCH ')
+  | grep -E '^\[(MATCH|MISMATCH|INFO)\]|^TOTAL |^MATCH |^test result|panicked')
 
 echo "== 2. the indexer's own decoder (services/indexer/src/codec) on captured events and real logs"
 node "$HERE/indexer_events.mjs"

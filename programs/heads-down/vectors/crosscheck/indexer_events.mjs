@@ -7,6 +7,13 @@
 //   node programs/heads-down/vectors/crosscheck/indexer_events.mjs
 //
 // Node >= 23.6 (type stripping) is required, as for the indexer itself.
+//
+// Every line starts with a verdict:
+//   [MATCH]     the indexer's result equals the program's
+//   [MISMATCH]  the indexer decodes or names it differently
+//   [UNKNOWN]   the indexer does not decode it (safe: it returns `Unknown`
+//               with the tag and length, or a generic name; nothing breaks)
+// and the script ends with the totals.
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,48 +27,61 @@ const HD = "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p";
 const golden = JSON.parse(readFileSync(join(here, "../events.json"), "utf8"));
 const hexToBytes = (h) => Uint8Array.from(h.match(/../g).map((b) => parseInt(b, 16)));
 const show = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x));
+// snake_case (the program's field names) -> camelCase (the indexer's).
+const camel = (s) => s.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
 
-let rows = [];
+const totals = { MATCH: 0, MISMATCH: 0, UNKNOWN: 0 };
+const say = (verdict, text) => {
+  totals[verdict] += 1;
+  console.log(`[${verdict}] ${text}`);
+};
+
+console.log("== events.json samples through services/indexer decodeHdEvent ==");
 for (const e of golden.events) {
   const bytes = hexToBytes(e.sample.hex);
+  const what = `tag ${e.tag} ${e.event} (${bytes.length} B, indexer size ${HD_EVENT_SIZE[e.tag] ?? "none"})`;
   let out;
-  let failed = false;
   try {
     out = decodeHdEvent(bytes);
   } catch (err) {
-    failed = true;
-    out = { decodeError: `${err.code ?? ""} ${err.message}` };
+    say("MISMATCH", `${what}: decodeHdEvent threw ${err.code ?? ""} ${err.message}`);
+    continue;
   }
-  // Field-by-field comparison against the program's own decode.
-  let verdict = "MISMATCH";
-  if (out.kind === "Unknown") verdict = "UNKNOWN_TAG (not decoded)";
-  else if (!failed) {
-    const f = e.sample.fields;
-    const pairs = {
-      RigDug: [["rig", "rig"], ["roundId", "round_id"], ["lamports", "lamports"], ["mask", "mask"], ["emaEv", "ema_ev"]],
-      RigSkipped: [["rig", "rig"], ["roundId", "round_id"], ["error", "error"]],
-      ShiftArmed: [["rig", "rig"], ["shiftId", "shift_id"]],
-      ShiftEnded: [["rig", "rig"], ["shiftId", "shift_id"], ["darkRounds", "dark_rounds"], ["roundsDug", "rounds_dug"], ["lamports", "lamports"], ["reason", "reason"]],
-      SeekerVerified: [["rig", "rig"], ["sgtMint", "sgt_mint"], ["memberNumber", "member_number"]],
-    }[out.kind];
-    // A kind this script has no field map for (the indexer may decode newer
-    // tags, such as the v1.2 SKR events 11..23) is reported, not compared.
-    verdict = !pairs
-      ? `DECODED as ${out.kind} (no field map here)`
-      : pairs.every(([a, b]) => String(out[a]) === String(f[b]))
-        ? "MATCH"
-        : "MISMATCH";
+  if (out.kind === "Unknown") {
+    say("UNKNOWN", `${what}: not decoded ${show(out)}`);
+    continue;
   }
-  rows.push({ tag: e.tag, event: e.event, length: bytes.length, indexer_expects: HD_EVENT_SIZE[e.tag] ?? null, verdict, decoded: out });
+  // Every field of the program's own decode, by name, against the indexer's.
+  const wrong = [];
+  if (out.kind !== e.event) wrong.push(`kind ${out.kind}`);
+  for (const [name, value] of Object.entries(e.sample.fields)) {
+    if (name === "tag") continue;
+    if (String(out[camel(name)]) !== String(value)) wrong.push(`${name}: indexer ${out[camel(name)]} / program ${value}`);
+  }
+  if (wrong.length === 0) say("MATCH", `${what}: every field equal`);
+  else say("MISMATCH", `${what}: ${wrong.join("; ")}`);
 }
-console.log("== events.json samples through services/indexer decodeHdEvent ==");
-for (const r of rows) console.log(`tag ${r.tag} ${r.event} (${r.length} B, indexer size ${r.indexer_expects}): ${r.verdict} ${show(r.decoded)}`);
 
 console.log("\n== RigSkipped codes through hdErrorName ==");
-for (const s of golden.skip_codes) console.log(`${s.error_hex} ${s.name}: indexer says ${hdErrorName(s.error)}`);
+for (const s of golden.skip_codes) {
+  const name = hdErrorName(s.error);
+  // The golden name of a shared-crate code is descriptive, e.g.
+  // "p256-introspect MessageMismatch (0x2560000e)": compare the variant.
+  const variant = s.name.includes(" ") ? s.name.split(" ")[1] : s.name;
+  if (/^unknown/i.test(name)) say("UNKNOWN", `code ${s.error_hex} ${s.name}: indexer says ${name}`);
+  else if (name === variant || name.endsWith(variant)) say("MATCH", `code ${s.error_hex} ${s.name}: indexer says ${name}`);
+  else say("MISMATCH", `code ${s.error_hex} ${s.name}: indexer says ${name}`);
+}
 
 console.log("\n== break reasons through breakReasonName ==");
-for (const r of [0, 1, 2, 3, 4, 5, 6, 7, 8]) console.log(`${r}: ${breakReasonName(r)}`);
+const reasons = ["completed", "pickup", "screen_on", "freeze", "lease_lapse", "budget", "manual", "unplugged", "unlocked"];
+reasons.forEach((want, code) => {
+  const name = breakReasonName(code);
+  const norm = (x) => String(x).toLowerCase().replace(/[^a-z]/g, "");
+  if (/^unknown/i.test(name)) say("UNKNOWN", `reason ${code} ${want}: indexer says ${name}`);
+  else if (norm(name) === norm(want)) say("MATCH", `reason ${code} ${want}: indexer says ${name}`);
+  else say("MISMATCH", `reason ${code} ${want}: indexer says ${name}`);
+});
 
 const logsPath = join(here, "../../target/crosscheck-logs.json");
 if (existsSync(logsPath)) {
@@ -69,16 +89,24 @@ if (existsSync(logsPath)) {
   for (const tx of JSON.parse(readFileSync(logsPath, "utf8"))) {
     const p = parseProgramData(tx.logs);
     const mine = p.entries.filter((x) => x.programId === HD);
+    let errors = 0;
     const decoded = mine.map((x) => {
       try {
         const d = decodeHdEvent(x.data);
         return d.kind === "Unknown" ? `Unknown(tag ${d.tag}, ${d.length} B)` : d.kind;
       } catch (err) {
+        errors += 1;
         return `ERROR ${err.message}`;
       }
     });
-    console.log(`${tx.name}: ${mine.length} heads_down data lines (anomalies ${p.anomalies.length}, truncated ${p.truncated}) -> ${decoded.join(", ")}`);
+    const clean = errors === 0 && p.anomalies.length === 0 && !p.truncated;
+    say(
+      clean ? "MATCH" : "MISMATCH",
+      `${tx.name}: ${mine.length} heads_down data lines attributed (anomalies ${p.anomalies.length}, truncated ${p.truncated}) -> ${decoded.join(", ")}`,
+    );
   }
 } else {
   console.log(`\n(no ${logsPath}; run the crosscheck test first for the log check)`);
 }
+
+console.log(`\nTOTAL services/indexer codec: MATCH ${totals.MATCH} / MISMATCH ${totals.MISMATCH} / UNKNOWN ${totals.UNKNOWN}`);

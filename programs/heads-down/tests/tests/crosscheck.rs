@@ -9,6 +9,13 @@
 //! reported (MATCH / MISMATCH / INFO), printed, and written to
 //! `target/crosscheck-report.json`. It also writes real transaction logs to
 //! `target/crosscheck-logs.json` for `vectors/crosscheck/indexer_events.mjs`.
+//!
+//! The Android scenario makes no assumption about which consumer vector
+//! succeeds: after every vector it executes as-is, it brings the rig back
+//! to the state the next step needs ([`ensure_rig`], [`ensure_idle`]), so a
+//! vector that starts or stops matching changes its own verdict and nothing
+//! else. A vector executed as-is is a MATCH when the program accepts it with
+//! the effect the contract gives it.
 
 use std::str::FromStr;
 
@@ -198,6 +205,33 @@ fn read(rel: &str) -> Option<Value> {
         .map(|s| serde_json::from_str(&s).unwrap())
 }
 
+/// Register the rig in the program's own format if nothing is registered at
+/// its PDA (a consumer vector may or may not have done it).
+fn ensure_rig(env: &mut Env, authority: &Address, p256: &[u8; 33]) {
+    let rig = rig_pda(authority);
+    if env.rig_slot(&rig) != RigSlot::Rig {
+        let res = send_unsigned(env, &[ix_register_rig(authority, p256, None)]);
+        assert!(res.is_ok(), "canonical register_rig: {res:?}");
+    }
+}
+
+/// Bring the rig to Idle with no open shift, whatever state the consumer
+/// vectors left it in: unfreeze if Frozen, then seal an open shift.
+fn ensure_idle(env: &mut Env, authority: &Address) {
+    let rig = rig_pda(authority);
+    if env.rig(&rig).state == rig_state::FROZEN {
+        let res = send_unsigned(env, &[ix_unfreeze(authority, true)]);
+        assert!(res.is_ok(), "unfreeze_rig: {res:?}");
+    }
+    let g = env.rig(&rig);
+    if g.shift_open == 1 {
+        let res = send_unsigned(env, &[ix_end_shift(authority, &rig, g.shift_id.get())]);
+        assert!(res.is_ok(), "end_shift: {res:?}");
+    }
+    let g = env.rig(&rig);
+    assert_eq!((g.state, g.shift_open), (rig_state::IDLE, 0));
+}
+
 // ---- 1. android/core/chain ix_vectors.json + android/core/keys vectors.json ----------
 
 #[allow(clippy::too_many_lines)]
@@ -293,90 +327,138 @@ fn android(rep: &mut Report) {
             .collect(),
         data: unhex(v["data_hex"].as_str().unwrap()),
     };
-    let compare =
-        |rep: &mut Report, env: &mut Env, name: &str, program: &Instruction, run: bool| {
-            let Some(v) = by_name(name) else {
-                rep.add(SRC, name, "INFO", "vector not present");
-                return None;
-            };
-            let theirs = as_is(&v);
-            rep.add(
-                SRC,
-                &format!("{name}: data"),
-                verdict(theirs.data == program.data),
-                format!(
-                    "consumer {} / program {} ({})",
-                    hex(&theirs.data),
-                    hex(&program.data),
-                    byte_diff(&theirs.data, &program.data)
-                ),
-            );
-            rep.add(
-                SRC,
-                &format!("{name}: accounts"),
-                verdict(theirs.accounts == program.accounts),
-                format!(
-                    "consumer [{}] / program [{}]",
-                    metas_str(&theirs.accounts, &names),
-                    metas_str(&program.accounts, &names)
-                ),
-            );
-            if run {
-                let res = send_unsigned(env, std::slice::from_ref(&theirs));
-                rep.add(
-                    SRC,
-                    &format!("{name}: executed as-is"),
-                    "INFO",
-                    outcome(&res),
-                );
-            }
-            Some(v)
+    // A consumer vector against the program-format instruction for the same
+    // arguments: data and ordered account metas. Returns the consumer's own
+    // instruction.
+    let compare = |rep: &mut Report, name: &str, program: &Instruction| -> Option<Instruction> {
+        let Some(v) = by_name(name) else {
+            rep.add(SRC, name, "INFO", "vector not present");
+            return None;
         };
+        let theirs = as_is(&v);
+        rep.add(
+            SRC,
+            &format!("{name}: data"),
+            verdict(theirs.data == program.data),
+            format!(
+                "consumer {} / program {} ({})",
+                hex(&theirs.data),
+                hex(&program.data),
+                byte_diff(&theirs.data, &program.data)
+            ),
+        );
+        rep.add(
+            SRC,
+            &format!("{name}: accounts"),
+            verdict(theirs.accounts == program.accounts),
+            format!(
+                "consumer [{}] / program [{}]",
+                metas_str(&theirs.accounts, &names),
+                metas_str(&program.accounts, &names)
+            ),
+        );
+        Some(theirs)
+    };
+    // The consumer's instruction executed as-is (after `before`, the
+    // companions its indices point at): a MATCH when the program accepts it.
+    let execute = |rep: &mut Report,
+                   env: &mut Env,
+                   name: &str,
+                   before: &[Instruction],
+                   theirs: &Instruction,
+                   note: &str|
+     -> bool {
+        let mut tx = before.to_vec();
+        tx.push(theirs.clone());
+        let res = send_unsigned(env, &tx);
+        let state = match env.rig_slot(&rig) {
+            RigSlot::Rig => format!("rig state {}", env.rig(&rig).state),
+            other => format!("rig PDA {other:?}"),
+        };
+        rep.add(
+            SRC,
+            &format!("{name}: executed as-is{note}"),
+            verdict(res.is_ok()),
+            format!("{} -> {state}", outcome(&res)),
+        );
+        res.is_ok()
+    };
 
-    // register_rig / rotate_key as-is (before a rig exists).
+    // ---- registration ---------------------------------------------------------
     let reg = by_name("register_rig_guest").unwrap();
     let p256: [u8; 33] = unhex(reg["args"]["p256_pubkey_hex"].as_str().unwrap())
         .try_into()
         .unwrap();
-    compare(
-        rep,
-        &mut env,
-        "register_rig_guest",
-        &ix_register_rig(&authority, &p256, None),
-        true,
-    );
+    if let Some(ix) = compare(rep, "register_rig_guest", &ix_register_rig(&authority, &p256, None)) {
+        execute(rep, &mut env, "register_rig_guest", &[], &ix, "");
+    }
     if let Some(att) = by_name("register_rig_attested") {
         let a = &att["args"];
+        let (att_ix, level, expiry) = (
+            num(&a["attestation_ix"]) as u8,
+            num(&a["attestation_level"]) as u8,
+            num(&a["attestation_expiry_slot"]),
+        );
+        let sig = a.get("ed25519_sig_index").map_or(0, |v| num(v) as u8);
         let program = ix_register_rig(
             &authority,
             &p256,
             Some(AttestationArg {
-                ix: num(&a["attestation_ix"]) as u8,
-                sig: 0,
-                level: num(&a["attestation_level"]) as u8,
-                expiry_slot: num(&a["attestation_expiry_slot"]),
+                ix: att_ix,
+                sig,
+                level,
+                expiry_slot: expiry,
             }),
         );
-        compare(rep, &mut env, "register_rig_attested", &program, true);
+        if let Some(ix) = compare(rep, "register_rig_attested", &program) {
+            // Free the address if the guest vector registered it (a rig that
+            // never armed closes completely), then run the attested vector
+            // with a real voucher from this fork's registrar at the
+            // top-level index the vector names.
+            if env.rig_slot(&rig) == RigSlot::Rig {
+                let res = send_unsigned(&mut env, &[ix_close_rig(&authority, None)]);
+                assert!(res.is_ok(), "close_rig between the two registrations: {res:?}");
+            }
+            if att_ix == 0 && expiry > env.slot {
+                let registrar = env.registrar.insecure_clone();
+                let (_, _, voucher) =
+                    vectors::registrar_voucher(&registrar, &authority, &p256, level, expiry);
+                let note = format!(
+                    " with a level-{level} registrar voucher (Ed25519SigVerify) at index 0"
+                );
+                if execute(rep, &mut env, "register_rig_attested", &[voucher], &ix, &note) {
+                    let g = env.rig(&rig);
+                    rep.add(
+                        SRC,
+                        "register_rig_attested: attestation stored",
+                        verdict(
+                            g.attestation_level == level
+                                && g.attestation_expiry_slot.get() == expiry,
+                        ),
+                        format!(
+                            "rig.attestation_level {} expiry_slot {}",
+                            g.attestation_level,
+                            g.attestation_expiry_slot.get()
+                        ),
+                    );
+                }
+            } else {
+                rep.add(
+                    SRC,
+                    "register_rig_attested: executed as-is",
+                    "INFO",
+                    format!("not executed: attestation_ix {att_ix}, expiry_slot {expiry} at slot {}", env.slot),
+                );
+            }
+        }
     }
-    // The canonical registration for the rest.
-    let res = send_unsigned(&mut env, &[ix_register_rig(&authority, &p256, None)]);
-    assert!(res.is_ok(), "canonical register_rig: {res:?}");
-    rep.add(
-        SRC,
-        "register_rig (program format, same args)",
-        "INFO",
-        outcome(&res),
-    );
-    compare(
-        rep,
-        &mut env,
-        "rotate_key",
-        &ix_rotate_key(&authority, &p256, None),
-        true,
-    );
+    // The canonical registration, only if no vector left a rig behind.
+    ensure_rig(&mut env, &authority, &p256);
+    if let Some(ix) = compare(rep, "rotate_key", &ix_rotate_key(&authority, &p256, None)) {
+        execute(rep, &mut env, "rotate_key", &[], &ix, "");
+    }
 
-    // set_caps as-is (expected to match and succeed).
+    // ---- caps and the wallet arm ------------------------------------------------
     let sc = by_name("set_caps").unwrap();
     let a = &sc["args"];
     let caps = Caps {
@@ -386,46 +468,22 @@ fn android(rep: &mut Report) {
         max_cost: num(&a["cap_max_cost"]),
         expiry: num(&a["caps_expiry_ts"]) as i64,
     };
-    compare(
-        rep,
-        &mut env,
-        "set_caps",
-        &ix_set_caps(&authority, caps),
-        true,
-    );
-    assert_eq!(
-        env.rig(&rig).cap_round.get(),
-        caps.round,
-        "set_caps as-is applied"
-    );
+    let caps_set = compare(rep, "set_caps", &ix_set_caps(&authority, caps))
+        .is_some_and(|ix| execute(rep, &mut env, "set_caps", &[], &ix, ""));
+    if !caps_set {
+        let res = send_unsigned(&mut env, &[ix_set_caps(&authority, caps)]);
+        assert!(res.is_ok(), "canonical set_caps: {res:?}");
+    }
+    assert_eq!(env.rig(&rig).cap_round.get(), caps.round, "set_caps applied");
 
-    // arm_shift: both paths as-is, then the program format with the Android
-    // PLAN signature (keys vectors plan_steady).
     let arm_w = by_name("arm_shift_wallet").unwrap();
     let plan = plan_of(&arm_w["args"]);
-    compare(
-        rep,
-        &mut env,
-        "arm_shift_wallet",
-        &ix_arm_wallet(&authority, &plan),
-        true,
-    );
-    let arm_p = by_name("arm_shift_p256").unwrap();
-    let ap = &arm_p["args"];
-    let counter = num(&ap["counter"]);
-    compare(
-        rep,
-        &mut env,
-        "arm_shift_p256",
-        &ix_arm_p256(
-            &authority,
-            &plan_of(ap),
-            counter,
-            num(&ap["precompile_ix"]) as u8,
-            num(&ap["sig_index"]) as u8,
-        ),
-        true,
-    );
+    if let Some(ix) = compare(rep, "arm_shift_wallet", &ix_arm_wallet(&authority, &plan)) {
+        execute(rep, &mut env, "arm_shift_wallet", &[], &ix, "");
+    }
+    // End the shift that vector armed (if it did), so the P-256 scenario below
+    // starts from an Idle rig either way.
+    ensure_idle(&mut env, &authority);
 
     // ---- keys vectors: preimage, digest, signatures -------------------------
     let kv = keys["vectors"].as_array().unwrap().clone();
@@ -545,35 +603,77 @@ fn android(rep: &mut Report) {
         );
     }
 
-    // ---- execute the Android-signed messages with the PROGRAM's layouts -----
+    // ---- the Android-signed messages, in Android's own instructions --------------
     // Rig at shift 6, counter 40, so plan_steady (counter 41) arms shift 7.
     poke_rig(&mut env, &rig, |r| {
         r.shift_id.set(6);
         r.hb_counter.set(40);
     });
     env.poke_u64(&BOARD, 8, 422_593);
+    // One signed message through the program: Android's own instruction for
+    // it when `ix_vectors.json` has one (compared, then executed as-is with
+    // the matching precompile at index 0), else the program-format builder.
+    let signed_step = |rep: &mut Report,
+                       env: &mut Env,
+                       key_vector: &str,
+                       ix_vector: Option<&str>,
+                       fallback: Instruction,
+                       what: &str|
+     -> bool {
+        let (s, m) = &sig_of[key_vector];
+        let pre = precompile(s, &key_pk, m);
+        let theirs = ix_vector.and_then(|n| {
+            let v = by_name(n)?;
+            let a = &v["args"];
+            if a.get("precompile_ix").map(num) != Some(0) {
+                return None;
+            }
+            let c = num(&a["counter"]);
+            let sig = num(&a["sig_index"]) as u8;
+            let program = match n {
+                "arm_shift_p256" => ix_arm_p256(&authority, &plan_of(a), c, 0, sig),
+                "break_shift_p256" => ix_break_p256(&authority, num(&a["reason"]) as u8, c, 0, sig),
+                _ => ix_freeze_p256(&authority, num(&a["reason"]) as u8, c, 0, sig),
+            };
+            compare(rep, n, &program)
+        });
+        let (ix, via) = match (&theirs, ix_vector) {
+            (Some(t), Some(n)) => (t.clone(), format!("Android's {n} as-is")),
+            _ => (fallback, "program-format instruction".to_string()),
+        };
+        let res = send_unsigned(env, &[pre, ix]);
+        if let (Some(_), Some(n)) = (&theirs, ix_vector) {
+            rep.add(
+                SRC,
+                &format!("{n}: executed as-is with the {key_vector} signature at index 0"),
+                verdict(res.is_ok()),
+                format!("{} -> rig state {}", outcome(&res), env.rig(&rig).state),
+            );
+        }
+        rep.add(
+            KSRC,
+            &format!("{key_vector} signature -> {what}"),
+            verdict(res.is_ok()),
+            format!("{via}: {} -> rig state {}", outcome(&res), env.rig(&rig).state),
+        );
+        res.is_ok()
+    };
+
     let steady = kv.iter().find(|v| v["name"] == "plan_steady").unwrap();
-    let (s, m) = &sig_of["plan_steady"];
-    let res = send_unsigned(
+    let armed = signed_step(
+        rep,
         &mut env,
-        &[
-            precompile(s, &key_pk, m),
-            ix_arm_p256(
-                &authority,
-                &plan_of(&steady["fields"]),
-                num(&steady["fields"]["counter"]),
-                0,
-                0,
-            ),
-        ],
+        "plan_steady",
+        Some("arm_shift_p256"),
+        ix_arm_p256(
+            &authority,
+            &plan_of(&steady["fields"]),
+            num(&steady["fields"]["counter"]),
+            0,
+            0,
+        ),
+        "arm_shift",
     );
-    rep.add(
-        KSRC,
-        "plan_steady signature -> arm_shift (program layout)",
-        if res.is_ok() { "MATCH" } else { "MISMATCH" },
-        outcome(&res),
-    );
-    let armed = res.is_ok();
     if armed {
         for (hb, round_ok) in [
             ("heartbeat_lease_1", 422_593u64),
@@ -608,142 +708,110 @@ fn android(rep: &mut Report) {
                 outcome(&res),
             );
         }
-        for (name, freeze) in [
-            ("break_pickup", false),
-            ("break_screen_on", false),
-            ("freeze", true),
-        ] {
+        let field = |name: &str, f: &str| {
             let v = kv.iter().find(|v| v["name"] == name).unwrap();
-            let f = &v["fields"];
-            let (s, m) = &sig_of[name];
-            let c = num(&f["counter"]);
-            let reason = num(&f["reason"]) as u8;
-            let ix = if freeze {
-                ix_freeze_p256(&authority, reason, c, 0, 0)
-            } else {
-                ix_break_p256(&authority, reason, c, 0, 0)
-            };
-            let res = env.send(&[precompile(s, &key_pk, m), ix], &[]);
-            rep.add(
-                KSRC,
-                &format!(
-                    "{name} signature -> {} (program layout)",
-                    if freeze { "freeze_rig" } else { "break_shift" }
-                ),
-                verdict(res.is_ok()),
-                format!("{} -> state {}", outcome(&res), env.rig(&rig).state),
-            );
-            // The same message in Android's instruction layout.
-            let their_name = if freeze {
-                "freeze_rig_p256"
-            } else {
-                "break_shift_p256"
-            };
-            if name != "break_screen_on" {
-                if let Some(tv) = by_name(their_name) {
-                    let a = &tv["args"];
-                    let prog = if freeze {
-                        ix_freeze_p256(
-                            &authority,
-                            num(&a["reason"]) as u8,
-                            num(&a["counter"]),
-                            num(&a["precompile_ix"]) as u8,
-                            num(&a["sig_index"]) as u8,
-                        )
-                    } else {
-                        ix_break_p256(
-                            &authority,
-                            num(&a["reason"]) as u8,
-                            num(&a["counter"]),
-                            num(&a["precompile_ix"]) as u8,
-                            num(&a["sig_index"]) as u8,
-                        )
-                    };
-                    let theirs = as_is(&tv);
-                    rep.add(
-                        SRC,
-                        &format!("{their_name}: data"),
-                        verdict(theirs.data == prog.data),
-                        format!(
-                            "consumer {} / program {} ({})",
-                            hex(&theirs.data),
-                            hex(&prog.data),
-                            byte_diff(&theirs.data, &prog.data)
-                        ),
-                    );
-                    rep.add(
-                        SRC,
-                        &format!("{their_name}: accounts"),
-                        verdict(theirs.accounts == prog.accounts),
-                        format!(
-                            "consumer [{}] / program [{}]",
-                            metas_str(&theirs.accounts, &names),
-                            metas_str(&prog.accounts, &names)
-                        ),
-                    );
-                    let res = send_unsigned(&mut env, &[precompile(s, &key_pk, m), theirs]);
-                    rep.add(SRC, &format!("{their_name}: executed as-is (with the matching precompile at index 0)"), "INFO", outcome(&res));
-                }
-            }
-        }
-        assert_eq!(env.rig(&rig).state, rig_state::FROZEN);
-        // Wallet paths as-is.
+            num(&v["fields"][f])
+        };
+        // Shift 7: pickup, screen-on, FREEZE from the phone key.
+        signed_step(
+            rep,
+            &mut env,
+            "break_pickup",
+            Some("break_shift_p256"),
+            ix_break_p256(
+                &authority,
+                field("break_pickup", "reason") as u8,
+                field("break_pickup", "counter"),
+                0,
+                0,
+            ),
+            "break_shift",
+        );
+        signed_step(
+            rep,
+            &mut env,
+            "break_screen_on",
+            None,
+            ix_break_p256(
+                &authority,
+                field("break_screen_on", "reason") as u8,
+                field("break_screen_on", "counter"),
+                0,
+                0,
+            ),
+            "break_shift",
+        );
+        signed_step(
+            rep,
+            &mut env,
+            "freeze",
+            Some("freeze_rig_p256"),
+            ix_freeze_p256(
+                &authority,
+                field("freeze", "reason") as u8,
+                field("freeze", "counter"),
+                0,
+                0,
+            ),
+            "freeze_rig",
+        );
+        // The wallet unfreezes (Frozen -> Broken: shift 7 is still open) and
+        // seals shift 7, both in Android's own instructions.
         for (name, program) in [
-            ("break_shift_wallet", ix_break_wallet(&authority, 6)),
-            ("freeze_rig_wallet", ix_freeze_wallet(&authority)),
             ("unfreeze_rig", ix_unfreeze(&authority, true)),
             ("end_shift", ix_end_shift(&authority, &rig, 7)),
         ] {
-            compare(rep, &mut env, name, &program, true);
+            if let Some(ix) = compare(rep, name, &program) {
+                execute(rep, &mut env, name, &[], &ix, "");
+            }
         }
-        // Program-format end + unfreeze, then plan_focus_only (counter 47).
-        let res = send_unsigned(
-            &mut env,
-            &[
-                ix_end_shift(&authority, &rig, 7),
-                ix_unfreeze(&authority, true),
-            ],
-        );
-        assert!(res.is_ok(), "{res:?}");
-        let focus = kv.iter().find(|v| v["name"] == "plan_focus_only").unwrap();
-        let (s, m) = &sig_of["plan_focus_only"];
-        let res = send_unsigned(
-            &mut env,
-            &[
-                precompile(s, &key_pk, m),
-                ix_arm_p256(
-                    &authority,
-                    &plan_of(&focus["fields"]),
-                    num(&focus["fields"]["counter"]),
-                    0,
-                    0,
-                ),
-            ],
-        );
-        rep.add(
-            KSRC,
-            "plan_focus_only signature -> arm_shift (program layout)",
-            verdict(res.is_ok()),
-            outcome(&res),
-        );
-        let res = send_unsigned(&mut env, &[ix_end_shift(&authority, &rig, 8)]);
-        assert!(res.is_ok(), "{res:?}");
-    }
+        // Whatever those two did, continue from Idle (no-ops if they worked).
+        ensure_idle(&mut env, &authority);
 
-    // close_rig: guest as-is on the Idle rig.
-    compare(
-        rep,
-        &mut env,
-        "close_rig_guest",
-        &ix_close_rig(&authority, None),
-        true,
-    );
+        // Shift 8: plan_focus_only (counter 47), then the wallet BREAK and
+        // FREEZE vectors on it.
+        let focus = kv.iter().find(|v| v["name"] == "plan_focus_only").unwrap();
+        let focus_armed = signed_step(
+            rep,
+            &mut env,
+            "plan_focus_only",
+            None,
+            ix_arm_p256(
+                &authority,
+                &plan_of(&focus["fields"]),
+                num(&focus["fields"]["counter"]),
+                0,
+                0,
+            ),
+            "arm_shift",
+        );
+        if focus_armed {
+            for (name, program) in [
+                ("break_shift_wallet", ix_break_wallet(&authority, 6)),
+                ("freeze_rig_wallet", ix_freeze_wallet(&authority)),
+            ] {
+                if let Some(ix) = compare(rep, name, &program) {
+                    execute(rep, &mut env, name, &[], &ix, "");
+                }
+            }
+        }
+    }
+    // Program-format unfreeze / end_shift, only as far as the rig still needs
+    // them (nothing if it is already Idle).
+    ensure_idle(&mut env, &authority);
+
+    // close_rig: guest as-is on the Idle rig. v1.3: a rig that armed a shift
+    // leaves a 32-byte tombstone at its PDA.
+    if let Some(ix) = compare(rep, "close_rig_guest", &ix_close_rig(&authority, None)) {
+        execute(rep, &mut env, "close_rig_guest", &[], &ix, "");
+    }
     // close_rig_seeker as-is on a re-registered rig made Seeker-tier by surgery
     // (the Android mint is not a real SGT; the seat is not initialized, so
     // only the rig closes).
     if let Some(v) = by_name("close_rig_seeker") {
         let mint = addr(&v["args"]["sgt_mint"]);
-        assert!(send_unsigned(&mut env, &[ix_register_rig(&authority, &p256, None)]).is_ok());
+        ensure_rig(&mut env, &authority, &p256);
+        ensure_idle(&mut env, &authority);
         poke_rig(&mut env, &rig, |r| {
             r.tier = 1;
             r.sgt_mint = mint.to_bytes();
@@ -754,14 +822,15 @@ fn android(rep: &mut Report) {
             verdict(addr(&ixv["pdas"]["seeker_seat"]) == seat_pda(&mint)),
             format!("seat_pda({mint}) = {}", seat_pda(&mint)),
         );
-        compare(
+        if let Some(ix) = compare(
             rep,
-            &mut env,
             "close_rig_seeker",
             &ix_close_rig(&authority, Some(seat_pda(&mint))),
-            true,
-        );
+        ) {
+            execute(rep, &mut env, "close_rig_seeker", &[], &ix, "");
+        }
     }
+
 
     // ORE automate / revoke as the Android client builds them (ORE's layout).
     if let Some(v) = by_name("ore_automate_heads_down") {
@@ -985,53 +1054,22 @@ fn crank(rep: &mut Report) {
     }
 }
 
-// ---- 3. event layouts and semantics (indexer N1-N4, crank A1-A3, B12, B14) -----
+// ---- 3. program facts the consumers rely on, measured on the fork ---------------------
+//
+// These rows are INFO: they state what the program does, with numbers from a
+// real run. Whether each consumer agrees is measured by running the
+// consumer's own code (`vectors/crosscheck/run.sh` steps 2 to 4), not by
+// comparing with a note about it.
 
 #[allow(clippy::too_many_lines)]
-fn events_and_semantics(rep: &mut Report, logs_out: &mut Vec<Value>) {
-    const IDX: &str = "services/indexer INTERFACE-NOTES + src/codec/events.ts";
-    const CRK: &str = "crank INTERFACE-NOTES + src/hd.rs";
-    // Assumed layouts (field sizes in order after the tag), from the notes.
-    let assumed: [(u8, &str, &[usize]); 5] = [
-        (1, "RigDug", &[32, 8, 8, 4, 8]),
-        (2, "RigSkipped", &[32, 8, 4]),
-        (3, "ShiftArmed", &[32, 8]),
-        (4, "ShiftEnded", &[32, 8, 8, 8, 8, 1]),
-        (5, "SeekerVerified", &[32, 32, 8]),
-    ];
-    for (tag, name, sizes) in assumed {
-        let program: Vec<usize> = heads_down_tests::vectors::event_layout(tag)
-            .iter()
-            .skip(1)
-            .map(|x| x.3)
-            .collect();
-        let total = 1 + sizes.iter().sum::<usize>();
-        let ok = program == sizes && total == ev::LEN[usize::from(tag)];
+fn program_facts(rep: &mut Report, logs_out: &mut Vec<Value>) {
+    const SRC: &str = "program (LiteSVM fork)";
+    for (tag, len) in ev::LEN.iter().enumerate().skip(1) {
         rep.add(
-            IDX,
-            &format!("N1 {name} (tag {tag}) layout"),
-            verdict(ok),
-            format!(
-                "{total} B; program {} B, fields {:?}",
-                ev::LEN[usize::from(tag)],
-                program
-            ),
-        );
-        if tag <= 3 {
-            rep.add(
-                CRK,
-                &format!("A1 {name} (tag {tag}) layout"),
-                verdict(ok),
-                format!("{total} B"),
-            );
-        }
-    }
-    for tag in 6..=10u8 {
-        rep.add(
-            IDX,
-            &format!("tag {tag} ({} B)", ev::LEN[usize::from(tag)]),
-            "MISMATCH",
-            "not in HD_EVENT_SIZE: decoded as Unknown (new in v1.1)",
+            SRC,
+            &format!("event tag {tag} ({})", heads_down_tests::vectors::event_name(tag as u8)),
+            "INFO",
+            format!("{len} bytes"),
         );
     }
 
@@ -1057,16 +1095,21 @@ fn events_and_semantics(rep: &mut Report, logs_out: &mut Vec<Value>) {
     logs_out.push(json!({"name": "dig (1 rig, fresh heartbeat)", "logs": meta.logs}));
     let debit = before - env.automation(&u.automation()).unwrap().balance;
     let (lamports, mask) = dug(&events(&meta.logs), &u.rig).unwrap();
-    rep.add(CRK, "A2 RigDug.lamports = Automation debit (tiles + fee)", verdict(lamports == debit), format!("program RigDug.lamports = {lamports} (SOL on squares only); Automation debit = {debit} = lamports + executor_fee {EXECUTOR_FEE} on the rig's first deploy of the round"));
+    assert_eq!(lamports + EXECUTOR_FEE, debit);
     rep.add(
-        IDX,
-        "N2 RigDug.lamports = SOL on squares, excluding the fee",
-        verdict(lamports + EXECUTOR_FEE == debit),
-        format!("{lamports}"),
+        SRC,
+        "RigDug.lamports = SOL on squares, excluding the Automation fee",
+        "INFO",
+        format!("RigDug.lamports {lamports}; Automation debit {debit} = lamports + executor_fee {EXECUTOR_FEE} on the rig's first deploy of the round"),
     );
-    rep.add(IDX, "N2 RigDug.mask = squares requested", "MATCH", format!("mask 0x{mask:07x} ({} squares); squares the Miner already holds are excluded before the CPI, so requested == credited", mask.count_ones()));
+    rep.add(
+        SRC,
+        "RigDug.mask = squares requested = squares credited",
+        "INFO",
+        format!("mask 0x{mask:07x} ({} squares); squares the Miner already holds are excluded before the CPI", mask.count_ones()),
+    );
 
-    // Fee inside caps (crank B12 / Android clock-in cap_round = dig_lamports).
+    // The fee is reserved inside every cap.
     let mut env = Env::golden(Build::Mainnet);
     let mut u = User::with_keys(&mut env, [0x53; 32], [0x54; 32]);
     let w = u.wallet.insecure_clone();
@@ -1084,84 +1127,14 @@ fn events_and_semantics(rep: &mut Report, logs_out: &mut Vec<Value>) {
     ));
     let meta = ok(env.dig_fresh(&mut [&mut u]));
     let (lamports, mask) = dug(&events(&meta.logs), &u.rig).unwrap();
-    let naive_per_tile = 1_000_000 / 10;
-    rep.add(CRK, "B12 amount = min(plan_dig, cap_round, ...) / (split + solo)", verdict(lamports == naive_per_tile * 10), format!("cap_round = plan_dig = 1,000,000, 10 split squares: INTERFACE v1 formula predicts {naive_per_tile}/square = 1,000,000; program deploys {}/square = {lamports} (fee {EXECUTOR_FEE} reserved inside cap_round), k = popcount(mask) = {}", lamports / u64::from(mask.count_ones()), mask.count_ones()));
+    assert_eq!(lamports, 995_000);
+    rep.add(
+        SRC,
+        "the fee is reserved inside the caps",
+        "INFO",
+        format!("cap_round = plan_dig = 1,000,000 on 10 split squares: {} per square = {lamports} on squares, debit 1,000,000 (k = popcount(mask) = {})", lamports / u64::from(mask.count_ones()), mask.count_ones()),
+    );
 
-    // Skip codes the crank's mock and the indexer proposal assumed.
-    for (item, assumed, actual) in [
-        (
-            "A3 ORE no-op after CPI",
-            "RigSkipped(12 BudgetExhausted) (mock)",
-            "RigSkipped(29 OreNoOp)",
-        ),
-        (
-            "B14 per_tile == 0",
-            "12 BudgetExhausted",
-            "12 BudgetExhausted",
-        ),
-        (
-            "B14 balance < per_tile*k + fee",
-            "12 BudgetExhausted",
-            "28 InsufficientAutomationBalance",
-        ),
-        (
-            "B14 Motherlode conditions fail",
-            "1 CostGate",
-            "27 MotherlodeCondition",
-        ),
-        (
-            "B14 ORE round window closed",
-            "11 OutsideWindow",
-            "25 RoundNotActive",
-        ),
-        (
-            "B14 Miner not checkpointed",
-            "3 InvalidOreAccount",
-            "26 MinerNotCheckpointed",
-        ),
-        (
-            "B14 Miner missing",
-            "3 InvalidOreAccount",
-            "3 InvalidOreAccount",
-        ),
-        (
-            "B14 Automation executor wrong / revoked",
-            "2 InvalidExecutor",
-            "2 InvalidExecutor",
-        ),
-        (
-            "B14 Automation authority wrong",
-            "2 InvalidExecutor",
-            "transaction fails with 3 InvalidOreAccount (not a skip)",
-        ),
-    ] {
-        let first = |s: &str| {
-            s.split(' ')
-                .next()
-                .unwrap()
-                .trim_start_matches("RigSkipped(")
-                .to_string()
-        };
-        rep.add(
-            CRK,
-            item,
-            verdict(first(assumed) == first(actual)),
-            format!("crank assumes {assumed}; program: {actual} (vectors/events.json skip_codes)"),
-        );
-    }
-    for (code, proposed, actual) in [
-        (24, "OreWindowClosed", "InvalidRigState (not a dig skip)"),
-        (25, "MinerNotCheckpointed", "RoundNotActive"),
-        (26, "AutomationUnderfunded", "MinerNotCheckpointed"),
-        (27, "OreNoOp", "MotherlodeCondition"),
-    ] {
-        rep.add(
-            IDX,
-            &format!("N4 code {code}"),
-            "MISMATCH",
-            format!("proposed {proposed}; program {actual}"),
-        );
-    }
 
     // More real logs for the indexer's parser.
     let w = u.wallet.insecure_clone();
@@ -1212,7 +1185,7 @@ fn crosscheck_consumer_assumptions() {
     let mut logs = vec![];
     android(&mut rep);
     crank(&mut rep);
-    events_and_semantics(&mut rep, &mut logs);
+    program_facts(&mut rep, &mut logs);
     let target = root().join("target");
     std::fs::create_dir_all(&target).unwrap();
     std::fs::write(
@@ -1225,11 +1198,33 @@ fn crosscheck_consumer_assumptions() {
         serde_json::to_string_pretty(&logs).unwrap(),
     )
     .unwrap();
-    let count = |v: &str| rep.rows.iter().filter(|r| r["verdict"] == v).count();
+    // Totals per consumer file, then overall.
+    let mut sources: Vec<String> = vec![];
+    for r in &rep.rows {
+        let s = r["source"].as_str().unwrap().to_string();
+        if !sources.contains(&s) {
+            sources.push(s);
+        }
+    }
+    let count = |src: Option<&str>, v: &str| {
+        rep.rows
+            .iter()
+            .filter(|r| r["verdict"] == v && src.is_none_or(|s| r["source"] == s))
+            .count()
+    };
+    println!();
+    for s in &sources {
+        println!(
+            "TOTAL {s}: MATCH {} / MISMATCH {} / INFO {}",
+            count(Some(s), "MATCH"),
+            count(Some(s), "MISMATCH"),
+            count(Some(s), "INFO")
+        );
+    }
     println!(
         "\nMATCH {} / MISMATCH {} / INFO {}",
-        count("MATCH"),
-        count("MISMATCH"),
-        count("INFO")
+        count(None, "MATCH"),
+        count(None, "MISMATCH"),
+        count(None, "INFO")
     );
 }
