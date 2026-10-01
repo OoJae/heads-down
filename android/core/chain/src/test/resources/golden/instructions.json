@@ -1,13 +1,14 @@
 {
   "format": "heads-down/golden-instructions",
-  "interface_version": "1.1",
+  "interface_version": "1.2",
   "generated_by": "programs/heads-down/tests/src/vectors.rs (HD_WRITE_VECTORS=1 cargo +1.97.1 test -p heads-down-tests --test vectors)",
   "notes": [
     "Every vector below was executed, in the order of `scenario`, on the LiteSVM fork of live mainnet ORE with the mainnet heads_down build and signature verification on; `litesvm.result` is what happened.",
     "All integers little-endian. u64/i64 values are decimal strings. `data_layout` gives every field's offset and size inside the instruction data (tag at offset 0).",
     "`accounts` is the exact ordered AccountMeta list the program accepted; `pda` gives the seeds and program each derived address comes from (bump = canonical find_program_address bump).",
     "`transaction.instructions` is the whole transaction: companion instructions (compute budget, Secp256r1SigVerify, Ed25519SigVerify) are given in full so hb_ix / p256_ix / ed25519_ix are real top-level indices.",
-    "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched."
+    "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched.",
+    "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned."
   ],
   "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
   "program_id_hex": "f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7",
@@ -26,7 +27,13 @@
     "secp256r1_program": "Secp256r1SigVerify1111111111111111111111111",
     "ed25519_program": "Ed25519SigVerify111111111111111111111111111",
     "compute_budget_program": "ComputeBudget111111111111111111111111111111",
-    "token_2022_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+    "token_2022_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "spl_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "associated_token_program": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    "skr_mint": "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+    "ore_mint": "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+    "ore_stake_program": "stakecNP3FpiExZPCgZfqRgumVzi6dNqnfrjwXyTgeH",
+    "bury_vault": "6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS"
   },
   "pinned_fork": {
     "ore_program_sha256": "57503f435dac3888571c1b21330994a821d5f891790bde5af93888b7ba9eb3a7 (live mainnet ORE, tests/fixtures/ore.so)",
@@ -84,6 +91,38 @@
       "fee": "5000",
       "amount_per_square": "100000",
       "executor": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge"
+    },
+    "skr_v1_2": {
+      "ore_stake_program_sha256": "1ea52a5d8954b39b6a1bf876c2a937344ad9f84574bd1dc3c4a89769effddd6a (live mainnet ORE stake program, tests/fixtures/ore_stake.so, fetched 2026-10-01)",
+      "skr_mint": {
+        "address": "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+        "token_program": "SPL Token",
+        "decimals": 6
+      },
+      "ore_mint": {
+        "address": "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+        "token_program": "SPL Token",
+        "decimals": 11
+      },
+      "stake_vesting": "pinned fully vested, start_time = T0 - 7200, so ORE bury's distribute vests nothing",
+      "stack": {
+        "bond_cap_in_person": "2000000000",
+        "bond_cap_remote": "1000000000",
+        "guest_bond_cap": "500000000",
+        "finisher_bps": 8000,
+        "max_seats": 8
+      },
+      "focus_bond_cap": "5000000000",
+      "max_gift_lamports": "10000000000",
+      "gift_expiry_secs": "2592000",
+      "bury_auction": {
+        "price_unit": "ORE atoms (1e-11 ORE) per whole SKR (1e6 base units)",
+        "initial_start_price": "100000000",
+        "start_multiplier": 4,
+        "max_start_price": "10000000000",
+        "floor_price": "10000",
+        "window_slots": "216000"
+      }
     }
   },
   "keys": {
@@ -174,6 +213,96 @@
       "rig": "BNfgqKYoG5fAr6iFFvqVvVEzbwHj1vNAeBuXokXV3awb",
       "ore_automation": "4MmLTomi67n8gummnvjNBTJidSFhz3visoRRBcy1V6TC",
       "ore_miner": "5ZCS7mzNsERcu5Vi7rrxLdb9qLk93VgKVkK8Ht9gHovd"
+    },
+    {
+      "name": "hana",
+      "wallet": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+      "wallet_seed": "[0x81; 32] (public test seed)",
+      "p256_private_scalar": "[0x18; 32]",
+      "p256_pubkey_hex": "0367c23516b347b0d8798143571741ce269b5b954877207caf8a00a776d4b790a3",
+      "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+      "ore_automation": "Ddwqb2HHVoCtJQw7bHxWqDWuSuEmgsXpivVXyvaudiiZ",
+      "ore_miner": "JNSdTMfW4qawzAgsZ8MJUEBaXHVKSLqP4U9ziYeG4VQ"
+    },
+    {
+      "name": "ivan",
+      "wallet": "HpuzRr6bRVNxjowfTsSjaqL5zmLS7cm4DSHfLPxuLZEX",
+      "wallet_seed": "[0x82; 32] (public test seed)",
+      "p256_private_scalar": "[0x28; 32]",
+      "p256_pubkey_hex": "032b2fd82cd7f45b899945ea255129310a1d8ae65df67e264dcd2b95aee49873b6",
+      "rig": "4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+      "ore_automation": "CjqWAeRLvK2zYozhRy7ugLZt9EWEA4svTYeCx6qLnYmC",
+      "ore_miner": "AtCSYNKBXJ7NdN4HsbsAem1Ctr7tA6L7xYL3fo7jtyMr"
+    },
+    {
+      "name": "judy",
+      "wallet": "FVwvnFf39mVqaRY3m54LBK8aN8HteQ6ua9zB9AB3Ygf1",
+      "wallet_seed": "[0x83; 32] (public test seed)",
+      "p256_private_scalar": "[0x38; 32]",
+      "p256_pubkey_hex": "02ae7c975c880afa3fa7426508433d12ae76a6b3afc167e4f21d37c8fa9d1bd6d0",
+      "rig": "AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+      "ore_automation": "AiggcqeLt4RneYsvwgGyZSnqqfWzxDJpoiiccptf7Byi",
+      "ore_miner": "HumPsNMSE937JdhLE8GrFkgESB9Qu92MF9Jzf9QV878h"
+    },
+    {
+      "name": "kai",
+      "wallet": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+      "wallet_seed": "[0x84; 32] (public test seed)",
+      "p256_private_scalar": "[0x48; 32]",
+      "p256_pubkey_hex": "0242a51e039eb9e0b5ce58c4f1b8ebcb281fae32b90729711640b0cad4fc5c38c1",
+      "rig": "GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+      "ore_automation": "H6y8qQ8waJEwtiYUxcsjfZyxyx5h49tQRZj3pMicpWDu",
+      "ore_miner": "B1vewzQKgsKJRrKUh11kAAJbYgwHYjBCXP1AyrekyRSY"
+    },
+    {
+      "name": "lena",
+      "wallet": "25dqU2BT7tC3xVFTC6P69phkMyuJoYXSsFT26xuYnexA",
+      "wallet_seed": "[0x85; 32] (public test seed)",
+      "p256_private_scalar": "[0x58; 32]",
+      "p256_pubkey_hex": "031a873c961a3eb846fd7e29213f96e536dafaf7483a38a166e4b69bb3c2c57054",
+      "rig": "Fr75sRJBJ1g1k9xttUTD5VtcGcu7sfm9e1yb5ms1dhVE",
+      "ore_automation": "4H6FvGnqtW9xjyK95zGz2H2Tk2EjLsHzj2F7w2mrzLDK",
+      "ore_miner": "4tX8Bmipfq4iW6NhyKMiW1YD5qniKmhjNuggwVdvF6iW"
+    },
+    {
+      "name": "olga",
+      "wallet": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+      "wallet_seed": "[0x86; 32] (public test seed)",
+      "p256_private_scalar": "[0x68; 32]",
+      "p256_pubkey_hex": "03692681e4d957786be9fb7f064113526389dab6ff0a2dd6dde42c5e579bf996d6",
+      "rig": "YuWHCGMdWdatgrqfvwttgFk4s9YEfrscriAAWFfYNTZ",
+      "ore_automation": "7QZf7wnkjotWd4L9p4JVuKXG93DzKB2YQMNv4nhEL9E5",
+      "ore_miner": "3SWcXikbzxKAxDBn8RaGkNXXnQSZ41HtGipE268Hwus4"
+    },
+    {
+      "name": "pia",
+      "wallet": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+      "wallet_seed": "[0x87; 32] (public test seed)",
+      "p256_private_scalar": "[0x78; 32]",
+      "p256_pubkey_hex": "03ab30d3464ac6bfed25064d901279e1a45b0b75a8c3e4cc4a182c36f58a2db3cd",
+      "rig": "CZv7jhXeNLDGvRbi6KmbKcrxPkNQeLDX7qbpNBmngFfs",
+      "ore_automation": "8p8r2Emcut5ooRFoRx1xKB6WKvpLMuCQQvZ4Vw9FMPfd",
+      "ore_miner": "4M3PRQHpkFAgrqH8qNrf31wk7wmDW32pgqn76mkn2EEb"
+    },
+    {
+      "name": "quinn",
+      "wallet": "CzxEa59tNkm525czZFP3NUxpTQNx1KFqgVDaA7rcmnbd",
+      "wallet_seed": "[0x88; 32] (public test seed)",
+      "p256_private_scalar": "[0x88; 32]",
+      "p256_pubkey_hex": "037f22411445de76e65c4a6f8089e84514a5e1075c05acee891106eaf375a577d1",
+      "rig": "5cZjvTMaEf7aG4pvAjf1wUM9x9MwPULFvLCvo9rq5TUH",
+      "ore_automation": "E5gx4i9gystwdiEJAGDKtyrXr1h4RBKPNG3XpEhUFrvM",
+      "ore_miner": "5HAB8ucr3BEsDZrxYsziNbBEWSbMD5arDi6shXYn244K"
+    },
+    {
+      "name": "rhea",
+      "wallet": "BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+      "wallet_seed": "[0x89; 32] (public test seed)",
+      "p256_private_scalar": "[0x98; 32]",
+      "p256_pubkey_hex": "03622f82c3489a044df2b3ca668fb88e2c6ec0f816d29a841b1b820090048c92c8",
+      "rig": "958Nyc8zAPJWaSuGmddHBqPZAv4YdsHsh2zaWUo2LnrA",
+      "ore_automation": "CgKCyyemC1GmM2jAViznbn8UopcYZ161SYTasEkThphP",
+      "ore_miner": "4BNYkN2JfrgSkfNwLmTFo4kTmPpWBAnCs2aZDXhF3R5d"
     }
   ],
   "scenario": [
@@ -361,6 +490,201 @@
       "step": 37,
       "kind": "vector",
       "name": "apply_config"
+    },
+    {
+      "step": 38,
+      "kind": "vector",
+      "name": "init_bury_vault"
+    },
+    {
+      "step": 39,
+      "kind": "setup",
+      "action": "hana / ivan / judy: ORE automate + register_rig + set_caps + arm_shift (wallet; focus-only plan with one-round leases, what a Stack seat arms)"
+    },
+    {
+      "step": 40,
+      "kind": "setup",
+      "action": "hana / ivan / judy: ORE automate + register_rig + set_caps + arm_shift (wallet; focus-only plan with one-round leases, what a Stack seat arms)"
+    },
+    {
+      "step": 41,
+      "kind": "setup",
+      "action": "hana / ivan / judy: ORE automate + register_rig + set_caps + arm_shift (wallet; focus-only plan with one-round leases, what a Stack seat arms)"
+    },
+    {
+      "step": 42,
+      "kind": "setup",
+      "action": "SKR balances by fixture surgery (the fork cannot mint SKR): 1,000 SKR in the SKR ATAs of hana, ivan, judy, kai and lena"
+    },
+    {
+      "step": 43,
+      "kind": "vector",
+      "name": "open_stack"
+    },
+    {
+      "step": 44,
+      "kind": "vector",
+      "name": "join_stack"
+    },
+    {
+      "step": 45,
+      "kind": "setup",
+      "action": "ivan / judy: join_stack (seats 1 and 2)"
+    },
+    {
+      "step": 46,
+      "kind": "setup",
+      "action": "ivan / judy: join_stack (seats 1 and 2)"
+    },
+    {
+      "step": 47,
+      "kind": "setup",
+      "action": "Board.round_id -> r+1 (the table's start_round)"
+    },
+    {
+      "step": 48,
+      "kind": "vector",
+      "name": "stack_checkin_heartbeat"
+    },
+    {
+      "step": 49,
+      "kind": "setup",
+      "action": "Board.round_id -> r+2 (the table's end_round)"
+    },
+    {
+      "step": 50,
+      "kind": "setup",
+      "action": "judy: P-256 BREAK reason 1 (pickup): Cooling, break_reason 1 recorded in shift 1"
+    },
+    {
+      "step": 51,
+      "kind": "setup",
+      "action": "record_heartbeats(hana, ivan) for round r+2 (lease 1): their leases now end at the live round"
+    },
+    {
+      "step": 52,
+      "kind": "vector",
+      "name": "stack_checkin_observe"
+    },
+    {
+      "step": 53,
+      "kind": "setup",
+      "action": "Board.round_id -> r+3 (> end_round: settle is open to anyone)"
+    },
+    {
+      "step": 54,
+      "kind": "vector",
+      "name": "settle_stack"
+    },
+    {
+      "step": 55,
+      "kind": "vector",
+      "name": "claim_stack"
+    },
+    {
+      "step": 56,
+      "kind": "setup",
+      "action": "claim_stack for ivan (280 SKR) and judy (0 SKR: forfeited; her seat closes)"
+    },
+    {
+      "step": 57,
+      "kind": "setup",
+      "action": "kai / lena: ORE automate + register_rig + set_caps + arm_shift (wallet, lease 3)"
+    },
+    {
+      "step": 58,
+      "kind": "setup",
+      "action": "kai / lena: ORE automate + register_rig + set_caps + arm_shift (wallet, lease 3)"
+    },
+    {
+      "step": 59,
+      "kind": "vector",
+      "name": "lock_focus_bond"
+    },
+    {
+      "step": 60,
+      "kind": "setup",
+      "action": "kai: record_heartbeats (round r+3, lease 3): one dark round"
+    },
+    {
+      "step": 61,
+      "kind": "setup",
+      "action": "lena: lock_focus_bond(shift 1, 300 SKR), then a wallet BREAK reason 6 (manual) and end_shift: ShiftLog reason 6"
+    },
+    {
+      "step": 62,
+      "kind": "vector",
+      "name": "forfeit_focus_bond"
+    },
+    {
+      "step": 63,
+      "kind": "setup",
+      "action": "clock -> kai's plan window_end + 1; Board.round_id -> r+6 (kai's lease [r+3, r+5] has expired)"
+    },
+    {
+      "step": 64,
+      "kind": "setup",
+      "action": "end_shift(kai, shift 1) by the cranker (permissionless after the window and the lease): ShiftLog reason 0 completed"
+    },
+    {
+      "step": 65,
+      "kind": "vector",
+      "name": "release_focus_bond"
+    },
+    {
+      "step": 66,
+      "kind": "vector",
+      "name": "create_gift_wallet"
+    },
+    {
+      "step": 67,
+      "kind": "vector",
+      "name": "claim_gift_wallet"
+    },
+    {
+      "step": 68,
+      "kind": "setup",
+      "action": "quinn holds the real mainnet SGT member #121,035 (crates/sgt-verify/fixtures): a frozen Token-2022 ATA holding it for quinn"
+    },
+    {
+      "step": 69,
+      "kind": "vector",
+      "name": "create_gift_sgt"
+    },
+    {
+      "step": 70,
+      "kind": "vector",
+      "name": "claim_gift_sgt"
+    },
+    {
+      "step": 71,
+      "kind": "setup",
+      "action": "olga: create_gift(nonce 3, 0.5 SOL for pia's wallet), never claimed"
+    },
+    {
+      "step": 72,
+      "kind": "setup",
+      "action": "clock += 30 days (the gift's expiry_ts)"
+    },
+    {
+      "step": 73,
+      "kind": "vector",
+      "name": "refund_gift"
+    },
+    {
+      "step": 74,
+      "kind": "setup",
+      "action": "rhea: an ORE ATA holding 1 ORE and an empty SKR ATA (fixture surgery)"
+    },
+    {
+      "step": 75,
+      "kind": "setup",
+      "action": "slot += 54,000 (a quarter of the auction window since lena's lot restarted it)"
+    },
+    {
+      "step": 76,
+      "kind": "vector",
+      "name": "bury_auction_buy"
     }
   ],
   "instructions": [
@@ -4141,6 +4465,3256 @@
         "executed": true,
         "result": "success",
         "events": []
+      }
+    },
+    {
+      "name": "init_bury_vault",
+      "tag": 26,
+      "instruction": "init_bury_vault",
+      "auth": "anyone (pays the rent); init-only, no admin",
+      "description": "Create the singleton BuryVault [\"bury\"] with the auction constants (initial start 100,000,000 ORE atoms per SKR, floor 10,000, window 216,000 slots) and the addresses of its two vault ATAs, which the companions create with the ATA program.",
+      "step": 38,
+      "args": {},
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "1a",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 26
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "payer",
+          "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "bury_vault",
+          "pubkey": "6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bury\"",
+                "hex": "62757279"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "ata: CreateIdempotent(BuryVault, SKR mint)",
+            "program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            "data_len": 1,
+            "data_hex": "01"
+          },
+          {
+            "index": 1,
+            "role": "ata: CreateIdempotent(BuryVault, ORE mint)",
+            "program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            "data_len": 1,
+            "data_hex": "01"
+          },
+          {
+            "index": 2,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": []
+      }
+    },
+    {
+      "name": "open_stack",
+      "tag": 15,
+      "instruction": "open_stack",
+      "auth": "host wallet",
+      "description": "Open an in-person table (flags 0: 80/20 split, guests allowed up to 500 SKR) bonding 200 SKR per seat for ORE rounds [r+1, r+2], grace 0, up to 4 seats. The table's SKR vault is its canonical SPL Token ATA, created by the companion. Emits StackOpened.",
+      "step": 43,
+      "args": {
+        "table_id": "1",
+        "bond": "200000000",
+        "start_round": "422702",
+        "end_round": "422703",
+        "grace_gaps": 0,
+        "flags": 0,
+        "max_seats": 4
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 39,
+      "data_hex": "0f010000000000000000c2eb0b000000002e730600000000002f73060000000000000000000004",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 15
+        },
+        {
+          "name": "table_id",
+          "type": "u64",
+          "offset": 1,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "bond",
+          "type": "u64",
+          "offset": 9,
+          "size": 8,
+          "value": "200000000"
+        },
+        {
+          "name": "start_round",
+          "type": "u64",
+          "offset": 17,
+          "size": 8,
+          "value": "422702"
+        },
+        {
+          "name": "end_round",
+          "type": "u64",
+          "offset": 25,
+          "size": 8,
+          "value": "422703"
+        },
+        {
+          "name": "grace_gaps",
+          "type": "u32",
+          "offset": 33,
+          "size": 4,
+          "value": 0
+        },
+        {
+          "name": "flags",
+          "type": "u8",
+          "offset": 37,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "max_seats",
+          "type": "u8",
+          "offset": 38,
+          "size": 1,
+          "value": 4
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "host",
+          "pubkey": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "stack_table",
+          "pubkey": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stack\"",
+                "hex": "737461636b"
+              },
+              {
+                "seed": "host AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "table_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "table_skr_vault",
+          "pubkey": "AopG8L7R3XiyF5yEzJB737C2xGV2CLAMbD3pZDXLF5Ct",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 250
+          }
+        },
+        {
+          "index": 3,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 4,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "ata: CreateIdempotent(table, SKR mint), payer hana",
+            "program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            "data_len": 1,
+            "data_hex": "01"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 11,
+            "event": "StackOpened",
+            "hex": "0b2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd0493db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37010000000000000000c2eb0b000000002e730600000000002f73060000000000000000000004",
+            "fields": {
+              "tag": 11,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "host": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+              "table_id": "1",
+              "bond": "200000000",
+              "start_round": "422702",
+              "end_round": "422703",
+              "grace_gaps": 0,
+              "flags": 0,
+              "max_seats": 4
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "join_stack",
+      "tag": 16,
+      "instruction": "join_stack",
+      "auth": "rig wallet (signs the SKR bond transfer)",
+      "description": "hana takes seat 0: the seat PDA is keyed by the rig (in-person table), and 200 SKR move from her SKR ATA to the table vault through an SPL Token Transfer CPI. No SGT accounts: the bond is within the guest cap. Emits StackJoined.",
+      "step": 44,
+      "args": {
+        "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+        "seat_key": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "10",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 16
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "stack_table",
+          "pubkey": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stack\"",
+                "hex": "737461636b"
+              },
+              {
+                "seed": "host AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "table_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "stack_seat",
+          "pubkey": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+                "hex": "d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee971"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 4,
+          "role": "authority_skr",
+          "pubkey": "ZLtLVcFzgAfiVg91N3knT9wunjR7F7hYKtfsKQ6mQwe",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 5,
+          "role": "table_skr_vault",
+          "pubkey": "AopG8L7R3XiyF5yEzJB737C2xGV2CLAMbD3pZDXLF5Ct",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 250
+          }
+        },
+        {
+          "index": 6,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 7,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 8,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 12,
+            "event": "StackJoined",
+            "hex": "0c2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee97193db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37000000000000000000000000000000000000000000000000000000000000000000c2eb0b0000000000",
+            "fields": {
+              "tag": 12,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+              "authority": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+              "sgt_mint": "11111111111111111111111111111111",
+              "bond": "200000000",
+              "seat_index": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "stack_checkin_heartbeat",
+      "tag": 17,
+      "instruction": "stack_checkin",
+      "auth": "anyone + P-256 HEARTBEATs (hb_ix = 0, lease 1)",
+      "description": "Round r+1: three HEARTBEATs (lease 1, round = Board.round_id) verified by one secp256r1 instruction at index 0 and applied to the rigs exactly as record_heartbeats does; each seat binds to shift 1 and counts the round. Emits HeartbeatsRecorded then StackCheckin (result 0) per seat.",
+      "step": 48,
+      "args": {
+        "n": 3,
+        "entries": [
+          {
+            "hb_ix": 0,
+            "hb_sig_index": 0,
+            "counter": "1",
+            "round_id": "422702",
+            "lease_rounds": 1
+          },
+          {
+            "hb_ix": 0,
+            "hb_sig_index": 1,
+            "counter": "1",
+            "round_id": "422702",
+            "lease_rounds": 1
+          },
+          {
+            "hb_ix": 0,
+            "hb_sig_index": 2,
+            "counter": "1",
+            "round_id": "422702",
+            "lease_rounds": 1
+          }
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 62,
+      "data_hex": "1103000001000000000000002e730600000000000100000101000000000000002e730600000000000100000201000000000000002e730600000000000100",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 17
+        },
+        {
+          "name": "n",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "entry[0].hb_ix",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].hb_sig_index",
+          "type": "u8",
+          "offset": 3,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].counter",
+          "type": "u64",
+          "offset": 4,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "entry[0].round_id",
+          "type": "u64",
+          "offset": 12,
+          "size": 8,
+          "value": "422702"
+        },
+        {
+          "name": "entry[0].lease_rounds",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[0]._pad",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[1].hb_ix",
+          "type": "u8",
+          "offset": 22,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[1].hb_sig_index",
+          "type": "u8",
+          "offset": 23,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[1].counter",
+          "type": "u64",
+          "offset": 24,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "entry[1].round_id",
+          "type": "u64",
+          "offset": 32,
+          "size": 8,
+          "value": "422702"
+        },
+        {
+          "name": "entry[1].lease_rounds",
+          "type": "u8",
+          "offset": 40,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[1]._pad",
+          "type": "u8",
+          "offset": 41,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[2].hb_ix",
+          "type": "u8",
+          "offset": 42,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[2].hb_sig_index",
+          "type": "u8",
+          "offset": 43,
+          "size": 1,
+          "value": 2
+        },
+        {
+          "name": "entry[2].counter",
+          "type": "u64",
+          "offset": 44,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "entry[2].round_id",
+          "type": "u64",
+          "offset": 52,
+          "size": 8,
+          "value": "422702"
+        },
+        {
+          "name": "entry[2].lease_rounds",
+          "type": "u8",
+          "offset": 60,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "entry[2]._pad",
+          "type": "u8",
+          "offset": 61,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "stack_table",
+          "pubkey": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stack\"",
+                "hex": "737461636b"
+              },
+              {
+                "seed": "host AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "table_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "stack_seat[0]",
+          "pubkey": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+                "hex": "d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee971"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 4,
+          "role": "rig[0]",
+          "pubkey": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 5,
+          "role": "stack_seat[1]",
+          "pubkey": "2drYiieyVnHKxR4GwmRu958zcJ5tXryi8VTQm3boQeT3",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig 4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+                "hex": "3a69677a69c73e2448a2890361d7896ee6f2914c805ff1be4f4e0008315f8fb8"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 6,
+          "role": "rig[1]",
+          "pubkey": "4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority HpuzRr6bRVNxjowfTsSjaqL5zmLS7cm4DSHfLPxuLZEX",
+                "hex": "fa01347a991e04ae0f1a6d81db29a5ea4eeb5965f577ac9efb44e7b1f2fbb028"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 7,
+          "role": "stack_seat[2]",
+          "pubkey": "E9pPwJyb7Y2b1L3cUeVLjXjdWTa8G97Dib6z9UtWmeH6",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+                "hex": "8bbae19fd8e6a18dd6d6796d6ea4801fda5eecdebbb4d7800a1c9878b16c2c7e"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 8,
+          "role": "rig[2]",
+          "pubkey": "AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority FVwvnFf39mVqaRY3m54LBK8aN8HteQ6ua9zB9AB3Ygf1",
+                "hex": "d76dfc6e3d5e78f46c54e9421c979dcdc0d9d03981b61a865ab202b1808dce90"
+              }
+            ],
+            "bump": 254
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "secp256r1: HEARTBEAT(hana), HEARTBEAT(ivan), HEARTBEAT(judy)",
+            "program_id": "Secp256r1SigVerify1111111111111111111111111",
+            "data_len": 431,
+            "data_hex": "03004d00ffff2c00ffff8d002000ffffce00ffffad00ffff0e012000ffff4f01ffff2e01ffff8f012000ffff0367c23516b347b0d8798143571741ce269b5b954877207caf8a00a776d4b790a3def54db6460f3fff4ed8ff8606dc7c4a911aea7f319108b469903d33d5dae02557cd20949aea04264f5f01a1f7af530873388eec0d4e49ae56e318831bfd4031b0c2c09f8b32eadb9814ac5846389400924eeea4a6f549f36e8d77e817f8a6eb032b2fd82cd7f45b899945ea255129310a1d8ae65df67e264dcd2b95aee49873b67404884774d5bff9ffe0b5d34ae425e2b6f2a82de3b6f318bf1eb7088131b7531445ed64a2d94d86ec6a904733b52d369eaa9e72d4b842a9ec0a6b7bac9530560b0490174cf384778a5175add7ead69de9ce198e682264abb681a903e1637c4c02ae7c975c880afa3fa7426508433d12ae76a6b3afc167e4f21d37c8fa9d1bd6d018d1d2528d6b7eb927356a3a561db42cffc6d444723d9e1eb8f3cb070610a8e93927f734916f2111391009789ddd87715f0e838b38201e677fb54b9cc893d5f30f2a55dbb2208f9d6e6b4ce3826be6306197e00b2a1e86b825bc5324e2922061"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 8,
+            "event": "HeartbeatsRecorded",
+            "hex": "08d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee9712e730600000000000100000000000000",
+            "fields": {
+              "tag": 8,
+              "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+              "round_id": "422702",
+              "dark_rounds_added": "1"
+            }
+          },
+          {
+            "tag": 13,
+            "event": "StackCheckin",
+            "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee9712e73060000000000010000000000000000000000",
+            "fields": {
+              "tag": 13,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+              "round_id": "422702",
+              "checked_rounds": "1",
+              "result": 0
+            }
+          },
+          {
+            "tag": 8,
+            "event": "HeartbeatsRecorded",
+            "hex": "083a69677a69c73e2448a2890361d7896ee6f2914c805ff1be4f4e0008315f8fb82e730600000000000100000000000000",
+            "fields": {
+              "tag": 8,
+              "rig": "4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+              "round_id": "422702",
+              "dark_rounds_added": "1"
+            }
+          },
+          {
+            "tag": 13,
+            "event": "StackCheckin",
+            "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd043a69677a69c73e2448a2890361d7896ee6f2914c805ff1be4f4e0008315f8fb82e73060000000000010000000000000000000000",
+            "fields": {
+              "tag": 13,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+              "round_id": "422702",
+              "checked_rounds": "1",
+              "result": 0
+            }
+          },
+          {
+            "tag": 8,
+            "event": "HeartbeatsRecorded",
+            "hex": "088bbae19fd8e6a18dd6d6796d6ea4801fda5eecdebbb4d7800a1c9878b16c2c7e2e730600000000000100000000000000",
+            "fields": {
+              "tag": 8,
+              "rig": "AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+              "round_id": "422702",
+              "dark_rounds_added": "1"
+            }
+          },
+          {
+            "tag": 13,
+            "event": "StackCheckin",
+            "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd048bbae19fd8e6a18dd6d6796d6ea4801fda5eecdebbb4d7800a1c9878b16c2c7e2e73060000000000010000000000000000000000",
+            "fields": {
+              "tag": 13,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+              "round_id": "422702",
+              "checked_rounds": "1",
+              "result": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "stack_checkin_observe",
+      "tag": 17,
+      "instruction": "stack_checkin",
+      "auth": "anyone, observe mode (hb_ix = 0xFF), no precompile",
+      "description": "Round r+2: hana and ivan count the round because their rigs' one-round leases end at Board.round_id (a heartbeat for this round landed in this round); judy's bound shift recorded a BREAK, so her seat is broken for good (result 42 StackSeatBroken). Emits StackCheckin per seat.",
+      "step": 52,
+      "args": {
+        "n": 3,
+        "entries": [
+          {
+            "hb_ix": 255,
+            "hb_sig_index": 0,
+            "counter": "0",
+            "round_id": "0",
+            "lease_rounds": 0
+          },
+          {
+            "hb_ix": 255,
+            "hb_sig_index": 0,
+            "counter": "0",
+            "round_id": "0",
+            "lease_rounds": 0
+          },
+          {
+            "hb_ix": 255,
+            "hb_sig_index": 0,
+            "counter": "0",
+            "round_id": "0",
+            "lease_rounds": 0
+          }
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 62,
+      "data_hex": "1103ff00000000000000000000000000000000000000ff00000000000000000000000000000000000000ff00000000000000000000000000000000000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 17
+        },
+        {
+          "name": "n",
+          "type": "u8",
+          "offset": 1,
+          "size": 1,
+          "value": 3
+        },
+        {
+          "name": "entry[0].hb_ix",
+          "type": "u8",
+          "offset": 2,
+          "size": 1,
+          "value": 255
+        },
+        {
+          "name": "entry[0].hb_sig_index",
+          "type": "u8",
+          "offset": 3,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0].counter",
+          "type": "u64",
+          "offset": 4,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[0].round_id",
+          "type": "u64",
+          "offset": 12,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[0].lease_rounds",
+          "type": "u8",
+          "offset": 20,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[0]._pad",
+          "type": "u8",
+          "offset": 21,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[1].hb_ix",
+          "type": "u8",
+          "offset": 22,
+          "size": 1,
+          "value": 255
+        },
+        {
+          "name": "entry[1].hb_sig_index",
+          "type": "u8",
+          "offset": 23,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[1].counter",
+          "type": "u64",
+          "offset": 24,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[1].round_id",
+          "type": "u64",
+          "offset": 32,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[1].lease_rounds",
+          "type": "u8",
+          "offset": 40,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[1]._pad",
+          "type": "u8",
+          "offset": 41,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[2].hb_ix",
+          "type": "u8",
+          "offset": 42,
+          "size": 1,
+          "value": 255
+        },
+        {
+          "name": "entry[2].hb_sig_index",
+          "type": "u8",
+          "offset": 43,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[2].counter",
+          "type": "u64",
+          "offset": 44,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[2].round_id",
+          "type": "u64",
+          "offset": 52,
+          "size": 8,
+          "value": "0"
+        },
+        {
+          "name": "entry[2].lease_rounds",
+          "type": "u8",
+          "offset": 60,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "entry[2]._pad",
+          "type": "u8",
+          "offset": 61,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "instructions_sysvar",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "stack_table",
+          "pubkey": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stack\"",
+                "hex": "737461636b"
+              },
+              {
+                "seed": "host AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "table_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "stack_seat[0]",
+          "pubkey": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+                "hex": "d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee971"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 4,
+          "role": "rig[0]",
+          "pubkey": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 5,
+          "role": "stack_seat[1]",
+          "pubkey": "2drYiieyVnHKxR4GwmRu958zcJ5tXryi8VTQm3boQeT3",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig 4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+                "hex": "3a69677a69c73e2448a2890361d7896ee6f2914c805ff1be4f4e0008315f8fb8"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 6,
+          "role": "rig[1]",
+          "pubkey": "4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority HpuzRr6bRVNxjowfTsSjaqL5zmLS7cm4DSHfLPxuLZEX",
+                "hex": "fa01347a991e04ae0f1a6d81db29a5ea4eeb5965f577ac9efb44e7b1f2fbb028"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 7,
+          "role": "stack_seat[2]",
+          "pubkey": "E9pPwJyb7Y2b1L3cUeVLjXjdWTa8G97Dib6z9UtWmeH6",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+                "hex": "8bbae19fd8e6a18dd6d6796d6ea4801fda5eecdebbb4d7800a1c9878b16c2c7e"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 8,
+          "role": "rig[2]",
+          "pubkey": "AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority FVwvnFf39mVqaRY3m54LBK8aN8HteQ6ua9zB9AB3Ygf1",
+                "hex": "d76dfc6e3d5e78f46c54e9421c979dcdc0d9d03981b61a865ab202b1808dce90"
+              }
+            ],
+            "bump": 254
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 13,
+            "event": "StackCheckin",
+            "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee9712f73060000000000020000000000000000000000",
+            "fields": {
+              "tag": 13,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+              "round_id": "422703",
+              "checked_rounds": "2",
+              "result": 0
+            }
+          },
+          {
+            "tag": 13,
+            "event": "StackCheckin",
+            "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd043a69677a69c73e2448a2890361d7896ee6f2914c805ff1be4f4e0008315f8fb82f73060000000000020000000000000000000000",
+            "fields": {
+              "tag": 13,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+              "round_id": "422703",
+              "checked_rounds": "2",
+              "result": 0
+            }
+          },
+          {
+            "tag": 13,
+            "event": "StackCheckin",
+            "hex": "0d2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd048bbae19fd8e6a18dd6d6796d6ea4801fda5eecdebbb4d7800a1c9878b16c2c7e2f7306000000000001000000000000002a000000",
+            "fields": {
+              "tag": 13,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+              "round_id": "422703",
+              "checked_rounds": "1",
+              "result": 42
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "settle_stack",
+      "tag": 18,
+      "instruction": "settle_stack",
+      "auth": "anyone, once Board.round_id > end_round",
+      "description": "hana and ivan finish (2/2 rounds, end round checked, no break); judy forfeits. B = 600 SKR, W = 400, F = 200: each finisher's payout is 200 + 80 SKR (80% of F pro rata); 40 SKR (20%) moves to the BuryVault's SKR ATA as a new lot, restarting the auction. Every seat passed once. Emits BuryLotAdded then StackSettled.",
+      "step": 54,
+      "args": {
+        "seats": [
+          "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
+          "2drYiieyVnHKxR4GwmRu958zcJ5tXryi8VTQm3boQeT3",
+          "E9pPwJyb7Y2b1L3cUeVLjXjdWTa8G97Dib6z9UtWmeH6"
+        ]
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "12",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 18
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "stack_table",
+          "pubkey": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stack\"",
+                "hex": "737461636b"
+              },
+              {
+                "seed": "host AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "table_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 1,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 2,
+          "role": "table_skr_vault",
+          "pubkey": "AopG8L7R3XiyF5yEzJB737C2xGV2CLAMbD3pZDXLF5Ct",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 250
+          }
+        },
+        {
+          "index": 3,
+          "role": "bury_vault",
+          "pubkey": "6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bury\"",
+                "hex": "62757279"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 4,
+          "role": "bury_skr_vault",
+          "pubkey": "2v3JD4WP7o5x2sUSyB59beLxu7S3ovSXt5mbf8v7rHnX",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+                "hex": "54cec0f59b18d4b1469a653402247c697dcc1f9245616b1404492a69113e1909"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 5,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 6,
+          "role": "stack_seat[0]",
+          "pubkey": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+                "hex": "d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee971"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 7,
+          "role": "stack_seat[1]",
+          "pubkey": "2drYiieyVnHKxR4GwmRu958zcJ5tXryi8VTQm3boQeT3",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig 4w1sFsT8GKKPGWHkUHDDcWKb5V76CxJqoHJGXMT8iAnj",
+                "hex": "3a69677a69c73e2448a2890361d7896ee6f2914c805ff1be4f4e0008315f8fb8"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 8,
+          "role": "stack_seat[2]",
+          "pubkey": "E9pPwJyb7Y2b1L3cUeVLjXjdWTa8G97Dib6z9UtWmeH6",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig AQSx2ksgc8eFFMgmyMw9VtQrBu3PzBnNkQgQXMWNgyAD",
+                "hex": "8bbae19fd8e6a18dd6d6796d6ea4801fda5eecdebbb4d7800a1c9878b16c2c7e"
+              }
+            ],
+            "bump": 254
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 22,
+            "event": "BuryLotAdded",
+            "hex": "162f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04005a620200000000005a62020000000000e1f505000000002a94f91a0000000001",
+            "fields": {
+              "tag": 22,
+              "source": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "amount": "40000000",
+              "lot_skr": "40000000",
+              "start_price": "100000000",
+              "start_slot": "452564010",
+              "source_kind": 1
+            }
+          },
+          {
+            "tag": 14,
+            "event": "StackSettled",
+            "hex": "0e2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd040046c323000000000084d7170000000000ec602100000000005a6202000000000302",
+            "fields": {
+              "tag": 14,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "total_bonds": "600000000",
+              "finisher_bonds": "400000000",
+              "payouts_total": "560000000",
+              "bury_amount": "40000000",
+              "seats": 3,
+              "finishers": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim_stack",
+      "tag": 19,
+      "instruction": "claim_stack",
+      "auth": "anyone (pays only the stored seat authority)",
+      "description": "Pay hana's settled payout (280 SKR) from the table vault to her SKR ATA, close her seat (rent to her wallet). Emits StackClaimed (kind 0 payout).",
+      "step": 55,
+      "args": {
+        "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+        "seat": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "13",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 19
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "stack_table",
+          "pubkey": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stack\"",
+                "hex": "737461636b"
+              },
+              {
+                "seed": "host AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "table_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 1,
+          "role": "stack_seat",
+          "pubkey": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"stackseat\"",
+                "hex": "737461636b73656174"
+              },
+              {
+                "seed": "table 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "rig FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+                "hex": "d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee971"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "seat_authority",
+          "pubkey": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 3,
+          "role": "authority_skr",
+          "pubkey": "ZLtLVcFzgAfiVg91N3knT9wunjR7F7hYKtfsKQ6mQwe",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+                "hex": "93db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a37"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 4,
+          "role": "table_skr_vault",
+          "pubkey": "AopG8L7R3XiyF5yEzJB737C2xGV2CLAMbD3pZDXLF5Ct",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+                "hex": "2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 250
+          }
+        },
+        {
+          "index": 5,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 15,
+            "event": "StackClaimed",
+            "hex": "0f2f69e5e162dfb8d002ca744c735c246185e189612a682d5466289f784f1dbd04d77724745c62c5d6806e0de73551b25206ec7d55be915d78b39c184f73aee97193db9f2ee0f7e39e942fb59441190bf20b9c43cfcc8a051a152499cf392b7a370076b0100000000000",
+            "fields": {
+              "tag": 15,
+              "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
+              "rig": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x",
+              "authority": "AxBAe8zXwD3GhbTkwMqQ4VX9LGt1CxGxc7keNPuBinni",
+              "amount": "280000000",
+              "kind": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "lock_focus_bond",
+      "tag": 20,
+      "instruction": "lock_focus_bond",
+      "auth": "rig wallet (signs the SKR transfer)",
+      "description": "Lock 500 SKR on kai's open, clean shift 1 (armed, no BREAK yet). The ShiftLog [\"shift\", rig, 1] must not exist yet; the bond records the shift's start round and time so only that shift's log can resolve it. The vault is the bond's SPL Token ATA (companion). Emits FocusBondLocked.",
+      "step": 59,
+      "args": {
+        "shift_id": "1",
+        "amount": "500000000"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 17,
+      "data_hex": "1401000000000000000065cd1d00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 20
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 1,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "offset": 9,
+          "size": 8,
+          "value": "500000000"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority 5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+                "hex": "3e6ea7acba59568c5f36acb41816fb16ab2b27ab13abd38b0924ca2691ad6599"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 2,
+          "role": "focus_bond",
+          "pubkey": "DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bond\"",
+                "hex": "626f6e64"
+              },
+              {
+                "seed": "rig GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+                "hex": "e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb36"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "authority_skr",
+          "pubkey": "3Fd1hVu5jWb7s5WyodWKEDKJg54ChixEUgxEK9vyqozf",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+                "hex": "3e6ea7acba59568c5f36acb41816fb16ab2b27ab13abd38b0924ca2691ad6599"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 4,
+          "role": "bond_skr_vault",
+          "pubkey": "GQk24G14hc4WFnc3btFvSYCUJqtntyWjTitJSTaXpDWc",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+                "hex": "b88551927fea4958233835f610c0f834520a3ddd361f13ed676a0fba2511cf19"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 5,
+          "role": "shift_log",
+          "pubkey": "DFRjPUimGZY9QWTAuypcQVxh8D19QJ1zMFxBTKU1R5Bh",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+                "hex": "e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb36"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 251
+          }
+        },
+        {
+          "index": 6,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 7,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "ata: CreateIdempotent(bond, SKR mint), payer kai",
+            "program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            "data_len": 1,
+            "data_hex": "01"
+          },
+          {
+            "index": 1,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 16,
+            "event": "FocusBondLocked",
+            "hex": "10b88551927fea4958233835f610c0f834520a3ddd361f13ed676a0fba2511cf19e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb363e6ea7acba59568c5f36acb41816fb16ab2b27ab13abd38b0924ca2691ad659901000000000000000065cd1d00000000",
+            "fields": {
+              "tag": 16,
+              "bond": "DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+              "rig": "GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+              "authority": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+              "shift_id": "1",
+              "amount": "500000000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "forfeit_focus_bond",
+      "tag": 22,
+      "instruction": "forfeit_focus_bond",
+      "auth": "anyone, once the bonded shift sealed with a reason other than completed",
+      "description": "lena's shift 1 sealed with reason 6 (manual): the 300 SKR move from the bond vault to the BuryVault's SKR ATA (a new lot: the auction restarts), the vault ATA and the bond close (both rents to lena's wallet). Emits BuryLotAdded then FocusBondForfeited (reason 6).",
+      "step": 62,
+      "args": {
+        "authority": "25dqU2BT7tC3xVFTC6P69phkMyuJoYXSsFT26xuYnexA",
+        "shift_id": "1"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "16",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 22
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "focus_bond",
+          "pubkey": "5MH2RZd4txEgtg9uffLHbH5aEfLeujRRqdLYuN4qrE2S",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bond\"",
+                "hex": "626f6e64"
+              },
+              {
+                "seed": "rig Fr75sRJBJ1g1k9xttUTD5VtcGcu7sfm9e1yb5ms1dhVE",
+                "hex": "dc97f4acc9c063ffe2378f995fc8a8b4aa8387b353842f2eb5be888e1bc451e5"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "shift_log",
+          "pubkey": "MNAg2EcqEyxrMKED9NL1ThdmycWDodGDgsmFtMKHvmL",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig Fr75sRJBJ1g1k9xttUTD5VtcGcu7sfm9e1yb5ms1dhVE",
+                "hex": "dc97f4acc9c063ffe2378f995fc8a8b4aa8387b353842f2eb5be888e1bc451e5"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "rig",
+          "pubkey": "Fr75sRJBJ1g1k9xttUTD5VtcGcu7sfm9e1yb5ms1dhVE",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority 25dqU2BT7tC3xVFTC6P69phkMyuJoYXSsFT26xuYnexA",
+                "hex": "100ba90b553ccb23ff13d508c1fa2b33c82b2bd68589a04039fa052f1a702e6b"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 3,
+          "role": "bond_skr_vault",
+          "pubkey": "H9K8DPpcNk8JNxtvo4oz5TzK8b7xsb5wmgbJWDYYDUu7",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 5MH2RZd4txEgtg9uffLHbH5aEfLeujRRqdLYuN4qrE2S",
+                "hex": "40a07b9f0804c61a669ff60acb88cdbca8aad5c19c37390f49b0d1d87ef582ef"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 4,
+          "role": "bury_vault",
+          "pubkey": "6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bury\"",
+                "hex": "62757279"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 5,
+          "role": "bury_skr_vault",
+          "pubkey": "2v3JD4WP7o5x2sUSyB59beLxu7S3ovSXt5mbf8v7rHnX",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+                "hex": "54cec0f59b18d4b1469a653402247c697dcc1f9245616b1404492a69113e1909"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 6,
+          "role": "authority",
+          "pubkey": "25dqU2BT7tC3xVFTC6P69phkMyuJoYXSsFT26xuYnexA",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 7,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 22,
+            "event": "BuryLotAdded",
+            "hex": "1640a07b9f0804c61a669ff60acb88cdbca8aad5c19c37390f49b0d1d87ef582ef00a3e1110000000000fd43140000000000e1f505000000002a94f91a0000000002",
+            "fields": {
+              "tag": 22,
+              "source": "5MH2RZd4txEgtg9uffLHbH5aEfLeujRRqdLYuN4qrE2S",
+              "amount": "300000000",
+              "lot_skr": "340000000",
+              "start_price": "100000000",
+              "start_slot": "452564010",
+              "source_kind": 2
+            }
+          },
+          {
+            "tag": 18,
+            "event": "FocusBondForfeited",
+            "hex": "1240a07b9f0804c61a669ff60acb88cdbca8aad5c19c37390f49b0d1d87ef582efdc97f4acc9c063ffe2378f995fc8a8b4aa8387b353842f2eb5be888e1bc451e5010000000000000000a3e1110000000006",
+            "fields": {
+              "tag": 18,
+              "bond": "5MH2RZd4txEgtg9uffLHbH5aEfLeujRRqdLYuN4qrE2S",
+              "rig": "Fr75sRJBJ1g1k9xttUTD5VtcGcu7sfm9e1yb5ms1dhVE",
+              "shift_id": "1",
+              "amount": "300000000",
+              "reason": 6
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "release_focus_bond",
+      "tag": 21,
+      "instruction": "release_focus_bond",
+      "auth": "anyone, once the bonded shift sealed completed (pays only the stored owner)",
+      "description": "kai's ShiftLog (same rig, shift id, start round and start time as the bond) says completed: the 500 SKR return to kai's SKR ATA; the vault ATA and the bond close (both rents to kai's wallet). Emits FocusBondReleased.",
+      "step": 65,
+      "args": {
+        "authority": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+        "shift_id": "1"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "15",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 21
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "focus_bond",
+          "pubkey": "DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bond\"",
+                "hex": "626f6e64"
+              },
+              {
+                "seed": "rig GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+                "hex": "e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb36"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 1,
+          "role": "shift_log",
+          "pubkey": "DFRjPUimGZY9QWTAuypcQVxh8D19QJ1zMFxBTKU1R5Bh",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+                "hex": "e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb36"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 251
+          }
+        },
+        {
+          "index": 2,
+          "role": "bond_skr_vault",
+          "pubkey": "GQk24G14hc4WFnc3btFvSYCUJqtntyWjTitJSTaXpDWc",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+                "hex": "b88551927fea4958233835f610c0f834520a3ddd361f13ed676a0fba2511cf19"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 3,
+          "role": "authority_skr",
+          "pubkey": "3Fd1hVu5jWb7s5WyodWKEDKJg54ChixEUgxEK9vyqozf",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+                "hex": "3e6ea7acba59568c5f36acb41816fb16ab2b27ab13abd38b0924ca2691ad6599"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 4,
+          "role": "authority",
+          "pubkey": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 5,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 17,
+            "event": "FocusBondReleased",
+            "hex": "11b88551927fea4958233835f610c0f834520a3ddd361f13ed676a0fba2511cf19e7b107b9b9f2d4b06aefda531ed033cf046db623cf29daf8599139be4ca7fb3601000000000000000065cd1d00000000",
+            "fields": {
+              "tag": 17,
+              "bond": "DRHvbaGBmrPbcKxuGm1i47YVG8w7DwEQZt1ghegpAYyN",
+              "rig": "GbRkBjSBGQBDYHdcdoB7S3Nbdzj6884GqebBsF62B7YR",
+              "shift_id": "1",
+              "amount": "500000000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "create_gift_wallet",
+      "tag": 23,
+      "instruction": "create_gift",
+      "auth": "sender wallet",
+      "description": "Escrow 0.5 SOL for pia's wallet in GiftEscrow [\"gift\", olga, 1]: the lamports sit on top of the escrow's rent; expiry = now + 30 days. (A sender paying in SKR adds a Jupiter SKR->SOL swap as a separate instruction before this one; the program only escrows SOL.) Emits GiftCreated.",
+      "step": 66,
+      "args": {
+        "nonce": "1",
+        "recipient_kind": 0,
+        "recipient": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+        "lamports": "500000000"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 50,
+      "data_hex": "17010000000000000000f5eacab77517c5b4b3b4373811c6f874fffb3dd4657da908b42fa2c7fe0ac0d80065cd1d00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 23
+        },
+        {
+          "name": "nonce",
+          "type": "u64",
+          "offset": 1,
+          "size": 8,
+          "value": "1"
+        },
+        {
+          "name": "recipient_kind",
+          "type": "u8",
+          "offset": 9,
+          "size": 1,
+          "value": 0
+        },
+        {
+          "name": "recipient",
+          "type": "pubkey",
+          "offset": 10,
+          "size": 32,
+          "value": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf"
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 42,
+          "size": 8,
+          "value": "500000000"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "sender",
+          "pubkey": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "gift_escrow",
+          "pubkey": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"gift\"",
+                "hex": "67696674"
+              },
+              {
+                "seed": "sender 7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+                "hex": "673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24"
+              },
+              {
+                "seed": "nonce 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 19,
+            "event": "GiftCreated",
+            "hex": "139a498c6e6e61913d3a1382608abe33ea93cec96938ff3c58e596a5a0d3d2da7e673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24f5eacab77517c5b4b3b4373811c6f874fffb3dd4657da908b42fa2c7fe0ac0d80065cd1d00000000826de36a0000000000",
+            "fields": {
+              "tag": 19,
+              "gift": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1",
+              "sender": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+              "recipient": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+              "lamports": "500000000",
+              "expiry_ts": "1793289602",
+              "recipient_kind": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim_gift_wallet",
+      "tag": 24,
+      "instruction": "claim_gift",
+      "auth": "the recipient wallet (signs)",
+      "description": "pia claims: 0.5 SOL move to her wallet and the escrow closes (rent back to olga). In the app the same transaction continues with ORE automate (executor = Executor PDA) and register_rig, so the gift arrives as a funded rig. Emits GiftClaimed.",
+      "step": 67,
+      "args": {
+        "gift": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "18",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 24
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "claimer",
+          "pubkey": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "gift_escrow",
+          "pubkey": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"gift\"",
+                "hex": "67696674"
+              },
+              {
+                "seed": "sender 7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+                "hex": "673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24"
+              },
+              {
+                "seed": "nonce 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "sender",
+          "pubkey": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "is_signer": false,
+          "is_writable": true
+        }
+      ],
+      "transaction": {
+        "fee_payer": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 20,
+            "event": "GiftClaimed",
+            "hex": "149a498c6e6e61913d3a1382608abe33ea93cec96938ff3c58e596a5a0d3d2da7ef5eacab77517c5b4b3b4373811c6f874fffb3dd4657da908b42fa2c7fe0ac0d80065cd1d0000000000",
+            "fields": {
+              "tag": 20,
+              "gift": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1",
+              "claimer": "HYxY9ghjHzbFAeVqeUD7sjdmtcqQEsjxrYBBgCw2VBJf",
+              "lamports": "500000000",
+              "recipient_kind": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "create_gift_sgt",
+      "tag": 23,
+      "instruction": "create_gift",
+      "auth": "sender wallet",
+      "description": "Escrow 0.5 SOL for whoever holds SGT mint 5pWbRnGU... (member #121,035) at claim time. Emits GiftCreated (recipient_kind 1).",
+      "step": 69,
+      "args": {
+        "nonce": "2",
+        "recipient_kind": 1,
+        "recipient": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+        "lamports": "500000000"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 50,
+      "data_hex": "17020000000000000001479a81dde1d826dea57c0ef44a9e5a6f5318bab01a81d3eef812e8f6f06d6bc90065cd1d00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 23
+        },
+        {
+          "name": "nonce",
+          "type": "u64",
+          "offset": 1,
+          "size": 8,
+          "value": "2"
+        },
+        {
+          "name": "recipient_kind",
+          "type": "u8",
+          "offset": 9,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "recipient",
+          "type": "pubkey",
+          "offset": 10,
+          "size": 32,
+          "value": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp"
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 42,
+          "size": 8,
+          "value": "500000000"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "sender",
+          "pubkey": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "gift_escrow",
+          "pubkey": "HanFioNNhgJwPxAKTh93Ykqk9Tq3UMUgykdTCSkeLXcC",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"gift\"",
+                "hex": "67696674"
+              },
+              {
+                "seed": "sender 7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+                "hex": "673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24"
+              },
+              {
+                "seed": "nonce 2 u64 LE",
+                "hex": "0200000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 19,
+            "event": "GiftCreated",
+            "hex": "13f662537f4fb485404ec3fd4d7bf7bd45059f5f6c7458cc3a8fe9d6cf124ad619673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24479a81dde1d826dea57c0ef44a9e5a6f5318bab01a81d3eef812e8f6f06d6bc90065cd1d00000000826de36a0000000001",
+            "fields": {
+              "tag": 19,
+              "gift": "HanFioNNhgJwPxAKTh93Ykqk9Tq3UMUgykdTCSkeLXcC",
+              "sender": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+              "recipient": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+              "lamports": "500000000",
+              "expiry_ts": "1793289602",
+              "recipient_kind": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim_gift_sgt",
+      "tag": 24,
+      "instruction": "claim_gift",
+      "auth": "the current SGT holder (signs; SGT re-verified in-program with sgt-verify, mainnet anchors)",
+      "description": "quinn proves he holds the gift's SGT right now (Token-2022 account owned by him, amount 1, real mint, group and authority anchors): 0.5 SOL to his wallet, escrow closed (rent to olga). Emits GiftClaimed (recipient_kind 1).",
+      "step": 70,
+      "args": {
+        "gift": "HanFioNNhgJwPxAKTh93Ykqk9Tq3UMUgykdTCSkeLXcC",
+        "sgt_mint": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+        "sgt_token_account": "CCdKBeAHkcgp9THhB27DLJbFkZ7W48LmkVQ32aoKb2U7"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "18",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 24
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "claimer",
+          "pubkey": "CzxEa59tNkm525czZFP3NUxpTQNx1KFqgVDaA7rcmnbd",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "gift_escrow",
+          "pubkey": "HanFioNNhgJwPxAKTh93Ykqk9Tq3UMUgykdTCSkeLXcC",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"gift\"",
+                "hex": "67696674"
+              },
+              {
+                "seed": "sender 7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+                "hex": "673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24"
+              },
+              {
+                "seed": "nonce 2 u64 LE",
+                "hex": "0200000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "sender",
+          "pubkey": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 3,
+          "role": "sgt_token_account",
+          "pubkey": "CCdKBeAHkcgp9THhB27DLJbFkZ7W48LmkVQ32aoKb2U7",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner CzxEa59tNkm525czZFP3NUxpTQNx1KFqgVDaA7rcmnbd",
+                "hex": "b2491d9502ae28630a2bacb2e0c74510ffcdd328c334ff3e1393e75b2d31e7dc"
+              },
+              {
+                "seed": "token_program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                "hex": "06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc"
+              },
+              {
+                "seed": "mint 5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+                "hex": "479a81dde1d826dea57c0ef44a9e5a6f5318bab01a81d3eef812e8f6f06d6bc9"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 4,
+          "role": "sgt_mint",
+          "pubkey": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "CzxEa59tNkm525czZFP3NUxpTQNx1KFqgVDaA7rcmnbd",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 20,
+            "event": "GiftClaimed",
+            "hex": "14f662537f4fb485404ec3fd4d7bf7bd45059f5f6c7458cc3a8fe9d6cf124ad619b2491d9502ae28630a2bacb2e0c74510ffcdd328c334ff3e1393e75b2d31e7dc0065cd1d0000000001",
+            "fields": {
+              "tag": 20,
+              "gift": "HanFioNNhgJwPxAKTh93Ykqk9Tq3UMUgykdTCSkeLXcC",
+              "claimer": "CzxEa59tNkm525czZFP3NUxpTQNx1KFqgVDaA7rcmnbd",
+              "lamports": "500000000",
+              "recipient_kind": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "refund_gift",
+      "tag": 25,
+      "instruction": "refund_gift",
+      "auth": "anyone, from expiry_ts (pays only the stored sender)",
+      "description": "Day 30: the unclaimed escrow closes and every lamport (gift and rent) returns to olga. Emits GiftRefunded.",
+      "step": 73,
+      "args": {
+        "gift": "E2nT26PYbqJaG6NnpKB7Toq1pun5VGjHWE1WnGrBPSTG"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "19",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 25
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "gift_escrow",
+          "pubkey": "E2nT26PYbqJaG6NnpKB7Toq1pun5VGjHWE1WnGrBPSTG",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"gift\"",
+                "hex": "67696674"
+              },
+              {
+                "seed": "sender 7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+                "hex": "673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad24"
+              },
+              {
+                "seed": "nonce 3 u64 LE",
+                "hex": "0300000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "sender",
+          "pubkey": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+          "is_signer": false,
+          "is_writable": true
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 21,
+            "event": "GiftRefunded",
+            "hex": "15c19ce655e86847c18d2292aa929ebd3467f452fd91380cd9b62bf0279a8f2367673d6ba2fa48ce76ecf181090cda607940c5052044a0377f159c59ccfa54ad240065cd1d00000000",
+            "fields": {
+              "tag": 21,
+              "gift": "E2nT26PYbqJaG6NnpKB7Toq1pun5VGjHWE1WnGrBPSTG",
+              "sender": "7x1KBPHZ6NGnscZyVQoTqXt7nsxFw1PDz3YYQVP8S9ib",
+              "lamports": "500000000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "bury_auction_buy",
+      "tag": 27,
+      "instruction": "bury_auction_buy",
+      "auth": "buyer wallet (signs the ORE payment)",
+      "description": "A quarter of the way through the window the price is 75,002,500 ORE atoms per SKR. rhea buys 10 SKR for 750,025,000 atoms (0.0075 ORE, max_ore = exactly that): the ORE moves into the BuryVault's ORE ATA, the program CPIs ORE bury (tag 24) signed by the BuryVault PDA (live ORE: 90% burned, 10% to ORE's stake program through the live ORE stake program), checks the vault lost exactly the payment and the ORE supply fell by 675,022,500 atoms, then sends the 10 SKR to rhea. Emits BuryAuctionSold.",
+      "step": 76,
+      "args": {
+        "skr_amount": "10000000",
+        "max_ore": "750025000",
+        "price": "75002500"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 17,
+      "data_hex": "1b80969800000000002879b42c00000000",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 27
+        },
+        {
+          "name": "skr_amount",
+          "type": "u64",
+          "offset": 1,
+          "size": 8,
+          "value": "10000000"
+        },
+        {
+          "name": "max_ore",
+          "type": "u64",
+          "offset": 9,
+          "size": 8,
+          "value": "750025000"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "buyer",
+          "pubkey": "BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "buyer_ore",
+          "pubkey": "5H7fqdxyhB6vpr7q9c1BMgPZMSvfBJpwSKv25MgMvxQd",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+                "hex": "a11dbe28d6b2c2d80c4f6cb2b0bca67baa2f8c9ceb81c0c94ac47e3cf0697035"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+                "hex": "0c00dbceb8ceaa7358945a475bca9f002ad0b2e6d8b063c825a8581643b9f575"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 2,
+          "role": "buyer_skr",
+          "pubkey": "9aYjpp4TCpZfiUEWwjUAQps8NvV7MhAqFrhdVfEgq8dc",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+                "hex": "a11dbe28d6b2c2d80c4f6cb2b0bca67baa2f8c9ceb81c0c94ac47e3cf0697035"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 3,
+          "role": "bury_vault",
+          "pubkey": "6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bury\"",
+                "hex": "62757279"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 4,
+          "role": "bury_ore_vault",
+          "pubkey": "BYcNkEtedVYUNED4nv1o1whSVhJu9u6YRQE17nW25hto",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+                "hex": "54cec0f59b18d4b1469a653402247c697dcc1f9245616b1404492a69113e1909"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+                "hex": "0c00dbceb8ceaa7358945a475bca9f002ad0b2e6d8b063c825a8581643b9f575"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 5,
+          "role": "bury_skr_vault",
+          "pubkey": "2v3JD4WP7o5x2sUSyB59beLxu7S3ovSXt5mbf8v7rHnX",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS",
+                "hex": "54cec0f59b18d4b1469a653402247c697dcc1f9245616b1404492a69113e1909"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+                "hex": "067c5a3e05fe414712a7a2eafe42be7610bcd90cbf571627758373cb8ad0d8a4"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 6,
+          "role": "ore_board",
+          "pubkey": "BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 7,
+          "role": "ore_mint",
+          "pubkey": "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 8,
+          "role": "ore_treasury",
+          "pubkey": "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 9,
+          "role": "ore_treasury_ore",
+          "pubkey": "GwZS8yBuPPkPgY4uh7eEhHN5EEdpkf7EBZ1za6nuP3wF",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner 45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG",
+                "hex": "2dc2c0a9d09b91ffce5d75c5f0d22fe54a65eccbf13a185dcf7dd5a1d8da2e35"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+                "hex": "0c00dbceb8ceaa7358945a475bca9f002ad0b2e6d8b063c825a8581643b9f575"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 10,
+          "role": "ore_stake_treasury",
+          "pubkey": "F3ajpARUkbMnYsrbAmgnsjyp991DVbGYRzfaVXy1Dfvu",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE stake (stakecNP3FpiExZPCgZfqRgumVzi6dNqnfrjwXyTgeH)",
+            "seeds": [
+              {
+                "seed": "utf8 \"treasury\"",
+                "hex": "7472656173757279"
+              }
+            ],
+            "bump": 251
+          }
+        },
+        {
+          "index": 11,
+          "role": "ore_stake_treasury_ore",
+          "pubkey": "BHnZihpszx6e9rmN2ZQkABBUhwQ1AFYUUpjY6yrVzz3h",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "AssociatedToken (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)",
+            "seeds": [
+              {
+                "seed": "owner F3ajpARUkbMnYsrbAmgnsjyp991DVbGYRzfaVXy1Dfvu",
+                "hex": "d0aced2b6849dfa077cc8d36ca7e68e3a58225ea81b0f82234c3d530a88686ee"
+              },
+              {
+                "seed": "token_program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "hex": "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9"
+              },
+              {
+                "seed": "mint oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+                "hex": "0c00dbceb8ceaa7358945a475bca9f002ad0b2e6d8b063c825a8581643b9f575"
+              }
+            ],
+            "bump": 254
+          }
+        },
+        {
+          "index": 12,
+          "role": "ore_stake_vesting",
+          "pubkey": "8dPF5obsJxPsZeecAFqJbSWPEw9FkR1XGyRSJbry8B21",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "ORE stake (stakecNP3FpiExZPCgZfqRgumVzi6dNqnfrjwXyTgeH)",
+            "seeds": [
+              {
+                "seed": "utf8 \"vesting\"",
+                "hex": "76657374696e67"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 13,
+          "role": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 14,
+          "role": "ore_program",
+          "pubkey": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+          "is_signer": false,
+          "is_writable": false
+        },
+        {
+          "index": 15,
+          "role": "ore_stake_program",
+          "pubkey": "stakecNP3FpiExZPCgZfqRgumVzi6dNqnfrjwXyTgeH",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 23,
+            "event": "BuryAuctionSold",
+            "hex": "17a11dbe28d6b2c2d80c4f6cb2b0bca67baa2f8c9ceb81c0c94ac47e3cf0697035809698000000000084727804000000002879b42c00000000a4063c280000000084727804000000008066ab1300000000",
+            "fields": {
+              "tag": 23,
+              "buyer": "BqvwkizDQWzAHWJBD8k6CSVFeotCWRfpb7raGbao1Ji8",
+              "skr_amount": "10000000",
+              "price": "75002500",
+              "ore_paid": "750025000",
+              "ore_burned": "675022500",
+              "ore_shared": "75002500",
+              "lot_remaining": "330000000"
+            }
+          }
+        ]
       }
     }
   ]

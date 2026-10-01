@@ -81,6 +81,18 @@ class GoldenInstructionsTest {
         "dig_fresh_heartbeat", "dig_reuse_lease", "dig_batch_two_rigs", "record_heartbeats",
     )
 
+    /**
+     * INTERFACE v1.2 (additive SKR features, tags 15..27). The phone does not build these yet; they are
+     * listed explicitly so a new vector can never be silently ignored. Each name moves to [androidBuilds]
+     * (or to [notOnPhone] for crank-only instructions) when its builder lands.
+     */
+    private val skrPendingOnPhone = setOf(
+        "init_bury_vault", "open_stack", "join_stack", "stack_checkin_heartbeat", "stack_checkin_observe",
+        "settle_stack", "claim_stack", "lock_focus_bond", "forfeit_focus_bond", "release_focus_bond",
+        "create_gift_wallet", "claim_gift_wallet", "create_gift_sgt", "claim_gift_sgt", "refund_gift",
+        "bury_auction_buy",
+    )
+
     // ------------------------------------------------------------------------------ helpers
 
     private fun role(v: JsonObject, role: String): Pubkey =
@@ -145,8 +157,8 @@ class GoldenInstructionsTest {
     // ------------------------------------------------------------------------------ tests
 
     @Test
-    fun `the golden file is the frozen v1_1 contract for this program`() {
-        assertEquals("1.1", Golden.instructions.str("interface_version"))
+    fun `the golden file is the frozen contract for this program - v1_1 core plus additive v1_2`() {
+        assertEquals("1.2", Golden.instructions.str("interface_version"))
         assertEquals(HeadsDownProgram.ID, Golden.instructions.pubkey("program_id"))
         val c = Golden.instructions.obj("constants")
         assertEquals(HeadsDownProgram.config.address, c.pubkey("config"))
@@ -165,10 +177,13 @@ class GoldenInstructionsTest {
 
     @Test
     fun `every golden vector is either built by the phone or deliberately not`() {
-        assertEquals(vectors.keys, androidBuilds.keys + notOnPhone)
-        assertTrue(androidBuilds.keys.intersect(notOnPhone).isEmpty())
-        // All 15 tags are covered by the file, and the phone builds 12 of them (not 0, 6, 7, 12, 13).
-        assertEquals((0..14).toSet(), vectors.values.map { it.int("tag") }.toSet())
+        assertEquals(vectors.keys, androidBuilds.keys + notOnPhone + skrPendingOnPhone)
+        assertTrue(androidBuilds.keys.intersect(notOnPhone + skrPendingOnPhone).isEmpty())
+        assertTrue(notOnPhone.intersect(skrPendingOnPhone).isEmpty())
+        // All 28 tags are covered by the file: the v1.1 core (0..14) and the additive v1.2 SKR set (15..27).
+        assertEquals((0..27).toSet(), vectors.values.map { it.int("tag") }.toSet())
+        assertEquals((15..27).toSet(), skrPendingOnPhone.map { vectors.getValue(it).int("tag") }.toSet())
+        // Of the core, the phone builds 10 tags (not 0, 6, 7, 12, 13).
         assertEquals(setOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 14), androidBuilds.keys.map { vectors.getValue(it).int("tag") }.toSet())
     }
 
