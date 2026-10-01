@@ -124,6 +124,28 @@ class JupiterSwapProviderTest {
     }
 
     @Test
+    fun `a route-size hint is sent as maxAccounts and gets a smaller route`() = runBlocking {
+        // The same 500 SKR, asked with maxAccounts=32 so the swap can share a packet with a gift.
+        val lean = JupiterFixture.skrSolGift
+        assertEquals(32, lean.request.maxAccounts)
+        respond(200, lean.quoteBody)
+        val quote = provider.quote(lean.request)!!
+        val sent = tls.server.takeRequest()
+        assertEquals("32", sent.url.queryParameter("maxAccounts"))
+        assertEquals(7, sent.url.querySize)
+        assertEquals(listOf("HumidiFi", "Kipseli"), quote.route)
+        assertEquals(77_211_172uL, quote.outAmount)
+        respond(200, lean.swapBody)
+        val ix = provider.instructions(quote, lean.user)
+        assertEquals(49, ix.swap.accounts.size) // 63 without the hint
+        assertEquals(2, ix.lookupTables.size)
+        // The hint is bounded: it cannot be used to ask for a degenerate or unbounded route.
+        assertThrows(IllegalArgumentException::class.java) { lean.request.copy(maxAccounts = 15) }
+        assertThrows(IllegalArgumentException::class.java) { lean.request.copy(maxAccounts = 65) }
+        assertNull(fixture.request.maxAccounts)
+    }
+
+    @Test
     fun `no route is no quote, and a failing provider never becomes one`() = runBlocking {
         respond(400, """{"error":"Could not find any route","errorCode":"COULD_NOT_FIND_ANY_ROUTE"}""")
         assertNull(provider.quote(fixture.request))

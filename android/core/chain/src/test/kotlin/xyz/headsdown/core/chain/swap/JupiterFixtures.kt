@@ -32,6 +32,8 @@ class JupiterFixture(name: String) {
         outputMint = Pubkey.fromBase58(quoteJson["outputMint"]!!.jsonPrimitive.content),
         inAmount = quoteJson["inAmount"]!!.jsonPrimitive.content.toULong(),
         slippageBps = quoteJson["slippageBps"]!!.jsonPrimitive.content.toInt(),
+        // The route-size hint is in the captured query string, not echoed in the answer.
+        maxAccounts = Regex("maxAccounts=(\\d+)").find(root["request"]!!.jsonObject["quote_url"]!!.jsonPrimitive.content)?.groupValues?.get(1)?.toInt(),
     )
     val quote: SwapQuote get() = JupiterSwapProvider.parseQuote(quoteBody, request)
     val instructions: SwapInstructions get() = JupiterSwapProvider.parseInstructions(swapBody)
@@ -52,6 +54,9 @@ class JupiterFixture(name: String) {
     companion object {
         val solOre: JupiterFixture by lazy { JupiterFixture("sol_ore") }
         val skrSol: JupiterFixture by lazy { JupiterFixture("skr_sol") }
+
+        /** The same SKR to SOL swap asked with `maxAccounts=32`: a two-venue route that leaves room for a gift. */
+        val skrSolGift: JupiterFixture by lazy { JupiterFixture("skr_sol_gift") }
 
         fun load(name: String): JsonObject =
             Json.parseToJsonElement(JupiterFixture::class.java.getResource("/jupiter/$name.json")!!.readText()).jsonObject

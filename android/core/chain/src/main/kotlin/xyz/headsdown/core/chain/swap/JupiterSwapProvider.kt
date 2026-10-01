@@ -48,7 +48,7 @@ class JupiterSwapProvider(
         val reply = exchange {
             http.get(
                 "/quote",
-                listOf(
+                listOfNotNull(
                     "inputMint" to request.inputMint.toBase58(),
                     "outputMint" to request.outputMint.toBase58(),
                     "amount" to request.inAmount.toString(),
@@ -56,6 +56,8 @@ class JupiterSwapProvider(
                     "swapMode" to "ExactIn",
                     // Routes through thinly traded intermediate tokens fail more often than they help.
                     "restrictIntermediateTokens" to "true",
+                    // A leaner route, so the swap can share a packet with the app's own instructions.
+                    request.maxAccounts?.let { "maxAccounts" to it.toString() },
                 ),
             )
         }

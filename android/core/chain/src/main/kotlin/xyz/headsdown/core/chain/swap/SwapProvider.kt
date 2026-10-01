@@ -14,17 +14,26 @@ data class SwapRequest(
     val inAmount: ULong,
     /** The most the price may move against the user between the quote and the fill. */
     val slippageBps: Int,
+    /**
+     * A hint to the provider to keep the route small (fewer accounts), for a swap that has to
+     * share one transaction with other instructions. Null: the provider's default. It is only a
+     * hint: whether the result fits is checked on the compiled transaction, never assumed.
+     */
+    val maxAccounts: Int? = null,
 ) {
     init {
         require(inputMint != outputMint) { "a swap needs two different mints" }
         require(inAmount > 0uL) { "nothing to swap" }
         require(slippageBps in 1..MAX_SLIPPAGE_BPS) { "slippage must be 1..$MAX_SLIPPAGE_BPS bps" }
+        require(maxAccounts == null || maxAccounts in MIN_ROUTE_ACCOUNTS..MAX_ROUTE_ACCOUNTS) { "maxAccounts must be $MIN_ROUTE_ACCOUNTS..$MAX_ROUTE_ACCOUNTS" }
     }
 
     companion object {
         /** The app's slippage cap: 3%. A wider tolerance is a different product. */
         const val MAX_SLIPPAGE_BPS = 300
         const val DEFAULT_SLIPPAGE_BPS = 50
+        const val MIN_ROUTE_ACCOUNTS = 16
+        const val MAX_ROUTE_ACCOUNTS = 64
     }
 }
 
