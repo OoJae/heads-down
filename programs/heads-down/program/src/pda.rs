@@ -1,10 +1,11 @@
-//! PDA derivation and init-only account creation.
+//! PDA derivation, init-only account creation, closing, and (v1.3) the
+//! shrink / regrow pair behind the Rig tombstone.
 
 use pinocchio::{
     cpi::{Seed, Signer},
     error::ProgramError,
     sysvars::{rent::Rent, Sysvar},
-    AccountView, Address, ProgramResult,
+    AccountView, Address, ProgramResult, Resize,
 };
 use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
 
@@ -97,4 +98,71 @@ pub fn close_account(account: &mut AccountView, recipient: &mut AccountView) -> 
     recipient.set_lamports(new_recipient);
     account.set_lamports(0);
     account.close()
+}
+
+/// Shrink a heads_down account to its first `new_len` bytes (which the caller
+/// has already written), keep exactly the rent-exempt minimum for that
+/// length, and move every other lamport to `recipient` (fixed by state, never
+/// chosen by the caller). The account stays owned by heads_down.
+pub fn shrink_account(
+    account: &mut AccountView,
+    recipient: &mut AccountView,
+    new_len: usize,
+) -> ProgramResult {
+    if !account.owned_by(&crate::ID) || !account.is_writable() || !recipient.is_writable() {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if account.address() == recipient.address() {
+        return Err(ProgramError::InvalidArgument);
+    }
+    if new_len > account.data_len() {
+        return Err(ProgramError::InvalidRealloc);
+    }
+    account.resize(new_len)?;
+    let keep = Rent::get()?.try_minimum_balance(new_len)?;
+    let lamports = account.lamports();
+    let refund = lamports.saturating_sub(keep);
+    let new_recipient = recipient
+        .lamports()
+        .checked_add(refund)
+        .ok_or(HdError::MathOverflow)?;
+    recipient.set_lamports(new_recipient);
+    account.set_lamports(lamports.checked_sub(refund).ok_or(HdError::MathOverflow)?);
+    Ok(())
+}
+
+/// Grow a heads_down account back to `space` zeroed bytes, topping its
+/// lamports up to rent-exemption from `payer` first. Everything it held is
+/// erased; the caller reads what it needs beforehand and initializes the
+/// account afterwards (`state::load_uninit_mut`).
+pub fn regrow_account(
+    payer: &AccountView,
+    target: &mut AccountView,
+    system_program: &AccountView,
+    space: usize,
+) -> ProgramResult {
+    if system_program.address() != &SYSTEM_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    if !target.owned_by(&crate::ID) || !target.is_writable() {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if !payer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let required = Rent::get()?.try_minimum_balance(space)?;
+    let current = target.lamports();
+    if current < required {
+        Transfer {
+            from: payer,
+            to: target,
+            lamports: required.checked_sub(current).ok_or(HdError::MathOverflow)?,
+        }
+        .invoke()?;
+    }
+    {
+        let mut data = target.try_borrow_mut()?;
+        data.fill(0);
+    }
+    target.resize(space)
 }

@@ -215,8 +215,9 @@ fn mutated_valid_instructions_never_abort() {
         let res = send(&mut env, &u, &pre, ix);
         assert_clean(&res, &format!("mutation #{i}"));
         failures += usize::from(res.is_err());
-        // Keep the rig usable: if a mutation froze/broke/closed it, reset.
-        if env.svm.get_account(&u.rig).is_none() {
+        // Keep the rig usable: if a mutation closed it (leaving nothing, or a
+        // v1.3 tombstone), register again.
+        if env.rig_slot(&u.rig) != RigSlot::Rig {
             let wk = u.wallet.insecure_clone();
             ok(env.send_as(
                 &wk,
@@ -226,7 +227,6 @@ fn mutated_valid_instructions_never_abort() {
                 ],
                 &[],
             ));
-            u.counter = 0;
         }
     }
     println!("{N} mutated instructions: {failures} rejected cleanly, 0 aborts");

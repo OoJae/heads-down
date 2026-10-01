@@ -16,6 +16,15 @@
 //! by an `Ed25519SigVerify` instruction in the same transaction.
 //!
 //! Emits `RigRegistered{rig, authority, tier = 0, attestation_level}`.
+//!
+//! **v1.3: resuming from a tombstone.** If the Rig PDA holds the
+//! [`RigTombstone`] an earlier `close_rig` left, the same instruction (same
+//! accounts, same data) grows it back into a Rig whose `shift_id` and
+//! `hb_counter` continue from the tombstone; the authority pays only the
+//! rent difference. Everything else starts fresh. A rig address therefore
+//! never reuses a shift id and never accepts a P-256 message twice.
+
+use core::mem::size_of;
 
 use pinocchio::{error::ProgramError, instruction::seeds, AccountView, ProgramResult};
 
@@ -23,7 +32,7 @@ use crate::{
     ed25519,
     error::HdError,
     events, message, ore, pda,
-    state::{self, rig_state, Config, Header, Rig},
+    state::{self, rig_state, Config, Header, Rig, RigTombstone},
     util::{clock, load_config, require_signer, Reader},
     ID, RIG_SEED,
 };
@@ -108,15 +117,26 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
         check_attestation(att, &cfg, authority.address(), &p256, rest.first())?
     };
 
-    let bump_seed = [bump];
-    let signer_seeds = seeds!(RIG_SEED, authority.address().as_ref(), &bump_seed);
-    pda::create_pda_account(
-        authority,
-        rig,
-        system_program,
-        core::mem::size_of::<Rig>(),
-        &signer_seeds,
-    )?;
+    // What an earlier rig at this address left behind (v1.3), if anything.
+    let resumed = if rig.owned_by(&ID) && rig.data_len() == size_of::<RigTombstone>() {
+        let t = state::load::<RigTombstone>(rig)?;
+        Some((t.shift_id.get(), t.hb_counter.get()))
+    } else {
+        None
+    };
+    if resumed.is_some() {
+        pda::regrow_account(authority, rig, system_program, size_of::<Rig>())?;
+    } else {
+        let bump_seed = [bump];
+        let signer_seeds = seeds!(RIG_SEED, authority.address().as_ref(), &bump_seed);
+        pda::create_pda_account(
+            authority,
+            rig,
+            system_program,
+            size_of::<Rig>(),
+            &signer_seeds,
+        )?;
+    }
 
     // Canonical bumps of the user's ORE Automation / Miner PDAs, found once
     // here so every dig re-derives them with a single hash.
@@ -143,6 +163,10 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     g.state = rig_state::IDLE;
     g.freezes_left = crate::logic::FREEZES_PER_PERIOD;
     g.week_start_ts.set(now);
+    if let Some((shift_id, hb_counter)) = resumed {
+        g.shift_id.set(shift_id);
+        g.hb_counter.set(hb_counter);
+    }
     drop(g);
     events::rig_registered(&rig_address, authority.address(), 0, level);
     Ok(())

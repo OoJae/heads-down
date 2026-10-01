@@ -24,7 +24,10 @@ devnet = ["sgt-verify/test-group"]
 no-entrypoint = []
 
 [dependencies]
-pinocchio = { version = "0.11.2", default-features = false, features = ["cpi", "copy"] }
+# `account-resize` (v1.3): the Rig shrinks to a RigTombstone at `close_rig` and
+# grows back at `register_rig`. The entrypoint records each account's original
+# length (2 CU per account) so the safe `Resize::resize` can bound growth.
+pinocchio = { version = "0.11.2", default-features = false, features = ["cpi", "copy", "account-resize"] }
 pinocchio-system = "0.6.1"
 # `sha2` gives the const PDA derivation used for the Config / Executor addresses.
 solana-address = { version = "2.7", default-features = false, features = ["copy", "sha2"] }
