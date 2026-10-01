@@ -103,7 +103,14 @@ internal class RhythmRecorder(
 
     private fun submit(task: () -> Unit) {
         try {
-            executor.execute(task)
+            executor.execute {
+                try {
+                    task()
+                } catch (_: RuntimeException) {
+                    // An exception escaping an executor thread would take the app down with it:
+                    // a log line is never worth a shift.
+                }
+            }
         } catch (_: RejectedExecutionException) {
             // The service is gone. A session left open is closed by the next start.
         }

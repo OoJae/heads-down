@@ -30,6 +30,10 @@ import java.util.concurrent.RejectedExecutionException
  * calls [onPickup], which dispatches `ShiftEvent.PickupDetected`. NOT_PICKUP does nothing at all:
  * no callback, no state, no change to the trigger. So the model can add a break and nothing else.
  *
+ * [enabled] is the switch that takes the classifier out of the shift ([ForemanSettings.pickupBreaksEnabled]):
+ * off, no window is judged and nothing is ever called back, which leaves exactly the
+ * deterministic rules. It is read when a window closes, so it takes effect at once.
+ *
  * Threads: [onSample] on the sensor thread (it allocates nothing until a window closes),
  * [onRig] and [clear] on the main thread, classification on [executor]; [onPickup] is called on
  * the executor's thread.
@@ -39,6 +43,7 @@ internal class PickupWatch(
     private val classifier: () -> PickupClassifier,
     private val executor: Executor,
     private val onPickup: (PickupDecision) -> Unit,
+    private val enabled: () -> Boolean = { true },
     trigger: MotionTrigger = MotionTrigger.live(),
 ) : PickupWindowCollector.Listener {
 
@@ -53,6 +58,8 @@ internal class PickupWatch(
         val interrupted: Int = 0,
         val judged: Int = 0,
         val pickups: Int = 0,
+        /** Windows that would have been judged while the classifier was switched off. */
+        val switchedOff: Int = 0,
     )
 
     private val collector = PickupWindowCollector(trigger = trigger, listener = this)
@@ -68,16 +75,17 @@ internal class PickupWatch(
     @Volatile var veto: PickupDecision? = null
         private set
 
-    // Each counter has one writer: the sensor thread for the first four, the executor for the rest.
+    // Each counter has one writer: the sensor thread for the first five, the executor for the rest.
     @Volatile private var triggers = 0
     @Volatile private var reFires = 0
     @Volatile private var notHot = 0
     @Volatile private var interruptedWindows = 0
+    @Volatile private var switchedOff = 0
     @Volatile private var staleVerdicts = 0
     @Volatile private var judged = 0
     @Volatile private var pickups = 0
 
-    val stats: Stats get() = Stats(triggers, reFires, notHot, interruptedWindows + staleVerdicts, judged, pickups)
+    val stats: Stats get() = Stats(triggers, reFires, notHot, interruptedWindows + staleVerdicts, judged, pickups, switchedOff)
 
     /** Main thread, after every transition: is the rig DOWN with the screen off? */
     fun onRig(hot: Boolean) {
@@ -109,8 +117,24 @@ internal class PickupWatch(
             interruptedWindows++
             return
         }
+        val on = try {
+            enabled()
+        } catch (_: RuntimeException) {
+            true // a switch that cannot be read does not take the classifier out
+        }
+        if (!on) {
+            switchedOff++
+            return
+        }
         try {
-            executor.execute { judge(window, tag) }
+            executor.execute {
+                try {
+                    judge(window, tag)
+                } catch (_: RuntimeException) {
+                    // Nothing may escape an executor thread (it would take the app down). The
+                    // veto, if it was set, already stops heartbeats.
+                }
+            }
         } catch (_: RejectedExecutionException) {
             // The service is shutting down: the shift is over, there is nothing left to break.
         }

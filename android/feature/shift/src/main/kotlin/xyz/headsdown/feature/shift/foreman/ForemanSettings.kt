@@ -27,11 +27,15 @@ internal class PrefsFlagStore(context: Context) : FlagStore {
 }
 
 /**
- * The user's switches for what the Foreman models may do on their own.
+ * The switches for what the Foreman models may do on their own.
  *
- * There is one, and it is OFF until the user turns it on: [autoArmEnabled]. With it off,
- * [AutoArmPolicy] holds whatever else is true, so no shift is ever armed without a tap. It stays
- * off by default until auto-arm has been run on a real device (FOREMAN.md, "Auto-arm").
+ * - [autoArmEnabled] is OFF until the user turns it on. With it off, [AutoArmPolicy] holds
+ *   whatever else is true, so no shift is ever armed without a tap. It stays off by default
+ *   until auto-arm has been run on a real device (FOREMAN.md, "Auto-arm").
+ * - [pickupBreaksEnabled] is ON. Turning it off takes the pickup classifier out of the shift:
+ *   the deterministic rules (tilt, screen-on, unlock, unplug) are all that is left, exactly as
+ *   before the model existed. It is the way back if the model, which has only ever seen
+ *   synthetic data, misbehaves on a real phone. Neither position can make a rig hot.
  */
 @Singleton
 class ForemanSettings internal constructor(private val store: FlagStore) {
@@ -42,9 +46,16 @@ class ForemanSettings internal constructor(private val store: FlagStore) {
         get() = store.get(KEY_AUTO_ARM, AUTO_ARM_DEFAULT)
         set(value) = store.put(KEY_AUTO_ARM, value)
 
+    /** Let a pickup verdict of the classifier break a hot shift (BREAK reason 1). */
+    var pickupBreaksEnabled: Boolean
+        get() = store.get(KEY_PICKUP_BREAKS, PICKUP_BREAKS_DEFAULT)
+        set(value) = store.put(KEY_PICKUP_BREAKS, value)
+
     companion object {
         /** Off. Changing this default needs the on-device tests in FOREMAN.md first. */
         const val AUTO_ARM_DEFAULT = false
+        const val PICKUP_BREAKS_DEFAULT = true
         internal const val KEY_AUTO_ARM = "auto_arm"
+        internal const val KEY_PICKUP_BREAKS = "pickup_breaks"
     }
 }

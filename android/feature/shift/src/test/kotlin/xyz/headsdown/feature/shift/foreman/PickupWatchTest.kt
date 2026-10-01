@@ -372,6 +372,40 @@ class PickupWatchTest {
         assertEquals(BreakReason.LIFTED, (b.machine.state as ShiftState.Broken).reason)
     }
 
+    // ------------------------------------------------------------------ the switch
+
+    @Test
+    fun `switched off, the classifier is out of the shift and the deterministic rules remain`() {
+        val values = HashMap<String, Boolean>()
+        val settings = ForemanSettings(object : FlagStore {
+            override fun get(key: String, default: Boolean) = values[key] ?: default
+            override fun put(key: String, value: Boolean) { values[key] = value }
+        })
+        assertTrue("on as shipped", ForemanSettings.PICKUP_BREAKS_DEFAULT && settings.pickupBreaksEnabled)
+
+        val model = Always(PickupVerdict.PICKUP)
+        val calls = ArrayList<PickupDecision>()
+        val watch = PickupWatch({ model }, direct, onPickup = { calls += it }, enabled = { settings.pickupBreaksEnabled })
+        watch.onRig(hot = true)
+        settings.pickupBreaksEnabled = false
+        val first = StreamBuilder().rest(4.0).knock().rest(6.0).build()
+        first.forEach(watch::onSample)
+        assertTrue("not judged, not called back", model.seen.isEmpty() && calls.isEmpty())
+        assertNull(watch.veto)
+        assertEquals(PickupWatch.Stats(triggers = 1, switchedOff = 1), watch.stats)
+
+        // It is read when a window closes: switching it back on takes effect for the next motion.
+        settings.pickupBreaksEnabled = true
+        StreamBuilder(startNanos = first.t.last() + 20_000_000).rest(1.0).knock().rest(4.0).build().forEach(watch::onSample)
+        assertEquals(1, calls.size)
+
+        // A switch that cannot be read leaves the classifier in.
+        val unreadable = PickupWatch({ model }, direct, onPickup = { calls += it }, enabled = { error("prefs unreadable") })
+        unreadable.onRig(hot = true)
+        StreamBuilder().rest(4.0).knock().rest(4.0).build().forEach(unreadable::onSample)
+        assertEquals(2, calls.size)
+    }
+
     @Test
     fun `a shut-down executor is not a crash`() {
         val watch = PickupWatch({ Always(PickupVerdict.PICKUP) }, Executor { throw RejectedExecutionException() }, onPickup = { error("never") })
