@@ -1,6 +1,6 @@
 {
   "format": "heads-down/golden-instructions",
-  "interface_version": "1.2",
+  "interface_version": "1.3",
   "generated_by": "programs/heads-down/tests/src/vectors.rs (HD_WRITE_VECTORS=1 cargo +1.97.1 test -p heads-down-tests --test vectors)",
   "notes": [
     "Every vector below was executed, in the order of `scenario`, on the LiteSVM fork of live mainnet ORE with the mainnet heads_down build and signature verification on; `litesvm.result` is what happened.",
@@ -8,7 +8,8 @@
     "`accounts` is the exact ordered AccountMeta list the program accepted; `pda` gives the seeds and program each derived address comes from (bump = canonical find_program_address bump).",
     "`transaction.instructions` is the whole transaction: companion instructions (compute budget, Secp256r1SigVerify, Ed25519SigVerify) are given in full so hb_ix / p256_ix / ed25519_ix are real top-level indices.",
     "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched.",
-    "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned."
+    "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned.",
+    "v1.3 (additive): tags 28..=31 follow the v1.2 vectors in the same scenario, with one more vector for tag 1 (`register_rig_resumed`: the same register_rig bytes over the RigTombstone that alice's close_rig left). Every v1.1 and v1.2 vector above them is byte-identical to its v1.2 form: no instruction data, account list or event of an existing tag changed."
   ],
   "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
   "program_id_hex": "f100eb3136753bd65e861b529d37246aab554604f23f78cde60526d14233f7d7",
@@ -123,6 +124,19 @@
         "floor_price": "10000",
         "window_slots": "216000"
       }
+    },
+    "v1_3": {
+      "governance_timelock_slots": "864000",
+      "shift_log_ttl_secs": "2592000",
+      "rig_tombstone": {
+        "account_tag": 10,
+        "len": 32,
+        "shift_id_offset": 8,
+        "hb_counter_offset": 16
+      },
+      "config_pending_governance_offset": 192,
+      "config_pending_governance_eta_slot_offset": 224,
+      "shift_log_payer_prefix_offset": 112
     }
   },
   "keys": {
@@ -141,6 +155,10 @@
     "registrar": {
       "pubkey": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
       "seed": "[0x05; 32] (public test seed, the key registrar/src/voucher.rs tests use)"
+    },
+    "new_governance": {
+      "pubkey": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+      "seed": "[0x07; 32] (public test seed; the successor named by propose_governance, v1.3)"
     }
   },
   "users": [
@@ -685,6 +703,56 @@
       "step": 76,
       "kind": "vector",
       "name": "bury_auction_buy"
+    },
+    {
+      "step": 77,
+      "kind": "vector",
+      "name": "register_rig_resumed"
+    },
+    {
+      "step": 78,
+      "kind": "setup",
+      "action": "alice: set_caps (expiry now + 7 days) + arm_shift (wallet): ShiftArmed shift_id 3, continuing from the tombstone"
+    },
+    {
+      "step": 79,
+      "kind": "vector",
+      "name": "close_shift_log"
+    },
+    {
+      "step": 80,
+      "kind": "vector",
+      "name": "close_shift_log_crank_paid"
+    },
+    {
+      "step": 81,
+      "kind": "setup",
+      "action": "new governance key [0x07; 32] funded with 1 SOL (it pays for its own accept_governance)"
+    },
+    {
+      "step": 82,
+      "kind": "vector",
+      "name": "propose_governance"
+    },
+    {
+      "step": 83,
+      "kind": "vector",
+      "name": "cancel_governance"
+    },
+    {
+      "step": 84,
+      "kind": "setup",
+      "action": "governance: propose_governance(new governance) again; the clock restarts"
+    },
+    {
+      "step": 85,
+      "kind": "setup",
+      "action": "clock slot += 864000 (TIMELOCK_SLOTS)"
+    },
+    {
+      "step": 86,
+      "kind": "vector",
+      "name": "accept_governance"
     }
   ],
   "instructions": [
@@ -7712,6 +7780,584 @@
               "ore_burned": "675022500",
               "ore_shared": "75002500",
               "lot_remaining": "330000000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "register_rig_resumed",
+      "tag": 1,
+      "instruction": "register_rig",
+      "auth": "wallet, no attestation; the Rig PDA holds a RigTombstone",
+      "description": "v1.3. The same bytes and accounts as register_rig_guest, sent after close_rig_guest left a 32-byte RigTombstone (account tag 10) at the Rig PDA. The tombstone grows back into a 384-byte Rig that resumes at shift_id 2 and hb_counter 5 (what the closed rig had); every other field starts fresh, and the wallet pays only the rent difference. The next arm_shift is shift 3, so no ShiftLog, Focus Bond or signed message of the earlier rig can collide with or be replayed on this one. Emits RigRegistered.",
+      "step": 77,
+      "args": {
+        "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+        "has_attestation": 0,
+        "tombstone": {
+          "shift_id": "2",
+          "hb_counter": "5"
+        }
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 35,
+      "data_hex": "010360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb600",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 1
+        },
+        {
+          "name": "p256_pubkey",
+          "type": "[u8;33]",
+          "offset": 1,
+          "size": 33,
+          "value": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+        },
+        {
+          "name": "has_attestation",
+          "type": "u8",
+          "offset": 34,
+          "size": 1,
+          "value": 0
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "authority",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": true,
+          "is_writable": true
+        },
+        {
+          "index": 1,
+          "role": "rig",
+          "pubkey": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"rig\"",
+                "hex": "726967"
+              },
+              {
+                "seed": "authority DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+                "hex": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 2,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 3,
+          "role": "system_program",
+          "pubkey": "11111111111111111111111111111111",
+          "is_signer": false,
+          "is_writable": false
+        }
+      ],
+      "transaction": {
+        "fee_payer": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 6,
+            "event": "RigRegistered",
+            "hex": "066c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4ebc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a50000",
+            "fields": {
+              "tag": 6,
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+              "tier": 0,
+              "attestation_level": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "close_shift_log",
+      "tag": 31,
+      "instruction": "close_shift_log",
+      "auth": "anyone, from end_ts + 30 days (pays only the address the log names)",
+      "description": "v1.3. alice's ShiftLog of shift 1 (sealed by her own wallet, so its payer_prefix is the first 16 bytes of her address) is closed 30 days later and its rent returns to her wallet. The FocusBond PDA of that shift is passed and holds no bond. The cranker only pays the transaction fee. Emits ShiftLogClosed.",
+      "step": 79,
+      "args": {
+        "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+        "shift_id": "1",
+        "rent_recipient": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "1f",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 31
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "shift_log",
+          "pubkey": "77tATZgGifUxMBrUSHqtdUCavhqeR8TD2JeYmB1Frb3f",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig 8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+                "hex": "6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 253
+          }
+        },
+        {
+          "index": 1,
+          "role": "rent_recipient",
+          "pubkey": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 2,
+          "role": "focus_bond",
+          "pubkey": "9Ept72YfRGGmD7CSm3VgW7o6XnphZJPgEPEWoazRkTaN",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bond\"",
+                "hex": "626f6e64"
+              },
+              {
+                "seed": "rig 8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+                "hex": "6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e"
+              },
+              {
+                "seed": "shift_id 1 u64 LE",
+                "hex": "0100000000000000"
+              }
+            ],
+            "bump": 252
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 27,
+            "event": "ShiftLogClosed",
+            "hex": "1b5ae974e8e8105c87eae53b542cbf49936acf2b93eb5125fdbbcbd385dc63d16a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000000301b0000000000",
+            "fields": {
+              "tag": 27,
+              "shift_log": "77tATZgGifUxMBrUSHqtdUCavhqeR8TD2JeYmB1Frb3f",
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "1",
+              "lamports": "1781760"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "close_shift_log_crank_paid",
+      "tag": 31,
+      "instruction": "close_shift_log",
+      "auth": "anyone, from end_ts + 30 days (pays only the address the log names)",
+      "description": "v1.3. alice's ShiftLog of shift 2 was sealed by the cranker (end_shift_permissionless), which paid its rent: the log's payer_prefix names the cranker, so the rent returns to the cranker and not to the rig's wallet.",
+      "step": 80,
+      "args": {
+        "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+        "shift_id": "2",
+        "rent_recipient": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "1f",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 31
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "shift_log",
+          "pubkey": "8G5GYup7e5fkPKvLNdSsBob5MjhxH7fwt4V7iwgj9trm",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"shift\"",
+                "hex": "7368696674"
+              },
+              {
+                "seed": "rig 8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+                "hex": "6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e"
+              },
+              {
+                "seed": "shift_id 2 u64 LE",
+                "hex": "0200000000000000"
+              }
+            ],
+            "bump": 255
+          }
+        },
+        {
+          "index": 1,
+          "role": "rent_recipient",
+          "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "index": 2,
+          "role": "focus_bond",
+          "pubkey": "6N8X6j56X1Mdi6umNWXSpw5uF45WXfmvxCdxDhDx9LNn",
+          "is_signer": false,
+          "is_writable": false,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"bond\"",
+                "hex": "626f6e64"
+              },
+              {
+                "seed": "rig 8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+                "hex": "6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e"
+              },
+              {
+                "seed": "shift_id 2 u64 LE",
+                "hex": "0200000000000000"
+              }
+            ],
+            "bump": 254
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 27,
+            "event": "ShiftLogClosed",
+            "hex": "1b6bde58b9bc39c6d294a681dfaa6f64990546da710da2d48409db8794e52c0cb26c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e020000000000000000301b0000000000",
+            "fields": {
+              "tag": 27,
+              "shift_log": "8G5GYup7e5fkPKvLNdSsBob5MjhxH7fwt4V7iwgj9trm",
+              "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+              "shift_id": "2",
+              "lamports": "1781760"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "propose_governance",
+      "tag": 28,
+      "instruction": "propose_governance",
+      "auth": "governance (the current one)",
+      "description": "v1.3. The current governance names its successor: Config.pending_governance (offset 192) and pending_governance_eta_slot (offset 224) = slot + 864000. Nothing else changes; the current governance keeps every power, including the immediate pause. Emits GovernanceProposed.",
+      "step": 82,
+      "args": {
+        "new_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB"
+      },
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 33,
+      "data_hex": "1cea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 28
+        },
+        {
+          "name": "new_governance",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32,
+          "value": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB"
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "governance",
+          "pubkey": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 24,
+            "event": "GovernanceProposed",
+            "hex": "188a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c1a96071b00000000",
+            "fields": {
+              "tag": 24,
+              "governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+              "pending_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+              "eta_slot": "453482010"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "cancel_governance",
+      "tag": 30,
+      "instruction": "cancel_governance",
+      "auth": "governance (the current one)",
+      "description": "v1.3. The current governance drops the pending rotation: pending_governance and its eta return to zero. Emits GovernanceCancelled.",
+      "step": 83,
+      "args": {},
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "1e",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 30
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "governance",
+          "pubkey": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 26,
+            "event": "GovernanceCancelled",
+            "hex": "1a8a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+            "fields": {
+              "tag": 26,
+              "governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+              "cancelled_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "accept_governance",
+      "tag": 29,
+      "instruction": "accept_governance",
+      "auth": "the pending governance itself, once slot >= pending_governance_eta_slot",
+      "description": "v1.3. The successor signs: it becomes Config.governance (offset 8), the rotation fields return to zero, and any pending config proposal of the outgoing governance is voided (paused is kept). Only the named successor can do this, so a mistyped address can never take governance. Emits GovernanceAccepted.",
+      "step": 86,
+      "args": {},
+      "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+      "data_len": 1,
+      "data_hex": "1d",
+      "data_layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1,
+          "value": 29
+        }
+      ],
+      "accounts": [
+        {
+          "index": 0,
+          "role": "new_governance",
+          "pubkey": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+          "is_signer": true,
+          "is_writable": false
+        },
+        {
+          "index": 1,
+          "role": "config",
+          "pubkey": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+          "is_signer": false,
+          "is_writable": true,
+          "pda": {
+            "program": "heads_down (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)",
+            "seeds": [
+              {
+                "seed": "utf8 \"config\"",
+                "hex": "636f6e666967"
+              }
+            ],
+            "bump": 253
+          }
+        }
+      ],
+      "transaction": {
+        "fee_payer": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+        "instructions": [
+          {
+            "index": 0,
+            "role": "this instruction",
+            "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
+          }
+        ]
+      },
+      "litesvm": {
+        "executed": true,
+        "result": "success",
+        "events": [
+          {
+            "tag": 25,
+            "event": "GovernanceAccepted",
+            "hex": "19ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c8a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17",
+            "fields": {
+              "tag": 25,
+              "governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+              "previous_governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa"
             }
           }
         ]
