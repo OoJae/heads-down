@@ -3,10 +3,11 @@
 //! ```text
 //! chain view ──► (new round) maintenance: prune, lookup-table sync, checkpoint sweep
 //!            └─► (slots_left <= deploy_margin) dig pass:
-//!                  getProgramAccounts(Armed, Down) → keep rigs with a lease or a held heartbeat
+//!                  getProgramAccounts(Armed, Down, Cooling) → keep rigs with a lease or a held heartbeat
 //!                  → getMultipleAccounts(Automations, Miners, Executor) → planner
 //!                  → pack → [simulate → size CU | bisect on failure] → sign → send
 //!                  → ledger (rig, round) pending → confirm task → events → ledger / metrics
+//! intake ──► SignalHub ──► signal lander: phone-signed BREAK / FREEZE → break_shift / freeze_rig
 //! ```
 //!
 //! Every pass re-reads the chain, so a retry never reuses stale instructions (the fork
@@ -22,7 +23,7 @@ use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_message::AddressLookupTableAccount;
 use solana_signer::Signer;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use crate::account::RawAccount;
 use crate::alt::{self, LookupTable};
@@ -30,14 +31,15 @@ use crate::breaker::Breaker;
 use crate::chain::ChainView;
 use crate::config::Config;
 use crate::hd::{self, HdConfig, HdEvent, Rig, RigAccounts, RigState};
-use crate::heartbeat::{HeartbeatStore, VerifiedHeartbeat};
+use crate::heartbeat::{HeartbeatStore, VerifiedHeartbeat, VerifiedSignal};
 use crate::keys::CrankKey;
 use crate::ledger::{DigStatus, Ledger, RetryPolicy};
 use crate::metrics::Metrics;
 use crate::ore::{self, Miner, OreKind};
-use crate::planner::{self, Plan, Policy, SubmittedCheck};
+use crate::planner::{self, Plan, Policy, Skip, SubmittedCheck};
 use crate::rpc::{self, Filter, RpcClient};
 use crate::sender::{ConfirmPolicy, Outcome, Submitter};
+use crate::signal::{SignalHub, SignalState};
 use crate::tx::{self, BuildParams, RigDig, TxFormat};
 
 /// Slots between planning and the expected landing slot.
@@ -60,10 +62,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     }
 }
 
-/// Read every Armed and Down Rig.
+/// Read every Rig that can take a heartbeat: Armed, Down and Cooling.
 pub async fn load_diggable_rigs(rpc: &RpcClient, program_id: &Address) -> anyhow::Result<Vec<(Address, Rig)>> {
     let mut out = Vec::new();
-    for state in [RigState::Armed, RigState::Down] {
+    for state in [RigState::Armed, RigState::Down, RigState::Cooling] {
         for (addr, acc) in rpc.get_program_accounts(program_id, &rpc::rig_filters(state)).await? {
             if let Ok(r) = Rig::decode(program_id, &acc.owner, &acc.data) {
                 out.push((addr, r));
@@ -77,7 +79,7 @@ pub async fn load_diggable_rigs(rpc: &RpcClient, program_id: &Address) -> anyhow
 pub struct Fetched {
     /// Candidate rigs after the cheap pre-filter.
     pub rigs: Vec<(Address, Rig)>,
-    /// All Armed/Down rigs read (for lookup-table sync and the intake cache).
+    /// All Armed/Down/Cooling rigs read (for lookup-table sync and the intake cache).
     pub all_rigs: Vec<(Address, Rig)>,
     /// Automations.
     pub automations: HashMap<Address, Option<RawAccount>>,
@@ -90,8 +92,8 @@ pub struct Fetched {
 }
 
 /// Read rigs and their ORE accounts, pre-filtering rigs that cannot dig this round anyway
-/// (already dug, or neither a covering lease nor a held heartbeat). ORE-owned user
-/// accounts that fail their layout pin trip the breaker.
+/// (focus-only, already dug, or neither a covering lease nor a held heartbeat). ORE-owned
+/// user accounts that fail their layout pin trip the breaker.
 pub async fn fetch_for_plan(
     rpc: &RpcClient,
     program_id: &Address,
@@ -102,7 +104,9 @@ pub async fn fetch_for_plan(
     let all_rigs = load_diggable_rigs(rpc, program_id).await?;
     let rigs: Vec<(Address, Rig)> = all_rigs
         .iter()
-        .filter(|(a, r)| r.last_dug_round != round_id && (r.lease_covers(round_id) || heartbeats.contains_key(a)))
+        .filter(|(a, r)| {
+            !r.focus_only() && r.last_dug_round != round_id && (r.lease_covers(round_id) || heartbeats.contains_key(a))
+        })
         .cloned()
         .collect();
     let executor = hd::executor_pda(program_id).0;
@@ -182,6 +186,7 @@ pub struct Crank {
     metrics: Arc<Metrics>,
     breaker: Arc<Breaker>,
     store: Arc<HeartbeatStore>,
+    signals: Arc<SignalHub>,
     chain: watch::Receiver<ChainView>,
     ledger: Mutex<Ledger>,
     alts: Mutex<Vec<LookupTable>>,
@@ -203,6 +208,7 @@ impl Crank {
         metrics: Arc<Metrics>,
         breaker: Arc<Breaker>,
         store: Arc<HeartbeatStore>,
+        signals: Arc<SignalHub>,
         chain: watch::Receiver<ChainView>,
         rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
     ) -> Arc<Self> {
@@ -216,6 +222,7 @@ impl Crank {
             metrics,
             breaker,
             store,
+            signals,
             chain,
             ledger: Mutex::new(Ledger::new()),
             alts: Mutex::new(Vec::new()),
@@ -245,6 +252,9 @@ impl Crank {
             tracing::warn!(error = %e, "could not load lookup tables");
         }
         tokio::spawn(self.clone().poll_loop());
+        if let Some(rx) = self.signals.take_receiver() {
+            tokio::spawn(self.clone().signal_loop(rx));
+        }
         let mut chain = self.chain.clone();
         let mut current_round = 0u64;
         let mut last_pass_slot: Option<u64> = None;
@@ -260,7 +270,7 @@ impl Crank {
                 let this = self.clone();
                 tokio::spawn(async move { this.on_new_round(board.round_id).await });
             }
-            if !self.cfg.dig.enabled || self.breaker.is_tripped() {
+            if self.breaker.is_tripped() || !self.cfg.dig.enabled {
                 continue;
             }
             let d = &self.cfg.dig;
@@ -335,6 +345,7 @@ impl Crank {
             if let Some(board) = board {
                 self.store.prune(board.round_id, Duration::from_secs(15 * 60));
             }
+            self.signals.prune(Duration::from_secs(6 * 3600));
             self.metrics.heartbeats_held.set_u64(self.store.len() as u64);
             // Register new rigs in the lookup table as they appear, but never inside the dig
             // window (an extend is only usable from the next slot anyway).
@@ -380,6 +391,23 @@ impl Crank {
         }
     }
 
+    fn base_params(&self, round_id: u64, cu_price: u64) -> BuildParams {
+        let d = &self.cfg.dig;
+        BuildParams {
+            program_id: self.program_id,
+            cranker: self.cranker(),
+            round_id,
+            format: d.tx_format,
+            cu_price_micro_lamports: cu_price,
+            cu_limit: None,
+            cu_estimate: d.cu_estimate,
+            loaded_accounts_data_size_limit: d.loaded_accounts_data_size_limit,
+            max_account_locks: d.max_account_locks,
+            max_rigs_per_tx: d.max_rigs_per_tx,
+            tip: self.submitter.tip_for(0),
+        }
+    }
+
     /// One planning + submission pass for the current round.
     pub async fn dig_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
         let board = view.board.ok_or_else(|| anyhow::anyhow!("no Board"))?;
@@ -398,11 +426,16 @@ impl Crank {
         *lock(&self.known_rigs) = fetched.all_rigs.clone();
         let block_height = self.rpc.get_block_height().await?;
         let retry = self.retry_policy();
-        let plan = {
+        let mut plan = {
             let ledger = lock(&self.ledger);
             let check = |r: &Address, round: u64| !ledger.can_submit(r, round, block_height, view.slot, retry);
             plan_with(&self.program_id, view, &config, &fetched, &heartbeats, &self.cfg.dig.policy(), &check)?
         };
+        // A phone-signed BREAK / FREEZE is on its way: do not dig the rig on its old lease.
+        let (keep, pending): (Vec<_>, Vec<_>) =
+            plan.digs.into_iter().partition(|d| !self.signals.is_pending(&d.dig.accounts.rig));
+        plan.digs = keep;
+        plan.skips.extend(pending.into_iter().map(|d| (d.dig.accounts.rig, Skip::SignalPending)));
         for (_, s) in &plan.skips {
             self.metrics.digs_skipped.inc(s.label());
         }
@@ -446,21 +479,10 @@ impl Crank {
         let d = &self.cfg.dig;
         let round_id = plan.round_id;
         let round = ore::round_pda(round_id);
-        let alts = if d.tx_format == TxFormat::V0 && self.cfg.alt.enabled { self.usable_alts(view.slot) } else { vec![] };
-        let base = BuildParams {
-            program_id: self.program_id,
-            cranker: self.cranker(),
-            round_id,
-            format: d.tx_format,
-            cu_price_micro_lamports: self.priority_price(&round).await,
-            cu_limit: None,
-            cu_estimate: d.cu_estimate,
-            loaded_accounts_data_size_limit: d.loaded_accounts_data_size_limit,
-            max_account_locks: d.max_account_locks,
-            max_rigs_per_tx: d.max_rigs_per_tx,
-            tip: self.submitter.tip_for(0),
-        };
+        let alts = if self.alts_in_use() { self.usable_alts(view.slot) } else { vec![] };
+        let base = self.base_params(round_id, self.priority_price(&round).await);
         let rigs: Vec<RigDig> = plan.digs.iter().map(|x| x.dig).collect();
+        let debits: HashMap<Address, u64> = plan.digs.iter().map(|x| (x.dig.accounts.rig, x.expected_debit)).collect();
         let (batches, rejected) = tx::pack(&base, &rigs, &alts);
         for (r, m) in rejected {
             tracing::warn!(rig = %r.accounts.rig, misfit = ?m, "rig does not fit a transaction alone");
@@ -524,6 +546,7 @@ impl Crank {
             self.metrics.checkpoints_sent.add(batch.iter().filter(|r| r.checkpoint_round.is_some()).count() as u64);
             tracing::info!(%sig, round = round_id, rigs = batch.len(), cu_limit = ?p.cu_limit, "dig sent");
             let this = self.clone();
+            let debits = debits.clone();
             tokio::spawn(async move {
                 let slots_left = this.chain.borrow().slots_left().unwrap_or(0);
                 let policy = ConfirmPolicy {
@@ -531,25 +554,28 @@ impl Crank {
                     ..ConfirmPolicy::default()
                 };
                 let outcome = this.submitter.confirm(&sig, &wire, lvbh, policy).await;
-                this.handle_outcome(&sig, &batch, round_id, outcome).await;
+                this.handle_outcome(&sig, &batch, round_id, outcome, &debits).await;
             });
         }
         Ok(())
     }
 
-    async fn handle_outcome(&self, sig: &str, batch: &[RigDig], round_id: u64, outcome: Outcome) {
+    async fn fetch_events(&self, sig: &str, max_version: u8) -> Option<crate::rpc::TransactionInfo> {
+        for _ in 0..5 {
+            if let Ok(Some(i)) = self.rpc.get_transaction(sig, max_version).await {
+                return Some(i);
+            }
+            tokio::time::sleep(Duration::from_millis(800)).await;
+        }
+        None
+    }
+
+    async fn handle_outcome(&self, sig: &str, batch: &[RigDig], round_id: u64, outcome: Outcome, debits: &HashMap<Address, u64>) {
         match outcome {
             Outcome::Landed { err: None, slot } => {
                 self.metrics.txs_confirmed.inc();
                 let max_version = if self.cfg.dig.tx_format == TxFormat::V1 { 1 } else { 0 };
-                let mut info = None;
-                for _ in 0..5 {
-                    if let Ok(Some(i)) = self.rpc.get_transaction(sig, max_version).await {
-                        info = Some(i);
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(800)).await;
-                }
+                let info = self.fetch_events(sig, max_version).await;
                 let crank_fee = self.hd_config().await.map_or(0, |c| c.crank_fee);
                 let (mut dug, mut skipped) = (0u32, 0u32);
                 let mut seen = std::collections::HashSet::new();
@@ -558,11 +584,15 @@ impl Crank {
                     self.metrics.compute_units.add(i.compute_units.unwrap_or(0));
                     for ev in hd::events_from_logs(&self.program_id, &i.logs) {
                         match ev {
-                            HdEvent::RigDug { rig, .. } if seen.insert(rig) => {
+                            HdEvent::RigDug { rig, lamports, .. } if seen.insert(rig) => {
                                 dug += 1;
                                 lock(&self.ledger).mark(&rig, round_id, DigStatus::Landed);
                                 self.metrics.digs_landed.inc();
                                 self.metrics.reimbursed_lamports.add(crank_fee);
+                                // RigDug.lamports is the SOL on squares; the debit adds the
+                                // Automation fee on the rig's first deploy of the round.
+                                self.metrics.squares_lamports.add(lamports);
+                                self.metrics.automation_debit_lamports.add(debits.get(&rig).copied().unwrap_or(lamports));
                                 if let Some(h) = batch.iter().find(|r| r.accounts.rig == rig).and_then(|r| r.heartbeat) {
                                     self.store.remove_if_counter_at_most(&rig, h.fields.counter);
                                 }
@@ -601,6 +631,119 @@ impl Crank {
         }
     }
 
+    // ---- BREAK / FREEZE -------------------------------------------------------------------
+
+    async fn signal_loop(self: Arc<Self>, mut rx: mpsc::Receiver<VerifiedSignal>) {
+        while let Some(s) = rx.recv().await {
+            let this = self.clone();
+            tokio::spawn(async move { this.land_signal(s).await });
+        }
+    }
+
+    /// Land one phone-signed BREAK / FREEZE on the P-256 path: `[CU limit, CU price,
+    /// Secp256r1SigVerify, break_shift | freeze_rig]`, the crank paying the fee. A signal the
+    /// program refuses (in simulation: its counter was consumed, the state moved on) is not
+    /// sent and never resubmitted; an expired blockhash is retried with a fresh one.
+    pub async fn land_signal(&self, s: VerifiedSignal) {
+        let c = &self.cfg.signals;
+        let ixs = match tx::signal_instructions(
+            &self.program_id,
+            s.kind,
+            &s.rig,
+            &s.authority,
+            s.reason,
+            s.counter,
+            s.sig,
+            s.pubkey,
+            s.digest,
+            c.cu_limit,
+            c.cu_price_micro_lamports,
+        ) {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!(rig = %s.rig, error = %e, "building the signal transaction failed");
+                self.metrics.signals_failed.inc("build");
+                self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                self.signals.refund(c.est_fee());
+                return;
+            }
+        };
+        for attempt in 1..=c.max_attempts.max(1) {
+            let (bh, lvbh) = match self.rpc.get_latest_blockhash().await {
+                Ok(x) => x,
+                Err(e) => {
+                    tracing::warn!(error = %e, "getLatestBlockhash failed (signal)");
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+            let signed = match tx::sign_legacy(&ixs, self.key.keypair(), bh) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(error = %e, "signing the signal transaction failed");
+                    break;
+                }
+            };
+            let Ok(wire) = tx::serialize(&signed) else { break };
+            if c.simulate {
+                match self.rpc.simulate_transaction(&wire).await {
+                    Ok(sim) if sim.err.is_some() => {
+                        let tail: Vec<&String> = sim.logs.iter().rev().take(4).collect();
+                        tracing::warn!(rig = %s.rig, kind = s.kind.name(), counter = s.counter, err = ?sim.err, logs = ?tail, "signal refused in simulation; not sent");
+                        self.metrics.signals_failed.inc("simulation");
+                        self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                        self.signals.refund(c.est_fee());
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "simulateTransaction failed (signal); sending anyway"),
+                }
+            }
+            let sig = signed.signatures.first().map(ToString::to_string).unwrap_or_default();
+            if let Err(e) = self.submitter.send(&wire).await {
+                tracing::warn!(error = %e, attempt, "sending the signal failed");
+                self.metrics.signals_failed.inc("send");
+                continue;
+            }
+            let policy = ConfirmPolicy {
+                poll_every: Duration::from_millis(400),
+                rebroadcast_every: Duration::from_secs(1),
+                rebroadcast_for: Duration::from_secs(30),
+                max_wait: Duration::from_secs(90),
+            };
+            match self.submitter.confirm(&sig, &wire, lvbh, policy).await {
+                Outcome::Landed { err: None, slot } => {
+                    self.signals.mark(&s.rig, s.counter, SignalState::Landed);
+                    self.store.remove_if_counter_at_most(&s.rig, s.counter);
+                    self.metrics.signals_landed.inc(s.kind.name());
+                    if let Some(i) = self.fetch_events(&sig, 0).await {
+                        self.metrics.signal_fees_lamports.add(i.fee);
+                    }
+                    tracing::info!(%sig, slot, rig = %s.rig, kind = s.kind.name(), reason = hd::reason_name(s.reason), counter = s.counter, "signal landed");
+                    return;
+                }
+                Outcome::Landed { err: Some(err), slot } => {
+                    tracing::warn!(%sig, slot, %err, rig = %s.rig, "signal failed on-chain");
+                    self.metrics.signals_failed.inc("onchain");
+                    self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                    return;
+                }
+                Outcome::Expired => {
+                    self.metrics.signals_failed.inc("expired");
+                    tracing::warn!(%sig, attempt, rig = %s.rig, "signal blockhash expired; retrying with a fresh one");
+                }
+                Outcome::Unknown => {
+                    self.metrics.signals_failed.inc("unconfirmed");
+                    self.signals.mark(&s.rig, s.counter, SignalState::Failed);
+                    return;
+                }
+            }
+        }
+        self.signals.mark(&s.rig, s.counter, SignalState::Failed);
+    }
+
+    // ---- maintenance ---------------------------------------------------------------------
+
     /// Send a small legacy transaction (lookup-table and checkpoint maintenance).
     async fn send_simple(&self, mut ixs: Vec<Instruction>) -> anyhow::Result<Outcome> {
         ixs.insert(0, tx::set_compute_unit_price(self.cfg.dig.cu_price_micro_lamports));
@@ -608,12 +751,7 @@ impl Crank {
             ixs.push(tx::system_transfer(&self.cranker(), &to, l));
         }
         let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
-        let msg = solana_message::VersionedMessage::Legacy(solana_message::Message::new_with_blockhash(
-            &ixs,
-            Some(&self.cranker()),
-            &bh,
-        ));
-        let t = tx::make_transaction(msg, Some(self.key.keypair()))?;
+        let t = tx::sign_legacy(&ixs, self.key.keypair(), bh)?;
         let wire = tx::serialize(&t)?;
         let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
         self.submitter.send(&wire).await?;

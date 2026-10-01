@@ -1,18 +1,29 @@
-//! Heartbeat intake: an axum WebSocket server, plus `/healthz` and `/metrics`.
+//! Phone intake (contract A): an axum WebSocket server on `/ws` (alias `/v1/heartbeats`),
+//! plus `/healthz` and `/metrics`.
 //!
-//! No auth tokens: a heartbeat is only useful if it verifies against the rig's on-chain
-//! key, so the intake's job is to be cheap to reject and hard to exhaust:
+//! No auth tokens: a message is only useful if it verifies against the rig's on-chain key, so
+//! the intake's job is to be cheap to reject and hard to exhaust:
 //!
 //! - global and per-IP connection caps (IPv6 folded to /64), checked before the upgrade;
 //! - a hard message/frame size cap (the socket errors on anything bigger);
 //! - per-IP and per-rig token buckets before any RPC read or signature check;
-//! - a bounded verification pool: when full the phone gets `busy` instead of queueing;
+//! - a bounded verification pool: when full the phone gets `rate_limited` instead of queueing;
 //! - idle and send timeouts, so slow or silent clients cannot pin connections.
 //!
-//! Protocol (JSON text frames): `{"type":"heartbeat", ...HeartbeatSubmission}` →
-//! `{"type":"ack","rig":..,"counter":..,"status":"accepted"|"rejected","reason"?}`;
-//! `{"type":"status"}` → the crank's view of the round (a convenience only: phones should
-//! read `Board.round_id` themselves, a lying crank can only make heartbeats useless).
+//! Frames (JSON text; integers as numbers or decimal strings; unknown fields ignored):
+//!
+//! ```text
+//! {"type":"heartbeat","rig","counter","shift_id","round_id","lease_rounds","sig64"}
+//! {"type":"break","rig","counter","shift_id","reason","sig64"}      reason ∈ {1,2,4,5,6,7,8}
+//! {"type":"freeze","rig","counter","shift_id","reason":3,"sig64"}
+//! → {"type":"ack","counter":N,"ok":true|false,"reason":"<code>"}
+//!   code ∈ {accepted, bad_signature, stale_counter, unknown_rig, rate_limited, malformed, lease_invalid}
+//! ```
+//!
+//! Legacy spellings accepted: `kind` for `type`, `sig` for `sig64`, and a frame with neither
+//! `type` nor `kind` is a heartbeat. `{"type":"status"}` returns the crank's view of the round
+//! (a convenience only: phones should read `Board.round_id` themselves). A verified BREAK /
+//! FREEZE is handed to the [`SignalHub`], which lands it on-chain.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -25,17 +36,18 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use serde::Deserialize;
 use serde_json::{json, Value};
 use solana_address::Address;
 use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
 
 use crate::breaker::Breaker;
 use crate::chain::ChainView;
-use crate::heartbeat::{HeartbeatSubmission, ParsedHeartbeat, Reject, RigSource, Verifier};
+use crate::hd::SignalKind;
+use crate::heartbeat::{HeartbeatSubmission, ParsedHeartbeat, ParsedSignal, Reject, RigSource, SignalSubmission, Verifier};
 use crate::metrics::Metrics;
 use crate::mirror::HeartbeatMirror;
 use crate::ratelimit::{ip_key, KeyedLimiter, Quota};
+use crate::signal::{Offered, SignalHub};
 
 /// Intake limits.
 #[derive(Clone, Debug)]
@@ -86,6 +98,7 @@ impl Default for IntakeConfig {
 pub struct Intake<S: RigSource> {
     cfg: IntakeConfig,
     verifier: Verifier<S>,
+    signals: Arc<SignalHub>,
     ip_limiter: KeyedLimiter<IpAddr>,
     rig_limiter: KeyedLimiter<Address>,
     verify_permits: Semaphore,
@@ -97,11 +110,22 @@ pub struct Intake<S: RigSource> {
     mirror: Arc<dyn HeartbeatMirror>,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ClientMessage {
-    Heartbeat(HeartbeatSubmission),
-    Status,
+/// The counter to echo in an ack: a JSON number or decimal string, else 0.
+fn counter_hint(v: &Value) -> u64 {
+    match v.get("counter") {
+        Some(Value::Number(n)) => n.as_u64().unwrap_or(0),
+        Some(Value::String(s)) if s.len() <= 20 && s.bytes().all(|c| c.is_ascii_digit()) => s.parse().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// `{"type":"ack","counter":N,"ok":…,"reason":…}` (contract A, exactly these four fields).
+pub fn ack_json(counter: u64, r: Result<(), Reject>) -> String {
+    match r {
+        Ok(()) => json!({ "type": "ack", "counter": counter, "ok": true, "reason": "accepted" }),
+        Err(e) => json!({ "type": "ack", "counter": counter, "ok": false, "reason": e.ack_code() }),
+    }
+    .to_string()
 }
 
 impl<S: RigSource> Intake<S> {
@@ -109,6 +133,7 @@ impl<S: RigSource> Intake<S> {
     pub fn new(
         cfg: IntakeConfig,
         verifier: Verifier<S>,
+        signals: Arc<SignalHub>,
         metrics: Arc<Metrics>,
         breaker: Arc<Breaker>,
         chain: watch::Receiver<ChainView>,
@@ -122,6 +147,7 @@ impl<S: RigSource> Intake<S> {
             per_ip: Mutex::new(HashMap::new()),
             cfg,
             verifier,
+            signals,
             metrics,
             breaker,
             chain,
@@ -139,42 +165,71 @@ impl<S: RigSource> Intake<S> {
         r
     }
 
+    fn reject_signal(&self, r: Reject) -> Reject {
+        self.metrics.signals_rejected.inc(r.reason());
+        r
+    }
+
     /// Handle one text frame from `ip`; returns the JSON reply.
     pub async fn handle_text(&self, ip: IpAddr, text: &str) -> String {
         if text.len() > self.cfg.max_message_bytes {
-            return error_json(self.reject(Reject::TooLarge));
+            return ack_json(0, Err(self.reject(Reject::TooLarge)));
         }
+        let v: Value = match serde_json::from_str(text) {
+            Ok(v @ Value::Object(_)) => v,
+            _ => return ack_json(0, Err(self.reject(Reject::Malformed))),
+        };
+        let counter = counter_hint(&v);
         if !self.ip_limiter.check(&ip_key(ip)) {
-            return error_json(self.reject(Reject::RateLimitedIp));
+            return ack_json(counter, Err(self.reject(Reject::RateLimitedIp)));
         }
-        let msg: ClientMessage = match serde_json::from_str(text) {
-            Ok(m) => m,
-            Err(_) => return error_json(self.reject(Reject::Malformed)),
-        };
-        let sub = match msg {
-            ClientMessage::Status => return self.status_json(),
-            ClientMessage::Heartbeat(s) => s,
-        };
-        let parsed = match ParsedHeartbeat::parse(&sub) {
-            Ok(p) => p,
-            Err(r) => return ack_json(&sub.rig, sub.counter, Err(self.reject(r))),
-        };
+        let ty = v.get("type").or_else(|| v.get("kind")).map(|t| t.as_str().unwrap_or("?"));
+        match ty {
+            Some("status") => self.status_json(),
+            Some("heartbeat") | None => ack_json(counter, self.heartbeat(v).await),
+            Some("break") => ack_json(counter, self.signal(SignalKind::Break, v).await),
+            Some("freeze") => ack_json(counter, self.signal(SignalKind::Freeze, v).await),
+            Some(_) => ack_json(counter, Err(self.reject(Reject::Malformed))),
+        }
+    }
+
+    async fn heartbeat(&self, v: Value) -> Result<(), Reject> {
+        let sub: HeartbeatSubmission = serde_json::from_value(v).map_err(|_| self.reject(Reject::Malformed))?;
+        let parsed = ParsedHeartbeat::parse(&sub).map_err(|r| self.reject(r))?;
         if !self.rig_limiter.check(&parsed.rig) {
-            return ack_json(&sub.rig, sub.counter, Err(self.reject(Reject::RateLimitedRig)));
+            return Err(self.reject(Reject::RateLimitedRig));
+        }
+        // A BREAK / FREEZE with this or a higher counter was already accepted.
+        if self.signals.max_counter(&parsed.rig).is_some_and(|c| c >= parsed.fields.counter) {
+            return Err(self.reject(Reject::StaleCounter));
         }
         let Ok(_permit) = self.verify_permits.try_acquire() else {
-            return ack_json(&sub.rig, sub.counter, Err(self.reject(Reject::Busy)));
+            return Err(self.reject(Reject::Busy));
         };
         let round = self.chain.borrow().board.map(|b| b.round_id);
-        match self.verifier.process(&parsed, round).await {
-            Ok(v) => {
-                self.metrics.heartbeats_accepted.inc();
-                self.metrics.heartbeats_held.set_u64(self.verifier.store.len() as u64);
-                self.mirror.mirror(&v);
-                ack_json(&sub.rig, sub.counter, Ok(()))
+        let v = self.verifier.process(&parsed, round).await.map_err(|r| self.reject(r))?;
+        self.metrics.heartbeats_accepted.inc();
+        self.metrics.heartbeats_held.set_u64(self.verifier.store.len() as u64);
+        self.mirror.mirror(&v);
+        Ok(())
+    }
+
+    async fn signal(&self, kind: SignalKind, v: Value) -> Result<(), Reject> {
+        let sub: SignalSubmission = serde_json::from_value(v).map_err(|_| self.reject_signal(Reject::Malformed))?;
+        let parsed = ParsedSignal::parse(kind, &sub).map_err(|r| self.reject_signal(r))?;
+        self.signals.check_rate(&parsed.rig).map_err(|r| self.reject_signal(r))?;
+        let Ok(_permit) = self.verify_permits.try_acquire() else {
+            return Err(self.reject_signal(Reject::Busy));
+        };
+        let verified = self.verifier.process_signal(&parsed).await.map_err(|r| self.reject_signal(r))?;
+        match self.signals.offer(verified).map_err(|r| self.reject_signal(r))? {
+            Offered::Queued => {
+                self.metrics.signals_accepted.inc(kind.name());
+                tracing::info!(rig = %parsed.rig, kind = kind.name(), counter = parsed.counter, reason = parsed.reason, "signal accepted for landing");
             }
-            Err(r) => ack_json(&sub.rig, sub.counter, Err(self.reject(r))),
+            Offered::Duplicate | Offered::Moot => {}
         }
+        Ok(())
     }
 
     fn status_json(&self) -> String {
@@ -230,20 +285,6 @@ impl<S: RigSource> Drop for ConnGuard<S> {
     }
 }
 
-fn error_json(r: Reject) -> String {
-    json!({ "type": "error", "reason": r.reason() }).to_string()
-}
-
-fn ack_json(rig: &str, counter: u64, r: Result<(), Reject>) -> String {
-    // Echo the rig only if it is plausibly an address (never reflect arbitrary input).
-    let rig = if rig.len() <= 44 && rig.chars().all(|c| c.is_ascii_alphanumeric()) { rig } else { "" };
-    match r {
-        Ok(()) => json!({ "type": "ack", "rig": rig, "counter": counter, "status": "accepted" }),
-        Err(e) => json!({ "type": "ack", "rig": rig, "counter": counter, "status": "rejected", "reason": e.reason() }),
-    }
-    .to_string()
-}
-
 /// Client IP: the socket peer, or the last `X-Forwarded-For` hop when configured.
 pub fn client_ip(peer: SocketAddr, headers: &HeaderMap, trust_forwarded_for: bool) -> IpAddr {
     if trust_forwarded_for {
@@ -287,7 +328,7 @@ async fn serve_socket<S: RigSource>(st: Arc<Intake<S>>, mut socket: WebSocket, i
         };
         let reply = match msg {
             Message::Text(t) => st.handle_text(ip, t.as_str()).await,
-            Message::Binary(_) => error_json(st.reject(Reject::Malformed)),
+            Message::Binary(_) => ack_json(0, Err(st.reject(Reject::Malformed))),
             Message::Ping(_) | Message::Pong(_) => continue,
             Message::Close(_) => break,
         };
@@ -313,6 +354,8 @@ async fn healthz<S: RigSource>(State(st): State<Arc<Intake<S>>>) -> (StatusCode,
         "slot_age_ms": age.map(|a| a.as_millis() as u64),
         "ema_ev": v.ema_ev(),
         "heartbeats_held": st.verifier.store.len(),
+        "signals_enabled": st.signals.enabled(),
+        "signal_budget_lamports": st.signals.budget_available(),
     });
     (if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE }, Json(body))
 }
@@ -321,10 +364,11 @@ async fn metrics<S: RigSource>(State(st): State<Arc<Intake<S>>>) -> impl IntoRes
     ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], st.metrics.render())
 }
 
-/// `/ws`, `/healthz`, `/metrics`.
+/// `/ws` (and its alias `/v1/heartbeats`), `/healthz`, `/metrics`.
 pub fn router<S: RigSource>(intake: Arc<Intake<S>>) -> Router {
     Router::new()
         .route("/ws", get(ws_handler::<S>))
+        .route("/v1/heartbeats", get(ws_handler::<S>))
         .route("/healthz", get(healthz::<S>))
         .route("/metrics", get(metrics::<S>))
         .with_state(intake)
@@ -333,4 +377,20 @@ pub fn router<S: RigSource>(intake: Arc<Intake<S>>) -> Router {
 /// Serve `router` on `listener` with peer addresses available to handlers.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
     axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acks_have_exactly_the_contract_fields() {
+        let ok: Value = serde_json::from_str(&ack_json(7, Ok(()))).unwrap();
+        assert_eq!(ok, json!({ "type": "ack", "counter": 7, "ok": true, "reason": "accepted" }));
+        let no: Value = serde_json::from_str(&ack_json(u64::MAX, Err(Reject::Expired))).unwrap();
+        assert_eq!(no, json!({ "type": "ack", "counter": u64::MAX, "ok": false, "reason": "lease_invalid" }));
+        assert_eq!(counter_hint(&json!({ "counter": "18446744073709551615" })), u64::MAX);
+        assert_eq!(counter_hint(&json!({ "counter": -3 })), 0);
+        assert_eq!(counter_hint(&json!({})), 0);
+    }
 }

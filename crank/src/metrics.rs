@@ -108,6 +108,15 @@ pub struct Metrics {
     pub breaker_tripped: Gauge,
     pub chain_updates: LabeledCounter,
     pub chain_reconnects: Counter,
+    /// SOL placed on squares, summed over `RigDug.lamports` (no Automation fee).
+    pub squares_lamports: Counter,
+    /// Automation debit the planner expects for landed digs (squares + fee on first deploy).
+    pub automation_debit_lamports: Counter,
+    pub signals_accepted: LabeledCounter,
+    pub signals_rejected: LabeledCounter,
+    pub signals_landed: LabeledCounter,
+    pub signals_failed: LabeledCounter,
+    pub signal_fees_lamports: Counter,
 }
 
 fn counter(out: &mut String, name: &str, help: &str, v: u64) {
@@ -155,6 +164,18 @@ impl Metrics {
         gauge(&mut o, "hd_crank_circuit_breaker_tripped", "1 when digging is stopped by the ORE layout breaker", self.breaker_tripped.get());
         labeled(&mut o, "hd_crank_chain_updates_total", "Account updates received, by account", "account", &self.chain_updates);
         counter(&mut o, "hd_crank_chain_reconnects_total", "Chain stream reconnects", self.chain_reconnects.get());
+        counter(&mut o, "hd_crank_squares_lamports_total", "SOL placed on squares by landed digs (RigDug.lamports, no fee)", self.squares_lamports.get());
+        counter(
+            &mut o,
+            "hd_crank_automation_debit_lamports_total",
+            "Automation debit of landed digs as planned (squares + fee on the first deploy of a round)",
+            self.automation_debit_lamports.get(),
+        );
+        labeled(&mut o, "hd_crank_signals_accepted_total", "Phone BREAK / FREEZE accepted for landing, by kind", "kind", &self.signals_accepted);
+        labeled(&mut o, "hd_crank_signals_rejected_total", "Phone BREAK / FREEZE refused at intake, by reason", "reason", &self.signals_rejected);
+        labeled(&mut o, "hd_crank_signals_landed_total", "BREAK / FREEZE landed on-chain, by kind", "kind", &self.signals_landed);
+        labeled(&mut o, "hd_crank_signals_failed_total", "BREAK / FREEZE not landed, by stage", "stage", &self.signals_failed);
+        counter(&mut o, "hd_crank_signal_fees_lamports_total", "Fees paid landing BREAK / FREEZE", self.signal_fees_lamports.get());
         o
     }
 }

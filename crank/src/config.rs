@@ -57,6 +57,8 @@ pub struct Config {
     pub alt: AltConfig,
     /// Submit path.
     pub sender: SenderConfig,
+    /// Landing phone-signed BREAK / FREEZE.
+    pub signals: SignalsConfig,
 }
 
 impl Default for Config {
@@ -74,6 +76,69 @@ impl Default for Config {
             intake: IntakeToml::default(),
             alt: AltConfig::default(),
             sender: SenderConfig::default(),
+            signals: SignalsConfig::default(),
+        }
+    }
+}
+
+/// Landing phone-signed BREAK / FREEZE (`break_shift` / `freeze_rig`, P-256 path). The crank
+/// pays one transaction signature, one secp256r1 signature and the priority fee per signal;
+/// the program does not reimburse these.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SignalsConfig {
+    /// Land signals (false: the intake answers `rate_limited` and the phone keeps its record).
+    pub enabled: bool,
+    /// Per-rig burst.
+    pub rig_burst: u32,
+    /// Per-rig sustained rate.
+    pub rig_per_minute: f64,
+    /// Fee budget for signals, lamports per hour (a rolling bucket).
+    pub max_lamports_per_hour: u64,
+    /// Compute limit of a signal transaction (measured: see README).
+    pub cu_limit: u32,
+    /// Priority fee (micro-lamports per CU): a BREAK should land within a slot or two.
+    pub cu_price_micro_lamports: u64,
+    /// Simulate first; a signal the program would refuse is not sent (and not paid for).
+    pub simulate: bool,
+    /// Attempts with a fresh blockhash when one expires unconfirmed.
+    pub max_attempts: u32,
+    /// Queue length between the intake and the lander.
+    pub queue: usize,
+}
+
+impl Default for SignalsConfig {
+    fn default() -> Self {
+        SignalsConfig {
+            enabled: true,
+            rig_burst: 4,
+            rig_per_minute: 1.0,
+            max_lamports_per_hour: 2_000_000,
+            // Measured with the real program: 1,429 CU for a BREAK or FREEZE (fork suite).
+            cu_limit: 5_000,
+            cu_price_micro_lamports: 20_000,
+            simulate: true,
+            max_attempts: 3,
+            queue: 256,
+        }
+    }
+}
+
+impl SignalsConfig {
+    /// Estimated lamports per landed signal: 2 signatures + the priority fee.
+    pub fn est_fee(&self) -> u64 {
+        crate::tx::fee_for(1, self.cu_limit, self.cu_price_micro_lamports, crate::tx::LAMPORTS_PER_SIGNATURE)
+    }
+
+    /// The hub's runtime knobs.
+    pub fn hub(&self) -> crate::signal::SignalHubConfig {
+        crate::signal::SignalHubConfig {
+            enabled: self.enabled,
+            rig_quota: Quota::new(self.rig_burst, self.rig_per_minute / 60.0),
+            max_lamports_per_hour: self.max_lamports_per_hour,
+            est_fee: self.est_fee(),
+            queue: self.queue,
+            max_rigs: 100_000,
         }
     }
 }
@@ -407,6 +472,16 @@ impl Config {
                 return bad("alt.tables has an invalid address");
             }
         }
+        let s = &self.signals;
+        if s.rig_burst == 0 || !(s.rig_per_minute.is_finite() && s.rig_per_minute >= 0.0) {
+            return bad("signals.rig_burst must be >= 1 and signals.rig_per_minute a non-negative number");
+        }
+        if s.cu_limit == 0 || s.cu_limit > crate::tx::MAX_COMPUTE_UNITS || s.max_attempts == 0 || s.queue == 0 {
+            return bad("signals.cu_limit must be 1..=1400000, signals.max_attempts and signals.queue >= 1");
+        }
+        if s.cu_price_micro_lamports > self.dig.max_cu_price_micro_lamports {
+            return bad("signals.cu_price_micro_lamports exceeds dig.max_cu_price_micro_lamports");
+        }
         Ok(())
     }
 
@@ -466,5 +541,26 @@ mod tests {
             .finalize(&no_env)
             .is_err(), "sender without tip accounts");
         assert!(Config::from_toml("program_id = \"nope\"").unwrap().finalize(&no_env).is_err());
+    }
+
+    #[test]
+    fn signals_section() {
+        let c = Config::from_toml("").unwrap().finalize(&no_env).unwrap();
+        assert!(c.signals.enabled);
+        assert_eq!(c.signals.est_fee(), 10_000 + 100, "2 signatures + 5k CU x 20,000 micro-lamports");
+        let t = "[signals]\nenabled = false\nmax_lamports_per_hour = 5\n";
+        let c = Config::from_toml(t).unwrap().finalize(&no_env).unwrap();
+        assert!(!c.signals.hub().enabled);
+        assert!(Config::from_toml("[signals]\ncu_limit = 0").unwrap().finalize(&no_env).is_err());
+        assert!(Config::from_toml("[signals]\nsurprise = 1").is_err());
+    }
+
+    #[test]
+    fn the_example_config_is_valid_and_matches_the_defaults() {
+        let env = |k: &str| (k == "HELIUS_API_KEY").then(|| "abc".to_string());
+        let c = Config::from_toml(include_str!("../crank.example.toml")).unwrap().finalize(&env).unwrap();
+        let d = Config::default();
+        assert_eq!(c.signals.est_fee(), d.signals.est_fee());
+        assert_eq!((c.signals.cu_limit, c.signals.max_lamports_per_hour), (d.signals.cu_limit, d.signals.max_lamports_per_hour));
     }
 }
