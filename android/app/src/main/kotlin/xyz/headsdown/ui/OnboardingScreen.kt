@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
+import xyz.headsdown.core.chain.registrar.AttestationOutcome
 import xyz.headsdown.core.keys.KeySecurityLevel
 import xyz.headsdown.feature.oemkeepalive.KeepAliveGuide
 import xyz.headsdown.feature.oemkeepalive.KeepAliveStep
@@ -49,9 +50,12 @@ import xyz.headsdown.ui.theme.HdColors
 /**
  * Five steps, in the order the night loop depends on them:
  * notifications -> exact alarm -> OEM keep-alive -> Quick Settings tile -> rig key.
+ *
+ * [onCreateRigKey] creates the key (attested by the registrar through a wallet sign-in when it
+ * can be); the Activity wires it, because the wallet needs its result sender.
  */
 @Composable
-fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -> Unit) {
+fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -> Unit, onCreateRigKey: () -> Unit) {
     val context = LocalContext.current
     val activity = LocalActivity.current
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -125,8 +129,8 @@ fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -
             }
         }
 
-        StepCard(5, "Create your rig key", rigKeySubtitle(state.rigKey), state.rigKeyReady) {
-            Button(onClick = vm::createRigKey, enabled = !state.creatingKey) {
+        StepCard(5, "Create your rig key", rigKeySubtitle(state.rigKey, state.attestation), state.rigKeyReady) {
+            Button(onClick = onCreateRigKey, enabled = !state.creatingKey) {
                 Text(if (state.creatingKey) "Creating in secure hardware…" else "Create rig key")
             }
         }
@@ -145,15 +149,24 @@ private fun keepAliveSubtitle(state: OnboardingState): String =
         "Android may pause background apps. This keeps your shift running until morning."
     }
 
-private fun rigKeySubtitle(status: RigKeyStatus): String = when (status) {
-    RigKeyStatus.Missing -> "A P-256 key that never leaves this phone's secure hardware signs every heartbeat."
+internal fun rigKeySubtitle(status: RigKeyStatus, attestation: AttestationOutcome? = null): String = when (status) {
+    RigKeyStatus.Missing ->
+        "A P-256 key that never leaves this phone's secure hardware signs every heartbeat. Your wallet may ask you to sign in, so the registrar can vouch for the key."
     is RigKeyStatus.Ready -> {
         val where = when (status.securityLevel) {
             KeySecurityLevel.STRONGBOX -> "StrongBox"
             KeySecurityLevel.TRUSTED_ENVIRONMENT -> "TEE"
             KeySecurityLevel.SOFTWARE_OR_UNKNOWN -> "software (not accepted for a verified rig)"
         }
-        "Hardware key ready · $where · ${status.attestationCertificates} attestation certs · ${status.fingerprint}…"
+        val vouched = when {
+            status.voucherLevel == 2 -> "registrar-attested (StrongBox)"
+            status.voucherLevel == 1 -> "registrar-attested (TEE)"
+            attestation == AttestationOutcome.LEVEL_ZERO -> "registrar could not attest this key: guest rig"
+            attestation == AttestationOutcome.SIGN_IN_DECLINED -> "no wallet sign-in: guest rig"
+            attestation == AttestationOutcome.REJECTED -> "registrar refused the attestation: guest rig"
+            else -> "guest rig (registrar not reached)"
+        }
+        "Hardware key ready · $where · $vouched · ${status.attestationCertificates} attestation certs · ${status.fingerprint}…"
     }
     is RigKeyStatus.Failed -> "Key creation failed (${status.reason}). Try again."
 }

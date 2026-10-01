@@ -45,6 +45,14 @@ class AttestationRun(
     val code: String? = null,
 )
 
+/** Runs one rig-key attestation (the seam the app fakes in tests). */
+fun interface RigAttestor {
+    suspend fun run(
+        signIn: suspend (SiwsRequest) -> SignInProof?,
+        generateKey: suspend (challenge: ByteArray) -> ChallengedKey,
+    ): AttestationRun
+}
+
 /**
  * The rig-key attestation with the registrar (registrar N1, N7): SIWS nonce → wallet sign-in →
  * session → attestation challenge → the rig key is generated with
@@ -62,16 +70,18 @@ class RigAttestationFlow(
     private val domain: String,
     /** This build's cluster, e.g. `solana:devnet` or `solana:localnet`. */
     private val chainId: String,
-) {
+) : RigAttestor {
     private sealed interface Step<out T> {
         class Ok<T>(val value: T) : Step<T>
         class Failed(val code: String, val unavailable: Boolean) : Step<Nothing>
     }
 
-    suspend fun run(
-        /** MWA sign-in with the registrar's fields; null when declined or unsupported. */
+    /**
+     * @param signIn MWA sign-in with the registrar's fields; null when declined or unsupported.
+     * @param generateKey generates (or replaces) the rig key with this attestation challenge. May throw.
+     */
+    override suspend fun run(
         signIn: suspend (SiwsRequest) -> SignInProof?,
-        /** Generates (or replaces) the rig key with this attestation challenge. May throw. */
         generateKey: suspend (challenge: ByteArray) -> ChallengedKey,
     ): AttestationRun {
         val request = when (val s = step { registrar.siwsNonce(domain, chainId) }) {

@@ -1,5 +1,6 @@
 package xyz.headsdown.rig
 
+import xyz.headsdown.core.chain.registrar.ChallengedKey
 import xyz.headsdown.core.keys.KeySecurityLevel
 import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.keys.RigKeyManager
@@ -16,6 +17,8 @@ sealed interface RigKeyStatus {
         /** First bytes of the compressed P-256 pubkey, hex: a human-checkable fingerprint. */
         val fingerprint: String,
         val attestationCertificates: Int,
+        /** Registrar voucher level for this key (1 TEE, 2 StrongBox), or null: a guest rig. */
+        val voucherLevel: Int? = null,
     ) : RigKeyStatus
     data class Failed(val reason: String) : RigKeyStatus
 }
@@ -23,26 +26,28 @@ sealed interface RigKeyStatus {
 /**
  * The device's single rig key (slot "primary").
  *
- * The attestation challenge is generated locally for now. Once the Key Attestation
- * registrar is live, it issues a single-use challenge bound to the user's SIWS session and
- * verifies the returned chain; until then the attestation is informational only and the Rig
- * registers as a guest (`attestation_level` 0). Every message this key signs goes through one
- * shared, write-ahead [RigCounter].
+ * With a registrar, the key is generated with the registrar's attestation challenge
+ * (`SHA-256("HDattest" ‖ authority ‖ nonce)`, registrar N1) so the certificate chain proves it is
+ * hardware-backed and fresh; see [RigOnboarding]. Without one (not configured, unreachable,
+ * declined), the challenge is local random bytes and the rig registers as a guest
+ * (`attestation_level` 0). Every message this key signs goes through one shared, write-ahead
+ * [RigCounter].
  */
 @Singleton
 class RigKeyRepository @Inject constructor(
     private val keys: RigKeyManager,
     private val counter: RigCounter,
-) : RigSignerProvider {
+) : RigSignerProvider, RigKeys {
     private val alias = keys.aliasFor("primary")
 
-    fun status(): RigKeyStatus = try {
+    override fun status(voucherLevel: Int?): RigKeyStatus = try {
         if (!keys.hasKey(alias)) RigKeyStatus.Missing else {
             val info = keys.info(alias)
             RigKeyStatus.Ready(
                 securityLevel = info.securityLevel,
                 fingerprint = info.compressedPublicKey.copyOfRange(0, 8).joinToString("") { "%02x".format(it) },
                 attestationCertificates = info.attestationChain.size,
+                voucherLevel = voucherLevel,
             )
         }
     } catch (e: Exception) {
@@ -50,12 +55,21 @@ class RigKeyRepository @Inject constructor(
     }
 
     /** Blocking Keystore work (StrongBox can take seconds): call off the main thread. */
-    fun create(): RigKeyStatus = try {
+    override fun create(): RigKeyStatus = try {
         val challenge = ByteArray(32).also(SecureRandom()::nextBytes)
         keys.generate(alias, challenge)
         status()
     } catch (e: Exception) {
         RigKeyStatus.Failed(e.javaClass.simpleName)
+    }
+
+    /**
+     * Generates (or replaces) the rig key with the registrar's [challenge] and returns what the
+     * registrar needs: the compressed key and the DER certificate chain, leaf first. Blocking.
+     */
+    override fun generateChallenged(challenge: ByteArray): ChallengedKey {
+        val info = keys.generate(alias, challenge)
+        return ChallengedKey(info.compressedPublicKey, info.attestationChain)
     }
 
     /** The 33-byte compressed rig key, or null when none exists yet. */
