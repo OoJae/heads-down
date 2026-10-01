@@ -150,6 +150,10 @@ pub enum Reject {
     SignalBudget,
     /// This crank does not land BREAK / FREEZE (`signals.enabled = false`).
     SignalsDisabled,
+    /// A BREAK for a rig whose plan window has already ended (or ends within the landing
+    /// margin). It is not landed: nothing is dug after the window anyway, and the BREAK would
+    /// make `end_shift` seal a completed night as a break (streak protection).
+    WindowEnded,
 }
 
 impl Reject {
@@ -174,19 +178,25 @@ impl Reject {
             Reject::Unavailable => "unavailable",
             Reject::SignalBudget => "signal_budget",
             Reject::SignalsDisabled => "signals_disabled",
+            Reject::WindowEnded => "window_ended",
         }
     }
 
     /// The contract-A ack code: one of `bad_signature, stale_counter, unknown_rig,
     /// rate_limited, malformed, lease_invalid`. Transient conditions (limits, capacity, RPC,
     /// budget) are `rate_limited`: retry later. A message that cannot apply to the rig's
-    /// current round, shift or state is `lease_invalid`: re-read the chain and re-sign.
+    /// current round, shift, state or plan window is `lease_invalid`: re-read the chain and
+    /// re-sign. Contract A has no "accepted but ignored" code, so a BREAK after the plan
+    /// window ([`Reject::WindowEnded`]) is `ok: false, reason: lease_invalid` as well.
     pub fn ack_code(self) -> &'static str {
         match self {
             Reject::Malformed | Reject::BadEncoding | Reject::BadReason | Reject::TooLarge => "malformed",
-            Reject::BadLease | Reject::RoundInFuture | Reject::Expired | Reject::ShiftMismatch | Reject::NotArmed => {
-                "lease_invalid"
-            }
+            Reject::BadLease
+            | Reject::RoundInFuture
+            | Reject::Expired
+            | Reject::ShiftMismatch
+            | Reject::NotArmed
+            | Reject::WindowEnded => "lease_invalid",
             Reject::StaleCounter => "stale_counter",
             Reject::UnknownRig => "unknown_rig",
             Reject::BadSignature => "bad_signature",
@@ -200,7 +210,8 @@ impl Reject {
     }
 
     /// Every variant.
-    pub const ALL: [Reject; 18] = [
+    pub const ALL: [Reject; 19] = [
+        Reject::WindowEnded,
         Reject::Malformed,
         Reject::BadEncoding,
         Reject::BadReason,
@@ -379,6 +390,47 @@ pub struct VerifiedSignal {
     pub digest: [u8; 32],
     /// The rig's state when the signal was verified.
     pub rig_state: RigState,
+    /// The rig's `plan_window_end_ts` (fixed for the shift the signal is bound to).
+    pub plan_window_end_ts: i64,
+}
+
+/// Streak protection for phone-signed BREAKs (see `signals.streak_protection`): a BREAK is
+/// landed only while the rig's plan window is open, with a margin for the landing itself.
+///
+/// After `plan_window_end_ts` the program digs nothing (`OutsideWindow`), so a BREAK protects
+/// no SOL; but it still sets `break_reason`, and `end_shift` would then seal the night as a
+/// pickup instead of `completed`, which the streak does not count. The phone already stops
+/// sending BREAKs when its window ends; this is the crank's side of the same rule, for clock
+/// skew and old clients. A FREEZE is never held back: it is a safety action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowRule {
+    /// Apply the rule at all.
+    pub enabled: bool,
+    /// Seconds before `plan_window_end_ts` from which a BREAK is no longer landed.
+    pub margin_secs: i64,
+}
+
+impl Default for WindowRule {
+    fn default() -> Self {
+        WindowRule { enabled: true, margin_secs: 5 }
+    }
+}
+
+impl WindowRule {
+    /// May this signal be landed at cluster time `now_ts`? Always for a FREEZE; for a BREAK
+    /// only while `now_ts + margin <= plan_window_end_ts`.
+    pub fn allows(&self, kind: SignalKind, plan_window_end_ts: i64, now_ts: i64) -> bool {
+        !self.enabled || kind != SignalKind::Break || now_ts.saturating_add(self.margin_secs) <= plan_window_end_ts
+    }
+
+    /// [`Self::allows`] for a verified signal.
+    pub fn check(&self, s: &VerifiedSignal, now_ts: i64) -> Result<(), Reject> {
+        if self.allows(s.kind, s.plan_window_end_ts, now_ts) {
+            Ok(())
+        } else {
+            Err(Reject::WindowEnded)
+        }
+    }
 }
 
 /// Latest verified heartbeat per rig, bounded.
@@ -640,6 +692,7 @@ impl<S: RigSource> Verifier<S> {
             pubkey: rig.p256_pubkey,
             digest,
             rig_state: rig.state,
+            plan_window_end_ts: rig.plan_window_end_ts,
         })
     }
 
@@ -757,5 +810,45 @@ mod tests {
         assert!(ParsedSignal::parse(SignalKind::Freeze, &sub(3)).is_ok());
         assert_eq!(ParsedSignal::parse(SignalKind::Freeze, &sub(1)).map(|_| ()), Err(Reject::BadReason));
         assert_eq!(Reject::BadReason.ack_code(), "malformed");
+    }
+
+    #[test]
+    fn a_break_is_landed_only_while_the_plan_window_is_open() {
+        let rule = WindowRule::default();
+        let end = 1_790_000_000i64;
+        // Inside the window, with room for the landing.
+        assert!(rule.allows(SignalKind::Break, end, end - 3_600));
+        assert!(rule.allows(SignalKind::Break, end, end - 5), "exactly the margin");
+        // Inside the margin, at the end, and after it: not landed.
+        assert!(!rule.allows(SignalKind::Break, end, end - 4));
+        assert!(!rule.allows(SignalKind::Break, end, end));
+        assert!(!rule.allows(SignalKind::Break, end, end + 1));
+        assert!(!rule.allows(SignalKind::Break, end, i64::MAX), "no overflow");
+        // A FREEZE is a safety action: always landed.
+        assert!(rule.allows(SignalKind::Freeze, end, end + 86_400));
+        // The rule can be switched off, and the margin set to zero.
+        assert!(WindowRule { enabled: false, margin_secs: 5 }.allows(SignalKind::Break, end, end + 1));
+        let tight = WindowRule { enabled: true, margin_secs: 0 };
+        assert!(tight.allows(SignalKind::Break, end, end) && !tight.allows(SignalKind::Break, end, end + 1));
+        // Contract A has no "accepted but ignored" code: the phone is told lease_invalid.
+        assert_eq!(Reject::WindowEnded.ack_code(), "lease_invalid");
+        assert_eq!(Reject::WindowEnded.reason(), "window_ended");
+        assert!(ACK_CODES.contains(&Reject::WindowEnded.ack_code()));
+        let s = VerifiedSignal {
+            kind: SignalKind::Break,
+            rig: Address::new_from_array([1; 32]),
+            authority: Address::new_from_array([2; 32]),
+            counter: 9,
+            shift_id: 3,
+            reason: 1,
+            sig: [0; 64],
+            pubkey: [2; 33],
+            digest: [0; 32],
+            rig_state: RigState::Down,
+            plan_window_end_ts: end,
+        };
+        assert_eq!(rule.check(&s, end - 60), Ok(()));
+        assert_eq!(rule.check(&s, end + 60), Err(Reject::WindowEnded));
+        assert_eq!(rule.check(&VerifiedSignal { kind: SignalKind::Freeze, reason: 3, ..s }, end + 60), Ok(()));
     }
 }

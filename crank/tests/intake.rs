@@ -31,6 +31,8 @@ use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 
 const ROUND: u64 = 5_000;
+/// The cluster's clock in these tests (`Clock.unix_timestamp` as the watcher last read it).
+const NOW: i64 = 1_790_000_000;
 
 #[derive(Clone, Default)]
 struct MapSource(Arc<Mutex<HashMap<Address, Rig>>>);
@@ -51,6 +53,9 @@ fn rig_for(phone: &Phone) -> Rig {
         state: RigState::Down,
         plan_split_tiles: 15,
         plan_lease_rounds: 3,
+        // An armed night: the plan window is open.
+        plan_window_start_ts: NOW - 3_600,
+        plan_window_end_ts: NOW + 3_600,
         shift_id: 2,
         freezes_left: 2,
         shift_open: true,
@@ -65,6 +70,7 @@ struct Server {
     signals: Arc<SignalHub>,
     chain: watch::Sender<ChainView>,
     breaker: Arc<Breaker>,
+    intake: Arc<Intake<MapSource>>,
 }
 
 async fn start_with(cfg: IntakeConfig, src: MapSource, hub: SignalHubConfig) -> Server {
@@ -81,8 +87,8 @@ async fn start_with(cfg: IntakeConfig, src: MapSource, hub: SignalHubConfig) -> 
     let intake = Intake::new(cfg, verifier, signals.clone(), metrics.clone(), breaker.clone(), chain_rx, Arc::new(NoMirror));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(intake::serve(listener, intake::router(intake)));
-    Server { addr, metrics, store, signals, chain: chain_tx, breaker }
+    tokio::spawn(intake::serve(listener, intake::router(intake.clone())));
+    Server { addr, metrics, store, signals, chain: chain_tx, breaker, intake }
 }
 
 async fn start(cfg: IntakeConfig, src: MapSource) -> Server {
@@ -98,6 +104,7 @@ fn live_view(slot: u64) -> ChainView {
         ore_config: Some(OreConfig { intermission_slots: 48, round_slots: 240 }),
         last_account_update: Some(Instant::now()),
         last_slot_update: Some(Instant::now()),
+        cluster_time: Some((NOW, Instant::now())),
     }
 }
 
@@ -312,6 +319,7 @@ async fn signals_disabled_or_over_budget_are_rate_limited() {
         SignalHubConfig { max_lamports_per_hour: 15_000, est_fee: 10_000, rig_quota: Quota::new(2, 0.0001), ..SignalHubConfig::default() },
     )
     .await;
+    poor.chain.send_replace(live_view(200));
     let _rx = poor.signals.take_receiver();
     let mut ws = connect(poor.addr).await;
     assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Break, 1, 1)).await, ack(1, "accepted"));
@@ -319,6 +327,101 @@ async fn signals_disabled_or_over_budget_are_rate_limited() {
     assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Break, 3, 2)).await, ack(3, "rate_limited"), "per-rig bucket spent");
     assert_eq!(poor.metrics.signals_rejected.get("signal_budget"), 1);
     assert_eq!(poor.metrics.signals_rejected.get("rate_limited_rig"), 1);
+}
+
+/// Streak protection: a phone-signed BREAK whose rig's plan window has already ended is not
+/// landed (it would make `end_shift` seal a completed night as a break). Contract A has no
+/// "accepted but ignored" code, so the ack is `ok: false, reason: lease_invalid`.
+#[tokio::test]
+async fn a_break_after_the_plan_window_is_refused_not_landed() {
+    let phone = Phone::new(9);
+    let src = MapSource::default();
+    let rig_with_window_end = |end: i64| Rig { plan_window_start_ts: NOW - 30_000, plan_window_end_ts: end, ..rig_for(&phone) };
+    let ended = Address::new_from_array([0x71; 32]); // the night's window ended a minute ago
+    let ending = Address::new_from_array([0x72; 32]); // ends in 3 s: a BREAK could land after it
+    let open = Address::new_from_array([0x73; 32]); // a minute of window left
+    let cooling = Address::new_from_array([0x74; 32]); // already Cooling, window over
+    src.0.lock().unwrap().insert(ended, rig_with_window_end(NOW - 60));
+    src.0.lock().unwrap().insert(ending, rig_with_window_end(NOW + 3));
+    src.0.lock().unwrap().insert(open, rig_with_window_end(NOW + 60));
+    src.0.lock().unwrap().insert(cooling, Rig { state: RigState::Cooling, break_reason: 1, hb_counter: 5, ..rig_with_window_end(NOW - 1) });
+    let hub = SignalHubConfig { rig_quota: Quota::new(100, 10.0), ..SignalHubConfig::default() };
+    let s = start_with(IntakeConfig::default(), src.clone(), hub).await;
+    s.chain.send_replace(live_view(200));
+    let mut rx = s.signals.take_receiver().unwrap();
+    let mut ws = connect(s.addr).await;
+
+    // Every BREAK reason the app sends is refused once the window is over, with the one
+    // contract-A code that fits: lease_invalid (re-read the Rig; nothing to re-sign tonight).
+    for (counter, reason) in [(7u64, hd::reason::PICKUP), (8, hd::reason::SCREEN_ON), (9, hd::reason::UNPLUGGED), (10, hd::reason::UNLOCKED)] {
+        let reply = ask(&mut ws, signal_json(&phone, &ended, SignalKind::Break, counter, reason)).await;
+        assert_eq!(reply, ack(counter, "lease_invalid"), "reason {reason}");
+        assert_eq!(reply["ok"], false);
+    }
+    assert!(rx.try_recv().is_err(), "nothing is queued for landing");
+    assert!(!s.signals.is_pending(&ended));
+    assert_eq!(s.signals.max_counter(&ended), None, "a refused BREAK consumes no counter at the crank");
+    // Inside the landing margin (5 s): refused as well, it could reach the chain after the window.
+    assert_eq!(ask(&mut ws, signal_json(&phone, &ending, SignalKind::Break, 7, hd::reason::PICKUP)).await, ack(7, "lease_invalid"));
+    assert_eq!(ask(&mut ws, signal_json(&phone, &cooling, SignalKind::Break, 7, hd::reason::UNLOCKED)).await, ack(7, "lease_invalid"));
+    assert!(rx.try_recv().is_err());
+    assert_eq!(s.metrics.signals_rejected.get("window_ended"), 6);
+    assert_eq!(s.metrics.signals_accepted.get("break"), 0);
+    // A bad signature is still a bad signature (the window is checked after the key).
+    let thief = Phone::new(10);
+    assert_eq!(ask(&mut ws, signal_json(&thief, &ended, SignalKind::Break, 11, hd::reason::PICKUP)).await, ack(11, "bad_signature"));
+    // With the window open the same BREAK is accepted and queued.
+    assert_eq!(ask(&mut ws, signal_json(&phone, &open, SignalKind::Break, 7, hd::reason::PICKUP)).await, ack(7, "accepted"));
+    let queued = rx.try_recv().unwrap();
+    assert_eq!((queued.rig, queued.kind, queued.plan_window_end_ts), (open, SignalKind::Break, NOW + 60));
+    // A FREEZE is a safety action: landed whatever the window says.
+    assert_eq!(ask(&mut ws, signal_json(&phone, &ended, SignalKind::Freeze, 12, hd::reason::FREEZE)).await, ack(12, "accepted"));
+    assert_eq!(rx.try_recv().unwrap().kind, SignalKind::Freeze);
+    // Heartbeats are untouched by the rule (the dig planner has its own window check).
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &ended, 13)).await, ack(13, "accepted"));
+    let (_, body) = http_get(s.addr, "/metrics").await;
+    assert!(body.contains("hd_crank_signals_rejected_total{reason=\"window_ended\"} 6"), "{body}");
+
+    // The rule can be switched off (signals.streak_protection = false).
+    let off = IntakeConfig { window_rule: hd_crank::heartbeat::WindowRule { enabled: false, margin_secs: 5 }, ..IntakeConfig::default() };
+    let s2 = start_with(off, src, SignalHubConfig { rig_quota: Quota::new(100, 10.0), ..SignalHubConfig::default() }).await;
+    s2.chain.send_replace(live_view(200));
+    let mut rx2 = s2.signals.take_receiver().unwrap();
+    let mut ws2 = connect(s2.addr).await;
+    assert_eq!(ask(&mut ws2, signal_json(&phone, &ended, SignalKind::Break, 7, hd::reason::PICKUP)).await, ack(7, "accepted"));
+    assert_eq!(rx2.try_recv().unwrap().rig, ended);
+}
+
+#[tokio::test]
+async fn a_draining_intake_refuses_new_messages_and_reports_it() {
+    let phone = Phone::new(11);
+    let rig = Address::new_from_array([0x75; 32]);
+    let src = MapSource::default();
+    src.0.lock().unwrap().insert(rig, rig_for(&phone));
+    let s = start(IntakeConfig::default(), src).await;
+    s.chain.send_replace(live_view(200));
+    let mut rx = s.signals.take_receiver().unwrap();
+    let mut ws = connect(s.addr).await;
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 1)).await, ack(1, "accepted"));
+    let (code, _) = http_get(s.addr, "/healthz").await;
+    assert_eq!(code, 200);
+    // SIGTERM: the process stops taking work. The phone keeps its record and retries elsewhere.
+    s.intake.set_draining();
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 2)).await, ack(2, "rate_limited"));
+    assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Break, 3, hd::reason::PICKUP)).await, ack(3, "rate_limited"));
+    assert!(rx.try_recv().is_err(), "nothing new is queued while draining");
+    assert_eq!(s.store.get(&rig).unwrap().fields.counter, 1, "the heartbeat held before the drain is kept");
+    let (code, body) = http_get(s.addr, "/healthz").await;
+    assert_eq!(code, 503, "{body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["status"], "draining");
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(v["cluster_unix_ts"].as_i64().map(|t| (t - NOW).abs() <= 2), Some(true));
+    assert!(v["stack"]["tables_open"].is_number() && v["in_flight"].is_number());
+    // /metrics keeps answering while draining.
+    let (code, body) = http_get(s.addr, "/metrics").await;
+    assert_eq!(code, 200);
+    assert!(body.contains("hd_crank_stack_checkins_missed_total") && body.contains("hd_crank_shutting_down"));
 }
 
 #[tokio::test]
