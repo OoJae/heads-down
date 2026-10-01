@@ -36,36 +36,7 @@ pub enum RpcError {
     Decode(String),
 }
 
-/// Keep only scheme and host: providers put keys in the query (`?api-key=`), the path
-/// (`/<token>/`) or userinfo (`user:pass@`), so everything else is replaced.
-pub fn redact_url(url: &str) -> String {
-    let Some((scheme, rest)) = url.split_once("://") else {
-        return "<redacted>".to_string();
-    };
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let (authority, tail) = rest.split_at(end);
-    let host = match authority.rsplit_once('@') {
-        Some((_, h)) => format!("<redacted>@{h}"),
-        None => authority.to_string(),
-    };
-    if tail.is_empty() || tail == "/" {
-        format!("{scheme}://{host}{tail}")
-    } else {
-        format!("{scheme}://{host}/<redacted>")
-    }
-}
-
-/// Remove `secret_url` (and any `api-key=` value) from an error message before logging it:
-/// some transport errors echo the request URL.
-pub fn scrub(message: &str, secret_url: &str) -> String {
-    let mut s = if secret_url.is_empty() { message.to_string() } else { message.replace(secret_url, &redact_url(secret_url)) };
-    while let Some(i) = s.to_ascii_lowercase().find("api-key=") {
-        let start = i + "api-key=".len();
-        let end = s[start..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map_or(s.len(), |j| start + j);
-        s.replace_range(i..end, "<redacted>");
-    }
-    s
-}
+pub use crate::redact::{redact_url, scrub};
 
 /// A getProgramAccounts filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -278,13 +249,14 @@ impl RpcClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| RpcError::Http(e.without_url().to_string()))?;
+            .map_err(|e| RpcError::Http(scrub(&e.without_url().to_string(), &self.url)))?;
         let status = resp.status();
         let parsed: RpcResponse = resp.json().await.map_err(|e| {
-            RpcError::Decode(format!("{method}: http {status}: {}", e.without_url()))
+            RpcError::Decode(format!("{method}: http {status}: {}", scrub(&e.without_url().to_string(), &self.url)))
         })?;
         if let Some(e) = parsed.error {
-            return Err(RpcError::Rpc { code: e.code, message: e.message });
+            // A provider's error text is not trusted to leave the request URL out.
+            return Err(RpcError::Rpc { code: e.code, message: scrub(&e.message, &self.url) });
         }
         parsed.result.ok_or_else(|| RpcError::Decode(format!("{method}: no result")))
     }
@@ -481,6 +453,13 @@ impl RpcClient {
             .ok_or_else(|| RpcError::Decode("rent".into()))
     }
 
+    /// `Clock.unix_timestamp` at the read commitment: the time the program compares plan
+    /// windows and gift expiries with.
+    pub async fn get_cluster_unix_timestamp(&self) -> Result<i64, RpcError> {
+        let acc = self.get_account(&crate::chain::CLOCK_SYSVAR_ID).await?.ok_or_else(|| RpcError::Decode("Clock sysvar missing".into()))?;
+        crate::chain::clock_unix_timestamp(&acc.owner, &acc.data).ok_or_else(|| RpcError::Decode("Clock sysvar".into()))
+    }
+
     /// `getRecentPrioritizationFees` for the accounts a dig write-locks.
     pub async fn get_recent_prioritization_fees(&self, accounts: &[Address]) -> Result<Vec<u64>, RpcError> {
         let ks: Vec<String> = accounts.iter().map(ToString::to_string).collect();
@@ -538,6 +517,51 @@ pub fn open_shift_filters() -> Vec<Filter> {
     ]
 }
 
+/// Filters for the open StackTables: the account tag (5) and version at offset 0, the exact
+/// size, and `status == Open` (0) at offset 110.
+pub fn open_stack_table_filters() -> Vec<Filter> {
+    use crate::skr;
+    vec![
+        Filter::DataSize(skr::STACK_TABLE_LEN as u64),
+        Filter::Memcmp { offset: 0, bytes: vec![skr::TAG_STACK_TABLE, hd::ACCOUNT_VERSION] },
+        Filter::Memcmp { offset: skr::STACK_TABLE_STATUS_OFFSET, bytes: vec![skr::status::OPEN] },
+    ]
+}
+
+/// Filters for the StackSeats that have no outcome yet: the account tag (6) and version, the
+/// exact size, `outcome == pending` (0) at offset 178, and, with `table`, that table's seats
+/// only (`table` at offset 8).
+pub fn pending_stack_seat_filters(table: Option<&Address>) -> Vec<Filter> {
+    use crate::skr;
+    let mut f = vec![
+        Filter::DataSize(skr::STACK_SEAT_LEN as u64),
+        Filter::Memcmp { offset: 0, bytes: vec![skr::TAG_STACK_SEAT, hd::ACCOUNT_VERSION] },
+        Filter::Memcmp { offset: skr::STACK_SEAT_OUTCOME_OFFSET, bytes: vec![skr::outcome::PENDING] },
+    ];
+    if let Some(t) = table {
+        f.push(Filter::Memcmp { offset: skr::STACK_SEAT_TABLE_OFFSET, bytes: t.to_bytes().to_vec() });
+    }
+    f
+}
+
+/// Filters for every FocusBond (account tag 7).
+pub fn focus_bond_filters() -> Vec<Filter> {
+    use crate::skr;
+    vec![
+        Filter::DataSize(skr::FOCUS_BOND_LEN as u64),
+        Filter::Memcmp { offset: 0, bytes: vec![skr::TAG_FOCUS_BOND, hd::ACCOUNT_VERSION] },
+    ]
+}
+
+/// Filters for every GiftEscrow (account tag 8).
+pub fn gift_escrow_filters() -> Vec<Filter> {
+    use crate::skr;
+    vec![
+        Filter::DataSize(skr::GIFT_ESCROW_LEN as u64),
+        Filter::Memcmp { offset: 0, bytes: vec![skr::TAG_GIFT_ESCROW, hd::ACCOUNT_VERSION] },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,6 +594,68 @@ mod tests {
         assert_eq!(j[1]["memcmp"]["bytes"], bs58::encode([2u8, 1]).into_string());
         assert_eq!(j[2]["memcmp"]["offset"], 75);
         assert_eq!(j[2]["memcmp"]["bytes"], "3");
+    }
+
+    #[test]
+    fn skr_account_filters_match_on_the_account_tag() {
+        // Open tables: size 208, tag 5 / version 1 at offset 0, status Open (0) at offset 110.
+        assert_eq!(
+            open_stack_table_filters(),
+            vec![
+                Filter::DataSize(208),
+                Filter::Memcmp { offset: 0, bytes: vec![5, 1] },
+                Filter::Memcmp { offset: 110, bytes: vec![0] },
+            ]
+        );
+        // Pending seats: size 200, tag 6, outcome pending (0) at offset 178; optionally one table.
+        let table = Address::new_from_array([9; 32]);
+        assert_eq!(
+            pending_stack_seat_filters(Some(&table)),
+            vec![
+                Filter::DataSize(200),
+                Filter::Memcmp { offset: 0, bytes: vec![6, 1] },
+                Filter::Memcmp { offset: 178, bytes: vec![0] },
+                Filter::Memcmp { offset: 8, bytes: vec![9; 32] },
+            ]
+        );
+        assert_eq!(pending_stack_seat_filters(None).len(), 3);
+        assert_eq!(focus_bond_filters(), vec![Filter::DataSize(160), Filter::Memcmp { offset: 0, bytes: vec![7, 1] }]);
+        assert_eq!(gift_escrow_filters(), vec![Filter::DataSize(128), Filter::Memcmp { offset: 0, bytes: vec![8, 1] }]);
+        // The filters select exactly the accounts the decoders accept.
+        let t = crate::skr::StackTable {
+            bump: 1,
+            host: table,
+            vault: table,
+            table_id: 1,
+            bond: 1,
+            start_round: 2,
+            end_round: 3,
+            grace_gaps: 0,
+            flags: 0,
+            max_seats: 2,
+            status: crate::skr::status::OPEN,
+            seat_count: 0,
+            finishers: 0,
+            claimed_count: 0,
+            total_bonds: 0,
+            finisher_bonds: 0,
+            payouts_total: 0,
+            bury_amount: 0,
+            claimed_total: 0,
+            refund_after_ts: 0,
+            opened_ts: 0,
+            opened_round: 1,
+        };
+        let matches = |filters: &[Filter], data: &[u8]| {
+            filters.iter().all(|f| match f {
+                Filter::DataSize(n) => data.len() as u64 == *n,
+                Filter::Memcmp { offset, bytes } => data.get(*offset..*offset + bytes.len()) == Some(&bytes[..]),
+            })
+        };
+        assert!(matches(&open_stack_table_filters(), &t.encode()));
+        let settled = crate::skr::StackTable { status: crate::skr::status::SETTLED, ..t };
+        assert!(!matches(&open_stack_table_filters(), &settled.encode()), "a settled table is not listed");
+        assert!(!matches(&pending_stack_seat_filters(None), &t.encode()), "a table is not a seat");
     }
 
     #[test]
