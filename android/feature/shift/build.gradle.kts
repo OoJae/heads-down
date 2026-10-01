@@ -38,6 +38,13 @@ tasks.matching { it.name.startsWith("lintAnalyze") }.configureEach {
     mustRunAfter(tasks.matching { it.name.startsWith("ksp") && it.name.endsWith("Kotlin") })
 }
 
+// The sensor-path tests count the bytes a thread allocates. HotSpot's escape analysis would
+// optimize a short-lived per-sample object away and hide it; ART does far less of that, so the
+// tests run without it and see every allocation the bytecode asks for.
+tasks.withType<Test>().configureEach {
+    jvmArgs("-XX:+IgnoreUnrecognizedVMOptions", "-XX:-DoEscapeAnalysis")
+}
+
 dependencies {
     api(projects.core.keys)
     // Heartbeat JSON + crank uplink seam; the Board is read through core/chain decoders.
