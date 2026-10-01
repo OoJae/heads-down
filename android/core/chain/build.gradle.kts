@@ -43,14 +43,14 @@ val goldenFiles = listOf("instructions.json", "messages.json", "registrar.json")
 val goldenSourceDir: File = rootProject.layout.projectDirectory.dir("../programs/heads-down/vectors").asFile
 val goldenCopyDir: File = layout.projectDirectory.dir("src/test/resources/golden").asFile
 
-val syncGoldenVectors by tasks.registering(Copy::class) {
+tasks.register<Copy>("syncGoldenVectors") {
     group = "verification"
     description = "Copies programs/heads-down/vectors/*.json into this module's test resources."
     from(goldenSourceDir) { include(goldenFiles) }
     into(goldenCopyDir)
 }
 
-val verifyGoldenVectors by tasks.registering {
+val verifyGoldenVectors = tasks.register("verifyGoldenVectors") {
     group = "verification"
     description = "Fails when src/test/resources/golden differs from programs/heads-down/vectors."
     val source = goldenSourceDir
