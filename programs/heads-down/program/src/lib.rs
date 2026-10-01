@@ -222,6 +222,7 @@ pub fn process_instruction(
         tag::PROPOSE_GOVERNANCE => governance::process_propose_governance(accounts, rest),
         tag::ACCEPT_GOVERNANCE => governance::process_accept_governance(accounts, rest),
         tag::CANCEL_GOVERNANCE => governance::process_cancel_governance(accounts, rest),
+        tag::CLOSE_SHIFT_LOG => shift_log::process_close(accounts, rest),
         _ => Err(error::HdError::InvalidInstruction.into()),
     }
 }

@@ -174,6 +174,8 @@ fn shift_ends_into_a_shift_log_and_the_rig_closes() {
     assert_eq!(l.mode, 0);
     assert_eq!(l.start_ts.get(), T0);
     assert_eq!(l.end_ts.get(), T0);
+    // v1.3: the log names who paid its rent (the first 16 address bytes).
+    assert_eq!(l.payer_prefix[..], w.pubkey().to_bytes()[..16]);
     assert_eq!(
         events(&meta.logs),
         vec![
