@@ -1,6 +1,8 @@
 //! Shared test helpers: phones that sign heartbeats like Android Keystore, rigs, params.
 #![allow(dead_code)]
 
+pub mod skr;
+
 use hd_crank::hd::{self, HeartbeatFields, RigAccounts};
 use hd_crank::heartbeat::{verify_signature, VerifiedHeartbeat};
 use hd_crank::tx::{BuildParams, CuEstimate, RigDig, TxFormat, DEFAULT_MAX_ACCOUNT_LOCKS};
