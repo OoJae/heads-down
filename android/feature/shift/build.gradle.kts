@@ -43,6 +43,11 @@ tasks.matching { it.name.startsWith("lintAnalyze") }.configureEach {
 // tests run without it and see every allocation the bytecode asks for.
 tasks.withType<Test>().configureEach {
     jvmArgs("-XX:+IgnoreUnrecognizedVMOptions", "-XX:-DoEscapeAnalysis")
+    // PlannerLogTest reads every FileProvider path file in the app to prove none of them can
+    // serve the planner log. They are inputs, so a new or changed one re-runs the test.
+    inputs.files(fileTree(rootDir) { include("**/src/*/res/xml/*.xml"); exclude("**/build/**") })
+        .withPropertyName("fileProviderPathFiles")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 dependencies {
