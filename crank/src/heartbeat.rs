@@ -1,11 +1,12 @@
-//! Heartbeat intake logic: parse, check, verify P-256 off-chain, keep the latest per rig.
+//! Intake logic for phone-signed messages: parse, check, verify P-256 off-chain, keep the
+//! latest heartbeat per rig, and verify BREAK / FREEZE signals before they are landed.
 //!
-//! Heartbeats are **self-authenticating**. The crank needs no session or auth token: a
-//! heartbeat is only useful if it verifies against the P-256 key registered in the rig's
-//! on-chain `Rig` account, over `SHA-256(HEARTBEAT preimage)` exactly as the program will
-//! rebuild it (`hd::heartbeat_preimage`). The crank verifies every signature before it
-//! spends a lamport on a transaction, because one bad signature in a Secp256r1SigVerify
-//! instruction fails the whole batch.
+//! Messages are **self-authenticating**. The crank needs no session or auth token: a
+//! message is only useful if it verifies against the P-256 key registered in the rig's
+//! on-chain `Rig` account, over `SHA-256(preimage)` exactly as the program will rebuild it
+//! (`hd::heartbeat_preimage`, `hd::break_preimage`). The crank verifies every signature
+//! before it spends a lamport on a transaction, because one bad signature in a
+//! Secp256r1SigVerify instruction fails the whole transaction.
 //!
 //! Verification uses the `p256` crate through `p256_introspect::client`: `normalize_low_s`
 //! (the precompile rejects high-S; normalizing needs no private key) and
@@ -25,80 +26,139 @@ use serde::{Deserialize, Serialize};
 use solana_address::Address;
 use tokio::sync::Semaphore;
 
-use crate::hd::{self, HeartbeatFields, Rig, MAX_LEASE_ROUNDS};
+use crate::hd::{self, HeartbeatFields, Rig, RigState, SignalKind, MAX_LEASE_ROUNDS};
 use crate::ratelimit::{KeyedLimiter, Quota};
 
-/// What a phone sends (one JSON text frame per heartbeat):
+/// An unsigned integer sent as a JSON number or as a decimal string (contract A: "Integers are
+/// JSON numbers. Accept them also as decimal strings"). At most 20 digits, no sign, no
+/// exponent, no fraction.
+pub fn de_u64_or_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    struct V;
+    impl serde::de::Visitor<'_> for V {
+        type Value = u64;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("an unsigned integer as a JSON number or a decimal string")
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<u64, E> {
+            u64::try_from(v).map_err(|_| E::custom("negative"))
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<u64, E> {
+            if v.is_empty() || v.len() > 20 || !v.bytes().all(|c| c.is_ascii_digit()) {
+                return Err(E::custom("not a decimal string"));
+            }
+            v.parse().map_err(|_| E::custom("out of range"))
+        }
+    }
+    d.deserialize_any(V)
+}
+
+/// What a phone sends for a HEARTBEAT (contract A), one JSON text frame:
 ///
 /// ```json
 /// {"type":"heartbeat","rig":"<base58>","counter":7,"shift_id":3,"round_id":422601,
-///  "lease_rounds":2,"sig64":"<base64 or hex r||s>","pubkey":"<optional hex/base64, 33 bytes>"}
+///  "lease_rounds":2,"sig64":"<standard base64 of r||s>"}
 /// ```
+///
+/// Integers may also be decimal strings. Unknown fields are ignored. The legacy field name
+/// `sig` is accepted for `sig64`.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct HeartbeatSubmission {
     /// Rig PDA, base58.
     pub rig: String,
-    /// Strictly increasing per rig.
+    /// Strictly increasing per rig across all kinds.
+    #[serde(deserialize_with = "de_u64_or_string")]
     pub counter: u64,
     /// `rig.shift_id` the phone armed.
+    #[serde(deserialize_with = "de_u64_or_string")]
     pub shift_id: u64,
     /// `Board.round_id` at signing.
+    #[serde(deserialize_with = "de_u64_or_string")]
     pub round_id: u64,
-    /// Requested lease, 1..=3.
-    pub lease_rounds: u8,
-    /// 64-byte raw `r || s` (high-S accepted and normalized), base64 or hex.
+    /// Requested lease, 1..=3 (anything else is `lease_invalid`).
+    #[serde(deserialize_with = "de_u64_or_string")]
+    pub lease_rounds: u64,
+    /// 64-byte raw `r || s` (low-S; high-S is normalized), standard base64 (hex also accepted).
+    #[serde(alias = "sig")]
     pub sig64: String,
-    /// Optional 33-byte compressed key. Only a consistency hint: the key that counts is
-    /// always the one in the Rig account.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pubkey: Option<String>,
 }
 
-/// Why a heartbeat was refused. [`Reject::reason`] is the metric label and the `reason`
-/// the phone sees.
+/// What a phone sends for a BREAK or a FREEZE (contract A):
+///
+/// ```json
+/// {"type":"break","rig":"<base58>","counter":N,"shift_id":N,"reason":R,"sig64":"<b64>"}   R ∈ {1,2,4,5,6,7,8}
+/// {"type":"freeze","rig":"<base58>","counter":N,"shift_id":N,"reason":3,"sig64":"<b64>"}
+/// ```
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SignalSubmission {
+    /// Rig PDA, base58.
+    pub rig: String,
+    /// Strictly increasing per rig across all kinds.
+    #[serde(deserialize_with = "de_u64_or_string")]
+    pub counter: u64,
+    /// `rig.shift_id` (0 before the first arm).
+    #[serde(deserialize_with = "de_u64_or_string")]
+    pub shift_id: u64,
+    /// The reason byte the phone signed.
+    #[serde(deserialize_with = "de_u64_or_string")]
+    pub reason: u64,
+    /// 64-byte raw `r || s`, standard base64 (hex also accepted).
+    #[serde(alias = "sig")]
+    pub sig64: String,
+}
+
+/// Why a message was refused. [`Reject::reason`] is the (bounded) metric label;
+/// [`Reject::ack_code`] is the contract-A code the phone sees.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Reject {
-    /// Not valid JSON / missing or unknown fields / wrong message type.
+    /// Not valid JSON / missing fields / wrong message type.
     Malformed,
     /// Bad base58 / base64 / hex or wrong byte length.
     BadEncoding,
+    /// A BREAK reason outside {1,2,4,5,6,7,8}, or a FREEZE reason other than 3.
+    BadReason,
     /// `lease_rounds` outside 1..=3.
     BadLease,
     /// `round_id` ahead of the chain by more than one round.
     RoundInFuture,
     /// The lease this heartbeat could grant has already ended.
     Expired,
-    /// A heartbeat with this or a higher counter is already held or on-chain.
+    /// A message with this or a higher counter is already held, landed or on-chain.
     StaleCounter,
     /// No Rig account at that address (or not a heads_down Rig).
     UnknownRig,
     /// `shift_id` differs from the rig's current shift.
     ShiftMismatch,
-    /// The rig is not Armed or Down.
+    /// The rig's state cannot take this message (a heartbeat or a BREAK outside Armed /
+    /// Down / Cooling).
     NotArmed,
-    /// `pubkey` given and different from the registered key.
-    PubkeyMismatch,
     /// ECDSA verification failed.
     BadSignature,
     /// Per-IP rate limit.
     RateLimitedIp,
     /// Per-rig rate limit.
     RateLimitedRig,
-    /// Verification capacity exhausted; retry later.
+    /// Verification capacity or a queue is full; retry later.
     Busy,
     /// Message larger than the cap.
     TooLarge,
     /// Could not read the chain to check the rig; retry later.
     Unavailable,
+    /// The crank's fee budget for landing BREAK / FREEZE is spent for now.
+    SignalBudget,
+    /// This crank does not land BREAK / FREEZE (`signals.enabled = false`).
+    SignalsDisabled,
 }
 
 impl Reject {
-    /// Stable snake_case label.
+    /// Stable snake_case label (metrics).
     pub fn reason(self) -> &'static str {
         match self {
             Reject::Malformed => "malformed",
             Reject::BadEncoding => "bad_encoding",
+            Reject::BadReason => "bad_reason",
             Reject::BadLease => "bad_lease",
             Reject::RoundInFuture => "round_in_future",
             Reject::Expired => "expired",
@@ -106,20 +166,44 @@ impl Reject {
             Reject::UnknownRig => "unknown_rig",
             Reject::ShiftMismatch => "shift_mismatch",
             Reject::NotArmed => "not_armed",
-            Reject::PubkeyMismatch => "pubkey_mismatch",
             Reject::BadSignature => "bad_signature",
             Reject::RateLimitedIp => "rate_limited_ip",
             Reject::RateLimitedRig => "rate_limited_rig",
             Reject::Busy => "busy",
             Reject::TooLarge => "too_large",
             Reject::Unavailable => "unavailable",
+            Reject::SignalBudget => "signal_budget",
+            Reject::SignalsDisabled => "signals_disabled",
         }
     }
 
-    /// Every variant (metrics pre-registration).
-    pub const ALL: [Reject; 16] = [
+    /// The contract-A ack code: one of `bad_signature, stale_counter, unknown_rig,
+    /// rate_limited, malformed, lease_invalid`. Transient conditions (limits, capacity, RPC,
+    /// budget) are `rate_limited`: retry later. A message that cannot apply to the rig's
+    /// current round, shift or state is `lease_invalid`: re-read the chain and re-sign.
+    pub fn ack_code(self) -> &'static str {
+        match self {
+            Reject::Malformed | Reject::BadEncoding | Reject::BadReason | Reject::TooLarge => "malformed",
+            Reject::BadLease | Reject::RoundInFuture | Reject::Expired | Reject::ShiftMismatch | Reject::NotArmed => {
+                "lease_invalid"
+            }
+            Reject::StaleCounter => "stale_counter",
+            Reject::UnknownRig => "unknown_rig",
+            Reject::BadSignature => "bad_signature",
+            Reject::RateLimitedIp
+            | Reject::RateLimitedRig
+            | Reject::Busy
+            | Reject::Unavailable
+            | Reject::SignalBudget
+            | Reject::SignalsDisabled => "rate_limited",
+        }
+    }
+
+    /// Every variant.
+    pub const ALL: [Reject; 18] = [
         Reject::Malformed,
         Reject::BadEncoding,
+        Reject::BadReason,
         Reject::BadLease,
         Reject::RoundInFuture,
         Reject::Expired,
@@ -127,17 +211,22 @@ impl Reject {
         Reject::UnknownRig,
         Reject::ShiftMismatch,
         Reject::NotArmed,
-        Reject::PubkeyMismatch,
         Reject::BadSignature,
         Reject::RateLimitedIp,
         Reject::RateLimitedRig,
         Reject::Busy,
         Reject::TooLarge,
         Reject::Unavailable,
+        Reject::SignalBudget,
+        Reject::SignalsDisabled,
     ];
 }
 
-/// Decode `N` bytes given as hex (`2N` chars) or standard base64.
+/// The contract-A ack codes: `accepted` and the six refusal codes.
+pub const ACK_CODES: [&str; 7] =
+    ["accepted", "bad_signature", "stale_counter", "unknown_rig", "rate_limited", "malformed", "lease_invalid"];
+
+/// Decode `N` bytes given as standard base64 (contract A) or hex (`2N` chars).
 pub fn decode_fixed<const N: usize>(s: &str) -> Option<[u8; N]> {
     if s.len() > 4 * N {
         return None; // never decode oversized input
@@ -169,8 +258,6 @@ pub struct ParsedHeartbeat {
     pub fields: HeartbeatFields,
     /// As received (may be high-S).
     pub sig: [u8; 64],
-    /// Optional claimed key.
-    pub claimed_pubkey: Option<[u8; 33]>,
 }
 
 impl ParsedHeartbeat {
@@ -178,24 +265,50 @@ impl ParsedHeartbeat {
     pub fn parse(s: &HeartbeatSubmission) -> Result<Self, Reject> {
         let rig = decode_address(&s.rig).ok_or(Reject::BadEncoding)?;
         let sig = decode_fixed::<64>(&s.sig64).ok_or(Reject::BadEncoding)?;
-        let claimed_pubkey = match &s.pubkey {
-            Some(p) => Some(decode_fixed::<33>(p).ok_or(Reject::BadEncoding)?),
-            None => None,
-        };
-        if s.lease_rounds == 0 || s.lease_rounds > MAX_LEASE_ROUNDS {
+        let lease_rounds = u8::try_from(s.lease_rounds).map_err(|_| Reject::BadLease)?;
+        if lease_rounds == 0 || lease_rounds > MAX_LEASE_ROUNDS {
             return Err(Reject::BadLease);
         }
         Ok(ParsedHeartbeat {
             rig,
-            fields: HeartbeatFields {
-                counter: s.counter,
-                shift_id: s.shift_id,
-                round_id: s.round_id,
-                lease_rounds: s.lease_rounds,
-            },
+            fields: HeartbeatFields { counter: s.counter, shift_id: s.shift_id, round_id: s.round_id, lease_rounds },
             sig,
-            claimed_pubkey,
         })
+    }
+}
+
+/// A syntactically valid BREAK / FREEZE, before any chain or signature check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParsedSignal {
+    /// BREAK or FREEZE.
+    pub kind: SignalKind,
+    /// Rig PDA.
+    pub rig: Address,
+    /// Counter.
+    pub counter: u64,
+    /// `rig.shift_id` the phone signed.
+    pub shift_id: u64,
+    /// Reason byte.
+    pub reason: u8,
+    /// As received (may be high-S).
+    pub sig: [u8; 64],
+}
+
+impl ParsedSignal {
+    /// Decode encodings and check the reason for `kind`.
+    pub fn parse(kind: SignalKind, s: &SignalSubmission) -> Result<Self, Reject> {
+        let rig = decode_address(&s.rig).ok_or(Reject::BadEncoding)?;
+        let sig = decode_fixed::<64>(&s.sig64).ok_or(Reject::BadEncoding)?;
+        let reason = u8::try_from(s.reason).map_err(|_| Reject::BadReason)?;
+        if !kind.reason_ok(reason) {
+            return Err(Reject::BadReason);
+        }
+        Ok(ParsedSignal { kind, rig, counter: s.counter, shift_id: s.shift_id, reason, sig })
+    }
+
+    /// `SHA-256` of the 86-byte BREAK / FREEZE preimage (what the phone signed).
+    pub fn digest(&self, program_id: &Address) -> [u8; 32] {
+        hd::digest(&hd::break_preimage(program_id, &self.rig, self.kind.message_kind(), self.counter, self.shift_id, self.reason))
     }
 }
 
@@ -241,6 +354,31 @@ pub struct VerifiedHeartbeat {
     pub pubkey: [u8; 33],
     /// `SHA-256(preimage)`: the precompile message.
     pub digest: [u8; 32],
+}
+
+/// A BREAK / FREEZE that verified against the rig; everything the lander needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedSignal {
+    /// BREAK or FREEZE.
+    pub kind: SignalKind,
+    /// Rig PDA.
+    pub rig: Address,
+    /// `rig.authority` (passed, not signing, on the P-256 path).
+    pub authority: Address,
+    /// Counter.
+    pub counter: u64,
+    /// Shift id the phone signed (= `rig.shift_id` at verification).
+    pub shift_id: u64,
+    /// Reason byte.
+    pub reason: u8,
+    /// Low-S signature.
+    pub sig: [u8; 64],
+    /// The rig's registered key.
+    pub pubkey: [u8; 33],
+    /// `SHA-256(86-byte preimage)`.
+    pub digest: [u8; 32],
+    /// The rig's state when the signal was verified.
+    pub rig_state: RigState,
 }
 
 /// Latest verified heartbeat per rig, bounded.
@@ -321,7 +459,8 @@ impl HeartbeatStore {
         });
     }
 
-    /// Forget a rig (e.g. its heartbeat landed on-chain and was consumed).
+    /// Forget a rig's heartbeat once its counter is consumed on-chain (a dig, a record, or a
+    /// BREAK / FREEZE with a counter at least as high).
     pub fn remove_if_counter_at_most(&self, rig: &Address, counter: u64) {
         let mut m = self.lock();
         if m.get(rig).is_some_and(|(h, _)| h.fields.counter <= counter) {
@@ -395,7 +534,8 @@ impl<S: RigSource> RigCache<S> {
     }
 
     /// The rig, from cache when fresh (unless `refresh`), else from the source.
-    /// `Err(Reject::Unavailable)` when the source fails or the fetch budget is spent.
+    /// `Err(Reject::Unavailable)` when the source fails, `Err(Reject::Busy)` when the fetch
+    /// budget is spent.
     pub async fn get(&self, addr: &Address, refresh: bool) -> Result<Option<Rig>, Reject> {
         let now = Instant::now();
         if let Some(c) = self.lock().get(addr).cloned() {
@@ -427,7 +567,7 @@ impl<S: RigSource> RigCache<S> {
     }
 }
 
-/// The full intake check for one heartbeat, minus rate limiting (done by the caller, which
+/// The full intake check for one message, minus rate limiting (done by the caller, which
 /// knows the IP). `current_round` is the crank's view of `Board.round_id`, if known.
 pub struct Verifier<S: RigSource> {
     /// heads_down program id (bound into the preimage).
@@ -439,7 +579,7 @@ pub struct Verifier<S: RigSource> {
 }
 
 impl<S: RigSource> Verifier<S> {
-    /// Check and verify; on success the heartbeat is the latest for its rig.
+    /// Check and verify a heartbeat; on success it is the latest held for its rig.
     pub async fn process(&self, p: &ParsedHeartbeat, current_round: Option<u64>) -> Result<VerifiedHeartbeat, Reject> {
         if let Some(cur) = current_round {
             check_freshness(&p.fields, cur)?;
@@ -448,8 +588,8 @@ impl<S: RigSource> Verifier<S> {
             return Err(Reject::StaleCounter);
         }
         let mut rig = self.rigs.get(&p.rig, false).await?.ok_or(Reject::UnknownRig)?;
-        // A mismatch may just mean the cache predates arm_shift / rotate_key / a dig that
-        // advanced hb_counter: refresh once, then decide.
+        // A mismatch may just mean the cache predates arm_shift / rotate_key / a BREAK / a dig
+        // that advanced hb_counter: refresh once, then decide.
         if Self::precheck(&rig, p).is_err() {
             rig = self.rigs.get(&p.rig, true).await?.ok_or(Reject::UnknownRig)?;
         }
@@ -465,7 +605,8 @@ impl<S: RigSource> Verifier<S> {
     }
 
     fn precheck(rig: &Rig, p: &ParsedHeartbeat) -> Result<(), Reject> {
-        if !rig.state.diggable() {
+        // Armed, Down, and Cooling (a fresh heartbeat is what resumes a Cooling rig).
+        if !rig.state.accepts_heartbeat() {
             return Err(Reject::NotArmed);
         }
         if rig.shift_id != p.fields.shift_id {
@@ -474,8 +615,43 @@ impl<S: RigSource> Verifier<S> {
         if p.fields.counter <= rig.hb_counter {
             return Err(Reject::StaleCounter);
         }
-        if p.claimed_pubkey.is_some_and(|k| k != rig.p256_pubkey) {
-            return Err(Reject::PubkeyMismatch);
+        Ok(())
+    }
+
+    /// Check and verify a BREAK / FREEZE against the rig: same shift, a counter above the
+    /// rig's `hb_counter`, a state the program accepts (BREAK: Armed, Down or Cooling; FREEZE:
+    /// any), and the rig's registered key.
+    pub async fn process_signal(&self, p: &ParsedSignal) -> Result<VerifiedSignal, Reject> {
+        let mut rig = self.rigs.get(&p.rig, false).await?.ok_or(Reject::UnknownRig)?;
+        if Self::signal_precheck(&rig, p).is_err() {
+            rig = self.rigs.get(&p.rig, true).await?.ok_or(Reject::UnknownRig)?;
+        }
+        Self::signal_precheck(&rig, p)?;
+        let digest = p.digest(&self.program_id);
+        let sig = verify_signature(&rig.p256_pubkey, &digest, &p.sig)?;
+        Ok(VerifiedSignal {
+            kind: p.kind,
+            rig: p.rig,
+            authority: rig.authority,
+            counter: p.counter,
+            shift_id: p.shift_id,
+            reason: p.reason,
+            sig,
+            pubkey: rig.p256_pubkey,
+            digest,
+            rig_state: rig.state,
+        })
+    }
+
+    fn signal_precheck(rig: &Rig, p: &ParsedSignal) -> Result<(), Reject> {
+        if rig.shift_id != p.shift_id {
+            return Err(Reject::ShiftMismatch);
+        }
+        if p.counter <= rig.hb_counter {
+            return Err(Reject::StaleCounter);
+        }
+        if p.kind == SignalKind::Break && !rig.state.breakable() {
+            return Err(Reject::NotArmed);
         }
         Ok(())
     }
@@ -528,5 +704,58 @@ mod tests {
         assert_eq!(s.offer(mk(2, 1)), Offer::Full, "bounded");
         s.prune(11, Duration::from_secs(60));
         assert!(s.is_empty(), "lease [10,10] ended before round 11");
+    }
+
+    #[test]
+    fn every_reject_maps_to_a_contract_ack_code() {
+        let labels: std::collections::HashSet<_> = Reject::ALL.iter().map(|r| r.reason()).collect();
+        assert_eq!(labels.len(), Reject::ALL.len(), "metric labels are unique");
+        for r in Reject::ALL {
+            assert!(ACK_CODES[1..].contains(&r.ack_code()), "{r:?}");
+        }
+        let used: std::collections::HashSet<_> = Reject::ALL.iter().map(|r| r.ack_code()).collect();
+        assert_eq!(used.len(), 6, "every refusal code is reachable");
+    }
+
+    #[test]
+    fn numbers_or_decimal_strings() {
+        let n: HeartbeatSubmission = serde_json::from_str(
+            r#"{"type":"heartbeat","rig":"x","counter":"18446744073709551615","shift_id":3,"round_id":"7","lease_rounds":"2","sig":"00","extra":{"a":1}}"#,
+        )
+        .unwrap();
+        assert_eq!((n.counter, n.shift_id, n.round_id, n.lease_rounds, n.sig64.as_str()), (u64::MAX, 3, 7, 2, "00"));
+        for bad in [r#""-1""#, r#""1e3""#, r#""0x10""#, r#""""#, "-1", "1.5", r#""18446744073709551616""#, "null", "true"] {
+            let j = format!(r#"{{"rig":"x","counter":{bad},"shift_id":1,"round_id":1,"lease_rounds":1,"sig64":"00"}}"#);
+            assert!(serde_json::from_str::<HeartbeatSubmission>(&j).is_err(), "{bad}");
+        }
+        // lease_rounds 300 parses, then fails the static rule (lease_invalid, not malformed).
+        let s: HeartbeatSubmission = serde_json::from_str(
+            r#"{"rig":"11111111111111111111111111111111","counter":1,"shift_id":1,"round_id":1,"lease_rounds":300,"sig64":"00"}"#,
+        )
+        .unwrap();
+        assert_eq!(ParsedHeartbeat::parse(&s).map(|_| ()), Err(Reject::BadEncoding), "sig checked first");
+        let s = HeartbeatSubmission { sig64: hex::encode([1u8; 64]), ..s };
+        assert_eq!(ParsedHeartbeat::parse(&s).map(|_| ()), Err(Reject::BadLease));
+        assert_eq!(Reject::BadLease.ack_code(), "lease_invalid");
+    }
+
+    #[test]
+    fn signal_reasons() {
+        let sub = |reason: u64| SignalSubmission {
+            rig: "11111111111111111111111111111111".into(),
+            counter: 1,
+            shift_id: 1,
+            reason,
+            sig64: base64::engine::general_purpose::STANDARD.encode([1u8; 64]),
+        };
+        for r in [1, 2, 4, 5, 6, 7, 8] {
+            assert!(ParsedSignal::parse(SignalKind::Break, &sub(r)).is_ok(), "break {r}");
+        }
+        for r in [0, 3, 9, 300] {
+            assert_eq!(ParsedSignal::parse(SignalKind::Break, &sub(r)).map(|_| ()), Err(Reject::BadReason), "break {r}");
+        }
+        assert!(ParsedSignal::parse(SignalKind::Freeze, &sub(3)).is_ok());
+        assert_eq!(ParsedSignal::parse(SignalKind::Freeze, &sub(1)).map(|_| ()), Err(Reject::BadReason));
+        assert_eq!(Reject::BadReason.ack_code(), "malformed");
     }
 }

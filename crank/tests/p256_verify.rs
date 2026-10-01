@@ -147,41 +147,14 @@ fn rig_account(pk: [u8; 33]) -> Rig {
         authority: Address::new_from_array([9; 32]),
         p256_pubkey: pk,
         attestation_level: 1,
-        tier: 0,
         state: RigState::Armed,
-        sgt_mint: Address::default(),
-        attestation_expiry_slot: 0,
-        cap_week: 0,
-        cap_shift: 0,
-        cap_round: 0,
-        cap_max_cost: 0,
-        caps_expiry_ts: 0,
-        plan_max_ev_cost: 0,
-        plan_dig_lamports: 0,
         plan_split_tiles: 15,
-        plan_solo_tiles: 0,
         plan_lease_rounds: 3,
-        plan_flags: 0,
-        plan_window_start_ts: 0,
-        plan_window_end_ts: 0,
         shift_id: 4,
         hb_counter: 10,
-        lease_from_round: 0,
-        lease_to_round: 0,
-        gap_count: 0,
-        spent_shift: 0,
-        spent_week: 0,
-        week_start_ts: 0,
-        last_dug_round: 0,
-        shift_start_round: 0,
-        shift_dark_rounds: 0,
-        shift_rounds_dug: 0,
-        lifetime_dark_rounds: 0,
-        lifetime_rounds_dug: 0,
-        lifetime_lamports_deployed: 0,
-        streak: 0,
         freezes_left: 2,
-        last_shift_day: 0,
+        shift_open: true,
+        ..Rig::default()
     }
 }
 
@@ -207,9 +180,8 @@ impl Phone {
             counter,
             shift_id,
             round_id,
-            lease_rounds: lease,
+            lease_rounds: u64::from(lease),
             sig64: hex::encode(raw),
-            pubkey: None,
         }
     }
 }
@@ -262,10 +234,7 @@ async fn verifier_rejects_wrong_key_unknown_rig_and_not_armed() {
 
     // Signed by a key that is not the rig's registered key.
     assert_eq!(run(&v, &thief.submit(11, 4, 500, 1), 500).await, Err(Reject::BadSignature));
-    // Claims a pubkey that is not registered.
-    let mut s = thief.submit(11, 4, 500, 1);
-    s.pubkey = Some(hex::encode(thief.pk()));
-    assert_eq!(run(&v, &s, 500).await, Err(Reject::PubkeyMismatch));
+    assert_eq!(Reject::BadSignature.ack_code(), "bad_signature");
     // Tampered field after signing.
     let mut s = phone.submit(11, 4, 500, 1);
     s.lease_rounds = 3;
@@ -304,21 +273,33 @@ async fn cache_refreshes_once_after_arm_or_rotation() {
         r.shift_id = 5;
         r.p256_pubkey = rotated.pk();
     }
-    let mut s = rotated.submit(12, 5, 500, 1);
-    s.pubkey = Some(hex::encode(rotated.pk()));
-    assert_eq!(run(&v, &s, 500).await, Ok(()), "refreshed on shift/key mismatch");
+    let s = rotated.submit(12, 5, 500, 1);
+    assert_eq!(run(&v, &s, 500).await, Ok(()), "refreshed on shift mismatch, verified with the rotated key");
     // The old key no longer works.
     assert_eq!(run(&v, &phone.submit(13, 5, 500, 1), 500).await, Err(Reject::BadSignature));
 }
 
 #[test]
-fn submission_json_is_strict() {
+fn submission_json_follows_contract_a() {
     let ok = r#"{"rig":"11111111111111111111111111111111","counter":1,"shift_id":1,"round_id":1,"lease_rounds":1,"sig64":"00"}"#;
     assert!(serde_json::from_str::<HeartbeatSubmission>(ok).is_ok());
-    let extra = r#"{"rig":"x","counter":1,"shift_id":1,"round_id":1,"lease_rounds":1,"sig64":"00","evil":1}"#;
-    assert!(serde_json::from_str::<HeartbeatSubmission>(extra).is_err());
+    // Unknown fields are ignored, not rejected.
+    let extra = r#"{"type":"heartbeat","rig":"x","counter":1,"shift_id":1,"round_id":1,"lease_rounds":1,"sig64":"00","evil":1}"#;
+    assert!(serde_json::from_str::<HeartbeatSubmission>(extra).is_ok());
+    // Integers may be decimal strings; never negative, fractional or out of range.
+    let strings = r#"{"rig":"x","counter":"18446744073709551615","shift_id":"1","round_id":"1","lease_rounds":"1","sig64":"00"}"#;
+    assert_eq!(serde_json::from_str::<HeartbeatSubmission>(strings).unwrap().counter, u64::MAX);
     let neg = r#"{"rig":"x","counter":-1,"shift_id":1,"round_id":1,"lease_rounds":1,"sig64":"00"}"#;
     assert!(serde_json::from_str::<HeartbeatSubmission>(neg).is_err());
-    let big = r#"{"rig":"x","counter":1,"shift_id":1,"round_id":1,"lease_rounds":300,"sig64":"00"}"#;
-    assert!(serde_json::from_str::<HeartbeatSubmission>(big).is_err());
+    let frac = r#"{"rig":"x","counter":1.5,"shift_id":1,"round_id":1,"lease_rounds":1,"sig64":"00"}"#;
+    assert!(serde_json::from_str::<HeartbeatSubmission>(frac).is_err());
+    // A lease of 300 parses and is refused by the static rule (lease_invalid, not malformed).
+    use base64::Engine;
+    let sig = base64::engine::general_purpose::STANDARD.encode([1u8; 64]);
+    let big = format!(r#"{{"rig":"11111111111111111111111111111111","counter":1,"shift_id":1,"round_id":1,"lease_rounds":300,"sig64":"{sig}"}}"#);
+    let s = serde_json::from_str::<HeartbeatSubmission>(&big).unwrap();
+    assert_eq!(ParsedHeartbeat::parse(&s).map(|_| ()), Err(Reject::BadLease));
+    // Missing a listed field: malformed.
+    let missing = r#"{"rig":"x","counter":1,"shift_id":1,"round_id":1,"sig64":"00"}"#;
+    assert!(serde_json::from_str::<HeartbeatSubmission>(missing).is_err());
 }

@@ -8,7 +8,7 @@ rpc_url = "https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"   # default
 commitment = "confirmed"
 # keypair_path = "/home/crank/.config/hd-crank/id.json"                # chmod 600; or --keypair / HD_CRANK_KEYPAIR
 program_id = "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
-listen = "0.0.0.0:8787"            # /ws (heartbeats), /healthz, /metrics
+listen = "0.0.0.0:8787"            # /ws (alias /v1/heartbeats: contract A frames), /healthz, /metrics
 state_dir = ".hd-crank"           # remembers the crank's lookup tables
 log_json = false
 
@@ -71,3 +71,32 @@ max_tables = 8                     # ~500 heartbeating rigs; the operator pays ~
 # helius_sender_url = "https://sender.helius-rpc.com/fast"
 # tip_accounts = ["..."]
 # tip_lamports = 200000
+
+[signals]                          # land phone-signed BREAK / FREEZE (break_shift / freeze_rig, P-256 path)
+enabled = true                     # false: the intake answers rate_limited and the phone keeps its record
+rig_burst = 4                      # per-rig token bucket
+rig_per_minute = 1.0
+max_lamports_per_hour = 2000000    # fee budget: ~10,100 lamports per signal, not reimbursed
+cu_limit = 5000                    # measured: 1,429 CU
+cu_price_micro_lamports = 20000    # land within a slot or two
+simulate = true                    # a signal the program would refuse is not sent
+max_attempts = 3                   # fresh blockhash when one expires unconfirmed
+queue = 256
+
+[record]                           # record_heartbeats for focus-only rigs (plan_flags bit 0)
+enabled = true
+every_rounds = 3                   # per rig, from its on-chain lease_from_round; <= the phone's lease = every round dark
+gate_closed_rigs = false           # also record night/day rigs whose cost gate is closed (the crank pays)
+delay_secs = 20                    # after a round is first seen, so the phones' heartbeats are in
+max_rigs_per_tx = 8
+max_lamports_per_hour = 2000000    # ~6,300 lamports per recorded rig, not reimbursed
+cu_base = 3000                     # measured: ~1,500 CU per rig
+cu_per_rig = 4000
+
+[end_shift]                        # permissionless end_shift: window over and lease expired
+enabled = true
+grace_secs = 60                    # after plan_window_end_ts
+max_per_pass = 4
+max_lamports_per_day = 50000000    # ShiftLog rent 1,781,760 + fee each: ~27 shifts per day
+poll_secs = 60
+cu_limit = 15000                   # measured: 5,195 CU

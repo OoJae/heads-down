@@ -1,8 +1,10 @@
-//! The `heads_down` program interface, built strictly from `programs/heads-down/INTERFACE.md`:
-//! PDAs, the Config and Rig account layouts, the signed P-256 preimages, the batched `dig`
-//! instruction, error codes and events. The program is written in parallel; nothing here
-//! imports it. Where the contract is silent, the choice made is listed in
-//! `crank/INTERFACE-NOTES.md`.
+//! The `heads_down` program interface, built strictly from the frozen contract
+//! `programs/heads-down/INTERFACE.md` v1.1 and its machine-checked golden vectors
+//! (`programs/heads-down/vectors/`, cross-checked byte for byte in `tests/golden.rs`):
+//! PDAs, the Config / Rig / ShiftLog layouts, the signed P-256 preimages, the instruction
+//! builders the crank sends (`dig`, `record_heartbeats`, `break_shift` / `freeze_rig` on the
+//! P-256 path, `end_shift`), error names and every event (tags 1..=10). The program is not
+//! imported: the vectors are the contract.
 
 use sha2::{Digest, Sha256};
 use solana_address::Address;
@@ -35,17 +37,31 @@ pub const ACCOUNT_VERSION: u8 = 1;
 pub const CONFIG_LEN: usize = 256;
 /// Rig size.
 pub const RIG_LEN: usize = 384;
+/// ShiftLog size.
+pub const SHIFT_LOG_LEN: usize = 128;
 
 /// `dig` instruction tag.
 pub const IX_DIG: u8 = 6;
+/// `record_heartbeats` instruction tag.
+pub const IX_RECORD_HEARTBEATS: u8 = 7;
+/// `break_shift` instruction tag.
+pub const IX_BREAK_SHIFT: u8 = 8;
+/// `freeze_rig` instruction tag.
+pub const IX_FREEZE_RIG: u8 = 9;
+/// `end_shift` instruction tag.
+pub const IX_END_SHIFT: u8 = 11;
+/// Authorization mode byte of `arm_shift` / `break_shift` / `freeze_rig`: the P-256 path.
+pub const MODE_P256: u8 = 1;
 /// `hb_ix` value meaning "reuse the rig's current on-chain lease".
 pub const HB_REUSE_LEASE: u8 = 0xFF;
-/// Size of one per-rig `dig` entry.
+/// Size of one per-rig `dig` / `record_heartbeats` entry.
 pub const DIG_ENTRY_LEN: usize = 20;
 /// Fixed accounts before the per-rig groups.
 pub const DIG_FIXED_ACCOUNTS: usize = 12;
 /// Accounts per rig.
 pub const DIG_ACCOUNTS_PER_RIG: usize = 4;
+/// Rigs per `dig` / `record_heartbeats` instruction at most (`n` 1..=32).
+pub const MAX_RIGS_PER_IX: usize = 32;
 /// Largest lease a heartbeat may request (`plan_lease_rounds` is 1..=3).
 pub const MAX_LEASE_ROUNDS: u8 = 3;
 
@@ -66,6 +82,30 @@ pub const BREAK_PREIMAGE_LEN: usize = 86;
 /// PLAN preimage length.
 pub const PLAN_PREIMAGE_LEN: usize = 113;
 
+/// `ShiftLog.break_reason` values (also the BREAK / FREEZE `reason` byte).
+pub mod reason {
+    /// Completed normally.
+    pub const COMPLETED: u8 = 0;
+    /// Phone picked up (BREAK → Cooling).
+    pub const PICKUP: u8 = 1;
+    /// Screen turned on (BREAK → Cooling).
+    pub const SCREEN_ON: u8 = 2;
+    /// Frozen (the reason a FREEZE carries).
+    pub const FREEZE: u8 = 3;
+    /// No lease (BREAK → Broken; also `end_shift` without a dark round).
+    pub const LEASE_LAPSE: u8 = 4;
+    /// Budget (BREAK → Broken).
+    pub const BUDGET: u8 = 5;
+    /// Manual (BREAK → Broken).
+    pub const MANUAL: u8 = 6;
+    /// Charger unplugged (BREAK → Cooling). v1.1.
+    pub const UNPLUGGED: u8 = 7;
+    /// Device unlocked (BREAK → Broken). v1.1.
+    pub const UNLOCKED: u8 = 8;
+    /// Every reason `break_shift` accepts.
+    pub const BREAK_REASONS: [u8; 7] = [PICKUP, SCREEN_ON, LEASE_LAPSE, BUDGET, MANUAL, UNPLUGGED, UNLOCKED];
+}
+
 /// `[b"config"]`.
 pub fn config_pda(program_id: &Address) -> (Address, u8) {
     Address::find_program_address(&[b"config"], program_id)
@@ -79,6 +119,11 @@ pub fn executor_pda(program_id: &Address) -> (Address, u8) {
 /// `[b"rig", authority]`.
 pub fn rig_pda(program_id: &Address, authority: &Address) -> (Address, u8) {
     Address::find_program_address(&[b"rig", authority.as_ref()], program_id)
+}
+
+/// `[b"shift", rig, shift_id u64 LE]`.
+pub fn shift_log_pda(program_id: &Address, rig: &Address, shift_id: u64) -> (Address, u8) {
+    Address::find_program_address(&[b"shift", rig.as_ref(), &shift_id.to_le_bytes()], program_id)
 }
 
 /// Why a heads_down account could not be decoded.
@@ -134,13 +179,13 @@ pub struct HdConfig {
     pub governance: Address,
     /// Attestation registrar key.
     pub registrar: Address,
-    /// Lamports reimbursed to the cranker per rig-round dug.
+    /// Lamports reimbursed to the cranker per real deploy.
     pub crank_fee: u64,
     /// The Discretionary `fee` every rig's Automation must use.
     pub executor_fee: u64,
     /// Bury share.
     pub bury_bps: u16,
-    /// 1 = `dig` disabled.
+    /// 1 = `dig` fails with `Paused`.
     pub paused: bool,
     /// Canonical bump of `[b"executor"]`.
     pub executor_bump: u8,
@@ -184,7 +229,7 @@ impl HdConfig {
     }
 }
 
-/// Rig state machine (`Rig.state`).
+/// Rig state machine (`Rig.state`, INTERFACE §6.7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RigState {
     /// 0
@@ -193,7 +238,7 @@ pub enum RigState {
     Armed,
     /// 2
     Down,
-    /// 3
+    /// 3: soft break; digs again only with a fresh heartbeat in the same entry.
     Cooling,
     /// 4
     Broken,
@@ -230,13 +275,37 @@ impl RigState {
         }
     }
 
-    /// `dig` step 2: `state ∈ {Armed, Down}`.
+    /// Only Armed and Down dig by reusing a lease (`hb_ix = 0xFF`).
     pub fn diggable(self) -> bool {
         matches!(self, RigState::Armed | RigState::Down)
     }
+
+    /// States a fresh HEARTBEAT is verified in (`dig` and `record_heartbeats`): Armed, Down,
+    /// Cooling. A verified heartbeat moves Armed / Cooling to Down.
+    pub fn accepts_heartbeat(self) -> bool {
+        matches!(self, RigState::Armed | RigState::Down | RigState::Cooling)
+    }
+
+    /// States `break_shift` accepts.
+    pub fn breakable(self) -> bool {
+        self.accepts_heartbeat()
+    }
+
+    /// Snake-case name for logs and captions.
+    pub fn name(self) -> &'static str {
+        match self {
+            RigState::Idle => "idle",
+            RigState::Armed => "armed",
+            RigState::Down => "down",
+            RigState::Cooling => "cooling",
+            RigState::Broken => "broken",
+            RigState::Frozen => "frozen",
+            RigState::Unknown(_) => "unknown",
+        }
+    }
 }
 
-/// `Rig` (384 bytes), every field of INTERFACE.md.
+/// `Rig` (384 bytes): every field of INTERFACE v1.1 §3.2 and §3.3.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct Rig {
@@ -279,12 +348,77 @@ pub struct Rig {
     pub streak: u32,
     pub freezes_left: u8,
     pub last_shift_day: i64,
+    /// v1.1 @336: 1 from `arm_shift` to `end_shift`.
+    pub shift_open: bool,
+    /// v1.1 @337: reason recorded by BREAK / a shift-interrupting FREEZE.
+    pub break_reason: u8,
+    /// v1.1 @338: canonical bump of ORE `["automation", authority]` (`dig` re-derives with it).
+    pub ore_automation_bump: u8,
+    /// v1.1 @339: canonical bump of ORE `["miner", authority]`.
+    pub ore_miner_bump: u8,
+    /// v1.1 @344: unix time of arm (becomes `ShiftLog.start_ts`).
+    pub shift_start_ts: i64,
 }
 
-/// `plan_flags` bit 0: focus-only, never deploys.
+impl Default for Rig {
+    fn default() -> Self {
+        Rig {
+            bump: 0,
+            authority: Address::default(),
+            p256_pubkey: [0; 33],
+            attestation_level: 0,
+            tier: 0,
+            state: RigState::Idle,
+            sgt_mint: Address::default(),
+            attestation_expiry_slot: 0,
+            cap_week: 0,
+            cap_shift: 0,
+            cap_round: 0,
+            cap_max_cost: 0,
+            caps_expiry_ts: 0,
+            plan_max_ev_cost: 0,
+            plan_dig_lamports: 0,
+            plan_split_tiles: 0,
+            plan_solo_tiles: 0,
+            plan_lease_rounds: 0,
+            plan_flags: 0,
+            plan_window_start_ts: 0,
+            plan_window_end_ts: 0,
+            shift_id: 0,
+            hb_counter: 0,
+            lease_from_round: 0,
+            lease_to_round: 0,
+            gap_count: 0,
+            spent_shift: 0,
+            spent_week: 0,
+            week_start_ts: 0,
+            last_dug_round: 0,
+            shift_start_round: 0,
+            shift_dark_rounds: 0,
+            shift_rounds_dug: 0,
+            lifetime_dark_rounds: 0,
+            lifetime_rounds_dug: 0,
+            lifetime_lamports_deployed: 0,
+            streak: 0,
+            freezes_left: 0,
+            last_shift_day: 0,
+            shift_open: false,
+            break_reason: 0,
+            ore_automation_bump: 0,
+            ore_miner_bump: 0,
+            shift_start_ts: 0,
+        }
+    }
+}
+
+/// `plan_flags` bit 0: focus-only, never deploys (heartbeats still recorded).
 pub const PLAN_FLAG_FOCUS_ONLY: u8 = 1;
+/// `plan_flags` bit 1: day shift (`ShiftLog.mode` 1).
+pub const PLAN_FLAG_DAY: u8 = 2;
 /// Byte offset of `Rig.state` (memcmp filter target).
 pub const RIG_STATE_OFFSET: usize = 75;
+/// Byte offset of `Rig.shift_open` (memcmp filter target).
+pub const RIG_SHIFT_OPEN_OFFSET: usize = 336;
 
 impl Rig {
     /// Decode after checking owner, size, tag and version.
@@ -331,6 +465,11 @@ impl Rig {
             streak: read_u32(data, 320).ok_or_else(e)?,
             freezes_left: read_u8(data, 324).ok_or_else(e)?,
             last_shift_day: read_i64(data, 328).ok_or_else(e)?,
+            shift_open: read_u8(data, RIG_SHIFT_OPEN_OFFSET).ok_or_else(e)? != 0,
+            break_reason: read_u8(data, 337).ok_or_else(e)?,
+            ore_automation_bump: read_u8(data, 338).ok_or_else(e)?,
+            ore_miner_bump: read_u8(data, 339).ok_or_else(e)?,
+            shift_start_ts: read_i64(data, 344).ok_or_else(e)?,
         })
     }
 
@@ -377,12 +516,18 @@ impl Rig {
         put(320, &self.streak.to_le_bytes());
         put(324, &[self.freezes_left]);
         put(328, &self.last_shift_day.to_le_bytes());
+        put(
+            RIG_SHIFT_OPEN_OFFSET,
+            &[u8::from(self.shift_open), self.break_reason, self.ore_automation_bump, self.ore_miner_bump],
+        );
+        put(344, &self.shift_start_ts.to_le_bytes());
         d
     }
 
-    /// True if the rig's on-chain lease covers `round_id` (`lease_from ≤ round ≤ lease_to`).
+    /// True if a lease granted in this shift covers `round_id`: `lease_to != 0 &&
+    /// lease_from ≤ round ≤ lease_to` (the program's `lease_covers`).
     pub fn lease_covers(&self, round_id: u64) -> bool {
-        self.lease_from_round <= round_id && round_id <= self.lease_to_round
+        self.lease_to_round != 0 && self.lease_from_round <= round_id && round_id <= self.lease_to_round
     }
 
     /// `plan_flags` bit 0.
@@ -390,9 +535,61 @@ impl Rig {
         self.plan_flags & PLAN_FLAG_FOCUS_ONLY != 0
     }
 
-    /// `k = split + solo` (u16, cannot overflow).
+    /// `split + solo` as requested by the plan (u16, cannot overflow). The squares actually
+    /// chosen, `k = popcount(mask)`, can be fewer: see [`ore::tiles_available`].
     pub fn tiles(&self) -> u16 {
         u16::from(self.plan_split_tiles) + u16::from(self.plan_solo_tiles)
+    }
+
+    /// `ShiftLog.mode` this shift will get: 2 focus-only (wins), 1 day, 0 night.
+    pub fn mode(&self) -> u8 {
+        if self.focus_only() {
+            2
+        } else if self.plan_flags & PLAN_FLAG_DAY != 0 {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+/// `ShiftLog` (128 bytes, `["shift", rig, shift_id]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct ShiftLog {
+    pub rig: Address,
+    pub shift_id: u64,
+    pub start_round: u64,
+    pub end_round: u64,
+    pub dark_rounds: u64,
+    pub rounds_dug: u64,
+    /// `spent_shift`: squares plus fees.
+    pub lamports_deployed: u64,
+    pub break_reason: u8,
+    /// 0 night, 1 day, 2 focus-only.
+    pub mode: u8,
+    pub start_ts: i64,
+    pub end_ts: i64,
+}
+
+impl ShiftLog {
+    /// Decode after checking owner, size, tag and version.
+    pub fn decode(program_id: &Address, owner: &Address, data: &[u8]) -> Result<Self, AccountError> {
+        check_header(program_id, owner, data, TAG_SHIFT_LOG, SHIFT_LOG_LEN)?;
+        let e = || AccountError::WrongSize { expected: SHIFT_LOG_LEN, got: data.len() };
+        Ok(ShiftLog {
+            rig: read_address(data, 8).ok_or_else(e)?,
+            shift_id: read_u64(data, 40).ok_or_else(e)?,
+            start_round: read_u64(data, 48).ok_or_else(e)?,
+            end_round: read_u64(data, 56).ok_or_else(e)?,
+            dark_rounds: read_u64(data, 64).ok_or_else(e)?,
+            rounds_dug: read_u64(data, 72).ok_or_else(e)?,
+            lamports_deployed: read_u64(data, 80).ok_or_else(e)?,
+            break_reason: read_u8(data, 88).ok_or_else(e)?,
+            mode: read_u8(data, 89).ok_or_else(e)?,
+            start_ts: read_i64(data, 96).ok_or_else(e)?,
+            end_ts: read_i64(data, 104).ok_or_else(e)?,
+        })
     }
 }
 
@@ -495,11 +692,54 @@ pub fn lease_range(hb_round_id: u64, lease_rounds: u8, plan_lease_rounds: u8) ->
     Some((hb_round_id, to))
 }
 
-/// One per-rig `dig` entry (20 bytes):
+/// What applying a verified heartbeat does to the rig's lease (INTERFACE §6.3, the program's
+/// `logic::grant_lease`, integer for integer).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeaseGrant {
+    /// New `lease_from_round`.
+    pub from: u64,
+    /// New `lease_to_round`.
+    pub to: u64,
+    /// Rounds newly covered inside the shift (added to the dark rounds).
+    pub dark_added: u64,
+    /// Uncovered rounds skipped over inside the shift (added to the gaps).
+    pub gap_added: u64,
+}
+
+/// Grant `[hb_round, hb_round + lease − 1]` on top of `[cur_from, cur_to]`. Leases only move
+/// forward: a heartbeat whose lease ends at or before `cur_to` changes nothing (its counter is
+/// still consumed). `cur_to == 0` means no lease yet in this shift. `lease` is the effective
+/// length `min(lease_rounds, plan_lease_rounds)`; `None` for 0 (InvalidHeartbeat) or overflow.
+pub fn grant_lease(cur_from: u64, cur_to: u64, shift_start: u64, hb_round: u64, lease: u8) -> Option<LeaseGrant> {
+    let span = u64::from(lease).checked_sub(1)?;
+    let new_to = hb_round.checked_add(span)?;
+    if cur_to != 0 && new_to <= cur_to {
+        return Some(LeaseGrant { from: cur_from, to: cur_to, dark_added: 0, gap_added: 0 });
+    }
+    let covered_end = if cur_to != 0 && cur_to >= shift_start { cur_to } else { shift_start.saturating_sub(1) };
+    let start = hb_round.max(shift_start);
+    let first_new = start.max(covered_end.saturating_add(1));
+    let dark_added = if new_to >= first_new { new_to.saturating_sub(first_new).saturating_add(1) } else { 0 };
+    let gap_added = start.saturating_sub(covered_end.saturating_add(1));
+    Some(LeaseGrant { from: hb_round, to: new_to, dark_added, gap_added })
+}
+
+/// The lease the rig holds after `hb` is applied (`None` if `hb` is invalid for it).
+pub fn lease_after(rig: &Rig, hb: &HeartbeatFields) -> Option<LeaseGrant> {
+    grant_lease(
+        rig.lease_from_round,
+        rig.lease_to_round,
+        rig.shift_start_round,
+        hb.round_id,
+        hb.lease_rounds.min(rig.plan_lease_rounds),
+    )
+}
+
+/// One per-rig `dig` / `record_heartbeats` entry (20 bytes):
 /// `hb_ix u8 | hb_sig_index u8 | counter u64 | round_id u64 | lease_rounds u8 | _pad u8`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DigEntry {
-    /// Top-level index of the Secp256r1SigVerify instruction, or [`HB_REUSE_LEASE`].
+    /// Absolute top-level index of the Secp256r1SigVerify instruction, or [`HB_REUSE_LEASE`].
     pub hb_ix: u8,
     /// Entry within that precompile instruction.
     pub hb_sig_index: u8,
@@ -542,6 +782,15 @@ impl DigEntry {
             lease_rounds: read_u8(b, 18)?,
         })
     }
+
+    /// Parse `n u8 | n × entry` (the data after the tag of `dig` / `record_heartbeats`).
+    pub fn decode_list(body: &[u8]) -> Option<Vec<DigEntry>> {
+        let (&n, rest) = body.split_first()?;
+        if n == 0 || rest.len() != usize::from(n) * DIG_ENTRY_LEN {
+            return None;
+        }
+        rest.chunks_exact(DIG_ENTRY_LEN).map(DigEntry::decode).collect()
+    }
 }
 
 /// The four accounts `dig` takes per rig, in order.
@@ -569,21 +818,39 @@ impl RigAccounts {
     }
 }
 
-/// Errors building a `dig` instruction.
+/// Errors building a batched instruction.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DigBuildError {
     /// No rigs.
     #[error("empty batch")]
     Empty,
-    /// More than 255 rigs.
-    #[error("too many rigs for a u8 count: {0}")]
+    /// More rigs than one instruction carries.
+    #[error("too many rigs for one instruction: {0}")]
     TooMany(usize),
     /// A rig appears twice (the program fails the tx with `DuplicateRig`).
     #[error("duplicate rig {0}")]
     DuplicateRig(Address),
 }
 
-/// Build `heads_down::dig` with the fixed account order of INTERFACE.md:
+fn check_batch<'a>(rigs: impl ExactSizeIterator<Item = &'a Address>, max: usize) -> Result<u8, DigBuildError> {
+    let len = rigs.len();
+    if len == 0 {
+        return Err(DigBuildError::Empty);
+    }
+    if len > max {
+        return Err(DigBuildError::TooMany(len));
+    }
+    let n = u8::try_from(len).map_err(|_| DigBuildError::TooMany(len))?;
+    let mut seen = std::collections::HashSet::with_capacity(len);
+    for a in rigs {
+        if !seen.insert(*a) {
+            return Err(DigBuildError::DuplicateRig(*a));
+        }
+    }
+    Ok(n)
+}
+
+/// Build `heads_down::dig` (tag 6) with the fixed account order of INTERFACE §5:
 ///
 /// ```text
 /// 0 cranker (s,w)   4 ore_config (w)   8 ore_program         12.. per rig i:
@@ -592,23 +859,16 @@ pub enum DigBuildError {
 /// 3 board (w)       7 system_program  11 instructions sysvar
 /// ```
 ///
-/// `round` is the Round PDA for the `Board.round_id` the tx is meant to land in.
+/// `round` is the Round PDA for the `Board.round_id` the tx is meant to land in. The program
+/// takes 1..=32 rigs; the builder refuses more than 255 (the `u8` count) so callers can size
+/// batches themselves.
 pub fn dig_ix(
     program_id: &Address,
     cranker: &Address,
     round: &Address,
     rigs: &[(RigAccounts, DigEntry)],
 ) -> Result<Instruction, DigBuildError> {
-    if rigs.is_empty() {
-        return Err(DigBuildError::Empty);
-    }
-    let n = u8::try_from(rigs.len()).map_err(|_| DigBuildError::TooMany(rigs.len()))?;
-    let mut seen = std::collections::HashSet::with_capacity(rigs.len());
-    for (a, _) in rigs {
-        if !seen.insert(a.rig) {
-            return Err(DigBuildError::DuplicateRig(a.rig));
-        }
-    }
+    let n = check_batch(rigs.iter().map(|(a, _)| &a.rig), usize::from(u8::MAX))?;
     let mut accounts = Vec::with_capacity(DIG_FIXED_ACCOUNTS + DIG_ACCOUNTS_PER_RIG * rigs.len());
     accounts.extend([
         AccountMeta::new(*cranker, true),
@@ -639,7 +899,117 @@ pub fn dig_ix(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-/// `ProgramError::Custom` codes of `heads_down`.
+/// Build `heads_down::record_heartbeats` (tag 7): `0 [] ORE Board | 1 [] instructions sysvar |
+/// 2.. [w] rig_i`, data `7 | n | n × entry` (every entry must name a precompile, never 0xFF).
+pub fn record_heartbeats_ix(program_id: &Address, rigs: &[(Address, DigEntry)]) -> Result<Instruction, DigBuildError> {
+    let n = check_batch(rigs.iter().map(|(a, _)| a), MAX_RIGS_PER_IX)?;
+    let mut accounts = Vec::with_capacity(2 + rigs.len());
+    accounts.push(AccountMeta::new_readonly(ore::BOARD_ADDRESS, false));
+    accounts.push(AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false));
+    let mut data = Vec::with_capacity(2 + DIG_ENTRY_LEN * rigs.len());
+    data.push(IX_RECORD_HEARTBEATS);
+    data.push(n);
+    for (rig, e) in rigs {
+        accounts.push(AccountMeta::new(*rig, false));
+        data.extend_from_slice(&e.encode());
+    }
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+/// A phone-signed shift signal (the P-256 path of `break_shift` / `freeze_rig`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SignalKind {
+    /// BREAK: `break_shift` (tag 8), message kind 2.
+    Break,
+    /// FREEZE: `freeze_rig` (tag 9), message kind 3.
+    Freeze,
+}
+
+impl SignalKind {
+    /// The preimage `kind` byte.
+    pub fn message_kind(self) -> u8 {
+        match self {
+            SignalKind::Break => KIND_BREAK,
+            SignalKind::Freeze => KIND_FREEZE,
+        }
+    }
+
+    /// The instruction tag.
+    pub fn ix_tag(self) -> u8 {
+        match self {
+            SignalKind::Break => IX_BREAK_SHIFT,
+            SignalKind::Freeze => IX_FREEZE_RIG,
+        }
+    }
+
+    /// `break` / `freeze` (also the intake frame `type`).
+    pub fn name(self) -> &'static str {
+        match self {
+            SignalKind::Break => "break",
+            SignalKind::Freeze => "freeze",
+        }
+    }
+
+    /// Whether `reason` is valid for this kind: BREAK takes 1, 2, 4, 5, 6, 7, 8 (the program
+    /// refuses anything else); a FREEZE frame carries 3 (contract A; the program binds any byte).
+    pub fn reason_ok(self, r: u8) -> bool {
+        match self {
+            SignalKind::Break => reason::BREAK_REASONS.contains(&r),
+            SignalKind::Freeze => r == reason::FREEZE,
+        }
+    }
+}
+
+/// `break_shift` / `freeze_rig` on the P-256 path (INTERFACE §5, vectors `break_shift_p256` /
+/// `freeze_rig_p256`): accounts `0 [w] rig | 1 [] authority (= rig.authority, not a signer) |
+/// 2 [] instructions sysvar`, data `tag | mode 1 | reason | counter u64 | p256_ix | p256_sig_index`
+/// (13 bytes, counter first). The fee payer is not an instruction account.
+#[allow(clippy::too_many_arguments)]
+pub fn signal_p256_ix(
+    program_id: &Address,
+    kind: SignalKind,
+    rig: &Address,
+    authority: &Address,
+    reason: u8,
+    counter: u64,
+    p256_ix: u8,
+    p256_sig_index: u8,
+) -> Instruction {
+    let mut data = Vec::with_capacity(13);
+    data.extend_from_slice(&[kind.ix_tag(), MODE_P256, reason]);
+    data.extend_from_slice(&counter.to_le_bytes());
+    data.extend_from_slice(&[p256_ix, p256_sig_index]);
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(*rig, false),
+            AccountMeta::new_readonly(*authority, false),
+            AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
+        ],
+        data,
+    }
+}
+
+/// `end_shift` (tag 11): `0 [s,w] caller (pays the ShiftLog rent) | 1 [w] rig |
+/// 2 [w] ShiftLog ["shift", rig, shift_id] | 3 [] ORE Board | 4 [] System`. Anyone may call it
+/// once `now > plan_window_end_ts` and `lease_to_round < Board.round_id`.
+pub fn end_shift_ix(program_id: &Address, caller: &Address, rig: &Address, shift_id: u64) -> Instruction {
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(*caller, true),
+            AccountMeta::new(*rig, false),
+            AccountMeta::new(shift_log_pda(program_id, rig, shift_id).0, false),
+            AccountMeta::new_readonly(ore::BOARD_ADDRESS, false),
+            AccountMeta::new_readonly(ore::SYSTEM_PROGRAM_ID, false),
+        ],
+        data: vec![IX_END_SHIFT],
+    }
+}
+
+/// `ProgramError::Custom` codes of `heads_down` (INTERFACE §8), including the precise
+/// `p256-introspect` codes (`0x2560_00xx`) that `RigSkipped.error` carries unchanged, and the
+/// builtin-error encoding `u32::MAX - k` of `skip_code`.
 pub fn error_name(code: u32) -> &'static str {
     match code {
         0 => "InvalidInstruction",
@@ -666,46 +1036,181 @@ pub fn error_name(code: u32) -> &'static str {
         21 => "InvalidAttestation",
         22 => "DuplicateRig",
         23 => "StrategyMismatch",
-        c if c & 0xFFF0_0000 == 0x2560_0000 => "P256Introspect",
+        24 => "InvalidRigState",
+        25 => "RoundNotActive",
+        26 => "MinerNotCheckpointed",
+        27 => "MotherlodeCondition",
+        28 => "InsufficientAutomationBalance",
+        29 => "OreNoOp",
+        30 => "FocusOnly",
+        31 => "ExecutorUnderfunded",
+        0x2560_0001 => "P256InvalidInstructionsSysvar",
+        0x2560_0002 => "P256MalformedInstructionsSysvar",
+        0x2560_0003 => "P256InstructionIndexOutOfBounds",
+        0x2560_0004 => "P256NotSecp256r1Instruction",
+        0x2560_0005 => "P256InvalidSignatureCount",
+        0x2560_0006 => "P256TruncatedOffsets",
+        0x2560_0007 => "P256ForeignInstructionIndex",
+        0x2560_0008 => "P256OffsetOutOfBounds",
+        0x2560_0009 => "P256SignatureIndexOutOfBounds",
+        0x2560_000a => "P256HighS",
+        0x2560_000b => "P256ScalarOutOfRange",
+        0x2560_000c => "P256InvalidPublicKeyEncoding",
+        0x2560_000d => "P256PublicKeyMismatch",
+        0x2560_000e => "P256MessageMismatch",
+        c if c & 0xFFFF_0000 == 0x2560_0000 => "P256Introspect",
         c if c & 0xFFFF_0000 == 0x5347_0000 => "SgtVerify",
+        0xFFFF_FFFE => "BuiltinInvalidArgument",
+        0xFFFF_FFFD => "BuiltinInvalidInstructionData",
+        0xFFFF_FFFC => "BuiltinInvalidAccountData",
+        0xFFFF_FFFB => "BuiltinAccountBorrowFailed",
+        0xFFFF_FFFA => "BuiltinMissingRequiredSignature",
+        0xFFFF_FFF9 => "BuiltinArithmeticOverflow",
+        0xFFFF_FFFF => "Builtin",
         _ => "Unknown",
     }
 }
 
-/// Events logged with `sol_log_data` (first byte = tag). Encoding assumed: a single data
-/// field, fields packed little-endian in declaration order (see `INTERFACE-NOTES.md`).
+/// `ShiftLog.break_reason` / BREAK reason name.
+pub fn reason_name(r: u8) -> &'static str {
+    match r {
+        reason::COMPLETED => "completed",
+        reason::PICKUP => "pickup",
+        reason::SCREEN_ON => "screen_on",
+        reason::FREEZE => "freeze",
+        reason::LEASE_LAPSE => "lease_lapse",
+        reason::BUDGET => "budget",
+        reason::MANUAL => "manual",
+        reason::UNPLUGGED => "unplugged",
+        reason::UNLOCKED => "unlocked",
+        _ => "unknown",
+    }
+}
+
+/// `ShiftLog.mode` name.
+pub fn mode_name(m: u8) -> &'static str {
+    match m {
+        0 => "night",
+        1 => "day",
+        2 => "focus_only",
+        _ => "unknown",
+    }
+}
+
+/// Events logged with `sol_log_data` (one slice, byte 0 = tag), INTERFACE §7. A tag's length
+/// never changes, so each tag is decoded by its exact length.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HdEvent {
-    /// Tag 1.
+    /// Tag 1 (61 bytes).
     RigDug {
         /// Rig.
         rig: Address,
-        /// ORE round.
+        /// Live `Board.round_id`.
         round_id: u64,
-        /// Lamports actually debited from the Automation.
+        /// SOL placed on squares, **without** the Automation fee.
         lamports: u64,
-        /// Squares deployed.
+        /// Squares deployed (= squares credited).
         mask: u32,
-        /// Gate value at dig time.
+        /// Gate value at dig time (saturated to u64).
         ema_ev: u64,
     },
-    /// Tag 2.
+    /// Tag 2 (45 bytes).
     RigSkipped {
         /// Rig.
         rig: Address,
-        /// ORE round.
+        /// Live `Board.round_id`.
         round_id: u64,
-        /// heads_down error code.
+        /// Precise error code (heads_down 0..=31 or a shared crate's code).
         error: u32,
     },
-    /// Tag 3.
+    /// Tag 3 (41 bytes).
     ShiftArmed {
         /// Rig.
         rig: Address,
         /// New shift id.
         shift_id: u64,
     },
-    /// Tag 4, 5 and anything newer: kept raw.
+    /// Tag 4 (66 bytes). Followed by [`HdEvent::ShiftEndedV2`] in the same instruction;
+    /// [`events_from_logs`] drops it when the V2 is present.
+    ShiftEnded {
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// Dark rounds.
+        dark_rounds: u64,
+        /// Rounds dug.
+        rounds_dug: u64,
+        /// `spent_shift` (squares plus fees).
+        lamports: u64,
+        /// Break reason.
+        reason: u8,
+    },
+    /// Tag 5 (73 bytes).
+    SeekerVerified {
+        /// Rig.
+        rig: Address,
+        /// SGT mint.
+        sgt_mint: Address,
+        /// Member number.
+        member_number: u64,
+    },
+    /// Tag 6 (67 bytes).
+    RigRegistered {
+        /// Rig.
+        rig: Address,
+        /// Wallet.
+        authority: Address,
+        /// Tier.
+        tier: u8,
+        /// Attestation level.
+        attestation_level: u8,
+    },
+    /// Tag 7 (33 bytes).
+    RigClosed {
+        /// Rig.
+        rig: Address,
+    },
+    /// Tag 8 (49 bytes), one per rig `record_heartbeats` accepted.
+    HeartbeatsRecorded {
+        /// Rig.
+        rig: Address,
+        /// Live `Board.round_id`.
+        round_id: u64,
+        /// Dark rounds the lease added.
+        dark_rounds_added: u64,
+    },
+    /// Tag 9 (42 bytes): a BREAK, or a FREEZE that interrupted an open shift (reason 3).
+    ShiftBroken {
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// Reason.
+        reason: u8,
+    },
+    /// Tag 10 (83 bytes): tag 4's fields plus the rounds and the mode.
+    ShiftEndedV2 {
+        /// Rig.
+        rig: Address,
+        /// Shift.
+        shift_id: u64,
+        /// Dark rounds.
+        dark_rounds: u64,
+        /// Rounds dug.
+        rounds_dug: u64,
+        /// `spent_shift` (squares plus fees).
+        lamports: u64,
+        /// Break reason.
+        reason: u8,
+        /// `Board.round_id` at arm.
+        start_round: u64,
+        /// `Board.round_id` at `end_shift`.
+        end_round: u64,
+        /// 0 night, 1 day, 2 focus-only.
+        mode: u8,
+    },
+    /// Any newer tag: kept raw.
     Other {
         /// Event tag.
         tag: u8,
@@ -714,44 +1219,128 @@ pub enum HdEvent {
     },
 }
 
-/// Parse one `sol_log_data` payload.
+impl HdEvent {
+    /// The event's name as INTERFACE §7 spells it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            HdEvent::RigDug { .. } => "RigDug",
+            HdEvent::RigSkipped { .. } => "RigSkipped",
+            HdEvent::ShiftArmed { .. } => "ShiftArmed",
+            HdEvent::ShiftEnded { .. } => "ShiftEnded",
+            HdEvent::SeekerVerified { .. } => "SeekerVerified",
+            HdEvent::RigRegistered { .. } => "RigRegistered",
+            HdEvent::RigClosed { .. } => "RigClosed",
+            HdEvent::HeartbeatsRecorded { .. } => "HeartbeatsRecorded",
+            HdEvent::ShiftBroken { .. } => "ShiftBroken",
+            HdEvent::ShiftEndedV2 { .. } => "ShiftEndedV2",
+            HdEvent::Other { .. } => "Other",
+        }
+    }
+
+    /// The rig the event is about (every known tag starts with it).
+    pub fn rig(&self) -> Option<Address> {
+        match self {
+            HdEvent::RigDug { rig, .. }
+            | HdEvent::RigSkipped { rig, .. }
+            | HdEvent::ShiftArmed { rig, .. }
+            | HdEvent::ShiftEnded { rig, .. }
+            | HdEvent::SeekerVerified { rig, .. }
+            | HdEvent::RigRegistered { rig, .. }
+            | HdEvent::RigClosed { rig }
+            | HdEvent::HeartbeatsRecorded { rig, .. }
+            | HdEvent::ShiftBroken { rig, .. }
+            | HdEvent::ShiftEndedV2 { rig, .. } => Some(*rig),
+            HdEvent::Other { .. } => None,
+        }
+    }
+}
+
+/// Exact length of each known tag, tag byte included (index = tag).
+pub const EVENT_LEN: [usize; 11] = [0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83];
+
+/// Parse one `sol_log_data` payload. A known tag with the wrong length is `None` (ignored).
 pub fn parse_event(b: &[u8]) -> Option<HdEvent> {
     let (&tag, body) = b.split_first()?;
-    match tag {
-        1 if body.len() == 32 + 8 + 8 + 4 + 8 => Some(HdEvent::RigDug {
-            rig: read_address(body, 0)?,
+    if let Some(&len) = EVENT_LEN.get(usize::from(tag)) {
+        if tag != 0 && b.len() != len {
+            return None;
+        }
+    }
+    let rig = || read_address(body, 0);
+    Some(match tag {
+        1 => HdEvent::RigDug {
+            rig: rig()?,
             round_id: read_u64(body, 32)?,
             lamports: read_u64(body, 40)?,
             mask: read_u32(body, 48)?,
             ema_ev: read_u64(body, 52)?,
-        }),
-        2 if body.len() == 32 + 8 + 4 => Some(HdEvent::RigSkipped {
-            rig: read_address(body, 0)?,
+        },
+        2 => HdEvent::RigSkipped { rig: rig()?, round_id: read_u64(body, 32)?, error: read_u32(body, 40)? },
+        3 => HdEvent::ShiftArmed { rig: rig()?, shift_id: read_u64(body, 32)? },
+        4 => HdEvent::ShiftEnded {
+            rig: rig()?,
+            shift_id: read_u64(body, 32)?,
+            dark_rounds: read_u64(body, 40)?,
+            rounds_dug: read_u64(body, 48)?,
+            lamports: read_u64(body, 56)?,
+            reason: read_u8(body, 64)?,
+        },
+        5 => HdEvent::SeekerVerified {
+            rig: rig()?,
+            sgt_mint: read_address(body, 32)?,
+            member_number: read_u64(body, 64)?,
+        },
+        6 => HdEvent::RigRegistered {
+            rig: rig()?,
+            authority: read_address(body, 32)?,
+            tier: read_u8(body, 64)?,
+            attestation_level: read_u8(body, 65)?,
+        },
+        7 => HdEvent::RigClosed { rig: rig()? },
+        8 => HdEvent::HeartbeatsRecorded {
+            rig: rig()?,
             round_id: read_u64(body, 32)?,
-            error: read_u32(body, 40)?,
-        }),
-        3 if body.len() == 32 + 8 => {
-            Some(HdEvent::ShiftArmed { rig: read_address(body, 0)?, shift_id: read_u64(body, 32)? })
-        }
-        1..=3 => None,
-        _ => Some(HdEvent::Other { tag, body: body.to_vec() }),
-    }
+            dark_rounds_added: read_u64(body, 40)?,
+        },
+        9 => HdEvent::ShiftBroken { rig: rig()?, shift_id: read_u64(body, 32)?, reason: read_u8(body, 40)? },
+        10 => HdEvent::ShiftEndedV2 {
+            rig: rig()?,
+            shift_id: read_u64(body, 32)?,
+            dark_rounds: read_u64(body, 40)?,
+            rounds_dug: read_u64(body, 48)?,
+            lamports: read_u64(body, 56)?,
+            reason: read_u8(body, 64)?,
+            start_round: read_u64(body, 65)?,
+            end_round: read_u64(body, 73)?,
+            mode: read_u8(body, 81)?,
+        },
+        0 => return None,
+        _ => HdEvent::Other { tag, body: body.to_vec() },
+    })
 }
 
 /// Extract `heads_down` events from transaction logs. Only `Program data:` lines emitted
 /// while `program_id` is the innermost executing program are considered, so an event-shaped
 /// payload logged by ORE, the entropy program or anything else is ignored.
+///
+/// `end_shift` emits `ShiftEnded` (tag 4) and then its superset `ShiftEndedV2` (tag 10): a
+/// tag 4 is dropped when a tag 10 for the same rig and shift follows in the same heads_down
+/// instruction, so a shift is never counted twice (a v1 program's lone tag 4 is kept).
 pub fn events_from_logs(program_id: &Address, logs: &[String]) -> Vec<HdEvent> {
     use base64::Engine;
     let pid = program_id.to_string();
     let mut stack: Vec<String> = Vec::new();
-    let mut out = Vec::new();
+    let mut invocation = 0usize;
+    let mut out: Vec<(usize, HdEvent)> = Vec::new();
     for line in logs {
         if let Some(rest) = line.strip_prefix("Program ") {
             let mut parts = rest.split_whitespace();
             let first = parts.next().unwrap_or("");
             let second = parts.next().unwrap_or("");
             if second == "invoke" {
+                if first == pid {
+                    invocation += 1;
+                }
                 stack.push(first.to_string());
                 continue;
             }
@@ -765,14 +1354,25 @@ pub fn events_from_logs(program_id: &Address, logs: &[String]) -> Vec<HdEvent> {
                 for field in rest.trim_start_matches("data:").split_whitespace() {
                     if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(field) {
                         if let Some(ev) = parse_event(&bytes) {
-                            out.push(ev);
+                            out.push((invocation, ev));
                         }
                     }
                 }
             }
         }
     }
-    out
+    let superseded = |inv: usize, r: &Address, s: u64| {
+        out.iter().any(|(i, e)| {
+            *i == inv && matches!(e, HdEvent::ShiftEndedV2 { rig, shift_id, .. } if rig == r && *shift_id == s)
+        })
+    };
+    out.iter()
+        .filter(|(inv, e)| match e {
+            HdEvent::ShiftEnded { rig, shift_id, .. } => !superseded(*inv, rig, *shift_id),
+            _ => true,
+        })
+        .map(|(_, e)| e.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -802,6 +1402,12 @@ mod tests {
         assert_eq!(DigEntry::decode(&b), Some(e));
         assert_eq!(DigEntry::decode(&b[..19]), None);
         assert_eq!(DigEntry::reuse_lease().encode()[0], 0xFF);
+        let mut list = vec![2u8];
+        list.extend_from_slice(&b);
+        list.extend_from_slice(&DigEntry::reuse_lease().encode());
+        assert_eq!(DigEntry::decode_list(&list), Some(vec![e, DigEntry::reuse_lease()]));
+        assert_eq!(DigEntry::decode_list(&list[..40]), None);
+        assert_eq!(DigEntry::decode_list(&[0]), None);
     }
 
     #[test]
@@ -847,8 +1453,44 @@ mod tests {
     }
 
     #[test]
-    fn rig_encode_decode_roundtrip_and_checks() {
-        let rig = Rig {
+    fn record_signal_and_end_shift_builders() {
+        let rig = Address::new_from_array([1; 32]);
+        let auth = Address::new_from_array([2; 32]);
+        let e = DigEntry { hb_ix: 2, hb_sig_index: 1, counter: 9, round_id: 10, lease_rounds: 3 };
+        let ix = record_heartbeats_ix(&PROGRAM_ID, &[(rig, e)]).unwrap();
+        assert_eq!(ix.data.len(), 22);
+        assert_eq!(&ix.data[..2], &[7, 1]);
+        assert_eq!(ix.accounts.len(), 3);
+        assert_eq!((ix.accounts[0].pubkey, ix.accounts[0].is_writable), (ore::BOARD_ADDRESS, false));
+        assert_eq!((ix.accounts[1].pubkey, ix.accounts[1].is_writable), (INSTRUCTIONS_SYSVAR_ID, false));
+        assert_eq!((ix.accounts[2].pubkey, ix.accounts[2].is_writable), (rig, true));
+        assert!(ix.accounts.iter().all(|m| !m.is_signer));
+        let too_many: Vec<_> = (0..33u8).map(|i| (Address::new_from_array([i; 32]), e)).collect();
+        assert_eq!(record_heartbeats_ix(&PROGRAM_ID, &too_many), Err(DigBuildError::TooMany(33)));
+
+        let ix = signal_p256_ix(&PROGRAM_ID, SignalKind::Break, &rig, &auth, reason::PICKUP, 4, 2, 0);
+        assert_eq!(hex::encode(&ix.data), "08010104000000000000000200");
+        assert_eq!(ix.accounts.iter().map(|m| (m.pubkey, m.is_signer, m.is_writable)).collect::<Vec<_>>(), vec![
+            (rig, false, true),
+            (auth, false, false),
+            (INSTRUCTIONS_SYSVAR_ID, false, false)
+        ]);
+        let ix = signal_p256_ix(&PROGRAM_ID, SignalKind::Freeze, &rig, &auth, reason::FREEZE, 5, 0, 0);
+        assert_eq!(hex::encode(&ix.data), "09010305000000000000000000");
+        assert!(SignalKind::Break.reason_ok(7) && !SignalKind::Break.reason_ok(3) && !SignalKind::Break.reason_ok(0));
+        assert!(SignalKind::Freeze.reason_ok(3) && !SignalKind::Freeze.reason_ok(1));
+
+        let caller = Address::new_from_array([3; 32]);
+        let ix = end_shift_ix(&PROGRAM_ID, &caller, &rig, 2);
+        assert_eq!(ix.data, vec![11]);
+        assert_eq!(ix.accounts[2].pubkey, shift_log_pda(&PROGRAM_ID, &rig, 2).0);
+        assert!(ix.accounts[0].is_signer && ix.accounts[0].is_writable);
+        assert!(ix.accounts[1].is_writable && ix.accounts[2].is_writable);
+        assert!(!ix.accounts[3].is_writable && !ix.accounts[4].is_writable);
+    }
+
+    fn sample_rig() -> Rig {
+        Rig {
             bump: 254,
             authority: Address::new_from_array([7; 32]),
             p256_pubkey: [3; 33],
@@ -888,13 +1530,27 @@ mod tests {
             streak: 36,
             freezes_left: 2,
             last_shift_day: 37,
-        };
+            shift_open: true,
+            break_reason: 7,
+            ore_automation_bump: 253,
+            ore_miner_bump: 252,
+            shift_start_ts: 38,
+        }
+    }
+
+    #[test]
+    fn rig_encode_decode_roundtrip_and_checks() {
+        let rig = sample_rig();
         let d = rig.encode();
         assert_eq!(d.len(), RIG_LEN);
         assert_eq!(d[RIG_STATE_OFFSET], 2);
+        assert_eq!(&d[336..340], &[1, 7, 253, 252]);
+        assert_eq!(&d[344..352], &38i64.to_le_bytes());
+        assert!(d[352..].iter().all(|b| *b == 0), "reserved stays zero");
         assert_eq!(Rig::decode(&PROGRAM_ID, &PROGRAM_ID, &d).unwrap(), rig);
         assert!(rig.focus_only());
         assert_eq!(rig.tiles(), 17);
+        assert_eq!(rig.mode(), 2);
         let other = Address::new_from_array([5; 32]);
         assert!(matches!(Rig::decode(&PROGRAM_ID, &other, &d), Err(AccountError::WrongOwner(_))));
         let mut bad = d.clone();
@@ -907,16 +1563,41 @@ mod tests {
             Rig::decode(&PROGRAM_ID, &PROGRAM_ID, &d[..383]),
             Err(AccountError::WrongSize { .. })
         ));
+        assert_eq!(Rig::decode(&PROGRAM_ID, &PROGRAM_ID, &Rig::default().encode()).unwrap(), Rig::default());
     }
 
     #[test]
-    fn lease_range_rules() {
+    fn lease_rules_mirror_the_program() {
         assert_eq!(lease_range(100, 1, 3), Some((100, 100)));
         assert_eq!(lease_range(100, 3, 2), Some((100, 101)));
         assert_eq!(lease_range(100, 0, 3), None);
         assert_eq!(lease_range(100, 2, 0), None);
         assert_eq!(lease_range(u64::MAX, 2, 3), None);
         assert_eq!(lease_range(u64::MAX, 1, 3), Some((u64::MAX, u64::MAX)));
+        // programs/heads-down/program/src/logic.rs leases_extend_forward_and_count_dark_rounds_and_gaps
+        let g = grant_lease(0, 0, 100, 100, 3).unwrap();
+        assert_eq!(g, LeaseGrant { from: 100, to: 102, dark_added: 3, gap_added: 0 });
+        let g2 = grant_lease(g.from, g.to, 100, 101, 3).unwrap();
+        assert_eq!(g2, LeaseGrant { from: 101, to: 103, dark_added: 1, gap_added: 0 });
+        assert_eq!(grant_lease(g2.from, g2.to, 100, 99, 3).unwrap(), LeaseGrant { from: 101, to: 103, dark_added: 0, gap_added: 0 });
+        assert_eq!(grant_lease(g2.from, g2.to, 100, 107, 1).unwrap(), LeaseGrant { from: 107, to: 107, dark_added: 1, gap_added: 3 });
+        assert_eq!(grant_lease(0, 0, 100, 104, 1).unwrap(), LeaseGrant { from: 104, to: 104, dark_added: 1, gap_added: 4 });
+        assert_eq!(grant_lease(0, 0, 100, 98, 3).unwrap(), LeaseGrant { from: 98, to: 100, dark_added: 1, gap_added: 0 });
+        assert_eq!(grant_lease(0, 0, 1, 5, 0), None);
+        assert_eq!(grant_lease(0, 0, 1, u64::MAX, 3), None);
+        // lease_covers needs lease_to != 0.
+        let mut r = Rig::default();
+        assert!(!r.lease_covers(0));
+        r.lease_to_round = 5;
+        assert!(r.lease_covers(0) && r.lease_covers(5) && !r.lease_covers(6));
+    }
+
+    fn event_bytes(tag: u8, fields: &[&[u8]]) -> Vec<u8> {
+        let mut v = vec![tag];
+        for f in fields {
+            v.extend_from_slice(f);
+        }
+        v
     }
 
     #[test]
@@ -924,16 +1605,8 @@ mod tests {
         use base64::Engine;
         let enc = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
         let rig = Address::new_from_array([4; 32]);
-        let mut dug = vec![1u8];
-        dug.extend_from_slice(rig.as_ref());
-        dug.extend_from_slice(&5u64.to_le_bytes());
-        dug.extend_from_slice(&1_005_000u64.to_le_bytes());
-        dug.extend_from_slice(&0b111u32.to_le_bytes());
-        dug.extend_from_slice(&600u64.to_le_bytes());
-        let mut skipped = vec![2u8];
-        skipped.extend_from_slice(rig.as_ref());
-        skipped.extend_from_slice(&5u64.to_le_bytes());
-        skipped.extend_from_slice(&7u32.to_le_bytes());
+        let dug = event_bytes(1, &[rig.as_ref(), &5u64.to_le_bytes(), &1_000_000u64.to_le_bytes(), &0b111u32.to_le_bytes(), &600u64.to_le_bytes()]);
+        let skipped = event_bytes(2, &[rig.as_ref(), &5u64.to_le_bytes(), &7u32.to_le_bytes()]);
         let pid = PROGRAM_ID.to_string();
         let ore = ore::ORE_PROGRAM_ID.to_string();
         let logs = vec![
@@ -951,11 +1624,97 @@ mod tests {
         assert_eq!(
             evs,
             vec![
-                HdEvent::RigDug { rig, round_id: 5, lamports: 1_005_000, mask: 7, ema_ev: 600 },
+                HdEvent::RigDug { rig, round_id: 5, lamports: 1_000_000, mask: 7, ema_ev: 600 },
                 HdEvent::RigSkipped { rig, round_id: 5, error: 7 },
             ]
         );
         assert_eq!(error_name(7), "StaleHeartbeat");
-        assert_eq!(error_name(0x2560_000e), "P256Introspect");
+        assert_eq!(error_name(0x2560_000e), "P256MessageMismatch");
+        assert_eq!(error_name(0x2560_00ff), "P256Introspect");
+        assert_eq!(error_name(0x5347_0023), "SgtVerify");
+        for (c, n) in [
+            (24, "InvalidRigState"),
+            (25, "RoundNotActive"),
+            (26, "MinerNotCheckpointed"),
+            (27, "MotherlodeCondition"),
+            (28, "InsufficientAutomationBalance"),
+            (29, "OreNoOp"),
+            (30, "FocusOnly"),
+            (31, "ExecutorUnderfunded"),
+        ] {
+            assert_eq!(error_name(c), n);
+        }
+        assert_eq!(error_name(32), "Unknown");
+    }
+
+    #[test]
+    fn shift_ended_is_not_double_counted() {
+        use base64::Engine;
+        let enc = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        let rig = Address::new_from_array([6; 32]);
+        let v1 = event_bytes(4, &[rig.as_ref(), &2u64.to_le_bytes(), &1u64.to_le_bytes(), &0u64.to_le_bytes(), &0u64.to_le_bytes(), &[3]]);
+        let v2 = event_bytes(10, &[&v1[1..], &422_700u64.to_le_bytes(), &422_701u64.to_le_bytes(), &[0]]);
+        assert_eq!(v1.len(), 66);
+        assert_eq!(v2.len(), 83);
+        let pid = PROGRAM_ID.to_string();
+        let both = vec![
+            format!("Program {pid} invoke [1]"),
+            format!("Program data: {}", enc(&v1)),
+            format!("Program data: {}", enc(&v2)),
+            format!("Program {pid} success"),
+        ];
+        let evs = events_from_logs(&PROGRAM_ID, &both);
+        assert_eq!(evs.len(), 1, "{evs:?}");
+        assert!(matches!(evs[0], HdEvent::ShiftEndedV2 { shift_id: 2, start_round: 422_700, end_round: 422_701, mode: 0, reason: 3, .. }));
+        // A v1 program emits only tag 4: kept.
+        let only_v1 = vec![both[0].clone(), both[1].clone(), both[3].clone()];
+        assert!(matches!(events_from_logs(&PROGRAM_ID, &only_v1)[..], [HdEvent::ShiftEnded { shift_id: 2, .. }]));
+        // Two end_shift instructions (two rigs) in one transaction: one V2 each.
+        let rig2 = Address::new_from_array([7; 32]);
+        let mut v1b = v1.clone();
+        v1b[1..33].copy_from_slice(rig2.as_ref());
+        let mut v2b = v2.clone();
+        v2b[1..33].copy_from_slice(rig2.as_ref());
+        let two = vec![
+            format!("Program {pid} invoke [1]"),
+            format!("Program data: {}", enc(&v1)),
+            format!("Program data: {}", enc(&v2)),
+            format!("Program {pid} success"),
+            format!("Program {pid} invoke [1]"),
+            format!("Program data: {}", enc(&v1b)),
+            format!("Program data: {}", enc(&v2b)),
+            format!("Program {pid} success"),
+        ];
+        let evs = events_from_logs(&PROGRAM_ID, &two);
+        assert_eq!(evs.iter().filter(|e| matches!(e, HdEvent::ShiftEndedV2 { .. })).count(), 2);
+        assert_eq!(evs.len(), 2);
+    }
+
+    #[test]
+    fn every_tag_decodes_by_exact_length() {
+        let rig = Address::new_from_array([9; 32]);
+        let other = Address::new_from_array([8; 32]);
+        let samples: Vec<(Vec<u8>, &str)> = vec![
+            (event_bytes(5, &[rig.as_ref(), other.as_ref(), &20u64.to_le_bytes()]), "SeekerVerified"),
+            (event_bytes(6, &[rig.as_ref(), other.as_ref(), &[1, 2]]), "RigRegistered"),
+            (event_bytes(7, &[rig.as_ref()]), "RigClosed"),
+            (event_bytes(8, &[rig.as_ref(), &3u64.to_le_bytes(), &2u64.to_le_bytes()]), "HeartbeatsRecorded"),
+            (event_bytes(9, &[rig.as_ref(), &3u64.to_le_bytes(), &[8]]), "ShiftBroken"),
+            (event_bytes(3, &[rig.as_ref(), &3u64.to_le_bytes()]), "ShiftArmed"),
+        ];
+        for (b, name) in &samples {
+            let e = parse_event(b).unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(e.name(), *name);
+            assert_eq!(e.rig(), Some(rig));
+            let mut longer = b.clone();
+            longer.push(0);
+            assert_eq!(parse_event(&longer), None, "{name} with a trailing byte");
+            assert_eq!(parse_event(&b[..b.len() - 1]), None, "{name} truncated");
+        }
+        assert_eq!(parse_event(&[42, 1, 2]), Some(HdEvent::Other { tag: 42, body: vec![1, 2] }));
+        assert_eq!(parse_event(&[0]), None);
+        assert_eq!(parse_event(&[]), None);
+        assert_eq!(reason_name(8), "unlocked");
+        assert_eq!(mode_name(2), "focus_only");
     }
 }

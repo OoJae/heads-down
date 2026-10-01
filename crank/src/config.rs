@@ -57,6 +57,12 @@ pub struct Config {
     pub alt: AltConfig,
     /// Submit path.
     pub sender: SenderConfig,
+    /// Landing phone-signed BREAK / FREEZE.
+    pub signals: SignalsConfig,
+    /// `record_heartbeats` for focus-only rigs.
+    pub record: RecordConfig,
+    /// Permissionless `end_shift`.
+    pub end_shift: EndShiftConfig,
 }
 
 impl Default for Config {
@@ -74,6 +80,163 @@ impl Default for Config {
             intake: IntakeToml::default(),
             alt: AltConfig::default(),
             sender: SenderConfig::default(),
+            signals: SignalsConfig::default(),
+            record: RecordConfig::default(),
+            end_shift: EndShiftConfig::default(),
+        }
+    }
+}
+
+/// Landing phone-signed BREAK / FREEZE (`break_shift` / `freeze_rig`, P-256 path). The crank
+/// pays one transaction signature, one secp256r1 signature and the priority fee per signal;
+/// the program does not reimburse these.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SignalsConfig {
+    /// Land signals (false: the intake answers `rate_limited` and the phone keeps its record).
+    pub enabled: bool,
+    /// Per-rig burst.
+    pub rig_burst: u32,
+    /// Per-rig sustained rate.
+    pub rig_per_minute: f64,
+    /// Fee budget for signals, lamports per hour (a rolling bucket).
+    pub max_lamports_per_hour: u64,
+    /// Compute limit of a signal transaction (measured: see README).
+    pub cu_limit: u32,
+    /// Priority fee (micro-lamports per CU): a BREAK should land within a slot or two.
+    pub cu_price_micro_lamports: u64,
+    /// Simulate first; a signal the program would refuse is not sent (and not paid for).
+    pub simulate: bool,
+    /// Attempts with a fresh blockhash when one expires unconfirmed.
+    pub max_attempts: u32,
+    /// Queue length between the intake and the lander.
+    pub queue: usize,
+}
+
+impl Default for SignalsConfig {
+    fn default() -> Self {
+        SignalsConfig {
+            enabled: true,
+            rig_burst: 4,
+            rig_per_minute: 1.0,
+            max_lamports_per_hour: 2_000_000,
+            // Measured with the real program: 1,429 CU for a BREAK or FREEZE (fork suite).
+            cu_limit: 5_000,
+            cu_price_micro_lamports: 20_000,
+            simulate: true,
+            max_attempts: 3,
+            queue: 256,
+        }
+    }
+}
+
+impl SignalsConfig {
+    /// Estimated lamports per landed signal: 2 signatures + the priority fee.
+    pub fn est_fee(&self) -> u64 {
+        crate::tx::fee_for(1, self.cu_limit, self.cu_price_micro_lamports, crate::tx::LAMPORTS_PER_SIGNATURE)
+    }
+
+    /// The hub's runtime knobs.
+    pub fn hub(&self) -> crate::signal::SignalHubConfig {
+        crate::signal::SignalHubConfig {
+            enabled: self.enabled,
+            rig_quota: Quota::new(self.rig_burst, self.rig_per_minute / 60.0),
+            max_lamports_per_hour: self.max_lamports_per_hour,
+            est_fee: self.est_fee(),
+            queue: self.queue,
+            max_rigs: 100_000,
+        }
+    }
+}
+
+/// `record_heartbeats` for focus-only rigs (`plan_flags` bit 0), so their dark rounds count
+/// on-chain. No deploy happens and nothing reimburses the crank: the fees are budgeted.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct RecordConfig {
+    /// Record heartbeats at all.
+    pub enabled: bool,
+    /// Record a rig at most every N rounds (from its on-chain `lease_from_round`). With N no
+    /// larger than the phone's lease, every round of the shift counts as dark.
+    pub every_rounds: u64,
+    /// Also record rigs whose cost gate is closed this round (off: the crank pays for them).
+    pub gate_closed_rigs: bool,
+    /// Seconds after a round is first seen before its record pass (the phone's heartbeat for
+    /// the new round arrives first).
+    pub delay_secs: u64,
+    /// Rigs per transaction at most (one precompile instruction holds 8).
+    pub max_rigs_per_tx: usize,
+    /// Fee budget for record transactions, lamports per hour.
+    pub max_lamports_per_hour: u64,
+    /// Compute limit: `base + per_rig × n`.
+    pub cu_base: u32,
+    /// Compute per recorded rig.
+    pub cu_per_rig: u32,
+}
+
+impl Default for RecordConfig {
+    fn default() -> Self {
+        RecordConfig {
+            enabled: true,
+            every_rounds: 3,
+            gate_closed_rigs: false,
+            delay_secs: 20,
+            max_rigs_per_tx: 8,
+            max_lamports_per_hour: 2_000_000,
+            // Measured with the real program: ~1,500 CU per recorded rig (fork suite).
+            cu_base: 3_000,
+            cu_per_rig: 4_000,
+        }
+    }
+}
+
+impl RecordConfig {
+    /// Compute estimate for record batches.
+    pub fn cu_estimate(&self) -> CuEstimate {
+        CuEstimate { base: self.cu_base, per_rig: self.cu_per_rig, per_checkpoint: 0 }
+    }
+
+    /// Planner policy.
+    pub fn policy(&self, clock_margin_secs: i64) -> crate::planner::RecordPolicy {
+        crate::planner::RecordPolicy {
+            every_rounds: self.every_rounds,
+            gate_closed_rigs: self.gate_closed_rigs,
+            clock_margin_secs,
+        }
+    }
+}
+
+/// Permissionless `end_shift` for shifts past their window whose lease has expired. The
+/// caller pays the ShiftLog rent (128 bytes: 1,781,760 lamports at the default rent) plus the
+/// fee, and nothing reimburses it, so it is capped.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct EndShiftConfig {
+    /// End stale shifts at all.
+    pub enabled: bool,
+    /// Seconds after `plan_window_end_ts` before the crank ends a shift (the cluster clock
+    /// must be past the window; the rig's wallet can end it any time).
+    pub grace_secs: i64,
+    /// Shifts ended per pass at most.
+    pub max_per_pass: usize,
+    /// Rent + fees per day at most (a rolling bucket), in lamports.
+    pub max_lamports_per_day: u64,
+    /// How often to look for stale shifts.
+    pub poll_secs: u64,
+    /// Compute limit of an `end_shift` transaction.
+    pub cu_limit: u32,
+}
+
+impl Default for EndShiftConfig {
+    fn default() -> Self {
+        EndShiftConfig {
+            enabled: true,
+            grace_secs: 60,
+            max_per_pass: 4,
+            max_lamports_per_day: 50_000_000,
+            poll_secs: 60,
+            // Measured with the real program: 5,195 CU (fork suite).
+            cu_limit: 15_000,
         }
     }
 }
@@ -407,6 +570,24 @@ impl Config {
                 return bad("alt.tables has an invalid address");
             }
         }
+        let s = &self.signals;
+        if s.rig_burst == 0 || !(s.rig_per_minute.is_finite() && s.rig_per_minute >= 0.0) {
+            return bad("signals.rig_burst must be >= 1 and signals.rig_per_minute a non-negative number");
+        }
+        if s.cu_limit == 0 || s.cu_limit > crate::tx::MAX_COMPUTE_UNITS || s.max_attempts == 0 || s.queue == 0 {
+            return bad("signals.cu_limit must be 1..=1400000, signals.max_attempts and signals.queue >= 1");
+        }
+        if s.cu_price_micro_lamports > self.dig.max_cu_price_micro_lamports {
+            return bad("signals.cu_price_micro_lamports exceeds dig.max_cu_price_micro_lamports");
+        }
+        let r = &self.record;
+        if r.every_rounds == 0 || r.max_rigs_per_tx == 0 || r.max_rigs_per_tx > hd::MAX_RIGS_PER_IX {
+            return bad("record.every_rounds must be >= 1 and record.max_rigs_per_tx 1..=32");
+        }
+        let e = &self.end_shift;
+        if e.max_per_pass == 0 || e.poll_secs == 0 || e.grace_secs < 0 || e.cu_limit == 0 {
+            return bad("end_shift.max_per_pass and end_shift.poll_secs must be >= 1, end_shift.grace_secs >= 0");
+        }
         Ok(())
     }
 
@@ -466,5 +647,33 @@ mod tests {
             .finalize(&no_env)
             .is_err(), "sender without tip accounts");
         assert!(Config::from_toml("program_id = \"nope\"").unwrap().finalize(&no_env).is_err());
+    }
+
+    #[test]
+    fn signal_record_and_end_shift_sections() {
+        let c = Config::from_toml("").unwrap().finalize(&no_env).unwrap();
+        assert!(c.signals.enabled && c.record.enabled && c.end_shift.enabled);
+        assert_eq!(c.signals.est_fee(), 10_000 + 100, "2 signatures + 5k CU x 20,000 micro-lamports");
+        let t = "[signals]\nenabled = false\nmax_lamports_per_hour = 5\n[record]\nevery_rounds = 1\ngate_closed_rigs = true\n[end_shift]\nmax_lamports_per_day = 0\n";
+        let c = Config::from_toml(t).unwrap().finalize(&no_env).unwrap();
+        assert!(!c.signals.hub().enabled);
+        assert_eq!(c.record.policy(5).every_rounds, 1);
+        assert_eq!(c.end_shift.max_lamports_per_day, 0);
+        assert!(Config::from_toml("[record]\nevery_rounds = 0").unwrap().finalize(&no_env).is_err());
+        assert!(Config::from_toml("[record]\nmax_rigs_per_tx = 33").unwrap().finalize(&no_env).is_err());
+        assert!(Config::from_toml("[signals]\ncu_limit = 0").unwrap().finalize(&no_env).is_err());
+        assert!(Config::from_toml("[end_shift]\ngrace_secs = -1").unwrap().finalize(&no_env).is_err());
+        assert!(Config::from_toml("[signals]\nsurprise = 1").is_err());
+    }
+
+    #[test]
+    fn the_example_config_is_valid_and_matches_the_defaults() {
+        let env = |k: &str| (k == "HELIUS_API_KEY").then(|| "abc".to_string());
+        let c = Config::from_toml(include_str!("../crank.example.toml")).unwrap().finalize(&env).unwrap();
+        let d = Config::default();
+        assert_eq!(c.signals.est_fee(), d.signals.est_fee());
+        assert_eq!((c.signals.cu_limit, c.signals.max_lamports_per_hour), (d.signals.cu_limit, d.signals.max_lamports_per_hour));
+        assert_eq!((c.record.every_rounds, c.record.cu_base, c.record.cu_per_rig), (d.record.every_rounds, d.record.cu_base, d.record.cu_per_rig));
+        assert_eq!((c.end_shift.cu_limit, c.end_shift.max_lamports_per_day), (d.end_shift.cu_limit, d.end_shift.max_lamports_per_day));
     }
 }

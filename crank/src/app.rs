@@ -19,7 +19,8 @@ use crate::metrics::Metrics;
 use crate::mirror::{HeartbeatMirror, NoMirror};
 use crate::rpc::{redact_url, RpcClient, RpcRigSource};
 use crate::sender::Submitter;
-use crate::{gate, hd, keys, ore};
+use crate::signal::SignalHub;
+use crate::{demo, gate, hd, keys, ore};
 
 /// Run the crank until the chain watcher stops (the binary adds Ctrl-C handling).
 pub async fn run(cfg: Config) -> anyhow::Result<()> {
@@ -64,9 +65,18 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         store: store.clone(),
     };
     let mirror: Arc<dyn HeartbeatMirror> = Arc::new(NoMirror);
-    let intake = Intake::new(cfg.intake.to_runtime(), verifier, metrics.clone(), breaker.clone(), chain_rx.clone(), mirror);
+    let signals = Arc::new(SignalHub::new(cfg.signals.hub()));
+    let intake = Intake::new(
+        cfg.intake.to_runtime(),
+        verifier,
+        signals.clone(),
+        metrics.clone(),
+        breaker.clone(),
+        chain_rx.clone(),
+        mirror,
+    );
     let listener = tokio::net::TcpListener::bind(&cfg.listen).await?;
-    tracing::info!(listen = %cfg.listen, "intake listening (/ws, /healthz, /metrics)");
+    tracing::info!(listen = %cfg.listen, signals = cfg.signals.enabled, "intake listening (/ws, /v1/heartbeats, /healthz, /metrics)");
     tokio::spawn(intake::serve(listener, intake::router(intake.clone())));
 
     let submitter = make_submitter(&cfg, rpc.clone())?;
@@ -79,6 +89,7 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         metrics,
         breaker,
         store,
+        signals,
         chain_rx,
         Box::new(move |a, r| seed.verifier().rigs.insert(a, r)),
     );
@@ -147,13 +158,39 @@ pub async fn check(cfg: Config) -> anyhow::Result<()> {
     let board = v.board.ok_or_else(|| anyhow::anyhow!("no board"))?;
     let heartbeats = HashMap::new();
     let fetched = crank::fetch_for_plan(&rpc, &program_id, board.round_id, &heartbeats, &breaker).await?;
-    println!("rigs           {} armed/down, {} with a covering lease", fetched.all_rigs.len(), fetched.rigs.len());
+    println!(
+        "rigs           {} armed/down/cooling, {} dig candidates with a covering lease",
+        fetched.all_rigs.len(),
+        fetched.rigs.len()
+    );
     let plan = crank::plan_with(&program_id, v, &hd_cfg, &fetched, &heartbeats, &cfg.dig.policy(), &|_: &Address, _| false)?;
     for d in &plan.digs {
-        println!("  dig  {} per_tile {} x {} (+fee) = {}", d.dig.accounts.rig, d.per_tile, d.tiles, d.expected_debit);
+        println!(
+            "  dig  {} {} x {} = {} on squares + fee {} = debit {}",
+            d.dig.accounts.rig, d.per_tile, d.tiles, d.squares_lamports, d.fee_due, d.expected_debit
+        );
     }
     for (a, s) in &plan.skips {
         println!("  skip {a} {}", s.label());
     }
+    let open = rpc.get_program_accounts(&program_id, &crate::rpc::open_shift_filters()).await?.len();
+    println!("open shifts    {open}");
     Ok(())
+}
+
+/// `hd-crank decode <signature>`: the heads_down events of a transaction, for captions.
+pub async fn decode(cfg: Config, signature: String, json: bool) -> anyhow::Result<()> {
+    let rpc = RpcClient::new(cfg.rpc_url.clone(), cfg.commitment.clone(), Duration::from_secs(15))?;
+    demo::decode(&rpc, &cfg.program_id(), &signature, json).await
+}
+
+/// `hd-crank replay --signature <sig>`: resubmit a landed dig's heartbeats (see [`demo`]).
+pub async fn replay(cfg: Config, opts: demo::ReplayOpts) -> anyhow::Result<()> {
+    let path = cfg
+        .keypair_path
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no keypair: pass --keypair or set HD_CRANK_KEYPAIR (it pays the replay's fee)"))?;
+    let key = keys::load_keypair(&path)?;
+    let rpc = RpcClient::new(cfg.rpc_url.clone(), cfg.commitment.clone(), Duration::from_secs(15))?;
+    demo::replay(&rpc, &cfg.program_id(), &key, opts).await
 }

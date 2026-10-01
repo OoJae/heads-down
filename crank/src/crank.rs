@@ -2,11 +2,14 @@
 //!
 //! ```text
 //! chain view ──► (new round) maintenance: prune, lookup-table sync, checkpoint sweep
-//!            └─► (slots_left <= deploy_margin) dig pass:
-//!                  getProgramAccounts(Armed, Down) → keep rigs with a lease or a held heartbeat
-//!                  → getMultipleAccounts(Automations, Miners, Executor) → planner
-//!                  → pack → [simulate → size CU | bisect on failure] → sign → send
-//!                  → ledger (rig, round) pending → confirm task → events → ledger / metrics
+//!            ├─► (slots_left <= deploy_margin) dig pass:
+//!            │     getProgramAccounts(Armed, Down, Cooling) → keep rigs with a lease or a held heartbeat
+//!            │     → getMultipleAccounts(Automations, Miners, Executor) → planner
+//!            │     → pack → [simulate → size CU | bisect on failure] → sign → send
+//!            │     → ledger (rig, round) pending → confirm task → events → ledger / metrics
+//!            ├─► (delay after the round starts) record pass: focus-only rigs → record_heartbeats
+//!            └─► every end_shift.poll_secs: permissionless end_shift for stale shifts
+//! intake ──► SignalHub ──► signal lander: phone-signed BREAK / FREEZE → break_shift / freeze_rig
 //! ```
 //!
 //! Every pass re-reads the chain, so a retry never reuses stale instructions (the fork
@@ -16,13 +19,13 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_message::AddressLookupTableAccount;
 use solana_signer::Signer;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use crate::account::RawAccount;
 use crate::alt::{self, LookupTable};
@@ -30,15 +33,16 @@ use crate::breaker::Breaker;
 use crate::chain::ChainView;
 use crate::config::Config;
 use crate::hd::{self, HdConfig, HdEvent, Rig, RigAccounts, RigState};
-use crate::heartbeat::{HeartbeatStore, VerifiedHeartbeat};
+use crate::heartbeat::{HeartbeatStore, VerifiedHeartbeat, VerifiedSignal};
 use crate::keys::CrankKey;
 use crate::ledger::{DigStatus, Ledger, RetryPolicy};
 use crate::metrics::Metrics;
 use crate::ore::{self, Miner, OreKind};
-use crate::planner::{self, Plan, Policy, SubmittedCheck};
+use crate::planner::{self, Plan, Policy, Skip, SubmittedCheck};
 use crate::rpc::{self, Filter, RpcClient};
 use crate::sender::{ConfirmPolicy, Outcome, Submitter};
-use crate::tx::{self, BuildParams, RigDig, TxFormat};
+use crate::signal::{FeeBudget, SignalHub, SignalState};
+use crate::tx::{self, BuildParams, RecordRig, RigDig, TxFormat};
 
 /// Slots between planning and the expected landing slot.
 pub const LANDING_LEAD_SLOTS: u64 = 2;
@@ -48,6 +52,12 @@ pub const MAX_SIMULATIONS_PER_PASS: usize = 16;
 pub const MAX_ALT_TXS_PER_ROUND: usize = 4;
 /// Checkpoint sweep transactions per sweep at most.
 pub const MAX_SWEEP_TXS: usize = 5;
+/// Record transactions per round at most.
+pub const MAX_RECORD_TXS_PER_ROUND: usize = 8;
+/// Do not retry `end_shift` for the same (rig, shift) within this long.
+pub const END_SHIFT_RETRY_AFTER: Duration = Duration::from_secs(600);
+/// ShiftLog rent at the default rent parameters, used if RPC cannot tell.
+pub const SHIFT_LOG_RENT_FALLBACK: u64 = 1_781_760;
 
 fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -60,10 +70,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     }
 }
 
-/// Read every Armed and Down Rig.
+/// Read every Rig that can take a heartbeat: Armed, Down and Cooling.
 pub async fn load_diggable_rigs(rpc: &RpcClient, program_id: &Address) -> anyhow::Result<Vec<(Address, Rig)>> {
     let mut out = Vec::new();
-    for state in [RigState::Armed, RigState::Down] {
+    for state in [RigState::Armed, RigState::Down, RigState::Cooling] {
         for (addr, acc) in rpc.get_program_accounts(program_id, &rpc::rig_filters(state)).await? {
             if let Ok(r) = Rig::decode(program_id, &acc.owner, &acc.data) {
                 out.push((addr, r));
@@ -77,7 +87,7 @@ pub async fn load_diggable_rigs(rpc: &RpcClient, program_id: &Address) -> anyhow
 pub struct Fetched {
     /// Candidate rigs after the cheap pre-filter.
     pub rigs: Vec<(Address, Rig)>,
-    /// All Armed/Down rigs read (for lookup-table sync and the intake cache).
+    /// All Armed/Down/Cooling rigs read (lookup-table sync, the intake cache, the record pass).
     pub all_rigs: Vec<(Address, Rig)>,
     /// Automations.
     pub automations: HashMap<Address, Option<RawAccount>>,
@@ -90,8 +100,8 @@ pub struct Fetched {
 }
 
 /// Read rigs and their ORE accounts, pre-filtering rigs that cannot dig this round anyway
-/// (already dug, or neither a covering lease nor a held heartbeat). ORE-owned user
-/// accounts that fail their layout pin trip the breaker.
+/// (focus-only, already dug, or neither a covering lease nor a held heartbeat). ORE-owned
+/// user accounts that fail their layout pin trip the breaker.
 pub async fn fetch_for_plan(
     rpc: &RpcClient,
     program_id: &Address,
@@ -102,7 +112,9 @@ pub async fn fetch_for_plan(
     let all_rigs = load_diggable_rigs(rpc, program_id).await?;
     let rigs: Vec<(Address, Rig)> = all_rigs
         .iter()
-        .filter(|(a, r)| r.last_dug_round != round_id && (r.lease_covers(round_id) || heartbeats.contains_key(a)))
+        .filter(|(a, r)| {
+            !r.focus_only() && r.last_dug_round != round_id && (r.lease_covers(round_id) || heartbeats.contains_key(a))
+        })
         .cloned()
         .collect();
     let executor = hd::executor_pda(program_id).0;
@@ -182,6 +194,7 @@ pub struct Crank {
     metrics: Arc<Metrics>,
     breaker: Arc<Breaker>,
     store: Arc<HeartbeatStore>,
+    signals: Arc<SignalHub>,
     chain: watch::Receiver<ChainView>,
     ledger: Mutex<Ledger>,
     alts: Mutex<Vec<LookupTable>>,
@@ -190,6 +203,10 @@ pub struct Crank {
     rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
     nonce: AtomicU64,
     alt_sync: tokio::sync::Mutex<()>,
+    record_budget: FeeBudget,
+    end_shift_budget: FeeBudget,
+    end_shift_tried: Mutex<HashMap<(Address, u64), Instant>>,
+    shift_log_rent: AtomicU64,
 }
 
 impl Crank {
@@ -203,11 +220,14 @@ impl Crank {
         metrics: Arc<Metrics>,
         breaker: Arc<Breaker>,
         store: Arc<HeartbeatStore>,
+        signals: Arc<SignalHub>,
         chain: watch::Receiver<ChainView>,
         rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
     ) -> Arc<Self> {
         let program_id = cfg.program_id();
         Arc::new(Crank {
+            record_budget: FeeBudget::new(cfg.record.max_lamports_per_hour, Duration::from_secs(3600)),
+            end_shift_budget: FeeBudget::new(cfg.end_shift.max_lamports_per_day, Duration::from_secs(86_400)),
             cfg,
             program_id,
             rpc,
@@ -216,6 +236,7 @@ impl Crank {
             metrics,
             breaker,
             store,
+            signals,
             chain,
             ledger: Mutex::new(Ledger::new()),
             alts: Mutex::new(Vec::new()),
@@ -224,6 +245,8 @@ impl Crank {
             rig_seed,
             nonce: AtomicU64::new(0),
             alt_sync: tokio::sync::Mutex::new(()),
+            end_shift_tried: Mutex::new(HashMap::new()),
+            shift_log_rent: AtomicU64::new(0),
         })
     }
 
@@ -245,8 +268,16 @@ impl Crank {
             tracing::warn!(error = %e, "could not load lookup tables");
         }
         tokio::spawn(self.clone().poll_loop());
+        if let Some(rx) = self.signals.take_receiver() {
+            tokio::spawn(self.clone().signal_loop(rx));
+        }
+        if self.cfg.end_shift.enabled {
+            tokio::spawn(self.clone().end_shift_loop());
+        }
         let mut chain = self.chain.clone();
         let mut current_round = 0u64;
+        let mut round_seen = Instant::now();
+        let mut recorded_round = 0u64;
         let mut last_pass_slot: Option<u64> = None;
         loop {
             if let Ok(Err(_)) = tokio::time::timeout(Duration::from_millis(400), chain.changed()).await {
@@ -256,11 +287,28 @@ impl Crank {
             let Some(board) = view.board.filter(|_| view.ready()) else { continue };
             if board.round_id != current_round {
                 current_round = board.round_id;
+                round_seen = Instant::now();
                 last_pass_slot = None;
                 let this = self.clone();
                 tokio::spawn(async move { this.on_new_round(board.round_id).await });
             }
-            if !self.cfg.dig.enabled || self.breaker.is_tripped() {
+            if self.breaker.is_tripped() {
+                continue;
+            }
+            // record_heartbeats once per round, once the phones' heartbeats for it are in.
+            if self.cfg.record.enabled
+                && recorded_round != current_round
+                && round_seen.elapsed() >= Duration::from_secs(self.cfg.record.delay_secs)
+            {
+                recorded_round = current_round;
+                let (this, v) = (self.clone(), view.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = this.record_pass(&v).await {
+                        tracing::warn!(error = %e, "record pass failed");
+                    }
+                });
+            }
+            if !self.cfg.dig.enabled {
                 continue;
             }
             let d = &self.cfg.dig;
@@ -335,6 +383,7 @@ impl Crank {
             if let Some(board) = board {
                 self.store.prune(board.round_id, Duration::from_secs(15 * 60));
             }
+            self.signals.prune(Duration::from_secs(6 * 3600));
             self.metrics.heartbeats_held.set_u64(self.store.len() as u64);
             // Register new rigs in the lookup table as they appear, but never inside the dig
             // window (an extend is only usable from the next slot anyway).
@@ -380,6 +429,23 @@ impl Crank {
         }
     }
 
+    fn base_params(&self, round_id: u64, cu_price: u64) -> BuildParams {
+        let d = &self.cfg.dig;
+        BuildParams {
+            program_id: self.program_id,
+            cranker: self.cranker(),
+            round_id,
+            format: d.tx_format,
+            cu_price_micro_lamports: cu_price,
+            cu_limit: None,
+            cu_estimate: d.cu_estimate,
+            loaded_accounts_data_size_limit: d.loaded_accounts_data_size_limit,
+            max_account_locks: d.max_account_locks,
+            max_rigs_per_tx: d.max_rigs_per_tx,
+            tip: self.submitter.tip_for(0),
+        }
+    }
+
     /// One planning + submission pass for the current round.
     pub async fn dig_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
         let board = view.board.ok_or_else(|| anyhow::anyhow!("no Board"))?;
@@ -398,11 +464,16 @@ impl Crank {
         *lock(&self.known_rigs) = fetched.all_rigs.clone();
         let block_height = self.rpc.get_block_height().await?;
         let retry = self.retry_policy();
-        let plan = {
+        let mut plan = {
             let ledger = lock(&self.ledger);
             let check = |r: &Address, round: u64| !ledger.can_submit(r, round, block_height, view.slot, retry);
             plan_with(&self.program_id, view, &config, &fetched, &heartbeats, &self.cfg.dig.policy(), &check)?
         };
+        // A phone-signed BREAK / FREEZE is on its way: do not dig the rig on its old lease.
+        let (keep, pending): (Vec<_>, Vec<_>) =
+            plan.digs.into_iter().partition(|d| !self.signals.is_pending(&d.dig.accounts.rig));
+        plan.digs = keep;
+        plan.skips.extend(pending.into_iter().map(|d| (d.dig.accounts.rig, Skip::SignalPending)));
         for (_, s) in &plan.skips {
             self.metrics.digs_skipped.inc(s.label());
         }
@@ -446,21 +517,10 @@ impl Crank {
         let d = &self.cfg.dig;
         let round_id = plan.round_id;
         let round = ore::round_pda(round_id);
-        let alts = if d.tx_format == TxFormat::V0 && self.cfg.alt.enabled { self.usable_alts(view.slot) } else { vec![] };
-        let base = BuildParams {
-            program_id: self.program_id,
-            cranker: self.cranker(),
-            round_id,
-            format: d.tx_format,
-            cu_price_micro_lamports: self.priority_price(&round).await,
-            cu_limit: None,
-            cu_estimate: d.cu_estimate,
-            loaded_accounts_data_size_limit: d.loaded_accounts_data_size_limit,
-            max_account_locks: d.max_account_locks,
-            max_rigs_per_tx: d.max_rigs_per_tx,
-            tip: self.submitter.tip_for(0),
-        };
+        let alts = if self.alts_in_use() { self.usable_alts(view.slot) } else { vec![] };
+        let base = self.base_params(round_id, self.priority_price(&round).await);
         let rigs: Vec<RigDig> = plan.digs.iter().map(|x| x.dig).collect();
+        let debits: HashMap<Address, u64> = plan.digs.iter().map(|x| (x.dig.accounts.rig, x.expected_debit)).collect();
         let (batches, rejected) = tx::pack(&base, &rigs, &alts);
         for (r, m) in rejected {
             tracing::warn!(rig = %r.accounts.rig, misfit = ?m, "rig does not fit a transaction alone");
@@ -524,6 +584,7 @@ impl Crank {
             self.metrics.checkpoints_sent.add(batch.iter().filter(|r| r.checkpoint_round.is_some()).count() as u64);
             tracing::info!(%sig, round = round_id, rigs = batch.len(), cu_limit = ?p.cu_limit, "dig sent");
             let this = self.clone();
+            let debits = debits.clone();
             tokio::spawn(async move {
                 let slots_left = this.chain.borrow().slots_left().unwrap_or(0);
                 let policy = ConfirmPolicy {
@@ -531,25 +592,28 @@ impl Crank {
                     ..ConfirmPolicy::default()
                 };
                 let outcome = this.submitter.confirm(&sig, &wire, lvbh, policy).await;
-                this.handle_outcome(&sig, &batch, round_id, outcome).await;
+                this.handle_outcome(&sig, &batch, round_id, outcome, &debits).await;
             });
         }
         Ok(())
     }
 
-    async fn handle_outcome(&self, sig: &str, batch: &[RigDig], round_id: u64, outcome: Outcome) {
+    async fn fetch_events(&self, sig: &str, max_version: u8) -> Option<crate::rpc::TransactionInfo> {
+        for _ in 0..5 {
+            if let Ok(Some(i)) = self.rpc.get_transaction(sig, max_version).await {
+                return Some(i);
+            }
+            tokio::time::sleep(Duration::from_millis(800)).await;
+        }
+        None
+    }
+
+    async fn handle_outcome(&self, sig: &str, batch: &[RigDig], round_id: u64, outcome: Outcome, debits: &HashMap<Address, u64>) {
         match outcome {
             Outcome::Landed { err: None, slot } => {
                 self.metrics.txs_confirmed.inc();
                 let max_version = if self.cfg.dig.tx_format == TxFormat::V1 { 1 } else { 0 };
-                let mut info = None;
-                for _ in 0..5 {
-                    if let Ok(Some(i)) = self.rpc.get_transaction(sig, max_version).await {
-                        info = Some(i);
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(800)).await;
-                }
+                let info = self.fetch_events(sig, max_version).await;
                 let crank_fee = self.hd_config().await.map_or(0, |c| c.crank_fee);
                 let (mut dug, mut skipped) = (0u32, 0u32);
                 let mut seen = std::collections::HashSet::new();
@@ -558,11 +622,15 @@ impl Crank {
                     self.metrics.compute_units.add(i.compute_units.unwrap_or(0));
                     for ev in hd::events_from_logs(&self.program_id, &i.logs) {
                         match ev {
-                            HdEvent::RigDug { rig, .. } if seen.insert(rig) => {
+                            HdEvent::RigDug { rig, lamports, .. } if seen.insert(rig) => {
                                 dug += 1;
                                 lock(&self.ledger).mark(&rig, round_id, DigStatus::Landed);
                                 self.metrics.digs_landed.inc();
                                 self.metrics.reimbursed_lamports.add(crank_fee);
+                                // RigDug.lamports is the SOL on squares; the debit adds the
+                                // Automation fee on the rig's first deploy of the round.
+                                self.metrics.squares_lamports.add(lamports);
+                                self.metrics.automation_debit_lamports.add(debits.get(&rig).copied().unwrap_or(lamports));
                                 if let Some(h) = batch.iter().find(|r| r.accounts.rig == rig).and_then(|r| r.heartbeat) {
                                     self.store.remove_if_counter_at_most(&rig, h.fields.counter);
                                 }
@@ -601,6 +669,298 @@ impl Crank {
         }
     }
 
+    // ---- BREAK / FREEZE -------------------------------------------------------------------
+
+    async fn signal_loop(self: Arc<Self>, mut rx: mpsc::Receiver<VerifiedSignal>) {
+        while let Some(s) = rx.recv().await {
+            let this = self.clone();
+            tokio::spawn(async move { this.land_signal(s).await });
+        }
+    }
+
+    /// Land one phone-signed BREAK / FREEZE on the P-256 path: `[CU limit, CU price,
+    /// Secp256r1SigVerify, break_shift | freeze_rig]`, the crank paying the fee. A signal the
+    /// program refuses (in simulation: its counter was consumed, the state moved on) is not
+    /// sent and never resubmitted; an expired blockhash is retried with a fresh one.
+    pub async fn land_signal(&self, s: VerifiedSignal) {
+        let c = &self.cfg.signals;
+        let ixs = match tx::signal_instructions(
+            &self.program_id,
+            s.kind,
+            &s.rig,
+            &s.authority,
+            s.reason,
+            s.counter,
+            s.sig,
+            s.pubkey,
+            s.digest,
+            c.cu_limit,
+            c.cu_price_micro_lamports,
+        ) {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!(rig = %s.rig, error = %e, "building the signal transaction failed");
+                self.metrics.signals_failed.inc("build");
+                self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                self.signals.refund(c.est_fee());
+                return;
+            }
+        };
+        for attempt in 1..=c.max_attempts.max(1) {
+            let (bh, lvbh) = match self.rpc.get_latest_blockhash().await {
+                Ok(x) => x,
+                Err(e) => {
+                    tracing::warn!(error = %e, "getLatestBlockhash failed (signal)");
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+            let signed = match tx::sign_legacy(&ixs, self.key.keypair(), bh) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(error = %e, "signing the signal transaction failed");
+                    break;
+                }
+            };
+            let Ok(wire) = tx::serialize(&signed) else { break };
+            if c.simulate {
+                match self.rpc.simulate_transaction(&wire).await {
+                    Ok(sim) if sim.err.is_some() => {
+                        let tail: Vec<&String> = sim.logs.iter().rev().take(4).collect();
+                        tracing::warn!(rig = %s.rig, kind = s.kind.name(), counter = s.counter, err = ?sim.err, logs = ?tail, "signal refused in simulation; not sent");
+                        self.metrics.signals_failed.inc("simulation");
+                        self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                        self.signals.refund(c.est_fee());
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "simulateTransaction failed (signal); sending anyway"),
+                }
+            }
+            let sig = signed.signatures.first().map(ToString::to_string).unwrap_or_default();
+            if let Err(e) = self.submitter.send(&wire).await {
+                tracing::warn!(error = %e, attempt, "sending the signal failed");
+                self.metrics.signals_failed.inc("send");
+                continue;
+            }
+            let policy = ConfirmPolicy {
+                poll_every: Duration::from_millis(400),
+                rebroadcast_every: Duration::from_secs(1),
+                rebroadcast_for: Duration::from_secs(30),
+                max_wait: Duration::from_secs(90),
+            };
+            match self.submitter.confirm(&sig, &wire, lvbh, policy).await {
+                Outcome::Landed { err: None, slot } => {
+                    self.signals.mark(&s.rig, s.counter, SignalState::Landed);
+                    self.store.remove_if_counter_at_most(&s.rig, s.counter);
+                    self.metrics.signals_landed.inc(s.kind.name());
+                    if let Some(i) = self.fetch_events(&sig, 0).await {
+                        self.metrics.signal_fees_lamports.add(i.fee);
+                    }
+                    tracing::info!(%sig, slot, rig = %s.rig, kind = s.kind.name(), reason = hd::reason_name(s.reason), counter = s.counter, "signal landed");
+                    return;
+                }
+                Outcome::Landed { err: Some(err), slot } => {
+                    tracing::warn!(%sig, slot, %err, rig = %s.rig, "signal failed on-chain");
+                    self.metrics.signals_failed.inc("onchain");
+                    self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                    return;
+                }
+                Outcome::Expired => {
+                    self.metrics.signals_failed.inc("expired");
+                    tracing::warn!(%sig, attempt, rig = %s.rig, "signal blockhash expired; retrying with a fresh one");
+                }
+                Outcome::Unknown => {
+                    self.metrics.signals_failed.inc("unconfirmed");
+                    self.signals.mark(&s.rig, s.counter, SignalState::Failed);
+                    return;
+                }
+            }
+        }
+        self.signals.mark(&s.rig, s.counter, SignalState::Failed);
+    }
+
+    // ---- record_heartbeats ------------------------------------------------------------------
+
+    /// Record the held heartbeats of focus-only rigs (and, opt-in, gate-closed rigs) so their
+    /// dark rounds count on-chain. Budgeted: nothing reimburses these fees.
+    pub async fn record_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
+        let (Some(board), Some(treasury)) = (view.board, view.treasury) else { return Ok(()) };
+        let heartbeats: HashMap<Address, VerifiedHeartbeat> =
+            self.store.snapshot().into_iter().map(|h| (h.rig, h)).collect();
+        if heartbeats.is_empty() {
+            return Ok(());
+        }
+        let rigs = load_diggable_rigs(&self.rpc, &self.program_id).await?;
+        let policy = self.cfg.record.policy(self.cfg.dig.clock_margin_secs);
+        let (decisions, skips) = planner::plan_records(&board, &treasury, unix_now(), &rigs, &heartbeats, &policy);
+        for (_, s) in &skips {
+            if *s != planner::RecordSkip::NotEligible {
+                self.metrics.record_skipped.inc(s.label());
+            }
+        }
+        let decisions: Vec<_> = decisions.into_iter().filter(|d| !self.signals.is_pending(&d.rig)).collect();
+        if decisions.is_empty() {
+            return Ok(());
+        }
+        let alts = if self.alts_in_use() { self.usable_alts(view.slot) } else { vec![] };
+        let mut p = self.base_params(board.round_id, self.cfg.dig.cu_price_micro_lamports);
+        p.max_rigs_per_tx = self.cfg.record.max_rigs_per_tx;
+        let est = self.cfg.record.cu_estimate();
+        let rigs: Vec<RecordRig> = decisions.iter().map(|d| RecordRig { rig: d.rig, heartbeat: d.heartbeat }).collect();
+        let (batches, rejected) = tx::pack_records(&p, &est, &rigs, &alts);
+        for (r, m) in rejected {
+            tracing::warn!(rig = %r.rig, misfit = ?m, "record does not fit a transaction alone");
+        }
+        for b in batches.into_iter().take(MAX_RECORD_TXS_PER_ROUND) {
+            let fee = tx::fee_for(b.rigs.len(), b.cu_limit, p.cu_price_micro_lamports, tx::LAMPORTS_PER_SIGNATURE);
+            if !self.record_budget.try_take(fee) {
+                self.metrics.record_skipped.add("budget", b.rigs.len() as u64);
+                tracing::warn!(rigs = b.rigs.len(), fee, "record budget spent for now");
+                break;
+            }
+            let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
+            let t = tx::sign_record_batch(&p, &est, &b.rigs, &alts, bh, self.key.keypair())?;
+            let wire = tx::serialize(&t)?;
+            let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
+            if let Err(e) = self.submitter.send(&wire).await {
+                self.record_budget.refund(fee);
+                tracing::warn!(error = %e, "sending record_heartbeats failed");
+                continue;
+            }
+            self.metrics.record_txs_sent.inc();
+            tracing::info!(%sig, round = board.round_id, rigs = b.rigs.len(), "record_heartbeats sent");
+            let this = self.clone();
+            tokio::spawn(async move {
+                let out = this.submitter.confirm(&sig, &wire, lvbh, ConfirmPolicy::default()).await;
+                if let Outcome::Landed { err: None, .. } = out {
+                    let max_version = if this.cfg.dig.tx_format == TxFormat::V1 { 1 } else { 0 };
+                    if let Some(i) = this.fetch_events(&sig, max_version).await {
+                        this.metrics.record_fees_lamports.add(i.fee);
+                        for ev in hd::events_from_logs(&this.program_id, &i.logs) {
+                            match ev {
+                                HdEvent::HeartbeatsRecorded { rig, dark_rounds_added, .. } => {
+                                    this.metrics.heartbeats_recorded.inc();
+                                    this.metrics.record_dark_rounds.add(dark_rounds_added);
+                                    if let Some(r) = b.rigs.iter().find(|r| r.rig == rig) {
+                                        this.store.remove_if_counter_at_most(&rig, r.heartbeat.fields.counter);
+                                    }
+                                }
+                                HdEvent::RigSkipped { error, .. } => this.metrics.record_skipped.inc(hd::error_name(error)),
+                                _ => {}
+                            }
+                        }
+                    }
+                } else {
+                    tracing::warn!(%sig, outcome = ?out, "record_heartbeats did not land");
+                }
+            });
+        }
+        Ok(())
+    }
+
+    // ---- permissionless end_shift -----------------------------------------------------------
+
+    async fn end_shift_loop(self: Arc<Self>) {
+        let every = Duration::from_secs(self.cfg.end_shift.poll_secs.max(1));
+        loop {
+            tokio::time::sleep(every).await;
+            if self.breaker.is_tripped() {
+                continue;
+            }
+            if let Err(e) = self.end_shift_sweep().await {
+                tracing::warn!(error = %e, "end_shift sweep failed");
+            }
+        }
+    }
+
+    async fn shift_log_rent(&self) -> u64 {
+        let cached = self.shift_log_rent.load(Ordering::Relaxed);
+        if cached != 0 {
+            return cached;
+        }
+        let rent = self.rpc.get_minimum_balance_for_rent_exemption(hd::SHIFT_LOG_LEN).await.unwrap_or(SHIFT_LOG_RENT_FALLBACK);
+        self.shift_log_rent.store(rent, Ordering::Relaxed);
+        rent
+    }
+
+    /// Seal shifts whose window has passed and whose lease has expired (INTERFACE §5 `end_shift`:
+    /// anyone may, and pays the ShiftLog rent). At most `max_per_pass` per pass, within the
+    /// daily lamport budget, oldest window first; a failing (rig, shift) is left alone for 10 min.
+    pub async fn end_shift_sweep(&self) -> anyhow::Result<usize> {
+        let c = &self.cfg.end_shift;
+        let Some(board) = self.chain.borrow().board else { return Ok(0) };
+        let now = unix_now();
+        let mut due: Vec<(Address, Rig)> = self
+            .rpc
+            .get_program_accounts(&self.program_id, &rpc::open_shift_filters())
+            .await?
+            .into_iter()
+            .filter_map(|(a, acc)| Rig::decode(&self.program_id, &acc.owner, &acc.data).ok().map(|r| (a, r)))
+            .filter(|(_, r)| r.shift_open && now > r.plan_window_end_ts.saturating_add(c.grace_secs) && r.lease_to_round < board.round_id)
+            .collect();
+        {
+            let mut tried = lock(&self.end_shift_tried);
+            tried.retain(|_, at| at.elapsed() < END_SHIFT_RETRY_AFTER);
+            due.retain(|(a, r)| !tried.contains_key(&(*a, r.shift_id)));
+        }
+        due.sort_by_key(|(_, r)| r.plan_window_end_ts);
+        let rent = self.shift_log_rent().await;
+        let price = self.cfg.dig.cu_price_micro_lamports;
+        let mut ended = 0usize;
+        for (rig, r) in due.into_iter().take(c.max_per_pass) {
+            let cost = rent.saturating_add(tx::fee_for(0, c.cu_limit, price, tx::LAMPORTS_PER_SIGNATURE));
+            if !self.end_shift_budget.try_take(cost) {
+                self.metrics.end_shift_failed.inc("budget");
+                tracing::warn!(%rig, cost, "end_shift budget spent for today");
+                break;
+            }
+            lock(&self.end_shift_tried).insert((rig, r.shift_id), Instant::now());
+            let ixs = tx::end_shift_instructions(&self.program_id, &self.cranker(), &rig, r.shift_id, c.cu_limit, price);
+            match self.send_signed(&ixs).await {
+                Ok((sig, Outcome::Landed { err: None, slot })) => {
+                    ended += 1;
+                    self.metrics.shifts_ended.inc();
+                    self.metrics.end_shift_lamports.add(cost);
+                    tracing::info!(%sig, slot, %rig, shift = r.shift_id, rent, "ended a stale shift (permissionless)");
+                }
+                Ok((sig, other)) => {
+                    self.end_shift_budget.refund(rent);
+                    self.metrics.end_shift_failed.inc("onchain");
+                    tracing::warn!(%sig, %rig, shift = r.shift_id, outcome = ?other, "end_shift did not land");
+                }
+                Err(e) => {
+                    self.end_shift_budget.refund(cost);
+                    self.metrics.end_shift_failed.inc("send");
+                    tracing::warn!(%rig, error = %e, "end_shift failed");
+                }
+            }
+        }
+        Ok(ended)
+    }
+
+    /// Sign `ixs` (legacy, crank pays), simulate, send, confirm.
+    async fn send_signed(&self, ixs: &[Instruction]) -> anyhow::Result<(String, Outcome)> {
+        let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
+        let t = tx::sign_legacy(ixs, self.key.keypair(), bh)?;
+        let wire = tx::serialize(&t)?;
+        let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
+        let sim = self.rpc.simulate_transaction(&wire).await?;
+        if let Some(err) = sim.err {
+            let tail: Vec<&String> = sim.logs.iter().rev().take(4).collect();
+            anyhow::bail!("simulation failed: {err} {tail:?}");
+        }
+        self.submitter.send(&wire).await?;
+        self.metrics.txs_sent.inc();
+        let out = self.submitter.confirm(&sig, &wire, lvbh, ConfirmPolicy::default()).await;
+        if matches!(out, Outcome::Landed { err: None, .. }) {
+            self.metrics.txs_confirmed.inc();
+        }
+        Ok((sig, out))
+    }
+
+    // ---- maintenance ---------------------------------------------------------------------
+
     /// Send a small legacy transaction (lookup-table and checkpoint maintenance).
     async fn send_simple(&self, mut ixs: Vec<Instruction>) -> anyhow::Result<Outcome> {
         ixs.insert(0, tx::set_compute_unit_price(self.cfg.dig.cu_price_micro_lamports));
@@ -608,12 +968,7 @@ impl Crank {
             ixs.push(tx::system_transfer(&self.cranker(), &to, l));
         }
         let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
-        let msg = solana_message::VersionedMessage::Legacy(solana_message::Message::new_with_blockhash(
-            &ixs,
-            Some(&self.cranker()),
-            &bh,
-        ));
-        let t = tx::make_transaction(msg, Some(self.key.keypair()))?;
+        let t = tx::sign_legacy(&ixs, self.key.keypair(), bh)?;
         let wire = tx::serialize(&t)?;
         let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
         self.submitter.send(&wire).await?;

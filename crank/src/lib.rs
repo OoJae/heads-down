@@ -10,16 +10,18 @@
 //!
 //! | Module | Role |
 //! |---|---|
-//! | [`ore`], [`hd`] | byte-exact ORE and `heads_down` layouts, PDAs, instruction builders, events |
+//! | [`ore`], [`hd`] | byte-exact ORE and `heads_down` v1.1 layouts, PDAs, instruction builders, events |
 //! | [`gate`] | the on-chain Motherlode-aware cost gate, integer for integer |
-//! | [`heartbeat`] | off-chain P-256 verification of phone heartbeats, low-S, latest-per-rig store |
-//! | [`intake`] | axum WebSocket intake with per-IP / per-rig rate limits and backpressure |
+//! | [`heartbeat`] | off-chain P-256 verification of phone heartbeats and BREAK / FREEZE, low-S, latest-per-rig store |
+//! | [`intake`] | axum WebSocket intake (contract A) with per-IP / per-rig rate limits and backpressure |
+//! | [`signal`] | BREAK / FREEZE idempotency, per-rig limits, fee budget and the landing queue |
 //! | [`chain`] | ORE Board / Treasury / Round watcher behind the [`chain::ChainSource`] trait |
-//! | [`planner`] | pre-checks everything the program checks and decides which rigs dig |
+//! | [`planner`] | pre-checks everything the program checks: which rigs dig, which heartbeats to record |
 //! | [`tx`], [`alt`] | batched v0 (+ lookup table) / v1 / legacy transactions, packed under the size limit |
 //! | [`sender`], [`ledger`] | submit, confirm, retry with a fresh blockhash, idempotent per (rig, round) |
 //! | [`breaker`], [`metrics`] | circuit breaker on ORE layout drift; Prometheus text metrics |
-//! | [`crank`] | the loop that ties them together |
+//! | [`crank`] | the loop: digs, `record_heartbeats`, BREAK / FREEZE landing, permissionless `end_shift` |
+//! | [`demo`] | `replay` (a landed dig's heartbeat, refused as stale) and `decode` (captions) |
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -32,6 +34,7 @@ pub mod bytes;
 pub mod chain;
 pub mod config;
 pub mod crank;
+pub mod demo;
 pub mod gate;
 pub mod hd;
 pub mod heartbeat;
@@ -45,4 +48,5 @@ pub mod planner;
 pub mod ratelimit;
 pub mod rpc;
 pub mod sender;
+pub mod signal;
 pub mod tx;

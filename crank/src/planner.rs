@@ -1,11 +1,23 @@
-//! Which rigs dig this round.
+//! Which rigs dig this round, and which focus-only rigs get their heartbeat recorded.
 //!
-//! The planner repeats, off-chain, **every** check `heads_down::dig` makes (INTERFACE.md,
-//! `dig` steps 1-5) and every ORE abort or no-op condition the program pre-flights
-//! (`docs/ORE.md` section 5), so the crank only pays for rigs that will actually deploy.
-//! It is a pure function of chain state, the held heartbeats and the ledger: no I/O, fully
-//! unit-tested. The program remains the authority; a stale read here costs at most a
-//! skipped rig (logged on-chain as `RigSkipped`), never a wrong deploy.
+//! The dig planner repeats, off-chain, **every** check `heads_down::dig` makes (INTERFACE v1.1
+//! §6.1-§6.5) and every ORE abort or no-op condition the program pre-flights, so the crank
+//! only pays for rigs that will actually deploy. The amount is the program's rule, integer
+//! for integer:
+//!
+//! ```text
+//! budget   = min(plan_dig, min(cap_round, cap_shift − spent_shift, cap_week − spent_week) − fee)  (saturating)
+//! mask     = split / solo least-crowded squares, excluding squares the Miner holds this round
+//! k        = popcount(mask)
+//! per_tile = min(budget / k, automation.amount)
+//! fee_due  = automation.fee if the Miner has no deployment this round, else 0
+//! need     = per_tile·k + fee_due          (the Automation debit)
+//! RigDug.lamports = per_tile·k             (SOL on squares only)
+//! ```
+//!
+//! Both planners are pure functions of chain state, the held heartbeats and the ledger: no
+//! I/O, fully unit-tested. The program remains the authority; a stale read here costs at
+//! most a skipped rig (logged on-chain as `RigSkipped`), never a wrong deploy.
 
 use std::collections::HashMap;
 
@@ -26,22 +38,26 @@ pub const RENT_EXEMPT_ZERO_BYTES: u64 = 890_880;
 /// Why a rig is not dug this round. [`Skip::label`] is the metric label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Skip {
-    /// `config.paused == 1`.
+    /// `config.paused == 1` (`dig` would fail the whole transaction with `Paused`).
     Paused,
     /// Round has not had its first deploy (`end_slot == u64::MAX`) and policy says wait.
     RoundNotStarted,
-    /// Outside `start_slot <= slot < end_slot`.
+    /// Outside `start_slot <= slot < end_slot` (on-chain: `RoundNotActive`).
     OutsideRoundWindow,
-    /// Executor PDA cannot cover ORE's CHECKPOINT_FEE top-up.
+    /// Executor PDA cannot cover ORE's CHECKPOINT_FEE top-up (on-chain: `ExecutorUnderfunded`).
     ExecutorFloatLow,
-    /// Rig not Armed/Down.
+    /// Rig is Idle, Broken, Frozen or unknown.
     NotDiggable(RigState),
-    /// Focus-only plan: never deploys.
+    /// Rig is Cooling and no fresh heartbeat is held: a lease cannot be reused while Cooling.
+    CoolingNeedsHeartbeat,
+    /// Focus-only plan: never deploys (its heartbeats go through `record_heartbeats`).
     FocusOnly,
     /// `last_dug_round == board.round_id`.
     AlreadyDug,
     /// The ledger has a live or final attempt for (rig, round).
     AlreadySubmitted,
+    /// A phone-signed BREAK / FREEZE for this rig is being landed.
+    SignalPending,
     /// No covering on-chain lease and no usable heartbeat.
     NoLease,
     /// Caps expired (with the clock margin).
@@ -50,9 +66,9 @@ pub enum Skip {
     OutsideWindow,
     /// `ema_ev > min(plan_max_ev_cost, cap_max_cost)` (or overflow).
     CostGate,
-    /// `plan_split + plan_solo == 0`.
+    /// No free square to choose (`k == 0`).
     NoTiles,
-    /// Remaining budget rounds to 0 lamports per tile.
+    /// `per_tile == 0`: the budget left after reserving the fee is below one lamport per square.
     BudgetExhausted,
     /// Automation missing.
     NoAutomation,
@@ -60,15 +76,15 @@ pub enum Skip {
     AutomationLayout,
     /// `automation.executor != Executor PDA`.
     ExecutorMismatch,
-    /// `automation.authority != rig.authority`.
+    /// `automation.authority != rig.authority` (on-chain this fails the whole transaction).
     AuthorityMismatch,
     /// Strategy not Discretionary, or `fee != config.executor_fee`.
     StrategyMismatch,
-    /// `balance < per_tile * k + fee`: ORE would close the Automation and no-op.
+    /// `balance < per_tile·k + fee_due` (on-chain: `InsufficientAutomationBalance`).
     InsufficientBalance,
     /// Automation's Motherlode conditions fail: ORE would return Ok without deploying.
     MotherlodeCondition,
-    /// Miner missing (ORE would try to create it with the signer's seeds and fail).
+    /// Miner missing.
     NoMiner,
     /// Miner failed its layout pin or belongs to someone else.
     MinerInvalid,
@@ -85,9 +101,11 @@ impl Skip {
             Skip::OutsideRoundWindow => "outside_round_window",
             Skip::ExecutorFloatLow => "executor_float_low",
             Skip::NotDiggable(_) => "not_diggable",
+            Skip::CoolingNeedsHeartbeat => "cooling_needs_heartbeat",
             Skip::FocusOnly => "focus_only",
             Skip::AlreadyDug => "already_dug",
             Skip::AlreadySubmitted => "already_submitted",
+            Skip::SignalPending => "signal_pending",
             Skip::NoLease => "no_lease",
             Skip::CapsExpired => "caps_expired",
             Skip::OutsideWindow => "outside_window",
@@ -161,11 +179,15 @@ pub struct Inputs<'a> {
 pub struct Decision {
     /// What goes in the transaction.
     pub dig: RigDig,
-    /// Lamports per tile the program will deploy.
+    /// Lamports per square the program will deploy.
     pub per_tile: u64,
-    /// `k = split + solo`.
+    /// `k = popcount(mask)`: squares the program will choose.
     pub tiles: u16,
-    /// Expected Automation debit: `per_tile * k + fee`.
+    /// `per_tile · k`: SOL placed on squares, what `RigDug.lamports` will report.
+    pub squares_lamports: u64,
+    /// The Automation fee ORE charges on the rig's first deploy this round (else 0).
+    pub fee_due: u64,
+    /// The whole Automation debit: `squares_lamports + fee_due` (what `spent_*` count).
     pub expected_debit: u64,
     /// The mask the program should pick (if the Round was available).
     pub predicted_mask: Option<u32>,
@@ -193,6 +215,24 @@ pub trait SubmittedCheck {
 impl<F: Fn(&Address, u64) -> bool> SubmittedCheck for F {
     fn already_submitted(&self, rig: &Address, round: u64) -> bool {
         self(rig, round)
+    }
+}
+
+/// `min(plan_dig, min(cap_round, cap_shift − spent_shift, cap_week − spent_week) − fee)`,
+/// saturating: the program's `logic::dig_budget`. The fee is reserved inside every cap
+/// because `spent_*` count the whole debit.
+pub fn dig_budget(plan_dig: u64, cap_round: u64, cap_shift: u64, spent_shift: u64, cap_week: u64, spent_week: u64, fee: u64) -> u64 {
+    let headroom = cap_round.min(cap_shift.saturating_sub(spent_shift)).min(cap_week.saturating_sub(spent_week));
+    plan_dig.min(headroom.saturating_sub(fee))
+}
+
+/// `spent_week` as the program sees it at `now`: the week rolls (to 0) when `week_start_ts`
+/// is 0 or `now − week_start_ts ≥ 604,800` (the program's `logic::roll_week`).
+pub fn spent_week_at(rig: &Rig, now: i64) -> u64 {
+    if rig.week_start_ts == 0 || now.saturating_sub(rig.week_start_ts) >= WEEK_SECS {
+        0
+    } else {
+        rig.spent_week
     }
 }
 
@@ -242,28 +282,34 @@ fn check_rig(
     rig: &Rig,
 ) -> Result<Decision, Skip> {
     let round_id = inp.board.round_id;
-    // Step 2 (state) and plan kind.
-    if !rig.state.diggable() {
-        return Err(Skip::NotDiggable(rig.state));
-    }
+    // State (INTERFACE §6.7): Armed and Down dig; Cooling only with a fresh heartbeat.
+    let cooling = match rig.state {
+        RigState::Armed | RigState::Down => false,
+        RigState::Cooling => true,
+        s => return Err(Skip::NotDiggable(s)),
+    };
     if rig.focus_only() {
         return Err(Skip::FocusOnly);
     }
-    // Step 3: idempotency, on-chain then local.
+    // Idempotency, on-chain then local.
     if rig.last_dug_round == round_id {
         return Err(Skip::AlreadyDug);
     }
     if submitted.already_submitted(addr, round_id) {
         return Err(Skip::AlreadySubmitted);
     }
-    // Step 2: lease. Reuse the on-chain lease when it covers this round (no precompile
-    // signature to pay for); otherwise a held heartbeat must grant one.
-    let heartbeat = if rig.lease_covers(round_id) {
+    // Lease. Reuse the on-chain lease when it covers this round and the state allows it (no
+    // precompile signature to pay for); otherwise a held heartbeat must leave a covering lease.
+    let heartbeat = if !cooling && rig.lease_covers(round_id) {
         None
     } else {
-        Some(usable_heartbeat(inp.heartbeats.get(addr), rig, round_id).ok_or(Skip::NoLease)?)
+        match usable_heartbeat(inp.heartbeats.get(addr), rig, round_id) {
+            Some(h) => Some(h),
+            None if cooling => return Err(Skip::CoolingNeedsHeartbeat),
+            None => return Err(Skip::NoLease),
+        }
     };
-    // Step 4: caps, window, gate.
+    // Caps, window, gate.
     let m = policy.clock_margin_secs;
     if inp.now_ts.saturating_add(m) > rig.caps_expiry_ts {
         return Err(Skip::CapsExpired);
@@ -279,75 +325,90 @@ fn check_rig(
     ) {
         return Err(Skip::CostGate);
     }
-    // Step 5: amount.
-    let spent_week = if inp.now_ts >= rig.week_start_ts.saturating_add(WEEK_SECS) { 0 } else { rig.spent_week };
-    let dig_lamports = rig
-        .plan_dig_lamports
-        .min(rig.cap_round)
-        .min(rig.cap_shift.saturating_sub(rig.spent_shift))
-        .min(rig.cap_week.saturating_sub(spent_week));
-    let k = rig.tiles();
-    if k == 0 {
-        return Err(Skip::NoTiles);
-    }
+    // The user's ORE accounts.
     let accounts = RigAccounts::derive(*addr, rig.authority);
     let automation = decode_automation(inp.automations.get(&accounts.automation))?;
-    if automation.executor != *executor {
-        return Err(Skip::ExecutorMismatch);
-    }
     if automation.authority != rig.authority {
         return Err(Skip::AuthorityMismatch);
+    }
+    if automation.executor != *executor {
+        return Err(Skip::ExecutorMismatch);
     }
     if automation.strategy != ore::STRATEGY_DISCRETIONARY || automation.fee != inp.config.executor_fee {
         return Err(Skip::StrategyMismatch);
     }
-    let per_tile = (dig_lamports / u64::from(k)).min(automation.amount);
-    if per_tile == 0 {
-        return Err(Skip::BudgetExhausted);
-    }
-    let expected_debit = per_tile
-        .checked_mul(u64::from(k))
-        .and_then(|v| v.checked_add(automation.fee))
-        .ok_or(Skip::MathOverflow)?;
-    if automation.balance < expected_debit {
-        return Err(Skip::InsufficientBalance);
-    }
-    if !automation.conditions.motherlode_allows(inp.treasury.motherlode) {
-        return Err(Skip::MotherlodeCondition);
-    }
-    // ORE pre-flight: the Miner must exist, be the rig's, and be checkpointed (or be
-    // checkpointed by an instruction the crank prepends).
     let miner = decode_miner(inp.miners.get(&accounts.miner))?;
     if miner.authority != rig.authority {
         return Err(Skip::MinerInvalid);
     }
+    // Squares and amount, exactly as the program computes them.
+    let held = miner.held_mask(round_id);
+    let k = ore::tiles_available(round_id, held, rig.plan_split_tiles, rig.plan_solo_tiles);
+    if k == 0 {
+        return Err(Skip::NoTiles);
+    }
+    let budget = dig_budget(
+        rig.plan_dig_lamports,
+        rig.cap_round,
+        rig.cap_shift,
+        rig.spent_shift,
+        rig.cap_week,
+        spent_week_at(rig, inp.now_ts),
+        automation.fee,
+    );
+    let per_tile = (budget / u64::from(k)).min(automation.amount);
+    if per_tile == 0 {
+        return Err(Skip::BudgetExhausted);
+    }
+    let squares_lamports = per_tile.checked_mul(u64::from(k)).ok_or(Skip::MathOverflow)?;
+    let sum_before = miner.deployed_in(round_id).ok_or(Skip::MathOverflow)?;
+    let fee_due = if sum_before == 0 { automation.fee } else { 0 };
+    let expected_debit = squares_lamports.checked_add(fee_due).ok_or(Skip::MathOverflow)?;
+    if automation.balance < expected_debit {
+        return Err(Skip::InsufficientBalance);
+    }
+    // ORE pre-flight.
+    if !automation.conditions.motherlode_allows(inp.treasury.motherlode) {
+        return Err(Skip::MotherlodeCondition);
+    }
+    // The Miner must be checkpointed; the crank prepends ORE `checkpoint` when it is not.
     let checkpoint_round = (!miner.deploy_would_pass_checkpoint_assert(round_id)).then_some(miner.round_id);
     let predicted_mask = inp
         .round
         .filter(|r| r.id == round_id)
-        .map(|r| ore::select_tiles(round_id, &r.deployed, rig.plan_split_tiles, rig.plan_solo_tiles));
+        .map(|r| ore::select_tiles_excluding(round_id, &r.deployed, held, rig.plan_split_tiles, rig.plan_solo_tiles));
     Ok(Decision {
         dig: RigDig { accounts, heartbeat, checkpoint_round },
         per_tile,
-        tiles: k,
+        tiles: u16::try_from(k).unwrap_or(u16::MAX),
+        squares_lamports,
+        fee_due,
         expected_debit,
         predicted_mask,
     })
 }
 
-/// A held heartbeat the program will accept for `round_id` (dig step 2): same shift, a
-/// counter above the rig's, signed by the rig's current key, not from the future, and a
-/// lease `[round_id, round_id + min(lease, plan_lease) - 1]` that covers the round.
+/// A held heartbeat the program will accept for `round_id` and that leaves a lease covering
+/// it (INTERFACE §6.2 step 3-4 and §6.3): same shift, counter above the rig's, signed by the
+/// rig's current key, not from the future, and — after "leases only move forward" — a lease
+/// `[from, to]` with `from ≤ round_id ≤ to`.
 pub fn usable_heartbeat(hb: Option<&VerifiedHeartbeat>, rig: &Rig, round_id: u64) -> Option<VerifiedHeartbeat> {
     let hb = hb?;
-    if hb.fields.shift_id != rig.shift_id || hb.fields.counter <= rig.hb_counter || hb.pubkey != rig.p256_pubkey {
+    if !fresh_for(hb, rig, round_id) {
         return None;
     }
-    if hb.fields.round_id > round_id {
-        return None;
-    }
-    let (from, to) = hd::lease_range(hb.fields.round_id, hb.fields.lease_rounds, rig.plan_lease_rounds)?;
-    (from <= round_id && round_id <= to).then_some(*hb)
+    let g = hd::lease_after(rig, &hb.fields)?;
+    (g.from <= round_id && round_id <= g.to).then_some(*hb)
+}
+
+/// `hb` would verify on-chain against `rig` in `round_id`: same shift, counter above the rig's,
+/// signed by the rig's current key, not from the future, a non-empty lease.
+pub fn fresh_for(hb: &VerifiedHeartbeat, rig: &Rig, round_id: u64) -> bool {
+    hb.fields.shift_id == rig.shift_id
+        && hb.fields.counter > rig.hb_counter
+        && hb.pubkey == rig.p256_pubkey
+        && hb.fields.round_id <= round_id
+        && hb.fields.lease_rounds > 0
 }
 
 fn decode_automation(a: Option<&Option<RawAccount>>) -> Result<Automation, Skip> {
@@ -366,6 +427,128 @@ fn decode_miner(m: Option<&Option<RawAccount>>) -> Result<Miner, Skip> {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// record_heartbeats: focus-only rigs (and, opt-in, rigs whose cost gate is closed).
+
+/// When to record a rig's held heartbeat with `record_heartbeats` (no deploy, no CPI).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordPolicy {
+    /// Record a rig at most every N rounds, measured from its on-chain `lease_from_round`
+    /// (the round of the last heartbeat that landed), so the rule survives restarts and holds
+    /// across cranks. With N ≤ the phone's lease (1..=3) every round of the shift is covered.
+    pub every_rounds: u64,
+    /// Also record night / day rigs whose cost gate is closed this round (they would otherwise
+    /// end the shift with no dark round). Off by default: the crank pays these fees.
+    pub gate_closed_rigs: bool,
+    /// Clock skew allowance for the plan window.
+    pub clock_margin_secs: i64,
+}
+
+impl Default for RecordPolicy {
+    fn default() -> Self {
+        RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 }
+    }
+}
+
+/// Why a rig's heartbeat is not recorded this round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordSkip {
+    /// Not focus-only (and not a gate-closed rig with `gate_closed_rigs`).
+    NotEligible,
+    /// Not Armed, Down or Cooling.
+    State,
+    /// Outside the plan window: dark rounds only count inside it, and the permissionless
+    /// `end_shift` needs the lease to lapse after it.
+    OutsideWindow,
+    /// Recorded less than `every_rounds` ago.
+    NotDue,
+    /// No held heartbeat that verifies against the rig now.
+    NoHeartbeat,
+    /// The heartbeat would not extend the on-chain lease (it would change nothing).
+    NoExtension,
+}
+
+impl RecordSkip {
+    /// Stable snake_case label.
+    pub fn label(self) -> &'static str {
+        match self {
+            RecordSkip::NotEligible => "not_eligible",
+            RecordSkip::State => "state",
+            RecordSkip::OutsideWindow => "outside_window",
+            RecordSkip::NotDue => "not_due",
+            RecordSkip::NoHeartbeat => "no_heartbeat",
+            RecordSkip::NoExtension => "no_extension",
+        }
+    }
+}
+
+/// One heartbeat to record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordDecision {
+    /// Rig PDA.
+    pub rig: Address,
+    /// The heartbeat.
+    pub heartbeat: VerifiedHeartbeat,
+    /// What the program will do to the lease (`dark_added` = `HeartbeatsRecorded.dark_rounds_added`).
+    pub grant: hd::LeaseGrant,
+}
+
+/// Plan `record_heartbeats` for this round.
+pub fn plan_records(
+    board: &Board,
+    treasury: &Treasury,
+    now_ts: i64,
+    rigs: &[(Address, Rig)],
+    heartbeats: &HashMap<Address, VerifiedHeartbeat>,
+    policy: &RecordPolicy,
+) -> (Vec<RecordDecision>, Vec<(Address, RecordSkip)>) {
+    let round_id = board.round_id;
+    let (mut out, mut skips) = (Vec::new(), Vec::new());
+    for (addr, rig) in rigs {
+        match check_record(board, treasury, now_ts, addr, rig, heartbeats.get(addr), policy, round_id) {
+            Ok(d) => out.push(d),
+            Err(s) => skips.push((*addr, s)),
+        }
+    }
+    out.sort_by_key(|d| d.rig.to_bytes());
+    (out, skips)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_record(
+    board: &Board,
+    treasury: &Treasury,
+    now_ts: i64,
+    addr: &Address,
+    rig: &Rig,
+    hb: Option<&VerifiedHeartbeat>,
+    policy: &RecordPolicy,
+    round_id: u64,
+) -> Result<RecordDecision, RecordSkip> {
+    let eligible = rig.focus_only()
+        || (policy.gate_closed_rigs
+            && !gate::gate_open(board.production_cost_ema, treasury.motherlode, rig.plan_max_ev_cost, rig.cap_max_cost));
+    if !eligible {
+        return Err(RecordSkip::NotEligible);
+    }
+    if !rig.state.accepts_heartbeat() {
+        return Err(RecordSkip::State);
+    }
+    let m = policy.clock_margin_secs;
+    if now_ts < rig.plan_window_start_ts.saturating_add(m) || now_ts.saturating_add(m) > rig.plan_window_end_ts {
+        return Err(RecordSkip::OutsideWindow);
+    }
+    if rig.lease_to_round != 0 && round_id < rig.lease_from_round.saturating_add(policy.every_rounds.max(1)) {
+        return Err(RecordSkip::NotDue);
+    }
+    let hb = hb.filter(|h| fresh_for(h, rig, round_id)).ok_or(RecordSkip::NoHeartbeat)?;
+    let grant = hd::lease_after(rig, &hb.fields).ok_or(RecordSkip::NoHeartbeat)?;
+    if rig.lease_to_round != 0 && grant.to <= rig.lease_to_round {
+        return Err(RecordSkip::NoExtension);
+    }
+    Ok(RecordDecision { rig: *addr, heartbeat: *hb, grant })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,9 +561,11 @@ mod tests {
             Skip::OutsideRoundWindow,
             Skip::ExecutorFloatLow,
             Skip::NotDiggable(RigState::Idle),
+            Skip::CoolingNeedsHeartbeat,
             Skip::FocusOnly,
             Skip::AlreadyDug,
             Skip::AlreadySubmitted,
+            Skip::SignalPending,
             Skip::NoLease,
             Skip::CapsExpired,
             Skip::OutsideWindow,
@@ -400,5 +585,42 @@ mod tests {
         ];
         let set: std::collections::HashSet<_> = all.iter().map(Skip::label).collect();
         assert_eq!(set.len(), all.len());
+        let rec = [
+            RecordSkip::NotEligible,
+            RecordSkip::State,
+            RecordSkip::OutsideWindow,
+            RecordSkip::NotDue,
+            RecordSkip::NoHeartbeat,
+            RecordSkip::NoExtension,
+        ];
+        let set: std::collections::HashSet<_> = rec.iter().map(|r| r.label()).collect();
+        assert_eq!(set.len(), rec.len());
+    }
+
+    #[test]
+    fn budget_matches_the_program() {
+        // programs/heads-down/program/src/logic.rs budget_reserves_the_fee_inside_every_cap
+        assert_eq!(dig_budget(1_000, 10_000, 10_000, 0, 10_000, 0, 5), 1_000);
+        assert_eq!(dig_budget(10_000, 1_000, 10_000, 0, 10_000, 0, 5), 995);
+        assert_eq!(dig_budget(10_000, 10_000, 10_000, 9_000, 10_000, 0, 5), 995);
+        assert_eq!(dig_budget(10_000, 10_000, 10_000, 0, 10_000, 9_500, 5), 495);
+        assert_eq!(dig_budget(10_000, 10_000, 10_000, 10_000, 10_000, 0, 5), 0);
+        assert_eq!(dig_budget(10_000, 4, 10_000, 0, 10_000, 0, 5), 0);
+        assert_eq!(dig_budget(10_000, 10_000, 1_000, 5_000, 10_000, 0, 5), 0);
+        assert_eq!(dig_budget(u64::MAX, u64::MAX, u64::MAX, 0, u64::MAX, 0, u64::MAX), 0);
+        assert_eq!(dig_budget(u64::MAX, u64::MAX, u64::MAX, 0, u64::MAX, 0, 0), u64::MAX);
+        // INTERFACE §6.4 example: cap_round = plan_dig = 1,000,000 on 10 squares, fee 5,000.
+        let b = dig_budget(1_000_000, 1_000_000, u64::MAX, 0, u64::MAX, 0, 5_000);
+        assert_eq!(b / 10, 99_500);
+        assert_eq!((b / 10) * 10 + 5_000, 1_000_000, "the whole debit is exactly cap_round");
+    }
+
+    #[test]
+    fn week_roll_matches_the_program() {
+        let mut r = Rig { spent_week: 99, week_start_ts: 1_000, ..Rig::default() };
+        assert_eq!(spent_week_at(&r, 1_000 + WEEK_SECS - 1), 99);
+        assert_eq!(spent_week_at(&r, 1_000 + WEEK_SECS), 0);
+        r.week_start_ts = 0;
+        assert_eq!(spent_week_at(&r, 5), 0, "week_start 0 rolls");
     }
 }

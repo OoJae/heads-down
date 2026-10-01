@@ -342,18 +342,14 @@ pub enum Misfit {
     Build,
 }
 
-/// Measure one candidate batch.
-pub fn measure(p: &BuildParams, rigs: &[RigDig], alts: &[AddressLookupTableAccount]) -> Result<Batch, Misfit> {
-    if rigs.len() > p.max_rigs_per_tx {
-        return Err(Misfit::Rigs);
-    }
-    let est = p.cu_estimate.units(rigs.len(), rigs.iter().filter(|r| r.checkpoint_round.is_some()).count());
-    if p.cu_limit.is_none() && est > MAX_COMPUTE_UNITS {
-        return Err(Misfit::Compute);
-    }
-    let cu_limit = cu_limit_for(p, rigs);
-    let ixs = build_instructions(p, rigs).map_err(|_| Misfit::Build)?;
-    let msg = compile_message(p, &ixs, Hash::default(), alts, cu_limit).map_err(|_| Misfit::Build)?;
+/// Compile `ixs` for `p.format` and check the account and wire limits: `(wire_size, accounts)`.
+pub fn measure_instructions(
+    p: &BuildParams,
+    ixs: &[Instruction],
+    alts: &[AddressLookupTableAccount],
+    cu_limit: u32,
+) -> Result<(usize, usize), Misfit> {
+    let msg = compile_message(p, ixs, Hash::default(), alts, cu_limit).map_err(|_| Misfit::Build)?;
     let accounts = account_count(&msg);
     let acct_limit = match p.format {
         TxFormat::V1 => p.max_account_locks.min(V1_MAX_ADDRESSES),
@@ -367,6 +363,21 @@ pub fn measure(p: &BuildParams, rigs: &[RigDig], alts: &[AddressLookupTableAccou
     if wire_size > p.format.size_limit() {
         return Err(Misfit::Size(wire_size));
     }
+    Ok((wire_size, accounts))
+}
+
+/// Measure one candidate batch.
+pub fn measure(p: &BuildParams, rigs: &[RigDig], alts: &[AddressLookupTableAccount]) -> Result<Batch, Misfit> {
+    if rigs.len() > p.max_rigs_per_tx {
+        return Err(Misfit::Rigs);
+    }
+    let est = p.cu_estimate.units(rigs.len(), rigs.iter().filter(|r| r.checkpoint_round.is_some()).count());
+    if p.cu_limit.is_none() && est > MAX_COMPUTE_UNITS {
+        return Err(Misfit::Compute);
+    }
+    let cu_limit = cu_limit_for(p, rigs);
+    let ixs = build_instructions(p, rigs).map_err(|_| Misfit::Build)?;
+    let (wire_size, accounts) = measure_instructions(p, &ixs, alts, cu_limit)?;
     Ok(Batch {
         rigs: rigs.to_vec(),
         wire_size,
@@ -430,7 +441,205 @@ pub fn sign_batch(
 /// Estimated lamports the cranker pays for a batch: one base signature, one signature per
 /// secp256r1 entry (measured in `spikes/secp256r1`), plus the priority fee.
 pub fn estimated_fee(batch: &Batch, cu_price_micro_lamports: u64, lamports_per_signature: u64) -> u64 {
-    let sigs = 1u64.saturating_add(batch.precompile_signatures as u64);
+    fee_for(batch.precompile_signatures, batch.cu_limit, cu_price_micro_lamports, lamports_per_signature)
+}
+
+/// Lamports per signature on Solana (the transaction signature and every secp256r1 entry).
+pub const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
+
+/// `(1 + precompile_signatures) × lamports_per_signature + ceil(cu_limit × price / 10⁶)`.
+pub fn fee_for(precompile_signatures: usize, cu_limit: u32, cu_price_micro_lamports: u64, lamports_per_signature: u64) -> u64 {
+    let sigs = 1u64.saturating_add(precompile_signatures as u64);
     sigs.saturating_mul(lamports_per_signature)
-        .saturating_add(priority_fee_lamports(batch.cu_limit, cu_price_micro_lamports))
+        .saturating_add(priority_fee_lamports(cu_limit, cu_price_micro_lamports))
+}
+
+/// One Secp256r1SigVerify instruction carrying `entries` (≤ 8), each `(low-S sig, key, 32-byte digest)`.
+pub fn precompile_ix(entries: &[([u8; 64], [u8; 33], [u8; 32])]) -> Result<Instruction, TxError> {
+    let inputs: Vec<p256_introspect::client::SignatureInput<'_>> = entries
+        .iter()
+        .map(|(signature, public_key, message)| p256_introspect::client::SignatureInput {
+            signature: *signature,
+            public_key: *public_key,
+            message,
+        })
+        .collect();
+    let data = p256_introspect::client::build_instruction_data(&inputs).map_err(TxError::Precompile)?;
+    Ok(Instruction { program_id: hd::SECP256R1_PROGRAM_ID, accounts: vec![], data })
+}
+
+// ---------------------------------------------------------------------------------------
+// record_heartbeats batches.
+
+/// One rig in a `record_heartbeats` batch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordRig {
+    /// Rig PDA.
+    pub rig: Address,
+    /// The verified heartbeat to put on-chain.
+    pub heartbeat: VerifiedHeartbeat,
+}
+
+/// A `record_heartbeats` batch that fits.
+#[derive(Clone, Debug)]
+pub struct RecordBatch {
+    /// Rigs in entry order.
+    pub rigs: Vec<RecordRig>,
+    /// Serialized size with placeholder signatures.
+    pub wire_size: usize,
+    /// Declared compute limit.
+    pub cu_limit: u32,
+}
+
+/// Compute limit of a record batch: `base + per_rig × n` (the `per_checkpoint` term is unused).
+pub fn record_cu_limit(est: &CuEstimate, rigs: usize) -> u32 {
+    est.units(rigs, 0).min(MAX_COMPUTE_UNITS)
+}
+
+/// `[ComputeBudget limit, price]` (legacy / v0) `+ Secp256r1SigVerify (≤ 8 each) + record_heartbeats`.
+/// Every entry names its precompile instruction by absolute index (never 0xFF).
+pub fn build_record_instructions(p: &BuildParams, est: &CuEstimate, rigs: &[RecordRig]) -> Result<Vec<Instruction>, TxError> {
+    if rigs.is_empty() {
+        return Err(TxError::Empty);
+    }
+    let mut ixs = Vec::new();
+    if p.format != TxFormat::V1 {
+        ixs.push(set_compute_unit_limit(record_cu_limit(est, rigs.len())));
+        ixs.push(set_compute_unit_price(p.cu_price_micro_lamports));
+    }
+    let mut entries = Vec::with_capacity(rigs.len());
+    for chunk in rigs.chunks(MAX_SIGS_PER_PRECOMPILE) {
+        let ix_index = u8::try_from(ixs.len()).map_err(|_| TxError::TooManyInstructions)?;
+        if ix_index == hd::HB_REUSE_LEASE {
+            return Err(TxError::TooManyInstructions);
+        }
+        let sigs: Vec<_> = chunk.iter().map(|r| (r.heartbeat.sig, r.heartbeat.pubkey, r.heartbeat.digest)).collect();
+        ixs.push(precompile_ix(&sigs)?);
+        for (i, r) in chunk.iter().enumerate() {
+            let h = &r.heartbeat;
+            entries.push((
+                r.rig,
+                DigEntry {
+                    hb_ix: ix_index,
+                    hb_sig_index: u8::try_from(i).map_err(|_| TxError::TooManyInstructions)?,
+                    counter: h.fields.counter,
+                    round_id: h.fields.round_id,
+                    lease_rounds: h.fields.lease_rounds,
+                },
+            ));
+        }
+    }
+    ixs.push(hd::record_heartbeats_ix(&p.program_id, &entries)?);
+    if let Some((to, lamports)) = p.tip {
+        ixs.push(system_transfer(&p.cranker, &to, lamports));
+    }
+    Ok(ixs)
+}
+
+/// Greedy packing of `record_heartbeats` batches (≤ 32 rigs per instruction, `p.max_rigs_per_tx`).
+pub fn pack_records(
+    p: &BuildParams,
+    est: &CuEstimate,
+    rigs: &[RecordRig],
+    alts: &[AddressLookupTableAccount],
+) -> (Vec<RecordBatch>, Vec<(RecordRig, Misfit)>) {
+    let measure_one = |batch: &[RecordRig]| -> Result<RecordBatch, Misfit> {
+        if batch.len() > p.max_rigs_per_tx.min(hd::MAX_RIGS_PER_IX) {
+            return Err(Misfit::Rigs);
+        }
+        if est.units(batch.len(), 0) > MAX_COMPUTE_UNITS {
+            return Err(Misfit::Compute);
+        }
+        let cu_limit = record_cu_limit(est, batch.len());
+        let ixs = build_record_instructions(p, est, batch).map_err(|_| Misfit::Build)?;
+        let (wire_size, _) = measure_instructions(p, &ixs, alts, cu_limit)?;
+        Ok(RecordBatch { rigs: batch.to_vec(), wire_size, cu_limit })
+    };
+    let (mut out, mut rejected) = (Vec::new(), Vec::new());
+    let mut current: Option<RecordBatch> = None;
+    for r in rigs {
+        let mut candidate = current.as_ref().map(|b| b.rigs.clone()).unwrap_or_default();
+        candidate.push(*r);
+        match measure_one(&candidate) {
+            Ok(b) => current = Some(b),
+            Err(_) if current.is_some() => {
+                out.extend(current.take());
+                match measure_one(std::slice::from_ref(r)) {
+                    Ok(b) => current = Some(b),
+                    Err(m) => rejected.push((*r, m)),
+                }
+            }
+            Err(m) => rejected.push((*r, m)),
+        }
+    }
+    out.extend(current);
+    (out, rejected)
+}
+
+/// Build and sign a record batch.
+pub fn sign_record_batch(
+    p: &BuildParams,
+    est: &CuEstimate,
+    rigs: &[RecordRig],
+    alts: &[AddressLookupTableAccount],
+    blockhash: Hash,
+    signer: &Keypair,
+) -> Result<VersionedTransaction, TxError> {
+    let ixs = build_record_instructions(p, est, rigs)?;
+    let msg = compile_message(p, &ixs, blockhash, alts, record_cu_limit(est, rigs.len()))?;
+    make_transaction(msg, Some(signer))
+}
+
+// ---------------------------------------------------------------------------------------
+// Single-purpose legacy transactions: phone-signed BREAK / FREEZE, permissionless end_shift.
+
+/// Top-level index of the precompile in [`signal_instructions`] (after the two ComputeBudget
+/// instructions); `break_shift` / `freeze_rig` name it as `p256_ix`.
+pub const SIGNAL_P256_IX: u8 = 2;
+
+/// `[SetComputeUnitLimit, SetComputeUnitPrice, Secp256r1SigVerify (1 entry), break_shift |
+/// freeze_rig (mode 1)]`: a phone-signed BREAK / FREEZE, landed by the crank as fee payer.
+#[allow(clippy::too_many_arguments)]
+pub fn signal_instructions(
+    program_id: &Address,
+    kind: hd::SignalKind,
+    rig: &Address,
+    authority: &Address,
+    reason: u8,
+    counter: u64,
+    sig: [u8; 64],
+    pubkey: [u8; 33],
+    digest: [u8; 32],
+    cu_limit: u32,
+    cu_price_micro_lamports: u64,
+) -> Result<Vec<Instruction>, TxError> {
+    Ok(vec![
+        set_compute_unit_limit(cu_limit),
+        set_compute_unit_price(cu_price_micro_lamports),
+        precompile_ix(&[(sig, pubkey, digest)])?,
+        hd::signal_p256_ix(program_id, kind, rig, authority, reason, counter, SIGNAL_P256_IX, 0),
+    ])
+}
+
+/// `[SetComputeUnitLimit, SetComputeUnitPrice, end_shift]` (the caller pays the ShiftLog rent).
+pub fn end_shift_instructions(
+    program_id: &Address,
+    caller: &Address,
+    rig: &Address,
+    shift_id: u64,
+    cu_limit: u32,
+    cu_price_micro_lamports: u64,
+) -> Vec<Instruction> {
+    vec![
+        set_compute_unit_limit(cu_limit),
+        set_compute_unit_price(cu_price_micro_lamports),
+        hd::end_shift_ix(program_id, caller, rig, shift_id),
+    ]
+}
+
+/// Compile and sign a legacy transaction paid by `payer`.
+pub fn sign_legacy(ixs: &[Instruction], payer: &Keypair, blockhash: Hash) -> Result<VersionedTransaction, TxError> {
+    use solana_signer::Signer;
+    let msg = VersionedMessage::Legacy(solana_message::Message::new_with_blockhash(ixs, Some(&payer.pubkey()), &blockhash));
+    make_transaction(msg, Some(payer))
 }
