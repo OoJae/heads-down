@@ -72,7 +72,8 @@ log "built $SO_LEN bytes, sha256 $SO_SHA ($SBF_VER)"
 
 # ---- 3. preflight (read-only) ----------------------------------------------------------------------
 PREFLIGHT_JSON="$HD_STATE/preflight-$CLUSTER-$TS.json"
-"$MAINNET_SCRIPTS/preflight.sh" --cluster "$CLUSTER" --keys-dir "$KEYS" --mode "$MODE" --max-len "$HD_MAX_LEN" \
+# The fee budget preflight checks depends on the priority fee: hand it the one this deploy uses.
+HD_CU_PRICE="$HD_CU_PRICE" "$MAINNET_SCRIPTS/preflight.sh" --cluster "$CLUSTER" --keys-dir "$KEYS" --mode "$MODE" --max-len "$HD_MAX_LEN" \
   --so "$HD_SO" --json "$PREFLIGHT_JSON" || die "preflight is NO-GO; nothing was sent"
 
 # ---- 4. plan and confirmation --------------------------------------------------------------------------

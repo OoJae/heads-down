@@ -108,7 +108,7 @@ if [[ $FUNDING == 1 ]]; then
   if [[ -f "$HD_SO" ]]; then SO_LEN="$(wc -c <"$HD_SO" | tr -d ' ')"; fi
   bold "Funding for the first $CLUSTER deploy (rent from $RPC_HOST; read-only)"
   if ! tool funding --deployer "$DEPLOYER" --so-len "$SO_LEN" --max-len "$HD_MAX_LEN" --crank-fee "$HD_CRANK_FEE" \
-    --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" --fee-budget "$HD_DEPLOY_FEE_BUDGET" \
+    --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" --fee-budget "$(deploy_fee_budget)" \
     --key "crank-payer=$CRANK:$HD_CRANK_PAYER_LAMPORTS" --key "governance=$GOVERNANCE:$HD_GOVERNANCE_LAMPORTS" \
     --key "registrar=$REGISTRAR:0"; then
     warn "could not read rent from the cluster; run scripts/mainnet/preflight.sh for exact amounts"

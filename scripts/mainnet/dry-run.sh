@@ -81,7 +81,7 @@ FUNDING_JSON="$HD_DEVSTACK_HOME/funding.json"
 funding_json() {
   HD_DEVSTACK_RPC="http://127.0.0.1:$HD_RPC_PORT" HD_CLUSTER=localnet "$TOOL_BIN" funding \
     --deployer "$(pubkey_of "$DRY_KEYS/deployer.json")" --so-len "$1" --max-len "$HD_MAX_LEN" \
-    --crank-fee "$HD_CRANK_FEE" --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" --fee-budget "$HD_DEPLOY_FEE_BUDGET" \
+    --crank-fee "$HD_CRANK_FEE" --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" --fee-budget "$(deploy_fee_budget)" \
     --key "crank-payer=$(pubkey_of "$DRY_KEYS/crank-payer.json"):$HD_CRANK_PAYER_LAMPORTS" \
     --key "governance=$(pubkey_of "$DRY_KEYS/governance.json"):$HD_GOVERNANCE_LAMPORTS" \
     --json "$FUNDING_JSON" >/dev/null
@@ -146,7 +146,7 @@ fi
 if [[ $TIGHT == 1 ]]; then
   # What the runbook says an upgrade needs: the temporary buffer's rent and the fee budget.
   funding_json "$(wc -c <"$HD_SO" | tr -d ' ')"
-  fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(( $(funding_of rent.buffer) + HD_DEPLOY_FEE_BUDGET ))"
+  fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(( $(funding_of rent.buffer) + $(deploy_fee_budget) ))"
 fi
 step "6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode upgrade --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
@@ -154,7 +154,7 @@ run "$MAINNET_SCRIPTS/solana.sh" --cluster localnet --keys-dir "$DRY_KEYS" -- pr
 ok "6 deploy.sh --mode upgrade: upgraded in place from a fresh buffer, bytes verified, receipt written"
 
 # The upgrade's buffer rent came back to the deployer; this drill's stays in the handed-over buffer.
-[[ $TIGHT == 0 ]] || fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$HD_DEPLOY_FEE_BUDGET"
+[[ $TIGHT == 0 ]] || fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(deploy_fee_budget)"
 step "7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode buffer \
   --buffer-authority "$(pubkey_of "$DRY_KEYS/governance.json")" --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
