@@ -272,27 +272,22 @@ The phone then reaches the Mac at `http://127.0.0.1:8899` (RPC), `ws://127.0.0.1
 127.0.0.1 is bound, so nothing is exposed on the LAN. Re-run `phone.sh` after replugging the
 cable or restarting adb. Undo it with `phone.sh --remove`.
 
-**What the Android app still needs before it can use this stack.** These were found while
-wiring this up and are not fixed here, because android/ is not in this workstream:
+**How the app uses this stack.** Install the `localdev` build (`cd android && ./gradlew
+:app:installLocaldev`): it is the only build that may talk plain `http`/`ws`, and only to
+`127.0.0.1` or `localhost`. Its endpoints default to this stack's ports.
 
-1. **Plain `http`/`ws` to 127.0.0.1 is refused.** `app/build.gradle.kts` requires `https` for
-   `headsdown.rpcUrl` and `wss` for `headsdown.crankUrl`, and `CrankUplink` also rejects
-   anything but `wss://`. It needs a debug-only `localnet` cluster that allows
-   `http://127.0.0.1:8899` and `ws://127.0.0.1:8787/ws`, plus a debug network-security-config
-   that permits cleartext to 127.0.0.1 only.
-2. **The heartbeat frame does not match the crank.** Android sends
-   `{"rig","counter","shift_id","round_id","lease_rounds","sig"}` to `/v1/heartbeats`
-   (android/INTERFACE-NOTES.md §4). The crank serves `/ws` and wants
-   `{"type":"heartbeat",…,"sig64"}`, and it refuses unknown fields (crank/INTERFACE-NOTES.md
-   A6). One side has to change. The smoke uses the crank's format.
-3. **The wallet sends to its own cluster.** Clock-in uses MWA `signAndSendTransactions`, so a
-   stock wallet broadcasts to devnet or mainnet, not to this fork. For localnet the app should
-   `signTransactions` and submit through its own RPC. Until then, use
-   `scripts/devstack/clock-in.sh <phone P-256 pubkey hex>`: a Mac-held dev wallet arms a rig for
-   the phone's Keystore key and prints `rig`, `authority`, `shift_id` and `hb_counter`. The
-   phone then only needs to stream heartbeats.
-4. The Redmi 14C has no gyroscope and a virtual proximity sensor. That affects face-down
-   detection, not this stack.
+1. **Without a wallet app.** In the app: Setup, create the rig key, then Home → "Rig key and
+   devstack (debug)". Copy the key's 33-byte hex and run
+   `scripts/devstack/clock-in.sh <hex>`: a Mac-held dev wallet arms a Rig for the phone's Keystore
+   key and prints `rig`, `authority`, `shift_id` and `hb_counter`. Paste the `authority` into the
+   debug screen and tap **Attach and arm**. From then on the phone streams heartbeats to the
+   crank over the same frames the smoke uses (`{"type":"heartbeat",…,"sig64"}` to `/ws`).
+2. **With a wallet app** (Solana Mobile's fakewallet, or any MWA wallet). A wallet broadcasts to
+   its own cluster, never to this fork, so the localdev build asks the wallet to sign only and
+   submits through its own RPC. Fund the wallet with `phone.sh --fund <pubkey>`.
+
+The Redmi 14C has no gyroscope and a virtual proximity sensor. That affects face-down detection,
+not this stack. An emulator works too: the same `adb reverse` rules apply to it.
 
 ## Logs, status, troubleshooting
 
