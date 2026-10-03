@@ -143,19 +143,19 @@ if [[ $SMOKE == 1 ]]; then
   fi
 fi
 
+step "6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show"
 if [[ $TIGHT == 1 ]]; then
   # What the runbook says an upgrade needs: the temporary buffer's rent and the fee budget.
   funding_json "$(wc -c <"$HD_SO" | tr -d ' ')"
   fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(( $(funding_of rent.buffer) + $(deploy_fee_budget) ))"
 fi
-step "6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode upgrade --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
 run "$MAINNET_SCRIPTS/solana.sh" --cluster localnet --keys-dir "$DRY_KEYS" -- program show "$HD_PROGRAM_ID"
 ok "6 deploy.sh --mode upgrade: upgraded in place from a fresh buffer, bytes verified, receipt written"
 
+step "7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
 # The upgrade's buffer rent came back to the deployer; this drill's stays in the handed-over buffer.
 [[ $TIGHT == 0 ]] || fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(deploy_fee_budget)"
-step "7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode buffer \
   --buffer-authority "$(pubkey_of "$DRY_KEYS/governance.json")" --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
 ok "7 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written"

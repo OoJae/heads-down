@@ -2,7 +2,7 @@
 
 > **Status.** This document states the security requirements and the bound on each key; the section "As built" below says which of its mitigations exist today. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.3](../programs/heads-down/INTERFACE.md); 171 tests on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
 >
-> ORE facts are cited as `file:line` at ORE commit `b92c5043`, which verify.osec.io reports as the deployed program ([ORE.md](ORE.md), section 1).
+> ORE facts are cited as `file:line` at ORE commit `b92c5043`. The program deployed since 2026-10-02 is commit `48c203bd` (verify.osec.io), which differs from it in one constant of `wrap.rs`; no cited line changed ([ORE.md](ORE.md), section 1).
 
 
 ## As built (3 October 2026)
@@ -75,7 +75,7 @@ code, and the rest of the document should be read with it. The review that produ
 **Assumptions:**
 - **A1.** SHA-256, ECDSA P-256 and Ed25519 are secure.
 - **A2.** On a device with a locked bootloader and verified boot, Keystore keys cannot be exported. The Redmi 14C is expected to be TEE-backed only; spike 1(b) confirms `KeyInfo.getSecurityLevel`.
-- **A3.** ORE behaves as its source at `b92c5043` says.
+- **A3.** ORE behaves as the source of its deployed build says (commit `48c203bd`; [ORE.md](ORE.md), section 1).
 - **A4.** Solana consensus and the runtime behave as specified. In particular, a transaction whose secp256r1 precompile instruction fails is rejected as a whole.
 
 ---

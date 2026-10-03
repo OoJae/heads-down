@@ -228,13 +228,15 @@ its value, and the haul is shown against the market price.
 
 On-chain pins check every ORE account: pinned ids, owner, exact size, discriminator and sanity
 values. Any mismatch refuses the dig, and funds stay in users' Automations. The crank latches a
-circuit breaker if ORE's ProgramData upgrade slot moves off 450,496,378, and resumes only after the
-fork suite passes against the new binary. A breaking change means deploying v2, and users re-point
-their executor with one approval. Honest: the on-chain version pin is not implemented. A fee change
+circuit breaker if ORE's ProgramData upgrade slot moves off its pin, and resumes only after the
+fork suite passes against the new binary. It happened while we were building: ORE deployed a new
+build on 2026-10-02 (one constant in `wrap`, an instruction we never call). Our preflight answered
+NO-GO, we read the diff, re-ran the suites on the new bytes and moved the pin the next day. A
+breaking change means deploying v2, and users re-point their executor with one approval. Honest: the on-chain version pin is not implemented. A fee change
 that keeps the layout is caught only by the crank's breaker. Rule changes also invalidate the
 forecaster, which is one reason it is only advisory.
 
-*Evidence:* `docs/ORE.md` §8, `crank/README.md` (circuit breaker),
+*Evidence:* `docs/ORE.md` §1 (the 2 October upgrade) and §8, `crank/README.md` (circuit breaker),
 `programs/heads-down/INTERFACE-NOTES.md` §10, `ml/forecaster/MODEL_CARD.md` (Limits).
 
 ### 19. "Small budgets behind a phone gate: does this bring ORE real usage?" (ORE)
