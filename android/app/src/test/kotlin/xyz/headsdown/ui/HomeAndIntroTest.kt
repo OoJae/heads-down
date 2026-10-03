@@ -128,6 +128,54 @@ class HomeAndIntroTest {
     }
 
     @Test
+    fun `the Focus Bond is chosen before a shift and says where the SKR goes either way`() {
+        var chosen: ULong? = null
+        rule.setContent {
+            HeadsDownTheme {
+                HomeScreen(
+                    snapshot = ShiftSnapshot.IDLE,
+                    onboarding = OnboardingState(),
+                    health = ShiftHealth.NoRecentShift,
+                    onClockIn = {},
+                    onEndShift = {},
+                    onFreeze = {},
+                    onOpenSetup = {},
+                    bondSkr = 10_000_000uL,
+                    onBondChange = { chosen = it },
+                )
+            }
+        }
+        rule.onNodeWithTag(HomeTags.BOND_CARD).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("It never goes to Heads Down.", substring = true).assertExists()
+        rule.onNodeWithTag(HomeTags.BOND_CHOICE + "50 SKR").performScrollTo().performClick()
+        assertEquals(50_000_000uL, chosen)
+        // Tapping the choice already selected changes nothing.
+        chosen = null
+        rule.onNodeWithTag(HomeTags.BOND_CHOICE + "10 SKR").performClick()
+        assertEquals(null, chosen)
+    }
+
+    @Test
+    fun `the Focus Bond cannot be changed while a shift is running`() {
+        rule.setContent {
+            HeadsDownTheme {
+                HomeScreen(
+                    snapshot = ShiftSnapshot(ShiftState.Down(ShiftSpec(1, ShiftMode.NIGHT), 0, 0)),
+                    onboarding = OnboardingState(),
+                    health = ShiftHealth.NoRecentShift,
+                    onClockIn = {},
+                    onEndShift = {},
+                    onFreeze = {},
+                    onOpenSetup = {},
+                    bondSkr = 10_000_000uL,
+                    onBondChange = {},
+                )
+            }
+        }
+        rule.onAllNodesWithTag(HomeTags.BOND_CARD).assertCountEquals(0)
+    }
+
+    @Test
     fun `hot rig shows ember state and shift controls`() {
         home(
             ShiftSnapshot(

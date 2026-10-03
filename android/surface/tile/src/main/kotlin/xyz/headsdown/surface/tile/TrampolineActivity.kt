@@ -28,6 +28,8 @@ class PreparedClockIn(
     transactions: List<ByteArray>,
     lastValidBlockHeight: Long,
     val spec: ShiftSpec,
+    /** What else the transaction does besides arming, in words (a Focus Bond, an unfreeze), or null. */
+    val note: String? = null,
 ) : PreparedTransactions(transactions, lastValidBlockHeight)
 
 /** Builds and finalizes clock-ins. Implemented in the app over core/chain. */
@@ -44,6 +46,15 @@ fun interface ClockInTransactions {
      * return the shift to arm (with the on-chain `shift_id`).
      */
     suspend fun confirmed(account: WalletAccount, prepared: PreparedClockIn): ShiftSpec = prepared.spec
+
+    /**
+     * Why the last [prepare] built nothing, in fixed words that are safe to show ("Not enough SKR
+     * in this wallet for the Focus Bond."), or null when it did not refuse. Never a server's text.
+     */
+    fun refusal(): String? = null
+
+    /** A line to add after a confirmed clock-in (what else the transaction did), or null. */
+    fun note(prepared: PreparedClockIn): String? = null
 }
 
 /**
@@ -104,7 +115,8 @@ class TrampolineActivity : ComponentActivity() {
         }
         when (result) {
             WalletResult.NoWalletInstalled -> toast("Install a Solana wallet (Solflare, Phantom or Seed Vault) to clock in.")
-            is WalletResult.Failed -> toast("Wallet: ${result.reason}")
+            // A refusal by our own composer says why (it is fixed text); anything else is the wallet's.
+            is WalletResult.Failed -> toast(clockInTransactions.refusal() ?: "Wallet: ${result.reason}")
             is WalletResult.Success -> when (val session = result.value) {
                 is WalletSession.NothingToSign -> {
                     // Nothing on-chain to arm on this cluster: a zero-SOL focus shift still counts.
@@ -114,7 +126,8 @@ class TrampolineActivity : ComponentActivity() {
                 is WalletSession.Submitted ->
                     if (session.report.allConfirmed) {
                         shifts.arm(clockInTransactions.confirmed(session.account, session.prepared))
-                        toast("Clocked in. Lay your phone face-down.")
+                        val note = clockInTransactions.note(session.prepared)
+                        toast(if (note == null) "Clocked in. Lay your phone face-down." else "Clocked in. $note Lay your phone face-down.")
                     } else {
                         toast("Clock-in did not confirm on-chain. Nothing was armed.")
                     }

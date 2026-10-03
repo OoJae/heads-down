@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import xyz.headsdown.rig.FocusBondSetting
 import xyz.headsdown.feature.oemkeepalive.ExitCause
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
 import xyz.headsdown.feature.shift.BreakReason
@@ -73,6 +74,8 @@ object HomeTags {
     const val CRANK_REFUSAL = "home-crank-refusal"
     const val CLOCK_IN_AMOUNTS = "home-clock-in-amounts"
     const val UNFREEZE = "home-unfreeze"
+    const val BOND_CARD = "home-focus-bond"
+    const val BOND_CHOICE = "home-focus-bond-choice-"
 }
 
 internal data class RigLook(val word: String, val color: Color, val line: String, val pixels: Int)
@@ -114,6 +117,10 @@ fun HomeScreen(
     crank: CrankLinkStatus = CrankLinkStatus(),
     /** What a clock-in can move, stated before the wallet opens (ClockInPolicy.disclosure). */
     clockInAmounts: String? = null,
+    /** The Focus Bond locked at the next clock-in, SKR base units (0 = none). */
+    bondSkr: ULong = 0uL,
+    /** Null hides the Focus Bond card (previews, tests that do not need it). */
+    onBondChange: ((ULong) -> Unit)? = null,
 ) {
     Column(
         Modifier
@@ -139,6 +146,10 @@ fun HomeScreen(
 
         HealthBanner(health, onOpenSetup)
         RigCard(snapshot, crank, clockInAmounts, onClockIn, onEndShift, onFreeze)
+        // The bond is chosen before a shift, never changed during one.
+        if (onBondChange != null && (snapshot.state is ShiftState.Idle || snapshot.state is ShiftState.Broken || snapshot.state is ShiftState.Frozen)) {
+            FocusBondCard(bondSkr, onBondChange)
+        }
         HaulCard(onPreviewReveal)
         if (onAddWidget != null) WidgetCard(onAddWidget)
 
@@ -239,6 +250,52 @@ private fun RigCard(
                         color = HdColors.AshMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * SKR behind tonight's shift. The copy says what happens to it in both outcomes; it is never
+ * described as growing, and it cannot: a completed shift returns exactly what was locked.
+ */
+@Composable
+private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
+    Card(
+        modifier = Modifier.testTag(HomeTags.BOND_CARD),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, HdColors.CharcoalOutline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("FOCUS BOND", style = PixelLabel, color = HdColors.AshMuted)
+            Text(
+                "Put SKR behind tonight's shift. Finish the shift and the same SKR comes back at your next clock-in. " +
+                    "Break it and the SKR goes to the Bury auction, where it is sold for ORE that ORE burns. It never goes to Heads Down.",
+                color = HdColors.Ash,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "A night when none of this phone's heartbeats reach the chain (no network, or the relay is down) also counts as broken.",
+                color = HdColors.AshMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (choice in FocusBondSetting.CHOICES) {
+                    val label = FocusBondSetting.label(choice)
+                    val tag = Modifier.testTag(HomeTags.BOND_CHOICE + label).semantics {
+                        contentDescription = if (choice == bondSkr) "$label, selected" else label
+                    }
+                    if (choice == bondSkr) {
+                        Button(
+                            onClick = {},
+                            modifier = tag,
+                            colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
+                        ) { Text(label) }
+                    } else {
+                        OutlinedButton(onClick = { onBondChange(choice) }, modifier = tag) { Text(label) }
+                    }
                 }
             }
         }

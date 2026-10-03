@@ -91,8 +91,9 @@ private fun HeadsDownRoot(
     val snapshot by vm.shift.collectAsStateWithLifecycle()
     val health by vm.health.collectAsStateWithLifecycle()
     val crank by vm.crank.collectAsStateWithLifecycle()
+    val bond by vm.bond.collectAsStateWithLifecycle()
     // What a clock-in can move, from the build's policy alone: on screen before the wallet opens.
-    val clockInAmounts = remember { runCatching { ClockInPolicy.fromBuildConfig().disclosure() }.getOrNull() }
+    val clockInAmounts = remember(bond) { runCatching { ClockInPolicy.fromBuildConfig().disclosure(bond) }.getOrNull() }
     // null = decide from onboarding progress; true/false = the user chose.
     var setupChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
     // Re-reading the ritual from the home screen.
@@ -121,6 +122,8 @@ private fun HeadsDownRoot(
             onOpenRigDebug = onOpenRigDebug,
             crank = crank,
             clockInAmounts = clockInAmounts,
+            bondSkr = bond,
+            onBondChange = vm::setBond,
         )
     }
 }

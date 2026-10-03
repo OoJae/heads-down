@@ -3,6 +3,7 @@ package xyz.headsdown.rig
 import xyz.headsdown.BuildConfig
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.clockin.ClockInComposer
+import xyz.headsdown.core.chain.clockin.ClockInRefusedException
 import xyz.headsdown.core.chain.clockin.ClockInRequest
 import xyz.headsdown.core.chain.clockin.ClockInService
 import xyz.headsdown.core.keys.RigCounter
@@ -44,11 +45,12 @@ data class ClockInPolicy(
      * bound), so it is true whatever the network answers: the wallet prompt is not the first place
      * the user sees an amount.
      */
-    fun disclosure(): String {
+    fun disclosure(focusBondSkr: ULong = 0uL): String {
         val request = request()
+        val bond = if (focusBondSkr == 0uL) "" else " It also locks your ${FocusBondSetting.label(focusBondSkr)} Focus Bond."
         return "This shift can place up to ${sol(shiftBudgetLamports)} SOL on ORE squares (${sol(weeklyBudgetLamports)} SOL a week). " +
             "Clock-in moves at most ${sol(ClockInComposer.maxDeposit(request))} SOL into your own ORE Automation; " +
-            "the first one also pays one-time account rent."
+            "the first one also pays one-time account rent." + bond
     }
 
     fun request(): ClockInRequest = ClockInRequest(
@@ -83,6 +85,17 @@ data class ClockInPolicy(
 
         fun plannedRounds(windowSeconds: Long): Int = ((windowSeconds + 77) / 78).toInt()
 
+        /** What a confirmed clock-in did besides arming the shift, or null when that is all it did. */
+        fun noteFor(unfroze: Boolean, bondLocked: ULong, bondReleased: ULong, bondDeferred: Boolean): String? {
+            val parts = buildList {
+                if (unfroze) add("Rig unfrozen.")
+                if (bondReleased > 0uL) add("Last shift's bond is back: ${FocusBondSetting.label(bondReleased)}.")
+                if (bondLocked > 0uL) add("Focus Bond locked: ${FocusBondSetting.label(bondLocked)}.")
+                if (bondDeferred) add("No Focus Bond this time: the first clock-in had no room for it.")
+            }
+            return parts.joinToString(" ").ifEmpty { null }
+        }
+
         /** Lamports as SOL without trailing zeros: 20_000_000 is "0.02", 22_000_000 "0.022". */
         fun sol(lamports: ULong): String {
             val whole = lamports / 1_000_000_000uL
@@ -106,22 +119,37 @@ class ChainClockIn @Inject constructor(
     private val widgets: RigWidgetUpdates,
     private val vouchers: VoucherStore,
     private val policy: ClockInPolicy,
+    private val focusBond: FocusBondSetting,
 ) : ClockInTransactions {
+
+    @Volatile private var lastRefusal: String? = null
+
+    override fun refusal(): String? = lastRefusal
+
+    override fun note(prepared: PreparedClockIn): String? = prepared.note
 
     override suspend fun prepare(account: WalletAccount, capabilities: WalletCapabilities): PreparedClockIn? {
         // No rig key means nothing could ever heartbeat: fail the session, send nothing.
+        lastRefusal = null
         val key = checkNotNull(rigKeys.compressedPublicKey()) { "no rig key" }
-        val request = policy.request()
+        val request = policy.request().copy(focusBondSkr = focusBond.amount.value)
         val authority = Pubkey(account.publicKey)
         // The composer uses it only if it covers this wallet and key and the program will accept it.
         val voucher = vouchers.forKey(key)
-        val prepared = service.prepare(authority, key, request, capabilities, voucher) ?: return null
+        val prepared = try {
+            service.prepare(authority, key, request, capabilities, voucher) ?: return null
+        } catch (e: ClockInRefusedException) {
+            // Fixed text from our own composer: the trampoline shows it instead of a generic failure.
+            lastRefusal = e.reason.message
+            throw e
+        }
         // Before any message for this Rig is signed, the local sequence must be above chain's.
         counter.raiseFloor(prepared.plan.hbCounterFloor)
         return PreparedClockIn(
             prepared.transactions,
             prepared.lastValidBlockHeight,
-            ShiftSpec(
+            note = ClockInPolicy.noteFor(prepared.plan.unfreezes, prepared.plan.bondLocked, prepared.plan.bondReleased, prepared.bondDeferred),
+            spec = ShiftSpec(
                 shiftId = prepared.plan.expectedShiftId.toLong(),
                 mode = policy.mode,
                 plannedRounds = ClockInPolicy.plannedRounds(request.windowSeconds),

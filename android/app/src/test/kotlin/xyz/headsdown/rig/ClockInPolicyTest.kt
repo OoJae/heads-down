@@ -62,12 +62,28 @@ class ClockInPolicyTest {
                 "Clock-in moves at most 0.022 SOL into your own ORE Automation; the first one also pays one-time account rent.",
             ClockInPolicy().disclosure(),
         )
+        // With a Focus Bond chosen, the same line says so.
+        assertTrue(ClockInPolicy().disclosure(focusBondSkr = 50_000_000uL).endsWith("It also locks your 50 SKR Focus Bond."))
         assertEquals("1", ClockInPolicy.sol(1_000_000_000uL))
         assertEquals("0.000000001", ClockInPolicy.sol(1uL))
         assertEquals("12.5", ClockInPolicy.sol(12_500_000_000uL))
         assertEquals("0", ClockInPolicy.sol(0uL))
         // Nothing in it promises a return.
         assertFalse(Regex("\\b(earn|yield|profit|income|reward)", RegexOption.IGNORE_CASE).containsMatchIn(ClockInPolicy().disclosure()))
+    }
+
+    @Test
+    fun `the toast after a clock-in says what else the transaction did`() {
+        assertEquals(null, ClockInPolicy.noteFor(unfroze = false, bondLocked = 0uL, bondReleased = 0uL, bondDeferred = false))
+        assertEquals("Focus Bond locked: 10 SKR.", ClockInPolicy.noteFor(false, 10_000_000uL, 0uL, false))
+        assertEquals(
+            "Rig unfrozen. Last shift's bond is back: 50 SKR. Focus Bond locked: 100 SKR.",
+            ClockInPolicy.noteFor(true, 100_000_000uL, 50_000_000uL, false),
+        )
+        assertEquals("No Focus Bond this time: the first clock-in had no room for it.", ClockInPolicy.noteFor(false, 0uL, 0uL, true))
+        // The offered bonds are small, fixed and far below the program's cap.
+        assertEquals(listOf("Off", "10 SKR", "50 SKR", "100 SKR"), FocusBondSetting.CHOICES.map(FocusBondSetting::label))
+        assertTrue(FocusBondSetting.CHOICES.all { it <= xyz.headsdown.core.chain.Skr.FOCUS_BOND_CAP })
     }
 
     @Test

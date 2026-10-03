@@ -33,6 +33,7 @@ import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.ShiftSnapshot
 import xyz.headsdown.feature.shift.ShiftStatusRepository
 import xyz.headsdown.feature.shift.isRunning
+import xyz.headsdown.rig.FocusBondSetting
 import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.rig.RigBindingStore
@@ -82,7 +83,13 @@ class HomeViewModel @Inject constructor(
     private val vouchers: VoucherStore,
     private val binding: RigBindingStore,
     crankLink: CrankLinkMonitor,
+    private val focusBond: FocusBondSetting,
 ) : ViewModel() {
+
+    /** The Focus Bond locked at the next clock-in, SKR base units (0 = none). */
+    val bond: StateFlow<ULong> = focusBond.amount
+
+    fun setBond(skr: ULong) = focusBond.set(skr)
 
     private val prefs = context.getSharedPreferences("hd_onboarding", Context.MODE_PRIVATE)
 
