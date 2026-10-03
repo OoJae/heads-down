@@ -1,6 +1,7 @@
 # Heads Down: Align submission form, draft answers
 
-Draft for the founder, written 2026-09-29. Paste only the text inside the quote blocks. Everything
+Draft for the founder, written 2026-09-29 and brought up to the state of `main` on 2026-10-03.
+Paste only the text inside the quote blocks. Everything
 outside them is a note for the founder. Form fields are listed in
 `docs/research/judges-preferences.md` (submission form finding). Submissions close 2026-10-09
 06:59 UTC.
@@ -54,37 +55,39 @@ outside them is a note for the founder. Form fields are listed in
 | `skrIntegration` | Version A or B below (at most 950 characters) | `docs/SKR.md` |
 | Deck URL | `[TBD: deck URL]` | built from `docs/pitch/DECK.md` |
 | Video URL | `[TBD: video URL]` | filmed from `docs/pitch/DEMO_SCRIPT.md` |
-| Repositories | `[TBD: public repo URL]` | the repo must be public for the Radiants audit |
+| Repositories | `https://github.com/OoJae/heads-down` | public since 2026-10-01 |
 | APK URL | `[TBD: APK URL]` | must install from a clean state on the Redmi 14C |
 
 ### `skrIntegration`
 
-Use **A** only if Stack, Focus Bonds, Gift a Rig and the Bury auction are live on mainnet when you
-submit. Otherwise use **B**. Character counts are checked by the command in section 5.
+Both describe the code as built (`docs/SKR.md` §8). Use **A** only if the program is deployed on
+mainnet when you submit. Otherwise use **B**, which says it is not. Character counts are checked
+by the command in section 5.
 
 <!-- skr-A:start -->
-> SKR is Heads Down's commitment collateral and gifting currency. In Stack, players bond SKR on
-> keeping their phones face-down, at a real table (phones paired over Nearby) or in a regional
-> room. Settlement is permissionless and on-chain: each phone's hardware-key heartbeat is checked by
-> Solana's secp256r1 precompile, and a pickup or missed heartbeats beyond the table's grace forfeit
-> the bond. Finishers take back their bond plus 80% of the forfeits; the other 20% is sold in a
-> no-oracle Dutch auction for ORE that goes through ORE's own bury instruction. Focus Bonds do the
-> same for a solo shift, with every forfeit going to that auction. Gift a Rig turns SKR sent to any
-> .skr name into a live ORE rig, escrowed against the recipient's Seeker Genesis Token so only that
-> Seeker can claim it. SKR can also fuel a night's digging inside the same signature. Heads Down
-> never locks SKR for a return, never emits SKR, and takes no SKR from users.
+> SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program.
+> Stack: players bond SKR on keeping their phones face-down for a window of ORE rounds, at a table
+> in person or remotely (Seekers only, SGT re-checked on-chain). A seat counts a round only if its
+> phone's hardware-key heartbeat, verified by Solana's secp256r1 precompile, landed in that round;
+> a recorded pickup breaks it. Anyone can settle: finishers get their bond back plus 80% of
+> forfeits, and 20% goes to a no-oracle Dutch auction where buyers pay ORE that the program sends
+> through ORE's own bury instruction. Focus Bond: SKR locked on one shift comes back if the shift
+> completes, else it goes to that auction. Gift a Rig: SOL, which the sender can swap from SKR in
+> the same transaction, is escrowed for a wallet or a Seeker Genesis Token that only its current
+> holder can claim. Heads Down emits no SKR, pays nothing for holding it and keeps none.
 <!-- skr-A:end -->
 
 <!-- skr-B:start -->
-> SKR is Heads Down's commitment collateral and gifting currency. These flows are specified in
-> docs/SKR.md and are not yet live in this build. Stack: players bond SKR on keeping their phones
-> face-down, at a table (Nearby) or in a regional room, settled permissionlessly from each phone's
-> secp256r1-verified hardware-key heartbeats. Finishers take back their bond plus 80% of forfeits;
-> 20% is sold in a no-oracle Dutch auction for ORE that goes through ORE's own bury instruction.
-> Focus Bond: a solo bond whose forfeit goes to that auction. Gift a Rig: SKR sent to a .skr name is
-> escrowed against the recipient's Seeker Genesis Token and arrives as a live ORE rig only that
-> Seeker can claim. SKR fuel: an SKR-to-SOL swap inside the clock-in transaction. No SKR is
-> emitted, locked for a return, or sent to the team.
+> SKR is Heads Down's commitment collateral and gifting currency. It is built into the Solana
+> program and tested on a fork of mainnet; the program is not deployed on mainnet yet. Stack:
+> players bond SKR on keeping their phones face-down for a window of ORE rounds. A seat counts a
+> round only if its phone's hardware-key heartbeat, verified by Solana's secp256r1 precompile,
+> landed in that round. Finishers get their bond back plus 80% of forfeits; 20% goes to a
+> no-oracle Dutch auction where buyers pay ORE that goes through ORE's own bury instruction. Focus
+> Bond: SKR locked on one shift, chosen on the app's home screen, comes back if the shift
+> completes, else it goes to that auction. Gift a Rig: SOL, which the sender can swap from SKR, is
+> escrowed for a wallet or a Seeker Genesis Token that only its current holder can claim. Heads
+> Down emits no SKR, pays nothing for holding it and keeps none.
 <!-- skr-B:end -->
 
 ---
@@ -105,23 +108,36 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - **Built:** on-device face-down and pickup detection from the accelerometer alone, with angle and
   time hysteresis, because the Redmi 14C has no gyroscope.
   `android/feature/shift/src/main/kotlin/xyz/headsdown/feature/shift/FaceDownDetector.kt`
-- **Next:** an on-device LiteRT pickup/bump classifier (at least 2k labelled events, target at
-  least 99% pickup recall) and a Shift Planner that predicts idle windows from the app's own logs.
-  `buildplan.md` (step 4), `docs/SPEC.md` (AI_FEATURE)
+- **Built, trained on synthetic data:** an on-device pickup/bump classifier (39 features over
+  5-second accelerometer windows). On synthetic tests it keeps at least 99.85% pickup recall with
+  at most 0.2% of bumps breaking a shift. No recording from a real phone exists yet, so these
+  numbers say nothing about real nights; retraining on Redmi recordings is next. It can only add
+  a break, never remove one. `ml/foreman/README.md`
+- **Built, evaluated on simulated users:** a Shift Planner that predicts idle windows from the
+  app's own log and proposes the shift window. `ml/foreman/README.md`
 - **Built:** a phone-signed plan cannot exceed the wallet-signed caps; the program rejects it with
   `PlanExceedsCaps`. `programs/heads-down/tests/tests/shifts.rs`
 - Sensor data never leaves the phone. `docs/PRIVACY.md` §1
 
 ### SKR Integration (Align 20)
 
-- **Designed:** four roles (Stack bonds, Focus Bonds, Gift a Rig, SKR fuel) plus a Bury auction.
-  None pays a return for locking SKR, no SKR is emitted or routed to the team, and Solana Mobile's
-  SKR program is never called. `docs/SKR.md` §6
-- **Designed:** forfeits go 80% to finishers and 20% to a no-oracle Dutch auction for ORE through
+- **Built:** four roles in the program (Stack bonds, Focus Bonds, Gift a Rig, the Bury auction):
+  13 instructions, tested on a fork of live mainnet ORE, with ORE's real `bury` in the auction.
+  None pays anything for locking SKR, no SKR is emitted or routed to the team, and Solana Mobile's
+  SKR program is never called. `docs/SKR.md` §6, §9, `programs/heads-down/INTERFACE.md` §11
+- **Built:** forfeits go 80% to finishers and 20% to a no-oracle Dutch auction for ORE through
   ORE's `bury`, with the invariant `sum(payouts) + bury == sum(bonds)`. `docs/SKR.md` §1, §5
+- **Built:** the crank lands Stack check-ins and settlement, forfeits broken bonds and refunds
+  expired gifts; the indexer and the dashboard report every SKR flow from its events.
+  `crank/README.md`, `dashboard/src/app/skr/page.tsx`
+- **Built, not on a device:** the Focus Bond in the app: chosen on the home screen, locked by
+  the clock-in transaction, returned at the next clock-in after a completed shift.
+  `android/app/src/main/kotlin/xyz/headsdown/rig/FocusBondSetting.kt`
+- **Next:** the Stack and Gift screens (their transactions are built and tested).
+  `android/core/chain/src/main/kotlin/xyz/headsdown/core/chain/ix/SkrInstructions.kt`
 - **Built:** the in-program SGT verifier that Seeker-only tables and SGT-escrowed gifts rely on.
   `crates/sgt-verify/README.md`
-- **Status:** no SKR instruction is in the program yet. `programs/heads-down/INTERFACE.md`
+- **Status:** tested on a fork of mainnet; not deployed on mainnet yet `[update at submission]`.
 
 ### UX (Align 15, public 25)
 
@@ -144,12 +160,13 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - **Built, not on a device:** an Android 16 Live Update notification with an Android 14/15
   fallback, and no countdowns. `android/README.md`,
   `android/surface/notification/src/main/kotlin/xyz/headsdown/surface/notification/RigNotificationCopy.kt`
-- **Next:** the exact-alarm, full-screen morning haul reveal (a stub today). `android/README.md`
+- **Built, not on a device:** the exact-alarm, full-screen morning haul reveal, replayed round by
+  round from the indexer's haul API. `android/README.md`
 
 ### Innovation (Align 15, public 25)
 
 - **Built:** an ORE Automation executor that signs only for an on-chain-verified phone heartbeat,
-  proven on a fork of the live ORE binary (spike 5/5; program 76 tests). Our review found no public
+  proven on a fork of the live ORE binary (spike 5/5; program 171 tests). Our own search found no public
   repo or store app that gates ORE mining on phone state. `spikes/ore-executor/README.md`,
   `programs/heads-down/README.md`, `buildplan.md`
 - **Built:** an SGT check anchored on Token-2022 group membership. It rejects a mint, forged with the
@@ -182,8 +199,10 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 
 - The demo shows a replayed heartbeat skipped with `StaleHeartbeat` and a fresh one digging, on a
   block explorer. `docs/pitch/DEMO_SCRIPT.md` §4
-- Tests: program 76, crank 82, registrar 105, `p256-introspect` 30, `sgt-verify` host 69,
-  Android 239. `docs/pitch/DECK.md` slide 14
+- Tests: program 171, crank 168, registrar 105, `p256-introspect` 30, `sgt-verify` host 69,
+  indexer 347, dashboard 48, Android 760. `docs/pitch/DECK.md` slide 14
+- A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
+  with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 
 ---
 
@@ -200,9 +219,9 @@ Pick the true one when you submit, and delete the rest.
 ## 5. Before submitting
 
 - [ ] Every `[TBD]` replaced with a measured value and its source, or the claim removed.
-- [ ] Clock-in claims kept only once the app's instruction layouts, heartbeat JSON and SIWS payload
-      match the program, crank and registrar (`docs/pitch/DEMO_SCRIPT.md` §1, R2 and R3;
-      `registrar/INTERFACE-NOTES.md` N7).
+- [x] The app's instruction layouts, heartbeat JSON and SIWS payload match the program, crank and
+      registrar (checked 2026-10-03: the app's builders against the program's golden vectors, and
+      the phone-less end-to-end run on a local fork of mainnet, `docs/DEVSTACK.md`).
 - [ ] Numbers re-run: `cd crank && cargo test`, `cd registrar && cargo test`,
       `cd crates/p256-introspect && cargo test --release --all-features`,
       `cd crates/sgt-verify && cargo test --features std`,
@@ -211,9 +230,10 @@ Pick the true one when you submit, and delete the rest.
 - [ ] `python3 docs/pitch/check_pitch.py` passes. It checks the wording against `docs/ECONOMICS.md`
       §4, text addressed to the people or tools scoring the submission, every repo path cited,
       both `skrIntegration` lengths (at most 950), slide, question and post counts, and the VO
-      length. Last run 2026-09-29: A 941 characters, B 811, PASS.
+      length. Last run 2026-10-03: PASS (the script prints both lengths).
 - [ ] The final deck file and the video's own transcript scanned for the same wording by hand;
       the script only sees these drafts.
-- [ ] Repo public. APK installs from a clean state on the Redmi. The dashboard shows real data, or
-      its SIMULATED banner.
+- [x] Repo public (`https://github.com/OoJae/heads-down`).
+- [ ] APK installs from a clean state on the Redmi. The dashboard shows real data, or its
+      SIMULATED banner.
 - [ ] Radiants security audit run on the public repo, and its findings fixed.

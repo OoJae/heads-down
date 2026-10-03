@@ -37,17 +37,20 @@ includes zero). At the 2026-09-29 snapshot the gate was shut. It's a modest edge
 paid is shown, not hidden.
 
 *Evidence:* `ml/forecaster/RESULTS.md` (TL;DR, §3), `docs/ECONOMICS.md` (Summary, §5).
-*If pressed:* the clock-out buy leg is not built yet. Until it is, a night with the gate shut digs
-nothing and spends nothing.
+*If pressed:* the clock-out buy leg's transactions are built and tested; its screen is not. Until
+it is, a night with the gate shut digs nothing and spends nothing.
 
 ### 3. "Who holds admin keys? Can you drain users?" (Toly, Mert)
 
 No instruction moves Automation lamports. The Executor PDA signs only ORE `deploy` and its own
 reimbursement transfer, and there is no withdraw path. Governance can change the registrar,
-`crank_fee` (at most `executor_fee`) and `bury_bps` after a 72 h timelock, and pause at once. It
-cannot move funds or change `executor_fee`. During beta the upgrade authority is full program
-authority. The plan is a Squads multisig behind a 72 h timelock, then revocation for an immutable v1
-`[TBD at deploy]`.
+`crank_fee` (at most `executor_fee`) and `bury_bps` after a 72 h timelock, hand governance on after
+the same 72 h, and pause at once. It cannot move funds or change `executor_fee`. The upgrade
+authority is a different matter, and I say it plainly: during beta it is one key, mine, with no
+delay, and it is full program authority. It could take what the program's own accounts hold (SKR
+bonds, gift escrows, the Executor float). It could not withdraw from anyone's Automation or claim
+anyone's ORE. The plan is a Squads multisig behind a 72 h delay, then revocation for an immutable
+v1 `[TBD]`.
 
 *Evidence:* `programs/heads-down/README.md` (Invariants, worst case per key, `admin` suite),
 `docs/THREAT_MODEL.md` K5.
@@ -88,25 +91,31 @@ an offline pickup.
 
 ### 7. "What happens when your crank goes down?" (Mert, ORE)
 
-Nothing digs and nothing is lost. The crank has liveness only: it chooses whether and when to submit
-a heartbeat, while the program chooses amount and squares and verifies every heartbeat. Anyone can
-run `hd-crank`, and the program reimburses a fixed fee only after a real deploy. A measured run
-(against the interface mock of the program): 3 rigs cost 20,168 lamports in fees and were
-reimbursed 21,000. Honest gaps: the Nostr heartbeat
-mirror and the LaserStream source are stubs; the WebSocket source works.
+For mining, nothing digs and nothing is lost. The crank has liveness only: it chooses whether and
+when to submit a heartbeat, while the program chooses amount and squares and verifies every
+heartbeat. Anyone can run `hd-crank`, and the program reimburses a fixed fee only out of the fee
+that same dig brought in. A measured run (against the interface mock of the program; the crank
+also runs against the real program on the fork): 3 rigs cost 20,168 lamports in fees and were
+reimbursed 21,000. Honest gaps: only the team's crank runs today; the Nostr heartbeat mirror and
+the LaserStream source are stubs (the WebSocket source works); and bonded SKR is more than a
+liveness matter. If none of a rig's heartbeats land in a night, its Focus Bond or its Stack seat is
+lost although the phone was down.
 
 *Evidence:* `crank/README.md` (Threat model, Transactions, Features and stubs).
 
 ### 8. "Show me the program's attack surface." (EthelSec)
 
 There is a 16-class checklist, with the concrete check and the named test that fails without it,
-from missing signer checks to sysvar spoofing and resource exhaustion. 76 tests run on a fork of the
-live ORE binary, including a test-only ORE that tries to drain the Executor float (reverted).
-5,000 fuzzed instructions on the SBF binary gave only clean errors. There is one `unsafe` block (the
-log syscall), and lints deny panics, indexing and unchecked arithmetic. Not yet: an external audit,
-the Radiants audit run, or Kani proofs.
+from missing signer checks to sysvar spoofing and resource exhaustion. 171 tests, 138 of them on a
+fork of the live ORE binary, including a test-only ORE that tries to drain the Executor float
+(reverted). 9,000 fuzzed instructions on the SBF binary gave only clean errors. There is one
+`unsafe` block (the log syscall), and lints deny panics, indexing and unchecked arithmetic. Before
+deploying we ran our own security pass over the whole system: 114 findings, 18 confirmed by a
+reproducing test, among them a reimbursement paid without a fee and a counter one message could
+exhaust. Each is fixed with a regression test, and what is still open is written down. Not yet: an
+external audit, the Radiants audit run, or Kani proofs.
 
-*Evidence:* `programs/heads-down/README.md` (Audit checklist, Tests).
+*Evidence:* `programs/heads-down/README.md` (Audit checklist, Tests), `docs/SECURITY_REVIEW.md`.
 
 ### 9. "And the Android client?" (EthelSec)
 
@@ -115,8 +124,10 @@ trampoline, reveal, receiver and shift service are not exported, and the trampol
 extras. R8 strips every `android.util.Log` call in release, and lint fails the build on one. Backups
 are off. RPC is HTTPS-only, the crank uplink WSS-only, and the build refuses URLs with a query
 string or user-info. The MWA auth token is AES-GCM-encrypted with a Keystore key. Success shows only
-after confirmation with `err == null`. Not yet: on-device testing, and a run of the AlignAI MWA
-fixtures `[TBD]`.
+after confirmation with `err == null`. The site the wallet shows for the app, and the sign-in domain, are build
+settings that must name a site we control; a mainnet build fails without them. The amounts a
+clock-in can move are bounded whatever the RPC answers, and shown before the wallet opens. Not
+yet: on-device testing, certificate pinning, and a run of the AlignAI MWA fixtures `[TBD]`.
 
 *Evidence:* `android/README.md` (Security notes), `docs/THREAT_MODEL.md` §8.
 
@@ -149,12 +160,13 @@ It uses clientlib-ktx 2.2.0 in one session: authorize, `get_capabilities` (v0 if
 legacy), build, sign and send. The registrar issues single-use, 10-minute SIWS nonces. The auth
 token sits in a Keystore AES-GCM vault. A confirmation poller handles blockheight expiry, and
 success requires `err == null`. Honest: it has not run against a real wallet on the Redmi
-`[TBD after device test]`. Three joins are still open: the app's instruction layouts against the
-program, its heartbeat JSON against the crank, and its SIWS payload against the registrar.
+`[TBD after device test]`. The three joins are closed in tests: the app's instructions match the
+program's golden vectors byte for byte, its heartbeat frames follow the crank's contract, and its
+SIWS payload the registrar's.
 
-*Evidence:* `android/README.md`, `registrar/README.md`. The open joins:
-`android/INTERFACE-NOTES.md` §1 vs `programs/heads-down/INTERFACE-NOTES.md` §4, `crank/README.md`
-(intake protocol), `registrar/INTERFACE-NOTES.md` N7.
+*Evidence:* `android/README.md`, `registrar/README.md`,
+`android/core/chain/src/test/kotlin/xyz/headsdown/core/chain/ix/GoldenInstructionsTest.kt`,
+`docs/DEVSTACK.md` (the end-to-end run).
 
 ### 13. "Most Seekers are second phones. Success here is a phone nobody touches. How does that help Solana Mobile?" (Akshay, Chase)
 
@@ -185,8 +197,8 @@ We never script or headline a Motherlode, and the price display puts its odds ne
 default a rig digs on the 15 split squares: in the backtest that gave no zero-ORE nights and a
 coefficient of variation of 0.32, against 9.6 on all 25 squares. Stack forfeits that pay finishers
 may count as wagering in some places, and we say so. So there are bury-only tables where nobody
-gains from a flinch, bonds are capped, the app is 18+ and there is no house cut. Stack is designed,
-not built.
+gains from a flinch, bonds are capped, the app is 18+ and there is no house cut. Stack is built in
+the program and tested; its screens in the app are not built yet.
 
 *Evidence:* `docs/ECONOMICS.md` §4, `ml/forecaster/RESULTS.md` §4, `docs/SKR.md` §1.
 
@@ -237,10 +249,13 @@ the Bury auction add to it, but neither is built yet.
 ### 20. "Are the AI and SKR parts real, or slideware?" (Align)
 
 It depends on the part, and each slide says which. AI, built: the cost forecaster (trained,
-backtested, and demoted to advisory by a rule set before training) and the accelerometer detector.
-AI, next: the LiteRT pickup classifier and the Shift Planner. SKR: fully specified (Stack, Focus
-Bond, Gift a Rig, fuel, the Bury auction) but not yet in the program. The SGT verifier those flows
-depend on is built.
+backtested, and demoted to advisory by a rule set before training), the accelerometer detector, a
+pickup classifier and a shift planner. The last two have seen only synthetic motion and simulated
+users so far, and are retrained on recordings from the phone before their numbers mean anything.
+SKR, built: Stack, Focus Bond, Gift a Rig and the Bury auction are in the program (13
+instructions, tested on a fork of live ORE with ORE's real `bury`), the crank runs them, and the
+dashboard reports them. In the app the Focus Bond is on the home screen; the Stack and Gift
+screens are next. Nothing is deployed on mainnet yet `[update at submission]`.
 
-*Evidence:* `ml/forecaster/MODEL_CARD.md`, `docs/SKR.md`, `programs/heads-down/INTERFACE.md`
-(instruction list), `crates/sgt-verify/README.md`.
+*Evidence:* `ml/foreman/README.md`, `ml/forecaster/MODEL_CARD.md`, `docs/SKR.md`,
+`programs/heads-down/INTERFACE.md` §11, `crates/sgt-verify/README.md`.

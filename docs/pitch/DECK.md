@@ -1,7 +1,7 @@
 # Heads Down: pitch deck script (17 slides)
 
-Draft for the founder, written 2026-09-29 from the state of `main`. Every number cites the repo
-file it comes from.
+Draft for the founder, written 2026-09-29 and brought up to the state of `main` on 2026-10-03.
+Every number cites the repo file it comes from.
 
 - `[TBD after device test]`: needs the Redmi 14C connected (it is not yet).
 - `[TBD after launch]`: needs real rigs on mainnet (the program is not deployed on any cluster yet:
@@ -87,18 +87,21 @@ The slide text and speaker notes below contain no word from its banned list.
      **Built, not on a device**
   4. Digs happen only when the on-chain price gate opens. **Built**
   5. Pick it up: 10 s cooling grace, then cold. Unlock: cold at once. **Built, not on a device**
-  6. Morning haul reveal at your alarm. **Next** (activity is a stub)
-  7. Clock-out and "buy the rest" leg. **Next**
+  6. Morning haul reveal at your alarm, replayed round by round from chain data.
+     **Built, not on a device**
+  7. Clock-out and "buy the rest" leg. Transactions **Built** and tested against recorded
+     Jupiter quotes; the screen is **Next**
 - **Visual:** A circular night-to-morning loop with a status chip on each step.
 - **Speaker notes:** "The habit hangs on three things people already do every night: bedtime, the
   charger and the alarm. If the OS kills the app, the rig goes cold and nothing is spent. The
-  morning reveal and the clock-out leg are the next build items."
+  clock-out screen is the next build item; its transactions already exist and are tested."
 - **Serves:** Public: Stickiness & PMF, UX. Align: UX, UI.
 - **Sources:** `android/README.md` (clock-in, shift loop, "still stubbed"), `docs/SPEC.md`
   (CORE_LOOP).
-- **Check before using this slide:** the app's instruction layouts and heartbeat JSON match the
-  program and the crank (`docs/pitch/DEMO_SCRIPT.md` §1, R2 and R3). Until then, steps 2 and 3
-  work only against the app's own test vectors.
+- **Checked 2026-10-03:** the app's instructions match the program's golden vectors byte for
+  byte (`android/core/chain/src/test/kotlin/xyz/headsdown/core/chain/ix/GoldenInstructionsTest.kt`),
+  and the phone-less end-to-end run passes on a local fork of mainnet (`docs/DEVSTACK.md`):
+  clock-in, dig, lift, replay refused, indexed.
 
 ## Slide 5: The trustless rig
 
@@ -109,7 +112,7 @@ The slide text and speaker notes below contain no word from its banned list.
     (heads_down) ← `dig` (anyone can crank) ← **P-256 heartbeat** from the phone's Keystore,
     verified by Solana's secp256r1 precompile.
   - "No fresh heartbeat, no deploy."
-  - "Mainnet-fork spike: 5/5. Program: 76/76 tests on a fork of live ORE."
+  - "Mainnet-fork spike: 5/5. Program: 171 tests, 138 of them on a fork of live ORE."
 - **Visual:** The architecture diagram. Inset: an explorer view of a replayed heartbeat skipped
   with `StaleHeartbeat` next to a landed dig `[TBD after device test]`.
 - **Speaker notes:** "Each rig is an ordinary ORE miner with its own Automation. The user sets the
@@ -129,7 +132,7 @@ The slide text and speaker notes below contain no word from its banned list.
 
   | What | Value |
   |---|---|
-  | Compute per rig, 1 rig per dig (median) | 37,725 CU, of which ORE `deploy` 21,758 |
+  | Compute for a dig | 39,414 CU with one rig, 67,421 with two (most of it ORE's own `deploy`) |
   | Max rigs per dig transaction | legacy 2 · v0 + lookup table 5 · v1 11 |
   | secp256r1 check | 0 CU in the precompile + 477 CU introspection; one 5,000-lamport fee per signature |
   | Crank cost per rig-dig | about 6,050 lamports (v0 + table), about 5,500 (v1) |
@@ -138,11 +141,12 @@ The slide text and speaker notes below contain no word from its banned list.
 
 - **Visual:** The table, with a small source tag on each row.
 - **Speaker notes:** "Transaction size binds before compute: eleven rigs use about 27% of the
-  compute limit. The crank's end-to-end run used the interface mock of our program, so its compute
-  is an upper bound; the fees depend on signature count and are real."
+  compute limit. The crank also runs against the real program on the fork and end to end on a local
+  validator; the fees depend on signature count and are real."
 - **Serves:** Public: Presentation & Demo (technical depth). Align: Innovation.
-- **Sources:** `programs/heads-down/README.md` (Measurements), `spikes/secp256r1/README.md`,
-  `crank/README.md` (packing, operating costs), `crates/sgt-verify/README.md`.
+- **Sources:** `programs/heads-down/README.md` (Measurements), `programs/heads-down/INTERFACE.md`
+  §12.11, `spikes/secp256r1/README.md`, `crank/README.md` (packing, operating costs),
+  `crates/sgt-verify/README.md`.
 
 ## Slide 7: Honest economics
 
@@ -163,7 +167,8 @@ The slide text and speaker notes below contain no word from its banned list.
   split squares, only when a Motherlode-aware rule it computes on-chain says mining is the cheaper
   route. At the snapshot the production-cost EMA was 0.919 SOL per ORE against a market of 0.758,
   so the rig would stay cold and the morning leg would buy. This is not a money machine; the value
-  is the ritual, the trustless gate and honest route choice. The buy leg is not built yet."
+  is the ritual, the trustless gate and honest route choice. The buy leg's transactions are built
+  and tested; its screen is not."
 - **Serves:** Public: Stickiness & PMF (trust), Innovation/X-factor. Align: Ecosystem Impact, UX.
 - **Sources:** `ml/forecaster/RESULTS.md` (TL;DR, §3, §4), `docs/ECONOMICS.md` (Summary, §5, §7).
 
@@ -177,9 +182,12 @@ The slide text and speaker notes below contain no word from its banned list.
     a night. Demoted, as the plan required."
   - "Pickup detection: **Built.** Accelerometer only, with hysteresis. The Redmi 14C has no
     gyroscope."
-  - "Pickup/bump classifier: **Next.** On-device LiteRT, trained on at least 2k labelled events,
-    target at least 99% pickup recall. Screen-on and unlock stay hard breaks."
-  - "Shift Planner: **Next.** Predicts idle windows from the app's own service logs."
+  - "Pickup/bump classifier: **Built, trained on synthetic data.** A 39-feature model over
+    5-second accelerometer windows. On synthetic tests: at least 99.85% pickup recall, at most
+    0.2% of bumps break a shift. Recordings from the Redmi come next; until then these numbers
+    say nothing about real nights. Screen-on and unlock stay hard breaks."
+  - "Shift Planner: **Built, evaluated on simulated users.** Its windows finished 90.6% of
+    simulated shifts, against 57% for a fixed 23:00 to 07:00 window."
   - "Bounds: a phone-signed plan above the wallet caps fails on-chain (`PlanExceedsCaps`). Sensor
     data never leaves the phone."
 - **Visual:** Three model cards with status chips, and a thumbnail of
@@ -188,11 +196,12 @@ The slide text and speaker notes below contain no word from its banned list.
   simple rule or be demoted. It found real one-hour structure: the cost ratio climbs as the
   Motherlode pot grows and collapses at each hit. But the program reads the live EMA and pot on
   every dig for free, and against that the forecast adds nothing measurable. So it explains the
-  night and powers the morning accuracy card; it never decides. Today's pickup detection is a
-  deterministic accelerometer filter; the learned classifier is next, and it matters most for
-  table contests, where a bump must not count as a pickup."
+  night and powers the morning accuracy card; it never decides. The classifier can only add a
+  break, never remove one, and so far it has seen only synthetic motion: it is retrained on
+  recordings from this phone before its numbers mean anything. It matters most for table
+  contests, where a bump must not count as a pickup."
 - **Serves:** Align: AI (20%), Innovation. Public: Innovation/X-factor.
-- **Sources:** `ml/forecaster/RESULTS.md` §5, `ml/forecaster/MODEL_CARD.md`,
+- **Sources:** `ml/foreman/README.md`, `ml/forecaster/RESULTS.md` §5, `ml/forecaster/MODEL_CARD.md`,
   `android/feature/shift/src/main/kotlin/xyz/headsdown/feature/shift/FaceDownDetector.kt`,
   `buildplan.md` (step 4), `docs/SPEC.md` (AI_FEATURE),
   `programs/heads-down/README.md` (`shifts` suite), `docs/PRIVACY.md` §1.
@@ -229,7 +238,7 @@ The slide text and speaker notes below contain no word from its banned list.
   - "`specialUse` foreground service. Killed by the OS = cold, nothing spent."
   - "HyperOS/MIUI keep-alive onboarding and a 'killed last night' health check"
   - "Android 16 Live Update notification with a 14/15 fallback"
-  - "239 JVM unit tests"
+  - "760 JVM unit tests"
 - **Visual:** Phone captures: the tile in the Quick Settings panel, the wallet sheet, the ongoing
   notification `[TBD after device test]`.
 - **Speaker notes:** "Only the launcher activity and the tile service are exported. The trampoline
@@ -247,12 +256,18 @@ The slide text and speaker notes below contain no word from its banned list.
 - **On slide:**
   - "Stack: players bond SKR on keeping their phones face-down. Finishers split 80% of forfeits;
     20% buys ORE that goes through ORE's own `bury` (90% burned)."
-  - "Focus Bond: a solo bond. A forfeit goes to the Bury auction, never to the team."
-  - "Gift a Rig: SKR sent to a .skr name is escrowed against the recipient's SGT and arrives as a
-    live rig."
-  - "SKR fuel: SKR to SOL inside the clock-in transaction."
+  - "Focus Bond: a solo bond, chosen on the app's home screen. A forfeit goes to the Bury
+    auction, never to the team."
+  - "Gift a Rig: SOL escrowed for a wallet, or for a Seeker's SGT (a .skr name resolves to it).
+    The claim can arm the recipient's rig in the same transaction. The sender can pay in SKR
+    through a swap in the same approval."
+  - "SKR fuel: SKR to SOL inside the clock-in transaction (a swap in the user's own
+    transaction)."
   - "No SKR emitted, none routed to the team; Solana Mobile's SKR program is never called."
-  - "Status: **Designed** (`docs/SKR.md`). Not in the program yet."
+  - "Status: **Built** in the program (13 instructions, tested on the live ORE fork with ORE's
+    real `bury`), in the crank (check-ins, settlement, forfeits, refunds), in the indexer and on
+    the dashboard. In the app: the Focus Bond. Stack and Gift transactions are built and tested;
+    their screens are **Next**."
 - **Visual:** Flow diagram: SKR → Stack / Focus Bond / Gift / Fuel → Dutch auction → ORE `bury`
   (90% burned, 10% distributed by ORE, shown as two lines).
 - **Speaker notes:** "Forfeits come only from other players at the same table; nothing is minted.
@@ -260,8 +275,8 @@ The slide text and speaker notes below contain no word from its banned list.
   payouts may count as wagering in some places, so bury-only tables exist, bonds are capped and
   the app is 18+."
 - **Serves:** Align: SKR (20%), Ecosystem Impact. Public: Stickiness & PMF.
-- **Sources:** `docs/SKR.md` (flows, §6, §1 legal risk), `docs/ECONOMICS.md` §6,
-  `programs/heads-down/INTERFACE.md` (instruction list, no SKR instruction yet).
+- **Sources:** `docs/SKR.md` (flows, §6, §9, §1 legal risk), `docs/ECONOMICS.md` §6,
+  `programs/heads-down/INTERFACE.md` §11, `dashboard/src/app/skr/page.tsx`.
 
 ## Slide 12: ORE is the product
 
@@ -294,11 +309,11 @@ The slide text and speaker notes below contain no word from its banned list.
 
   | Key | Worst case | What bounds it |
   |---|---|---|
-  | Your wallet | Everything it controls: it is the root | Your wallet; every tx built on-device and simulated |
-  | Rig P-256 key (phone) | The armed, capped budget deploys into ORE only while the gate is open; about 10.5% goes to ORE fees, none to the attacker; its own SKR bonds | Caps and expiry, the on-chain gate, Freeze (phone), Revoke (wallet) |
-  | Crank | Liveness only: nothing mines, nothing is lost | Anyone can run `hd-crank`; fixed reimbursement |
-  | Registrar | Software keys pass as hardware on capped remote Stack tables | No custody, no mining power; bond caps; public transcripts |
-  | Upgrade authority (beta) | After a public 72 h delay: Heads Down-held SKR and SOL; forced deploys up to 25 × the per-square amount per round | Timelock and in-app banner; one-approval Revoke; then revoked |
+  | Your wallet | Everything it controls: it is the root | Your wallet; every tx built on-device, its amounts bounded and shown before the wallet opens |
+  | Rig P-256 key (phone) | The armed, capped budget deploys into ORE only while the gate is open; about 10.5% goes to ORE fees, none to the attacker; its own SKR bonds | Caps and expiry, the on-chain gate, Freeze (phone), Unfreeze (wallet) |
+  | Crank | For mining, liveness only: nothing mines, nothing is lost. A Focus Bond or a Stack seat is lost if no heartbeat lands | Anyone can run `hd-crank`; fixed reimbursement. Only the team's runs today |
+  | Registrar | Software keys pass as hardware on capped remote Stack tables | No custody, no mining power; bond caps; voucher lifetime capped on-chain; an append-only log |
+  | Upgrade authority (beta) | Today, with one key and no delay: Heads Down-held SKR and SOL; forced deploys up to 25 × the per-square amount per round. Never an Automation's balance or anyone's ORE | Small custody (bond caps); a multisig with a 72 h delay is planned, then revocation |
   | Team servers | Liveness, privacy, phishing-shaped pushes | No signing from push; txs rebuilt from chain |
   | ORE upstream | ORE owns every Automation and can move funds | Inherited and stated; layout pins and a circuit breaker for accidents |
 
@@ -306,11 +321,12 @@ The slide text and speaker notes below contain no word from its banned list.
 - **Speaker notes:** "Heads Down reuses ORE's custody instead of writing its own vault for mining
   funds, so we inherit ORE's trust assumption in full, and we say so. The rig key can't require
   user authentication because it signs while the phone is locked; that is why the wallet-signed
-  caps, not the key, bound the damage. The Squads multisig and 72-hour upgrade timelock apply at
-  deploy `[TBD]`; the Config changes are already timelocked in code."
+  caps, not the key, bound the damage. Config changes and governance rotation wait 72 hours in
+  code. Program upgrades do not: at launch the upgrade authority is one key, mine, and the threat
+  model says so in plain words. A multisig with a delay comes before the caps go up."
 - **Serves:** Align: Ecosystem Impact, Innovation. Public: UX (trust).
-- **Sources:** `docs/THREAT_MODEL.md` (Summary, K2, K5, K7), `programs/heads-down/README.md`
-  (worst case per key, `admin` suite).
+- **Sources:** `docs/THREAT_MODEL.md` (As built, Summary, K2, K5, K7), `docs/SECURITY_REVIEW.md`,
+  `programs/heads-down/README.md` (worst case per key, `admin` suite).
 
 ## Slide 14: Open, tested, checkable
 
@@ -319,17 +335,21 @@ The slide text and speaker notes below contain no word from its banned list.
 
   | Component | Tests | Where the number comes from |
   |---|---|---|
-  | `heads_down` program | 76 passed (fork of live ORE) | `programs/heads-down/README.md` |
-  | `hd-crank` | 82 passed | re-run 2026-09-29 |
-  | Registrar (SIWS + Key Attestation) | 105 passed | re-run 2026-09-29 |
-  | `p256-introspect` | 30 passed | re-run 2026-09-29 |
-  | `sgt-verify` (host suites) | 69 passed, plus LiteSVM suites | re-run 2026-09-29; `crates/sgt-verify/README.md` |
+  | `heads_down` program | 171 passed (138 on a fork of live ORE) | re-run 2026-10-03; `programs/heads-down/README.md` |
+  | `hd-crank` | 168 passed, plus 14 against the real program on the fork | re-run 2026-10-03 |
+  | Registrar (SIWS + Key Attestation) | 105 passed | re-run 2026-10-03 |
+  | `p256-introspect` | 30 passed | re-run 2026-10-03 |
+  | `sgt-verify` (host suites) | 69 passed, plus LiteSVM suites | `crates/sgt-verify/README.md` |
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
-  | Indexer | 128 | `services/indexer/README.md` |
-  | Android | 239 JVM unit tests | `android/` |
+  | Indexer | 347 passed | re-run 2026-10-03 |
+  | Dashboard | 48 passed | re-run 2026-10-03 |
+  | Android | 760 JVM unit tests | re-run 2026-10-03 |
+  | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |
 
-  - "16 bug classes mapped to named tests; 5,000 fuzzed instructions on the program binary, no aborts"
-  - "Registrar: public, hash-chained transparency log"
+  - "16 bug classes mapped to named tests; 9,000 fuzzed instructions on the program binary, no aborts"
+  - "Security review before deployment: 114 findings, 18 confirmed by a reproducing test, each
+    fix with its regression test; what is still open is written down"
+  - "Registrar: a hash-chained log of every voucher (a file today, not yet published)"
   - "Dashboard: a SIMULATED banner shows on every page while data is simulated"
   - "Not yet: Radiants audit run, Kani proofs, external audit `[TBD]`"
 - **Visual:** The table with repo paths in a mono font.
@@ -338,7 +358,8 @@ The slide text and speaker notes below contain no word from its banned list.
   arithmetic at lint level."
 - **Serves:** Public: Presentation & Demo (technical depth). Align: Ecosystem Impact.
 - **Sources:** as in the table; `programs/heads-down/README.md` (audit checklist, fuzz),
-  `registrar/README.md` (transparency log), `dashboard/README.md` (honesty and safety).
+  `docs/SECURITY_REVIEW.md`, `registrar/README.md` (transparency log), `dashboard/README.md`
+  (honesty and safety).
 
 ## Slide 15: Traction (placeholder until real users)
 
@@ -384,19 +405,21 @@ The slide text and speaker notes below contain no word from its banned list.
 - **Message:** The hard parts are proven on a mainnet fork; the next step is the phone in the loop.
 - **On slide:**
   - "Proven: PDA executor on live ORE; on-chain P-256 heartbeats; unforgeable SGT check; honest
-    economics; crank end to end on a validator; registrar on real Google attestation chains."
-  - "Before submission: mainnet deploy with tiny caps; the Redmi's Keystore signing on-chain;
-    phone-to-crank uplink; morning reveal `[TBD]`."
-  - "After: Stack, Gift a Rig and the Bury auction; learned pickup classifier; immutable v1."
+    economics; Stack, Focus Bond, Gift a Rig and the Bury auction on the live ORE fork; the whole
+    loop end to end on a local fork of mainnet; registrar on real Google attestation chains."
+  - "Before submission: mainnet deploy with tiny caps; the Redmi's Keystore signing on-chain
+    `[TBD after device test]`."
+  - "After: the Stack and Gift screens; the classifier retrained on real recordings; an upgrade
+    multisig, then an immutable v1."
   - "Founder: solo, Nigeria (WAT), building with AI agents on one Redmi 14C. `[founder to
     personalise]`"
 - **Visual:** Three columns: Proven / Next / After. Founder photo `[TBD]`.
-- **Speaker notes:** "Two hundred and one commits since the repo was created on 29 September 2026
-  `[update the count before recording]`. Offline means no mining and no loss, which suits power and
+- **Speaker notes:** "Four hundred and fourteen commits since the repo was created on 29 September
+  2026 `[update the count before recording]`. Offline means no mining and no loss, which suits power and
   network cuts where I live."
 - **Serves:** Public: Stickiness & PMF (founder-market fit), Presentation & Demo.
 - **Sources:** `README.md` (proven so far), `spikes/*/README.md`, `crank/README.md`,
-  `registrar/README.md`, `git rev-list --count --no-merges main` (201 on 2026-09-29).
+  `registrar/README.md`, `git rev-list --count --no-merges main` (414 on 2026-10-03).
 
 ---
 
@@ -409,6 +432,6 @@ The slide text and speaker notes below contain no word from its banned list.
 | UI | Night palette (charcoal, ember orange, ORE gold) shared by the app and the dashboard; accessible charts. | `dashboard/README.md` (Design) |
 | Innovation | A third-party ORE executor that signs only for an on-chain-verified phone heartbeat. | `programs/heads-down/README.md` |
 | Presentation & Demo | The demo shows a replayed heartbeat skipped and a fresh one digging, on an explorer. | `docs/pitch/DEMO_SCRIPT.md` |
-| AI | On-device detection built; forecaster built and demoted to advisory by a pre-set rule; classifier and planner next. | `ml/forecaster/MODEL_CARD.md` |
-| SKR | Bonds, gifts, fuel and a Bury auction; no emission, no return for locking. Designed, not built. | `docs/SKR.md` |
+| AI | On-device detection, a pickup classifier and a shift planner are built (trained on synthetic data and simulated users so far); the forecaster was demoted to advisory by a pre-set rule. | `ml/foreman/README.md`, `ml/forecaster/MODEL_CARD.md` |
+| SKR | Bonds, gifts, fuel and a Bury auction; no emission, nothing paid for locking. Built in the program, the crank, the indexer and the dashboard; the Focus Bond is in the app. | `docs/SKR.md` |
 | Ecosystem Impact | Two open-source crates, verifiable ORE usage metrics, a milestone plan. | `crates/`, `docs/ORE.md` §9 |
