@@ -527,7 +527,197 @@ dl.defs dd {
 }
 @media (forced-colors: active) {
   .swatch,
-  .meter > span {
+  .meter > span,
+  .hbar-fill,
+  .sq,
+  .round-strip rect {
     forced-color-adjust: none;
   }
+}
+
+/* ---- filter row (one row, above what it scopes) ----------------------------------- */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.filter-row input {
+  max-width: 100%;
+  margin-left: 4px;
+}
+.btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.btn {
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ---- skips: horizontal bars, one hue, value at the tip ---------------------------- */
+.hbar-list {
+  display: grid;
+  gap: 2px;
+}
+.hbar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.hbar-row:hover,
+.hbar-row:focus-visible {
+  background: var(--surface-2);
+}
+.hbar-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hbar-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.hbar-fill {
+  display: block;
+  height: 14px;
+  min-width: 2px;
+  background: var(--viz-guest);
+  border-radius: 0 4px 4px 0; /* square at the baseline, 4px rounded data end */
+}
+.hbar-muted .hbar-fill {
+  background: var(--viz-context);
+}
+.hbar-value {
+  font-size: 13px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .hbar-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
+/* ---- morning haul ------------------------------------------------------------------ */
+.haul-head {
+  margin-bottom: 4px;
+}
+.haul-title {
+  font-size: 28px;
+  margin: 2px 0;
+}
+h3 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+.round-strip {
+  display: block;
+  max-width: 560px;
+  margin: 6px 0 12px;
+}
+.round-strip .rs-off {
+  fill: transparent;
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.rs-key.rs-off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-muted);
+}
+.round-strip .rs-dark {
+  fill: var(--viz-context);
+}
+.rs-key.rs-dark {
+  background: var(--viz-context);
+}
+.round-strip .rs-dug {
+  fill: var(--viz-guest);
+}
+.rs-key.rs-dug {
+  background: var(--viz-guest);
+}
+.round-strip .rs-hit {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+.rs-key.rs-hit {
+  box-shadow: 0 0 0 2px var(--text);
+}
+.round-strip .rs-selected {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+.round-strip g[role="button"] {
+  cursor: pointer;
+}
+.round-strip g[role="button"]:focus {
+  outline: none;
+}
+.round-strip g[role="button"]:focus-visible rect:last-child {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+.haul-board-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: flex-start;
+}
+.board {
+  display: grid;
+  gap: 2px;
+  width: min(220px, 100%);
+}
+.board-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+}
+.sq {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: var(--text);
+}
+.sq-dug {
+  background: var(--viz-guest);
+  color: var(--heat-on);
+}
+.sq-win {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+.price-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 40px;
+}
+.verdict {
+  font-size: 17px;
+  margin: 12px 0 6px;
+}
+.streak {
+  font-size: 22px;
+  font-weight: 650;
 }

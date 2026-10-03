@@ -12,7 +12,7 @@ export function DatasetBannerView({ dataset }: { dataset: DatasetInfo | null }) 
         <div className="wrap">
           <strong>SIMULATED DATA.</strong> Every number, rig, address and transaction on this page comes from the
           indexer&apos;s deterministic simulator{dataset.simSeed ? ` (seed “${dataset.simSeed}”)` : ""}. None of it
-          exists on any chain, and none of it is traction. The heads_down program is not deployed yet.
+          exists on any chain, and none of it is traction. The heads_down program is not deployed on a public cluster yet.
         </div>
       </div>
     );

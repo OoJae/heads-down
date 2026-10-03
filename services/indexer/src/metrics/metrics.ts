@@ -4,7 +4,9 @@
  * to check it. u64 amounts stay bigint internally and are serialized as decimal strings.
  */
 import type { DeployRow, DigRow, MetricsInput, RigRow, RoundRow } from "../model.ts";
-import { HD_ERROR_COST_GATE, hdErrorName } from "../codec/events.ts";
+import { HD_ERROR_COST_GATE, hdErrorName, hdErrorRange, skipLabel } from "../codec/events.ts";
+import { decodeOreRound } from "../codec/round.ts";
+import { oreMined, outcomeFromReset, outcomeFromRoundAccount, perSquare, type RoundOutcome } from "./oremath.ts";
 import { findProgramAddress, seed, addrBytes } from "../codec/pda.ts";
 import { DEFAULT_ROUND_SECONDS, ONE_ORE, ORE_SPLIT_ADDRESS } from "../constants.ts";
 import { DAY, dayLabel, hourOf, median, monthOf, nightIndex } from "./time.ts";
@@ -66,17 +68,74 @@ function sample<T>(rows: T[], n: number, key: (t: T) => string): T[] {
  * The result is unrefined ORE, before the 10% refining fee charged on claim.
  */
 export function oreMinedForDeploy(d: Pick<DeployRow, "authority" | "amount" | "mask">, r: RoundRow): bigint {
-  const ws = r.winningSquare;
-  if (ws === null || ((d.mask >>> ws) & 1) === 0) return 0n;
-  const dws = r.deployedWinningSquare;
-  if (dws === 0n || d.amount === 0n) return 0n;
-  const amount = d.amount > dws ? dws : d.amount; // defensive: a share can never exceed 100%
-  const reward = r.totalMinted < ONE_ORE ? r.totalMinted : ONE_ORE;
-  let base: bigint;
-  if (r.topMiner === ORE_SPLIT_ADDRESS) base = (reward * amount) / dws;
-  else base = r.topMiner === d.authority ? reward : 0n;
-  const motherlode = r.motherlode > 0n ? (r.motherlode * amount) / dws : 0n;
-  return base + motherlode;
+  return oreMined(d.authority, perSquare([d]), outcomeFromReset(r)).total;
+}
+
+/** Round outcomes: the Round-account snapshot when present (exact per square), else the ResetEvent. */
+export function roundOutcomes(input: Pick<MetricsInput, "rounds" | "roundStates">): Map<bigint, RoundOutcome> {
+  const out = new Map<bigint, RoundOutcome>();
+  for (const r of input.rounds) out.set(r.roundId, outcomeFromReset(r));
+  for (const st of input.roundStates ?? []) {
+    const o = outcomeFromRoundAccount(decodeOreRound(st.data), out.get(st.roundId)?.resetSignature ?? null);
+    if (o) out.set(st.roundId, o);
+  }
+  return out;
+}
+
+/** Heads Down deploys grouped per (authority, round): ORE credits a miner per round, not per event. */
+export function groupDeploys(deploys: readonly DeployRow[]): { authority: string; roundId: bigint; deploys: DeployRow[] }[] {
+  const m = new Map<string, { authority: string; roundId: bigint; deploys: DeployRow[] }>();
+  for (const d of deploys) {
+    const k = `${d.authority}:${d.roundId}`;
+    let g = m.get(k);
+    if (!g) m.set(k, (g = { authority: d.authority, roundId: d.roundId, deploys: [] }));
+    g.deploys.push(d);
+  }
+  return [...m.values()];
+}
+
+/**
+ * Open / closed / Seeker rigs from the v1.1 lifecycle events, or null when none are indexed.
+ * A rig is open when its latest RigRegistered is later than its latest RigClosed. When both are
+ * in the same slot (close_rig and register_rig can share a transaction) the rows do not say which
+ * came first, but a rig PDA alternates register, close, register: it is open iff it was registered
+ * more often than it was closed. It is Seeker-tier when a SeekerVerified for it follows that
+ * registration and no later SeekerVerified moved the same SGT to another rig (verify_seeker
+ * downgrades the previous rig).
+ */
+export function rigLifecycle(input: Pick<MetricsInput, "registered" | "closedRigs" | "seekers">): { open: Set<string>; closed: Set<string>; registered: Set<string>; seeker: Set<string> } | null {
+  const reg = input.registered ?? [];
+  if (reg.length === 0) return null;
+  const lastReg = new Map<string, number>();
+  const regCount = new Map<string, number>();
+  for (const r of reg) {
+    lastReg.set(r.rig, Math.max(lastReg.get(r.rig) ?? -1, r.slot));
+    regCount.set(r.rig, (regCount.get(r.rig) ?? 0) + 1);
+  }
+  const lastClose = new Map<string, number>();
+  const closeCount = new Map<string, number>();
+  for (const c of input.closedRigs ?? []) {
+    lastClose.set(c.rig, Math.max(lastClose.get(c.rig) ?? -1, c.slot));
+    closeCount.set(c.rig, (closeCount.get(c.rig) ?? 0) + 1);
+  }
+  const open = new Set<string>();
+  const closed = new Set<string>();
+  for (const [rig, slot] of lastReg) {
+    const c = lastClose.get(rig) ?? -1;
+    const isClosed = c > slot || (c === slot && (closeCount.get(rig) ?? 0) >= (regCount.get(rig) ?? 0));
+    if (isClosed) closed.add(rig);
+    else open.add(rig);
+  }
+  // Latest holder of each SGT mint (by slot); it counts only while open and verified after its registration.
+  const holder = new Map<string, { rig: string; slot: number }>();
+  for (const sv of input.seekers) {
+    const slot = sv.slot ?? -1;
+    const prev = holder.get(sv.sgtMint);
+    if (!prev || slot >= prev.slot) holder.set(sv.sgtMint, { rig: sv.rig, slot });
+  }
+  const seeker = new Set<string>();
+  for (const { rig, slot } of holder.values()) if (open.has(rig) && slot >= (lastReg.get(rig) ?? Infinity)) seeker.add(rig);
+  return { open, closed, registered: new Set(lastReg.keys()), seeker };
 }
 
 // ------------------------------------------------------------------ share of ORE miners
@@ -233,7 +292,16 @@ export interface Summary {
     seeker: number;
     guest: number;
     closed: number;
-    basis: "accounts" | "events";
+    /**
+     * "lifecycle": RigRegistered minus RigClosed events (v1.1), Seeker tier from SeekerVerified.
+     * "accounts": the Rig account snapshot (no lifecycle events indexed).
+     * "events": distinct rigs seen in any event (neither is available).
+     */
+    basis: "lifecycle" | "accounts" | "events";
+    /** Rigs ever registered (lifecycle basis), else null. */
+    everRegistered: number | null;
+    /** The account snapshot, as an independent count of the same thing (null without a snapshot). */
+    crossCheck: { accounts: number | null; accountsSeeker: number | null; matches: boolean | null };
     evidence: Evidence[];
   };
   nightlyActive: {
@@ -270,7 +338,7 @@ export interface Summary {
     digShareOfDarkRounds: number | null;
     evidence: Evidence[];
   };
-  skips: { code: number; name: string; count: number }[];
+  skips: { code: number; name: string; range: string; label: string; count: number }[];
   crankers: { distinct: number; thirdParty: number | null };
   programPaused: boolean | null;
   consistency: {
@@ -309,21 +377,44 @@ export function computeSummary(input: MetricsInput, opts: MetricsOptions): Summa
   // ---- rigs
   const openRigs = input.rigs.filter(isOpen);
   const haveAccounts = input.rigs.length > 0;
+  const accountsSeeker = openRigs.filter((r) => r.tier === 1).length;
+  const lifecycle = rigLifecycle(input);
   let rigs: Summary["rigs"];
-  if (haveAccounts) {
-    const seeker = openRigs.filter((r) => r.tier === 1).length;
+  let seekerSet: Set<string>;
+  if (lifecycle) {
+    const matches = haveAccounts ? openRigs.length === lifecycle.open.size && accountsSeeker === lifecycle.seeker.size : null;
+    rigs = {
+      total: lifecycle.open.size,
+      seeker: lifecycle.seeker.size,
+      guest: lifecycle.open.size - lifecycle.seeker.size,
+      closed: lifecycle.closed.size,
+      basis: "lifecycle",
+      everRegistered: lifecycle.registered.size,
+      crossCheck: { accounts: haveAccounts ? openRigs.length : null, accountsSeeker: haveAccounts ? accountsSeeker : null, matches },
+      evidence: [
+        ...sample(input.registered ?? [], 2, (r) => r.signature).map((r) => ev.tx("RigRegistered", r.signature)),
+        ...sample(input.closedRigs ?? [], 1, (r) => r.signature).map((r) => ev.tx("RigClosed", r.signature)),
+        ...sample(input.seekers, 1, (r) => r.signature).map((r) => ev.tx("SeekerVerified", r.signature)),
+        ...(haveAccounts ? [ev.acct("heads_down program (all Rig accounts)", opts.programId)] : []),
+      ],
+    };
+    seekerSet = lifecycle.seeker;
+  } else if (haveAccounts) {
     rigs = {
       total: openRigs.length,
-      seeker,
-      guest: openRigs.length - seeker,
+      seeker: accountsSeeker,
+      guest: openRigs.length - accountsSeeker,
       closed: input.rigs.length - openRigs.length,
       basis: "accounts",
+      everRegistered: null,
+      crossCheck: { accounts: openRigs.length, accountsSeeker, matches: null },
       evidence: [
         ev.acct("heads_down program (all Rig accounts)", opts.programId),
         ...sample(openRigs.filter((r) => r.tier === 1), 2, (r) => r.address).map((r) => ev.acct("Seeker-tier Rig account", r.address)),
         ...sample(openRigs.filter((r) => r.tier === 0), 1, (r) => r.address).map((r) => ev.acct("Guest Rig account", r.address)),
       ],
     };
+    seekerSet = new Set(openRigs.filter((r) => r.tier === 1).map((r) => r.address));
   } else {
     const all = new Set<string>([...input.arms, ...input.digs, ...input.ends, ...input.seekers].map((e) => e.rig));
     const seekerRigs = new Set(input.seekers.map((s) => s.rig));
@@ -333,12 +424,14 @@ export function computeSummary(input: MetricsInput, opts: MetricsOptions): Summa
       guest: all.size - seekerRigs.size,
       closed: 0,
       basis: "events",
+      everRegistered: null,
+      crossCheck: { accounts: null, accountsSeeker: null, matches: null },
       evidence: sample(input.seekers, 2, (s) => s.signature).map((s) => ev.tx("SeekerVerified", s.signature)),
     };
+    seekerSet = seekerRigs;
   }
 
   // ---- nightly active (and per-night seeker split)
-  const seekerSet = new Set(haveAccounts ? openRigs.filter((r) => r.tier === 1).map((r) => r.address) : input.seekers.map((s) => s.rig));
   const perNight = new Map<number, Set<string>>();
   const mark = (rig: string, t: number | null) => {
     if (t === null) return;
@@ -368,20 +461,20 @@ export function computeSummary(input: MetricsInput, opts: MetricsOptions): Summa
   const deployLamports = sumBig(input.deploys.map((d) => d.amount * BigInt(d.totalSquares)));
   const lamportsMismatch = paired.filter((p) => p.deploy && p.deploy.amount * BigInt(p.deploy.totalSquares) !== p.dig.lamports).length;
 
-  // ---- ORE mined
-  const roundById = new Map(input.rounds.map((r) => [r.roundId, r]));
+  // ---- ORE mined: per (authority, round), ORE's checkpoint rules on that round's outcome
+  const outcomes = roundOutcomes(input);
   let mined = 0n;
   let pending = 0;
   let minedSample: { dig: string; reset: string | null } | null = null;
-  for (const d of input.deploys) {
-    const r = roundById.get(d.roundId);
-    if (!r) {
-      pending++;
+  for (const g of groupDeploys(input.deploys)) {
+    const o = outcomes.get(g.roundId);
+    if (!o) {
+      pending += g.deploys.length;
       continue;
     }
-    const m = oreMinedForDeploy(d, r);
+    const m = oreMined(g.authority, perSquare(g.deploys), o).total;
     mined += m;
-    if (m > 0n) minedSample = { dig: d.signature, reset: r.resetSignature };
+    if (m > 0n) minedSample = { dig: g.deploys[g.deploys.length - 1]!.signature, reset: o.resetSignature };
   }
 
   // ---- gate
@@ -461,7 +554,9 @@ export function computeSummary(input: MetricsInput, opts: MetricsOptions): Summa
         ...sample(costGateSkips, 1, (s) => s.signature).map((s) => ev.tx("gate closed: RigSkipped(CostGate)", s.signature)),
       ],
     },
-    skips: [...skipCounts.entries()].sort((a, b) => a[0] - b[0]).map(([code, count]) => ({ code, name: hdErrorName(code), count })),
+    skips: [...skipCounts.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([code, count]) => ({ code, name: hdErrorName(code), range: hdErrorRange(code), label: skipLabel(code), count })),
     crankers: { distinct: payers.size, thirdParty: team ? [...payers].filter((p) => !team.has(p)).length : null },
     programPaused: input.config ? input.config.paused : null,
     consistency: {
@@ -634,7 +729,7 @@ export function monthlyReport(input: MetricsInput, opts: MetricsOptions): Monthl
     if (!s) perNight.set(n, (s = new Set()));
     s.add(e.rig);
   }
-  const roundById = new Map(input.rounds.map((r) => [r.roundId, r]));
+  const outcomes = roundOutcomes(input);
   const shares = roundShares(input.deploys, input.rounds);
 
   return sorted.map((month) => {
@@ -652,7 +747,12 @@ export function monthlyReport(input: MetricsInput, opts: MetricsOptions): Monthl
       nightlyActivePeak: nightCounts.length ? Math.max(...nightCounts) : 0,
       rigRoundsDug: input.digs.filter((d) => inMonth(d.blockTime)).length,
       lamportsDeployed: sumBig(input.digs.filter((d) => inMonth(d.blockTime)).map((d) => d.lamports)),
-      oreMined: sumBig(deploys.map((d) => (roundById.has(d.roundId) ? oreMinedForDeploy(d, roundById.get(d.roundId)!) : 0n))),
+      oreMined: sumBig(
+        groupDeploys(deploys).map((g) => {
+          const o = outcomes.get(g.roundId);
+          return o ? oreMined(g.authority, perSquare(g.deploys), o).total : 0n;
+        }),
+      ),
       hdShareMean: monthShares.length ? monthShares.reduce((a, s) => a + s.share!, 0) / monthShares.length : null,
     };
   });

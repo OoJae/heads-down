@@ -5,12 +5,14 @@
  *    webhook, which is off unless a secret is configured and is never enabled for the
  *    simulated dataset.
  *  - Bound to ONE dataset; every JSON response carries `dataset` (with `simulated`) and an
- *    `X-HeadsDown-Dataset` header; every CSV row starts with the dataset name.
- *  - Query parameters are integer-validated and range-checked; errors never include stack
+ *    `X-HeadsDown-Dataset` header; every CSV row starts with the dataset name. The morning haul
+ *    (contract B) is the one exception to the envelope: its body IS the HaulSummary, which carries
+ *    `simulated` itself, and the header names the dataset.
+ *  - Query and path parameters are validated and range-checked; errors never include stack
  *    traces, SQL or configuration.
  */
 import http from "node:http";
-import type { Store } from "../store/store.ts";
+import type { SkipCursor, Store } from "../store/store.ts";
 import type { DatasetInfo, MetricsInput } from "../model.ts";
 import {
   computeMilestones,
@@ -25,10 +27,14 @@ import {
   type MetricsOptions,
 } from "../metrics/metrics.ts";
 import { DAY, MAX_TZ_OFFSET, MIN_TZ_OFFSET, formatTzOffset } from "../metrics/time.ts";
+import { HD_ERROR, P256_INTROSPECT_NAMES, P256_INTROSPECT_BASE, hdErrorName, hdErrorRange, skipLabel } from "../codec/events.ts";
+import { isAddress, isSignature } from "../codec/base58.ts";
 import { toCsv } from "./csv.ts";
 import { explorerUrl } from "./explorer.ts";
+import { haulChecks, listRigShifts, loadHaul } from "./haul.ts";
 import { openApiDocument } from "./openapi.ts";
 import { MAX_WEBHOOK_BYTES, checkWebhookAuth, handleHeliusPayload } from "../sources/helius.ts";
+import type { MarketPrice } from "../sources/market.ts";
 import type { RpcClient } from "../sources/rpc.ts";
 import type { IngestContext } from "../ingest.ts";
 
@@ -40,15 +46,21 @@ export interface ApiDeps {
   now?: () => number;
   cacheTtlMs?: number;
   corsOrigin?: string;
+  /** Market quote for the haul (null / absent: the haul shows no market price). */
+  market?: MarketPrice | null;
+  /** RPC shown in localnet explorer links. */
+  localExplorerRpc?: string;
   webhook?: { secret: string; rpc: RpcClient | null; trustPayload: boolean; ctx: IngestContext } | null;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
 class HttpError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly retryAfterS: number | null;
+  constructor(status: number, message: string, retryAfterS: number | null = null) {
     super(message);
     this.status = status;
+    this.retryAfterS = retryAfterS;
   }
 }
 
@@ -61,7 +73,52 @@ function intParam(q: URLSearchParams, name: string, def: number, min: number, ma
   return v;
 }
 
+function rigParam(raw: string | null, required: boolean): string | null {
+  if (raw === null || raw === "") {
+    if (required) throw new HttpError(400, "rig is required");
+    return null;
+  }
+  if (!isAddress(raw)) throw new HttpError(400, "rig must be a base58 address");
+  return raw;
+}
+
+const ERROR_NAMES = new Map<string, number>([
+  ...Object.entries(HD_ERROR).map(([k, v]) => [k.toLowerCase(), v] as const),
+  ...Object.entries(P256_INTROSPECT_NAMES).map(([n, k]) => [k.toLowerCase(), P256_INTROSPECT_BASE | Number(n)] as const),
+]);
+
+/** `error` filter: a decimal or 0x-hex code, or a heads_down / p256-introspect error name. */
+export function errorParam(raw: string | null): number | null {
+  if (raw === null || raw === "") return null;
+  let v: number | undefined;
+  if (/^\d{1,10}$/.test(raw)) v = Number(raw);
+  else if (/^0x[0-9a-fA-F]{1,8}$/.test(raw)) v = Number.parseInt(raw.slice(2), 16);
+  else v = ERROR_NAMES.get(raw.toLowerCase());
+  if (v === undefined || !Number.isSafeInteger(v) || v < 0 || v > 0xffff_ffff) throw new HttpError(400, "error must be a code (decimal or 0x hex) or an error name");
+  return v;
+}
+
+export function encodeCursor(c: SkipCursor): string {
+  return Buffer.from(JSON.stringify([c.slot, c.signature, c.idx])).toString("base64url");
+}
+
+export function decodeCursor(raw: string | null): SkipCursor | null {
+  if (raw === null || raw === "") return null;
+  try {
+    if (raw.length > 200) throw new Error();
+    const v: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    if (Array.isArray(v) && v.length === 3 && Number.isSafeInteger(v[0]) && v[0] >= 0 && isSignature(v[1]) && Number.isSafeInteger(v[2]) && v[2] >= 0) {
+      return { slot: v[0], signature: v[1], idx: v[2] };
+    }
+  } catch {
+    /* fall through */
+  }
+  throw new HttpError(400, "cursor is invalid");
+}
+
 const iso = (t: number) => new Date(t * 1000).toISOString();
+
+const RIG_ROUTE = /^\/v1\/rigs\/([1-9A-HJ-NP-Za-km-z]{32,44})\/(haul\/latest|haul\/([0-9]{1,20})|shifts)$/;
 
 export function createApiServer(deps: ApiDeps): http.Server {
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
@@ -69,8 +126,8 @@ export function createApiServer(deps: ApiDeps): http.Server {
   const cors = deps.corsOrigin ?? "*";
   const ds = deps.info;
   const datasetJson = { name: ds.name, simulated: ds.simulated, programId: ds.programId, executorPda: ds.executorPda, simSeed: ds.simSeed };
-  const link = (kind: "tx" | "account", id: string | null) => (id ? explorerUrl(ds.name, kind, id) : null);
-  const withUrls = (e: Evidence[]) => e.map((x) => ({ ...x, url: explorerUrl(ds.name, x.kind, x.id) }));
+  const link = (kind: "tx" | "account", id: string | null) => (id ? explorerUrl(ds.name, kind, id, deps.localExplorerRpc) : null);
+  const withUrls = (e: Evidence[]) => e.map((x) => ({ ...x, url: explorerUrl(ds.name, x.kind, x.id, deps.localExplorerRpc) }));
 
   // One shared, briefly cached snapshot of the metrics input.
   let cache: { at: number; input: Promise<MetricsInput> } | null = null;
@@ -95,11 +152,12 @@ export function createApiServer(deps: ApiDeps): http.Server {
     teamCrankers: deps.teamCrankers,
   });
 
-  const json = (res: http.ServerResponse, status: number, body: unknown) => {
+  const json = (res: http.ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}) => {
     const text = JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
     res.writeHead(status, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": status === 200 ? "public, max-age=30" : "no-store",
+      ...extra,
     });
     res.end(text);
   };
@@ -115,6 +173,18 @@ export function createApiServer(deps: ApiDeps): http.Server {
     });
     res.end(toCsv(["dataset", ...header], rows.map((r) => [ds.name, ...r])));
   };
+  const skipItem = (r: { signature: string; slot: number; blockTime: number | null; rig: string; roundId: bigint; errorCode: number }) => ({
+    signature: r.signature,
+    slot: r.slot,
+    blockTime: r.blockTime,
+    rig: r.rig,
+    roundId: r.roundId.toString(),
+    error: r.errorCode,
+    name: hdErrorName(r.errorCode),
+    range: hdErrorRange(r.errorCode),
+    label: skipLabel(r.errorCode),
+    txUrl: link("tx", r.signature),
+  });
 
   const routes: Record<string, (q: URLSearchParams, res: http.ServerResponse) => Promise<void>> = {
     "/v1/health": async (_q, res) => ok(res, { status: "ok", ...(await deps.store.health()) }),
@@ -160,6 +230,27 @@ export function createApiServer(deps: ApiDeps): http.Server {
       ok(res, feed.map((f) => ({ ...f, txUrl: link("tx", f.signature), rigUrl: link("account", f.rig) })));
     },
 
+    "/v1/skips": async (q, res) => {
+      const rig = rigParam(q.get("rig"), false);
+      const errorCode = errorParam(q.get("error"));
+      const limit = intParam(q, "limit", 50, 1, 500);
+      const after = decodeCursor(q.get("cursor"));
+      const [page, hist] = await Promise.all([
+        deps.store.listSkips({ rig, errorCode, limit, after }),
+        deps.store.skipHistogram({ rig }),
+      ]);
+      const histogram = hist
+        .map((h) => ({ code: h.code, name: hdErrorName(h.code), range: hdErrorRange(h.code), label: skipLabel(h.code), count: h.count }))
+        .sort((a, b) => b.count - a.count || a.code - b.code);
+      ok(res, {
+        filter: { rig, error: errorCode },
+        total: errorCode === null ? histogram.reduce((n, h) => n + h.count, 0) : (histogram.find((h) => h.code === errorCode)?.count ?? 0),
+        histogram,
+        items: page.rows.map(skipItem),
+        nextCursor: page.next ? encodeCursor(page.next) : null,
+      });
+    },
+
     "/v1/milestones": async (q, res) => {
       const tz = intParam(q, "tz", deps.defaultTzOffsetMinutes, MIN_TZ_OFFSET, MAX_TZ_OFFSET);
       const input = await loadInput();
@@ -197,6 +288,27 @@ export function createApiServer(deps: ApiDeps): http.Server {
       );
     },
 
+    "/v1/export/skips.csv": async (q, res) => {
+      const rig = rigParam(q.get("rig"), false);
+      const errorCode = errorParam(q.get("error"));
+      const days = intParam(q, "days", 30, 1, 90);
+      const to = asOf();
+      const rows: ReturnType<typeof skipItem>[] = [];
+      let after: SkipCursor | null = null;
+      for (let page = 0; page < 200; page++) {
+        const r = await deps.store.listSkips({ rig, errorCode, fromTime: to - days * DAY, toTime: to, limit: 500, after });
+        rows.push(...r.rows.map(skipItem));
+        if (!r.next) break;
+        after = r.next;
+      }
+      csv(
+        res,
+        "skips",
+        ["signature", "block_time_utc", "slot", "rig", "round_id", "error_code", "error_hex", "error_name", "meaning"],
+        rows.map((r) => [r.signature, r.blockTime === null ? null : iso(r.blockTime), r.slot, r.rig, r.roundId, r.error, `0x${r.error.toString(16).padStart(8, "0")}`, r.name, r.label]),
+      );
+    },
+
     "/v1/export/monthly.csv": async (q, res) => {
       const tz = intParam(q, "tz", deps.defaultTzOffsetMinutes, MIN_TZ_OFFSET, MAX_TZ_OFFSET);
       const rows = monthlyReport(await loadInput(), metricOpts(tz));
@@ -214,6 +326,19 @@ export function createApiServer(deps: ApiDeps): http.Server {
 
     "/openapi.json": async (_q, res) => json(res, 200, openApiDocument),
   };
+
+  async function rigRoute(m: RegExpExecArray, res: http.ServerResponse) {
+    const rig = rigParam(m[1]!, true)!;
+    if (m[2] === "shifts") {
+      ok(res, { rig, shifts: await listRigShifts(deps.store, rig) });
+      return;
+    }
+    const which = m[3] === undefined ? "latest" : BigInt(m[3]);
+    if (which !== "latest" && which > 0xffff_ffff_ffff_ffffn) throw new HttpError(400, "shift_id must be a u64");
+    const r = await loadHaul({ store: deps.store, dataset: ds.name, simulated: ds.simulated, programId: ds.programId, market: deps.market ?? null, link, now: asOf }, rig, which);
+    if (r.status === 404) throw new HttpError(404, r.error, r.retryAfterS ?? null);
+    json(res, 200, r.haul, { "cache-control": "public, max-age=30", "x-headsdown-haul-checks": haulChecks(r.diagnostics) });
+  }
 
   async function webhook(req: http.IncomingMessage, res: http.ServerResponse) {
     const w = deps.webhook;
@@ -240,6 +365,7 @@ export function createApiServer(deps: ApiDeps): http.Server {
   return http.createServer(async (req, res) => {
     res.setHeader("access-control-allow-origin", cors);
     res.setHeader("access-control-allow-methods", "GET, OPTIONS");
+    res.setHeader("access-control-expose-headers", "x-headsdown-dataset, x-headsdown-haul-checks, retry-after");
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("referrer-policy", "no-referrer");
     res.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
@@ -258,13 +384,19 @@ export function createApiServer(deps: ApiDeps): http.Server {
         return;
       }
       const route = routes[url.pathname];
-      if (!route) throw new HttpError(404, "not found");
+      const rig = route ? null : RIG_ROUTE.exec(url.pathname);
+      if (!route && !rig) {
+        if (url.pathname.startsWith("/v1/rigs/")) throw new HttpError(400, "expected /v1/rigs/{rig}/haul/latest, /v1/rigs/{rig}/haul/{shift_id} or /v1/rigs/{rig}/shifts with a base58 rig");
+        throw new HttpError(404, "not found");
+      }
       if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "method not allowed");
-      await route(url.searchParams, res);
+      if (route) await route(url.searchParams, res);
+      else await rigRoute(rig!, res);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
-      if (status === 500) deps.log?.("api: internal error", { error: e instanceof Error ? e.name : "unknown" });
-      if (!res.headersSent) json(res, status, { error: e instanceof HttpError ? e.message : "internal error" });
+      if (status === 500) deps.log?.("api: internal error", { error: e instanceof Error ? e.name : "unknown", detail: e instanceof Error ? e.message.slice(0, 200) : "" });
+      const extra: Record<string, string> = e instanceof HttpError && e.retryAfterS !== null ? { "retry-after": String(e.retryAfterS) } : {};
+      if (!res.headersSent) json(res, status, { error: e instanceof HttpError ? e.message : "internal error" }, extra);
       else res.destroy();
     }
   });
@@ -277,9 +409,14 @@ export const API_ROUTES = [
   "/v1/cohorts",
   "/v1/share-by-hour",
   "/v1/digs/recent",
+  "/v1/skips",
   "/v1/milestones",
+  "/v1/rigs/{rig}/haul/latest",
+  "/v1/rigs/{rig}/haul/{shift_id}",
+  "/v1/rigs/{rig}/shifts",
   "/v1/export/rounds.csv",
   "/v1/export/digs.csv",
+  "/v1/export/skips.csv",
   "/v1/export/monthly.csv",
   "/openapi.json",
 ];

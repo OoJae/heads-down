@@ -6,6 +6,8 @@
  *   node src/main.ts simulate [--seed s] [--rigs n] [--nights n] [--start YYYY-MM-DD]
  *                                                 (re)generate the `simulated` dataset
  *   node src/main.ts demo [--port 8787]           in-memory Postgres + simulation + API, one command
+ *   node src/main.ts decode <signature> [--json]  print a transaction's heads_down instructions and
+ *                                                 events with names (needs RPC_URL)
  */
 import { parseArgs } from "node:util";
 import { createApiServer } from "./api/server.ts";
@@ -14,10 +16,22 @@ import { resolveExecutorPda, CONFIG_PDA, HEADS_DOWN_PROGRAM_ID } from "./constan
 import { derivePda } from "./constants.ts";
 import { pollRpcOnce, type IngestContext } from "./ingest.ts";
 import { DEFAULT_SIM, runSimulation } from "./sim/simulate.ts";
+import { describeTransaction, formatDescribed } from "./decode.ts";
+import { explorerUrl } from "./api/explorer.ts";
+import { isSignature } from "./codec/base58.ts";
+import { MarketPrice, fixedSource, sourcesFromConfig } from "./sources/market.ts";
 import { pollOreRounds } from "./sources/oreApi.ts";
+import { resolveRounds } from "./sources/rounds.ts";
 import { RpcClient } from "./sources/rpc.ts";
 import { migrate, openDb, type Db } from "./store/db.ts";
 import { Store } from "./store/store.ts";
+
+/** Every per-dataset table, children before parents (txs is referenced by the event tables). */
+const SIMULATED_TABLES = [
+  "ev_rig_dug", "ev_rig_skipped", "ev_shift_armed", "ev_shift_ended", "ev_seeker_verified", "ev_rig_registered", "ev_rig_closed",
+  "ev_heartbeats_recorded", "ev_shift_broken", "hd_heartbeats", "hd_arm_plans", "ore_deploys", "txs", "ore_rounds", "ore_round_state",
+  "ore_round_missing", "acc_rigs", "acc_shift_logs", "acc_seeker_seats", "acc_config", "ingest_cursors", "ingest_problems",
+];
 
 const log = (msg: string, fields: Record<string, unknown> = {}) =>
   process.stderr.write(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }) + "\n");
@@ -44,6 +58,12 @@ async function ingestLoop(ctx: IngestContext, cfg: Config, once: boolean): Promi
       if (rpc) {
         const r = await pollRpcOnce(ctx, rpc, { addresses: [ctx.programId, ctx.executorPda], maxBackfill: cfg.rpcMaxBackfill, concurrency: 4 });
         log("rpc poll", r);
+        if (cfg.resolveRounds) {
+          // Without api.ore.com (localnet, devnet) the chain is the only source for every round of a shift.
+          const withShiftRounds = !(cfg.oreApiEnabled && cfg.dataset === "mainnet");
+          const rr = await resolveRounds(ctx, rpc, { maxRounds: cfg.resolveMaxRounds, withShiftRounds, resetLookups: cfg.resolveResetLookups });
+          if (rr.snapshots || rr.missing || rr.resets) log("ore rounds resolved", { ...rr });
+        }
       }
       if (cfg.oreApiEnabled && cfg.dataset === "mainnet") {
         const r = await pollOreRounds(ctx, { since: cfg.oreRoundsSince, maxPages: 200, verifySample: cfg.oreApiVerifySample, sleepMs: 500 }, rpc);
@@ -63,8 +83,7 @@ async function simulate(db: Db, cfg: Config, args: Record<string, string | undef
   const executorPda = await resolveExecutorPda(cfg.programId);
   // A fresh simulation always replaces the previous one; it never touches real datasets.
   await db.transaction(async (tx) => {
-    for (const t of ["ev_rig_dug", "ev_rig_skipped", "ev_shift_armed", "ev_shift_ended", "ev_seeker_verified", "ore_deploys",
-      "txs", "ore_rounds", "acc_rigs", "acc_shift_logs", "acc_seeker_seats", "acc_config", "ingest_cursors", "ingest_problems"]) {
+    for (const t of SIMULATED_TABLES) {
       await tx.query(`DELETE FROM ${t} WHERE dataset = 'simulated'`);
     }
     await tx.query("DELETE FROM datasets WHERE name = 'simulated'");
@@ -86,18 +105,31 @@ async function simulate(db: Db, cfg: Config, args: Record<string, string | undef
     (m) => log(m),
   );
   await store.setCursor("sim", "team-crankers", out.teamCrankers.join(","));
+  await store.setCursor("sim", "market-lamports-per-ore", out.marketLamportsPerOre.toString());
   log("simulation stored (dataset = simulated)", { seed, txs: out.txs.length, ms: Date.now() - t });
   return out.teamCrankers;
 }
 
 async function serve(db: Db, cfg: Config, ctx: IngestContext, teamCrankers: string[]): Promise<void> {
   const rpc = cfg.rpcUrl ? new RpcClient(cfg.rpcUrl) : null;
+  // The simulated dataset carries its own (simulated, labelled) market price; real datasets ask Jupiter / api.ore.com.
+  const simPrice = cfg.dataset === "simulated" ? await ctx.store.getCursor("sim", "market-lamports-per-ore") : null;
+  const market =
+    cfg.dataset === "simulated"
+      ? simPrice
+        ? new MarketPrice([fixedSource(BigInt(simPrice), "simulated")])
+        : null
+      : cfg.marketSources.length
+        ? new MarketPrice(sourcesFromConfig(cfg.marketSources))
+        : null;
   const server = createApiServer({
     store: ctx.store,
     info: await ctx.store.info(),
     defaultTzOffsetMinutes: cfg.tzOffsetMinutes,
     teamCrankers,
     corsOrigin: cfg.corsOrigin,
+    market,
+    localExplorerRpc: cfg.localExplorerRpc,
     webhook: cfg.heliusWebhookSecret && cfg.dataset !== "simulated"
       ? { secret: cfg.heliusWebhookSecret, rpc, trustPayload: cfg.heliusTrustPayload, ctx }
       : null,
@@ -115,7 +147,7 @@ async function serve(db: Db, cfg: Config, ctx: IngestContext, teamCrankers: stri
 
 async function main(): Promise<void> {
   const [cmd = "serve", ...rest] = process.argv.slice(2);
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: rest,
     options: {
       once: { type: "boolean" },
@@ -124,8 +156,26 @@ async function main(): Promise<void> {
       nights: { type: "string" },
       start: { type: "string" },
       port: { type: "string" },
+      json: { type: "boolean" },
     },
+    allowPositionals: true,
   });
+  if (cmd === "decode") {
+    const cfg = loadConfig(process.env);
+    const sig = positionals[0];
+    if (!isSignature(sig)) throw new Error("usage: node src/main.ts decode <transaction signature> [--json]  (RPC_URL selects the cluster)");
+    if (!cfg.rpcUrl) throw new Error("decode needs RPC_URL");
+    const rpc = new RpcClient(cfg.rpcUrl);
+    const tx = await rpc.getTransaction(sig);
+    if (!tx) throw new Error(`transaction ${sig} not found at finalized commitment on ${rpc.host}`);
+    const d = describeTransaction(tx, { programId: cfg.programId, executorPda: await resolveExecutorPda(cfg.programId) });
+    process.stdout.write(
+      values.json
+        ? JSON.stringify(d, null, 2) + "\n"
+        : formatDescribed(d, (s) => (cfg.dataset === "simulated" ? null : explorerUrl(cfg.dataset, "tx", s, cfg.localExplorerRpc))) + "\n",
+    );
+    return;
+  }
   if (cmd === "demo") {
     const cfg = loadConfig(process.env, {
       dataset: "simulated",

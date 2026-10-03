@@ -25,7 +25,7 @@ export function createProgramAddress(seeds: Uint8Array[], bump: number, programI
 
 /**
  * Canonical-bump address (what `find_program_address` returns) iff `bump` is the highest bump
- * that yields an off-curve point; null otherwise.
+ * that gives an off-curve point; null otherwise.
  */
 export function canonicalProgramAddress(seeds: Uint8Array[], bump: number, programId: string): string | null {
   const addr = createProgramAddress(seeds, bump, programId);

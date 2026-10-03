@@ -18,11 +18,23 @@ const CHECK_LABELS: Record<keyof Summary["consistency"], string> = {
 export function OverviewView({ s, simulated }: { s: Summary; simulated: boolean }) {
   const seekerShare = s.rigs.total > 0 ? s.rigs.seeker / s.rigs.total : null;
   const checks = Object.entries(s.consistency) as [keyof Summary["consistency"], number][];
-  const allClean = checks.every(([, n]) => n === 0) && s.solDeployed.consistent;
+  const allClean = checks.every(([, n]) => n === 0) && s.solDeployed.consistent && s.rigs.crossCheck.matches !== false;
   return (
     <>
       <div className="grid tiles">
-        <StatTile label="Rigs" value={formatInt(s.rigs.total)} sub={s.rigs.basis === "accounts" ? "Open Rig accounts" : "Distinct rigs seen in events"} evidence={s.rigs.evidence} simulated={simulated} />
+        <StatTile
+          label="Rigs"
+          value={formatInt(s.rigs.total)}
+          sub={
+            s.rigs.basis === "lifecycle"
+              ? `Registered minus closed (${formatInt(s.rigs.everRegistered)} ever registered)${s.rigs.crossCheck.matches === true ? " · Rig accounts agree ✓" : s.rigs.crossCheck.matches === false ? ` · Rig accounts say ${formatInt(s.rigs.crossCheck.accounts)} ⚠` : ""}`
+              : s.rigs.basis === "accounts"
+                ? "Open Rig accounts"
+                : "Distinct rigs seen in events"
+          }
+          evidence={s.rigs.evidence}
+          simulated={simulated}
+        />
         <StatTile label="Seeker-verified rigs" swatch="seeker" value={formatInt(s.rigs.seeker)} sub={`${formatPct(seekerShare, 0)} of rigs · SGT checked on-chain`} simulated={simulated} />
         <StatTile label="Guest rigs" swatch="guest" value={formatInt(s.rigs.guest)} sub="Any Android phone" simulated={simulated} />
         <StatTile
@@ -122,6 +134,16 @@ export function OverviewView({ s, simulated }: { s: Summary; simulated: boolean 
                   </td>
                 </tr>
               ))}
+              {s.rigs.crossCheck.matches !== null ? (
+                <tr>
+                  <td>Rig count: RigRegistered/RigClosed events vs Rig accounts</td>
+                  <td className="num">
+                    <span className={s.rigs.crossCheck.matches ? "pill-ok" : "pill-warn"}>
+                      {s.rigs.crossCheck.matches ? "agree ✓" : `${formatInt(s.rigs.total)} vs ${formatInt(s.rigs.crossCheck.accounts)} ⚠`}
+                    </span>
+                  </td>
+                </tr>
+              ) : null}
               <tr>
                 <td>Program circuit breaker (Config.paused)</td>
                 <td className="num">{s.programPaused === null ? "unknown" : s.programPaused ? "PAUSED" : "running"}</td>
@@ -129,7 +151,7 @@ export function OverviewView({ s, simulated }: { s: Summary; simulated: boolean 
               {s.skips.map((k) => (
                 <tr key={k.code}>
                   <td>
-                    Rigs skipped: <span className="mono">{k.name}</span>
+                    Rigs skipped: <span className="mono">{k.name}</span> <span className="small muted">· {k.label}</span>
                   </td>
                   <td className="num">{formatInt(k.count)}</td>
                 </tr>

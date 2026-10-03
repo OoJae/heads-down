@@ -1,0 +1,21 @@
+{
+ "_source": "GET https://lite-api.jup.ag/price/v3?ids=<ORE mint>,<wSOL mint>, fetched 2026-10-01 (unmodified response)",
+ "response": {
+  "So11111111111111111111111111111111111111112": {
+   "createdAt": "2024-06-05T08:55:25.527Z",
+   "liquidity": 968919885.7892418,
+   "usdPrice": 118.09043817886219,
+   "blockId": 452125567,
+   "decimals": 9,
+   "priceChange24h": -0.4422498546377814
+  },
+  "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp": {
+   "createdAt": "2024-08-03T00:00:50.697Z",
+   "liquidity": 923045.6729286435,
+   "usdPrice": 95.70542008101766,
+   "blockId": 452125157,
+   "decimals": 11,
+   "priceChange24h": 11.996172591110147
+  }
+ }
+}

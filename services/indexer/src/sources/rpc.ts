@@ -101,6 +101,25 @@ export class RpcClient {
     ]);
   }
 
+  /** Up to 100 accounts at `finalized`; null for an address with no account. */
+  async getMultipleAccounts(addresses: string[]): Promise<{ slot: number; accounts: (RawAccount | null)[] }> {
+    if (addresses.length > 100) throw new RpcError("getMultipleAccounts: at most 100 addresses");
+    for (const a of addresses) if (!isAddress(a)) throw new RpcError("getMultipleAccounts: invalid address");
+    const r = await this.call<{ context: { slot: number }; value: ({ data: [string, string]; owner: string } | null)[] }>("getMultipleAccounts", [
+      addresses,
+      { encoding: "base64", commitment: "finalized" },
+    ]);
+    if (!r || !Array.isArray(r.value) || r.value.length !== addresses.length || !Number.isSafeInteger(r.context?.slot)) {
+      throw new RpcError("getMultipleAccounts: malformed response");
+    }
+    const accounts = r.value.map((v, i): RawAccount | null => {
+      if (v === null) return null;
+      if (!isAddress(v?.owner) || !Array.isArray(v.data) || v.data[1] !== "base64") throw new RpcError("getMultipleAccounts: malformed account");
+      return { address: addresses[i]!, owner: v.owner, data: decodeBase64Strict(v.data[0], 10 * 1024 * 1024) };
+    });
+    return { slot: r.context.slot, accounts };
+  }
+
   async getProgramAccounts(programId: string, filters: unknown[]): Promise<{ slot: number; accounts: RawAccount[] }> {
     const r = await this.call<{ context: { slot: number }; value: { pubkey: string; account: { data: [string, string]; owner: string } }[] }>(
       "getProgramAccounts",
@@ -136,27 +155,48 @@ export interface RawAccount {
 /**
  * Newest-first signatures for `address` strictly newer than `until` (exclusive), paging
  * backwards. Without a cursor, stops after `maxBackfill` signatures.
+ *
+ * A node with a short ledger history (solana-test-validator keeps ~10,000 shreds; pruned RPC
+ * nodes) eventually forgets the cursor transaction and answers "not found". Then the walk runs
+ * without `until` and stops below `untilSlot` (the cursor's slot); signatures in that very slot
+ * may come back again, which the idempotent store skips.
  */
 export async function collectNewSignatures(
   rpc: RpcClient,
   address: string,
   until: string | null,
   maxBackfill: number,
+  untilSlot: number | null = null,
 ): Promise<SignatureInfo[]> {
-  const out: SignatureInfo[] = [];
-  let before: string | undefined;
-  for (;;) {
-    const page = await rpc.getSignaturesForAddress(address, { before, until: until ?? undefined, limit: 1000 });
-    if (!Array.isArray(page)) throw new RpcError("getSignaturesForAddress: malformed response");
-    for (const s of page) {
-      if (!isSignature(s?.signature) || !Number.isSafeInteger(s.slot)) throw new RpcError("getSignaturesForAddress: malformed entry");
-      out.push(s);
+  const walk = async (stopAt: string | null, minSlot: number | null): Promise<SignatureInfo[]> => {
+    const out: SignatureInfo[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const page = await rpc.getSignaturesForAddress(address, { before, until: stopAt ?? undefined, limit: 1000 });
+      if (!Array.isArray(page)) throw new RpcError("getSignaturesForAddress: malformed response");
+      let reached = false;
+      for (const s of page) {
+        if (!isSignature(s?.signature) || !Number.isSafeInteger(s.slot)) throw new RpcError("getSignaturesForAddress: malformed entry");
+        if (minSlot !== null && s.slot < minSlot) {
+          reached = true;
+          break;
+        }
+        out.push(s);
+      }
+      if (reached || page.length < 1000) break;
+      if (stopAt === null && minSlot === null && out.length >= maxBackfill) break;
+      before = page[page.length - 1]!.signature;
     }
-    if (page.length < 1000) break;
-    if (until === null && out.length >= maxBackfill) break;
-    before = page[page.length - 1]!.signature;
+    return out;
+  };
+  if (until === null) return (await walk(null, null)).slice(0, maxBackfill);
+  try {
+    return await walk(until, null);
+  } catch (e) {
+    if (!(e instanceof RpcError) || !/not found/i.test(e.message)) throw e;
+    if (untilSlot === null) return (await walk(null, null)).slice(0, maxBackfill);
+    return walk(null, untilSlot);
   }
-  return until === null ? out.slice(0, maxBackfill) : out;
 }
 
 /** Runs `fn` over `items` with at most `n` in flight, preserving order. */

@@ -11,6 +11,7 @@ import { runSimulation } from "../src/sim/simulate.ts";
 import { buildDigTx } from "../src/sim/txbuilder.ts";
 import { migrate, openDb, type Db } from "../src/store/db.ts";
 import { Store } from "../src/store/store.ts";
+import { MarketPrice, fixedSource } from "../src/sources/market.ts";
 import { addr, sig } from "./helpers.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,7 +72,12 @@ beforeAll(async () => {
     { store: sim, programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA },
     { seed: "api-test", rigs: 12, nights: 9, startDay: "2026-09-10", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA, configPda: CONFIG_PDA },
   );
-  simBase = await listen(createApiServer({ store: sim, info: await sim.info(), defaultTzOffsetMinutes: 60, teamCrankers: out.teamCrankers }));
+  simBase = await listen(
+    createApiServer({
+      store: sim, info: await sim.info(), defaultTzOffsetMinutes: 60, teamCrankers: out.teamCrankers,
+      market: new MarketPrice([fixedSource(out.marketLamportsPerOre, "simulated")]),
+    }),
+  );
 
   const main = await Store.bind(db, { name: "mainnet", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA });
   const tx = buildDigTx({
@@ -105,7 +111,7 @@ describe("OpenAPI", () => {
 });
 
 describe("JSON endpoints (simulated dataset)", () => {
-  for (const route of ["/v1/health", "/v1/summary", "/v1/cohorts", "/v1/share-by-hour", "/v1/digs/recent", "/v1/milestones"]) {
+  for (const route of ["/v1/health", "/v1/summary", "/v1/cohorts", "/v1/share-by-hour", "/v1/digs/recent", "/v1/skips", "/v1/milestones"]) {
     it(`${route} matches its schema and is badged simulated`, async () => {
       const r = await fetch(`${simBase}${route}`);
       expect(r.status).toBe(200);
@@ -142,6 +148,92 @@ describe("JSON endpoints (simulated dataset)", () => {
     expect((await fetch(`${simBase}/v1/summary`, { method: "OPTIONS" })).status).toBe(204);
     // The webhook does not exist on a simulated server.
     expect((await fetch(`${simBase}/webhooks/helius`, { method: "POST", body: "[]", headers: { authorization: "x" } })).status).toBe(404);
+  });
+});
+
+describe("GET /v1/skips", () => {
+  it("lists skips newest first with names, ranges and plain labels, and a histogram", async () => {
+    const body = await j(await fetch(`${simBase}/v1/skips?limit=5`));
+    expect(check(body, responseSchema("/v1/skips"))).toEqual([]);
+    const d = body.data;
+    expect(d.items).toHaveLength(5);
+    expect(d.total).toBe(d.histogram.reduce((n: number, h: { count: number }) => n + h.count, 0));
+    const codes = d.histogram.map((h: { code: number }) => h.code);
+    expect(codes).toEqual(expect.arrayContaining([1, 7]));
+    // Sorted by count, every code named and explained.
+    const counts = d.histogram.map((h: { count: number }) => h.count);
+    expect([...counts].sort((a, b) => b - a)).toEqual(counts);
+    expect(d.histogram.every((h: { name: string; label: string }) => !h.name.startsWith("unknown") && h.label.length > 0)).toBe(true);
+    const stale = d.histogram.find((h: { code: number }) => h.code === 7);
+    expect(stale).toMatchObject({ name: "StaleHeartbeat", range: "heads_down", label: "replay rejected: heartbeat counter not newer" });
+    const slots = d.items.map((i: { slot: number }) => i.slot);
+    expect([...slots].sort((a, b) => b - a)).toEqual(slots);
+    expect(d.items.every((i: { txUrl: string | null }) => i.txUrl === null)).toBe(true); // simulated: no links
+  });
+
+  it("paginates with an opaque cursor, without gaps or repeats", async () => {
+    const all = (await j(await fetch(`${simBase}/v1/skips?limit=500`))).data.items.map((i: { signature: string; rig: string }) => `${i.signature}:${i.rig}`);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let n = 0; n < 100; n++) {
+      const page: { items: { signature: string; rig: string }[]; nextCursor: string | null } = (await j(await fetch(`${simBase}/v1/skips?limit=7${cursor ? `&cursor=${cursor}` : ""}`))).data;
+      seen.push(...page.items.map((i: { signature: string; rig: string }) => `${i.signature}:${i.rig}`));
+      cursor = page.nextCursor;
+      if (!cursor) break;
+    }
+    expect(seen).toEqual(all);
+  });
+
+  it("filters by error (code, hex or name) and by rig", async () => {
+    const byName = (await j(await fetch(`${simBase}/v1/skips?error=StaleHeartbeat&limit=500`))).data;
+    expect(byName.items.length).toBeGreaterThan(0);
+    expect(byName.items.every((i: { error: number }) => i.error === 7)).toBe(true);
+    expect(byName.total).toBe(byName.items.length);
+    expect((await j(await fetch(`${simBase}/v1/skips?error=0x7&limit=500`))).data.items).toEqual(byName.items);
+    expect((await j(await fetch(`${simBase}/v1/skips?error=7&limit=500`))).data.items).toEqual(byName.items);
+    const rig = byName.items[0].rig;
+    const mine = (await j(await fetch(`${simBase}/v1/skips?rig=${rig}&limit=500`))).data;
+    expect(mine.items.every((i: { rig: string }) => i.rig === rig)).toBe(true);
+    expect(mine.filter).toEqual({ rig, error: null });
+  });
+
+  it("rejects bad filters and cursors", async () => {
+    for (const q of ["?error=NotAnError", "?error=-1", "?rig=abc", "?limit=0", "?limit=501", "?cursor=zzz", `?cursor=${Buffer.from("[1,2,3]").toString("base64url")}`]) {
+      const r = await fetch(`${simBase}/v1/skips${q}`);
+      expect(r.status, q).toBe(400);
+    }
+  });
+
+  it("exports skips.csv with the code in decimal and hex, its name and meaning", async () => {
+    const r = await fetch(`${simBase}/v1/export/skips.csv?error=StaleHeartbeat`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-disposition")).toMatch(/SIMULATED-heads-down-simulated-skips-/);
+    const lines = (await r.text()).trimEnd().split("\r\n");
+    expect(lines[0]).toBe("dataset,signature,block_time_utc,slot,rig,round_id,error_code,error_hex,error_name,meaning");
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.slice(1).every((l) => l.startsWith("simulated,") && l.includes(",7,0x00000007,StaleHeartbeat,replay rejected: heartbeat counter not newer"))).toBe(true);
+  });
+});
+
+describe("haul on the simulated dataset", () => {
+  it("serves contract B with simulated: true, a labelled simulated market price and no explorer links", async () => {
+    const feed = (await j(await fetch(`${simBase}/v1/digs/recent?limit=50`))).data;
+    let served = 0;
+    for (const rig of new Set<string>(feed.map((f: { rig: string }) => f.rig))) {
+      const r = await fetch(`${simBase}/v1/rigs/${rig}/haul/latest`);
+      if (r.status !== 200) continue;
+      const h = await j(r);
+      expect(check(h, components.HaulSummary!)).toEqual([]);
+      expect(h.simulated).toBe(true);
+      expect(h.explorer).toEqual({ shift_log: null, sample_digs: [] });
+      expect(h.market_source).toBe("simulated");
+      expect(h.first_pickup_ts).toBeNull();
+      expect(r.headers.get("x-headsdown-dataset")).toBe("simulated");
+      expect(r.headers.get("x-headsdown-haul-checks")).toBe("dark=match; sol-returned=exact; deploys=match");
+      expect(JSON.stringify(h)).not.toMatch(/solscan|explorer\.solana/);
+      served++;
+    }
+    expect(served).toBeGreaterThan(0);
   });
 });
 

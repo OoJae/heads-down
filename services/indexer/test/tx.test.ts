@@ -5,7 +5,7 @@ import { encodeHdEvent } from "../src/codec/events.ts";
 import { parseProgramData } from "../src/codec/logs.ts";
 import { TxShapeError, extractTransaction, type RawTransaction } from "../src/codec/tx.ts";
 import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID, ORE_BOARD, ORE_PROGRAM_ID } from "../src/constants.ts";
-import { buildDigTx, buildEventTx, encodeOreDeployEvent } from "../src/sim/txbuilder.ts";
+import { buildDigTx, buildEventTx, buildRecordTx, encodeOreDeployEvent } from "../src/sim/txbuilder.ts";
 
 const HD = HEADS_DOWN_PROGRAM_ID;
 const OPTS = { programId: HD, executorPda: EXECUTOR_PDA };
@@ -99,7 +99,7 @@ describe("extractTransaction", () => {
     expect(x.problems).toEqual([]);
   });
 
-  it("a failed transaction yields no events", () => {
+  it("a failed transaction contributes no events", () => {
     const x = extractTransaction(dig({ failed: true }), OPTS);
     expect(x.failed).toBe(true);
     expect(x.hdEvents).toEqual([]);
@@ -200,6 +200,84 @@ describe("extractTransaction", () => {
     // With the wallet as "executor" the very same bytes are accepted, proving the path works.
     const y = extractTransaction(tx, { programId: HD, executorPda: "9FsGp26UkKndmewwV5sNTPXfBoNP1BxywifBrpWrxpVP" });
     expect(y.oreDeploys.map((d) => d.event.roundId)).toEqual([422_675n]);
+  });
+
+  it("keeps ShiftEndedV2 and drops the ShiftEnded it supersedes (one shift is one row)", () => {
+    const summary = { rig: RIG_A, shiftId: 3n, darkRounds: 9n, roundsDug: 2n, lamports: 2_010_000n, reason: 0 };
+    const tx = buildEventTx({
+      signature: sig(20), slot: 1, blockTime: 1, signer: addr(9), programId: HD,
+      events: [{ kind: "ShiftEnded", ...summary }, { kind: "ShiftEndedV2", ...summary, startRound: 100n, endRound: 120n, mode: 1 }],
+    });
+    const x = extractTransaction(tx, OPTS);
+    expect(x.hdEvents.map((e) => e.event.kind)).toEqual(["ShiftEndedV2"]);
+    expect(x.hdEvents[0]!.index).toBe(1);
+    expect(x.problems).toEqual([]);
+    expect(x.hdInstructions.map((i) => i.ix.name)).toEqual(["end_shift"]);
+    // A v1 program (tag 4 alone) is still counted.
+    const v1 = buildEventTx({ signature: sig(21), slot: 1, blockTime: 1, signer: addr(9), programId: HD, events: [{ kind: "ShiftEnded", ...summary }] });
+    expect(extractTransaction(v1, OPTS).hdEvents.map((e) => e.event.kind)).toEqual(["ShiftEnded"]);
+    // Disagreeing twins: V2 kept, the disagreement recorded.
+    const odd = buildEventTx({
+      signature: sig(22), slot: 1, blockTime: 1, signer: addr(9), programId: HD,
+      events: [{ kind: "ShiftEnded", ...summary, darkRounds: 8n }, { kind: "ShiftEndedV2", ...summary, startRound: 100n, endRound: 120n, mode: 1 }],
+    });
+    const y = extractTransaction(odd, OPTS);
+    expect(y.hdEvents.map((e) => e.event.kind)).toEqual(["ShiftEndedV2"]);
+    expect(y.problems.map((p) => p.code)).toEqual(["SHIFT_ENDED_MISMATCH"]);
+  });
+
+  it("decodes the dig instruction and tells which heartbeats were applied (their lease granted)", () => {
+    const tx = buildDigTx({
+      signature: sig(30), slot: 9, blockTime: 9, cranker: addr(9), programId: HD, configPda: CONFIG_PDA, executorPda: EXECUTOR_PDA,
+      roundAccount: addr(10), roundId: 500n,
+      rigs: [
+        { rig: addr(1), authority: addr(11), automation: addr(12), miner: addr(13), heartbeat: { counter: 7n, round: 500n, lease: 3 }, outcome: { kind: "dug", perTile: 10n, mask: 1, emaEv: 1n } },
+        { rig: addr(2), authority: addr(21), automation: addr(22), miner: addr(23), heartbeat: { counter: 4n, round: 499n, lease: 2 }, outcome: { kind: "skipped", error: 1 } }, // CostGate: after the heartbeat
+        { rig: addr(3), authority: addr(31), automation: addr(32), miner: addr(33), heartbeat: { counter: 2n, round: 500n, lease: 3 }, outcome: { kind: "skipped", error: 7 } }, // StaleHeartbeat: refused
+        { rig: addr(4), authority: addr(41), automation: addr(42), miner: addr(43), heartbeat: null, outcome: { kind: "dug", perTile: 10n, mask: 2, emaEv: 1n } }, // lease reuse
+        { rig: addr(5), authority: addr(51), automation: addr(52), miner: addr(53), heartbeat: { counter: 9n, round: 500n, lease: 1 }, outcome: { kind: "skipped", error: 0x2560_000e } }, // bad signature
+      ],
+    });
+    const x = extractTransaction(tx, OPTS);
+    expect(x.problems).toEqual([]);
+    expect(x.hdInstructions).toHaveLength(1);
+    expect(x.hdInstructions[0]!.ix.name).toBe("dig");
+    expect(x.hdInstructions[0]!.events).toHaveLength(5);
+    expect(x.heartbeats.map((h) => [h.rig, h.fresh, h.applied, h.counter, h.hbRound, h.leaseRounds, h.boardRound, h.authority])).toEqual([
+      [addr(1), true, true, 7n, 500n, 3, 500n, addr(11)],
+      [addr(2), true, true, 4n, 499n, 2, 500n, addr(21)],
+      [addr(3), true, false, 2n, 500n, 3, 500n, addr(31)],
+      [addr(4), false, false, 0n, 0n, 0, 500n, addr(41)],
+      [addr(5), true, false, 9n, 500n, 1, 500n, addr(51)],
+    ]);
+  });
+
+  it("matches record_heartbeats entries to HeartbeatsRecorded / RigSkipped", () => {
+    const tx = buildRecordTx({
+      signature: sig(31), slot: 9, blockTime: 9, cranker: addr(9), programId: HD, boardRound: 600n,
+      rigs: [
+        { rig: addr(1), heartbeat: { counter: 3n, round: 600n, lease: 3 }, outcome: { kind: "recorded", darkRoundsAdded: 3n } },
+        { rig: addr(2), heartbeat: { counter: 1n, round: 600n, lease: 3 }, outcome: { kind: "skipped", error: 14 } },
+      ],
+    });
+    const x = extractTransaction(tx, OPTS);
+    expect(x.heartbeats.map((h) => [h.kind, h.rig, h.applied, h.authority])).toEqual([
+      ["record", addr(1), true, null],
+      ["record", addr(2), false, null],
+    ]);
+    expect(x.hdEvents.map((e) => e.event.kind)).toEqual(["HeartbeatsRecorded", "RigSkipped"]);
+  });
+
+  it("an undecodable heads_down instruction or truncated logs are reported, never guessed", () => {
+    const tx = buildEventTx({ signature: sig(32), slot: 1, blockTime: 1, signer: addr(9), programId: HD, events: [], ix: { data: Uint8Array.of(6, 1), accounts: [] } });
+    const x = extractTransaction(tx, OPTS);
+    expect(x.problems.map((p) => p.code)).toEqual(["IX_BAD_LENGTH"]);
+    const t = dig();
+    t.meta!.logMessages = [...t.meta!.logMessages!.slice(0, 3), "Log truncated"];
+    const y = extractTransaction(t, OPTS);
+    expect(y.logsTruncated).toBe(true);
+    expect(y.problems.map((p) => p.code)).toContain("IX_LOG_MISMATCH");
+    expect(y.heartbeats.every((h) => h.applied === null)).toBe(true);
   });
 
   it("parses the real mainnet v1 reset transaction and its ResetEvent", () => {

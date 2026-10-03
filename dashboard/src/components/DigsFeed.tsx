@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatCost, formatSol, formatUtc, shortId, timeAgo } from "@/lib/format";
 import type { FeedItem } from "@/lib/types";
 import { ExplorerLink } from "./Evidence";
@@ -33,7 +34,10 @@ export function DigsFeed({ items, simulated, now }: { items: FeedItem[]; simulat
             <tr key={`${d.signature}-${d.rig}`}>
               <td title={formatUtc(d.blockTime)}>{timeAgo(d.blockTime, now)}</td>
               <td>
-                <ExplorerLink url={d.rigUrl} id={d.rig} simulated={simulated} />
+                <ExplorerLink url={d.rigUrl} id={d.rig} simulated={simulated} />{" "}
+                <Link className="small" href={`/haul/?rig=${encodeURIComponent(d.rig)}`} title={`Morning haul of rig ${d.rig}`}>
+                  haul
+                </Link>
               </td>
               <td>
                 {d.tier === 1 ? (

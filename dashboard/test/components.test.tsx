@@ -93,7 +93,11 @@ describe("OverviewView", () => {
       expect(screen.getByRole("region", { name: label })).toBeTruthy();
     }
     expect(screen.getByRole("region", { name: "Rigs" }).textContent).toContain(String(summary.data.rigs.total));
-    expect(screen.getByRole("region", { name: "SOL deployed into ORE" }).textContent).toMatch(/19\.73 SOL/);
+    expect(screen.getByRole("region", { name: "SOL deployed into ORE" }).textContent).toMatch(/16\.58 SOL/);
+    // Rigs are counted from RigRegistered / RigClosed and cross-checked against the Rig accounts.
+    expect(screen.getByRole("region", { name: "Rigs" }).textContent).toMatch(/Registered minus closed \(120 ever registered\) · Rig accounts agree ✓/);
+    expect(screen.getByRole("region", { name: "Integrity checks" }).textContent).toMatch(/RigRegistered\/RigClosed events vs Rig accounts.*agree ✓/);
+    expect(screen.getByRole("region", { name: "Integrity checks" }).textContent).toMatch(/StaleHeartbeat · replay rejected: heartbeat counter not newer/);
     expect(screen.getByRole("region", { name: "Integrity checks" }).textContent).toMatch(/all clear/);
     expect(screen.getAllByText("SIM").length).toBeGreaterThanOrEqual(11);
   });
@@ -178,17 +182,21 @@ describe("ShareView", () => {
 });
 
 describe("DigsFeed", () => {
-  it("lists digs with tier and no links for simulated data", () => {
+  it("lists digs with tier and no explorer links for simulated data (only links to each rig's haul page)", () => {
     render(<DigsFeed items={digs.data} simulated now={digs.asOf} />);
     const rows = within(screen.getByRole("table")).getAllByRole("row");
     expect(rows).toHaveLength(digs.data.length + 1);
-    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    const hrefs = screen.queryAllByRole("link").map((a) => a.getAttribute("href") ?? "");
+    expect(hrefs).toHaveLength(digs.data.length);
+    // next/link drops the trailing slash outside a build (trailingSlash applies in the static export).
+    expect(hrefs.every((h) => /^\/haul\/?\?rig=[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(h))).toBe(true);
   });
 
   it("links the transaction and the rig on real data", () => {
     const item: FeedItem = { ...digs.data[0]!, signature: SIG, txUrl: `https://solscan.io/tx/${SIG}`, rig: "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge", rigUrl: "https://solscan.io/account/By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge" };
     render(<DigsFeed items={[item]} simulated={false} now={digs.asOf} />);
-    expect(screen.getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual([item.rigUrl, item.txUrl]);
+    const hrefs = screen.getAllByRole("link").map((a) => (a.getAttribute("href") ?? "").replace("/haul/?", "/haul?"));
+    expect(hrefs).toEqual([item.rigUrl, `/haul?rig=${item.rig}`, item.txUrl]);
   });
 });
 

@@ -72,8 +72,12 @@ export async function pollRpcOnce(ctx: IngestContext, rpc: RpcClient, opts: RpcP
   let ingested = 0;
   const done = new Set<string>();
   for (const address of opts.addresses) {
-    const cursor = await ctx.store.getCursor("rpc-signatures", address);
-    const newestFirst = await collectNewSignatures(rpc, address, cursor, opts.maxBackfill);
+    // Cursor: "<slot>:<signature>" (older rows hold just the signature).
+    const raw = await ctx.store.getCursor("rpc-signatures", address);
+    const m = raw === null ? null : /^(\d{1,15}):(.+)$/.exec(raw);
+    const cursor = m ? m[2]! : raw;
+    const cursorSlot = m ? Number(m[1]) : null;
+    const newestFirst = await collectNewSignatures(rpc, address, cursor, opts.maxBackfill, cursorSlot);
     const oldestFirst = newestFirst.reverse();
     for (let i = 0; i < oldestFirst.length; i += 50) {
       const chunk = oldestFirst.slice(i, i + 50);
@@ -85,12 +89,13 @@ export async function pollRpcOnce(ctx: IngestContext, rpc: RpcClient, opts: RpcP
       for (const t of ready) done.add(t.transaction.signatures[0]!);
       if (missing >= 0) {
         // Not yet served by this RPC node: keep the cursor before it and retry next poll.
-        const lastOk = missing === 0 ? null : wanted[missing - 1]!.signature;
-        if (lastOk) await ctx.store.setCursor("rpc-signatures", address, lastOk);
+        const lastOk = missing === 0 ? null : wanted[missing - 1]!;
+        if (lastOk) await ctx.store.setCursor("rpc-signatures", address, `${lastOk.slot}:${lastOk.signature}`);
         ctx.log?.("rpc: transaction not yet available, will retry", { address });
         return { ingested, accounts: 0 };
       }
-      await ctx.store.setCursor("rpc-signatures", address, chunk[chunk.length - 1]!.signature);
+      const last = chunk[chunk.length - 1]!;
+      await ctx.store.setCursor("rpc-signatures", address, `${last.slot}:${last.signature}`);
     }
   }
   const accounts = await snapshotAccountsViaRpc(ctx, rpc);

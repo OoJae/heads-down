@@ -1,0 +1,52 @@
+{
+ "_source": "GET https://api.ore.com/market, fetched 2026-10-01; the `pools` and `windows` arrays are cut to their first entries (the price fields are unmodified)",
+ "response": {
+  "active_price_usd": 96.3297325422457,
+  "sol_price_usd": 118.14649092854864,
+  "updated_at": 1790814379,
+  "windows": [
+   {
+    "price_low": 7.0,
+    "ore_usd": 0.0,
+    "usdc_usd": 98.95402811762256,
+    "sol_usd": 0.0,
+    "zec_usd": 0.0,
+    "gldx_usd": 79.8974744212837,
+    "other_usd": 0.0,
+    "is_active": false,
+    "pools": [
+     {
+      "pool_index": 0,
+      "total_usd": 98.95402811762256
+     },
+     {
+      "pool_index": 7,
+      "total_usd": 79.8974744212837
+     }
+    ]
+   }
+  ],
+  "pools": [
+   {
+    "address": "C7hF6MvQwErhsf1KrFvnKzdArb9PsofFiwZdipo9c7cz",
+    "label": "ORE/USDC #1",
+    "provider": "meteora_dlmm",
+    "quote_token": "usdc",
+    "ore_reserves": 1067.232484575119,
+    "quote_reserves": 360591.12788099993,
+    "tvl_usd": 463397.34768051753,
+    "fees_24h_usd": 811.5368423939627
+   },
+   {
+    "address": "Vc49WKg7j66BYhvNNZw3FzxLmqUtjhnncX7LxNp3xMV",
+    "label": "ORE/USDC #2",
+    "provider": "meteora_dlmm",
+    "quote_token": "usdc",
+    "ore_reserves": 149.08903642009992,
+    "quote_reserves": 8877.475116999998,
+    "tvl_usd": 23239.18212032935,
+    "fees_24h_usd": 8.861500371910134
+   }
+  ]
+ }
+}

@@ -30,7 +30,17 @@ export interface Summary {
   asOf: number;
   tzOffsetMinutes: number;
   lastCompleteNight: string | null;
-  rigs: { total: number; seeker: number; guest: number; closed: number; basis: "accounts" | "events"; evidence: Evidence[] };
+  rigs: {
+    total: number;
+    seeker: number;
+    guest: number;
+    closed: number;
+    /** "lifecycle" = RigRegistered minus RigClosed events (v1.1); "accounts" = Rig account snapshot; "events" = rigs seen in any event. */
+    basis: "lifecycle" | "accounts" | "events";
+    everRegistered: number | null;
+    crossCheck: { accounts: number | null; accountsSeeker: number | null; matches: boolean | null };
+    evidence: Evidence[];
+  };
   nightlyActive: {
     lastNight: string | null;
     rigs: number;
@@ -47,7 +57,7 @@ export interface Summary {
     buried: { amount: null; status: "not_shipped"; note: string };
   };
   gate: { openRate: number | null; opened: number; closedByCostGate: number; digShareOfDarkRounds: number | null; evidence: Evidence[] };
-  skips: { code: number; name: string; count: number }[];
+  skips: { code: number; name: string; range: ErrorRange; label: string; count: number }[];
   crankers: { distinct: number; thirdParty: number | null };
   programPaused: boolean | null;
   consistency: Record<
@@ -138,4 +148,61 @@ export interface Health {
   lastSlot: number | null;
   lastBlockTime: number | null;
   problems: { code: string; count: number }[];
+}
+
+export type ErrorRange = "heads_down" | "p256-introspect" | "sgt-verify" | "builtin" | "unknown";
+
+export interface SkipItem {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  rig: string;
+  roundId: string;
+  error: number;
+  name: string;
+  range: ErrorRange;
+  label: string;
+  txUrl: string | null;
+}
+
+export interface Skips {
+  filter: { rig: string | null; error: number | null };
+  total: number;
+  histogram: { code: number; name: string; range: ErrorRange; label: string; count: number }[];
+  items: SkipItem[];
+  nextCursor: string | null;
+}
+
+export interface RigShifts {
+  rig: string;
+  shifts: { shiftId: string; endedAt: number | null; darkRounds: string; roundsDug: string; reason: number; mode: number | null; signature: string }[];
+}
+
+/** u64 as a JSON number up to 2^53, else a decimal string (contract B). */
+export type U64 = number | string;
+
+/** The morning haul, shared contract B (not enveloped). */
+export interface HaulSummary {
+  rig: string;
+  shift_id: U64;
+  mode: "night" | "day" | "focus_only";
+  start_ts: number;
+  end_ts: number;
+  start_round: U64;
+  end_round: U64;
+  rounds: { round_id: U64; dark: boolean; dug_mask: number; winning_square: number | null; motherlode: boolean; split: boolean }[];
+  dark_rounds: U64;
+  rounds_dug: U64;
+  sol_placed_lamports: U64;
+  fees_lamports: U64;
+  ore_mined_atoms: string;
+  effective_lamports_per_ore: string | null;
+  market_lamports_per_ore: string | null;
+  market_source: string | null;
+  streak_before: number;
+  streak_after: number;
+  break_reason: number;
+  first_pickup_ts: null;
+  simulated: boolean;
+  explorer: { shift_log: string | null; sample_digs: string[] };
 }
