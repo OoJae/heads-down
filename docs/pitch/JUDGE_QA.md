@@ -37,8 +37,9 @@ includes zero). At the 2026-09-29 snapshot the gate was shut. It's a modest edge
 paid is shown, not hidden.
 
 *Evidence:* `ml/forecaster/RESULTS.md` (TL;DR, §3), `docs/ECONOMICS.md` (Summary, §5).
-*If pressed:* the clock-out buy leg's transactions are built and tested; its screen is not. Until
-it is, a night with the gate shut digs nothing and spends nothing.
+*If pressed:* the clock-out screen is built (seal the shift, take back a bond, claim ORE). The buy
+leg's transactions are built and tested, but the screen does not offer it yet. Until it does, a
+night with the gate shut digs nothing and spends nothing.
 
 ### 3. "Who holds admin keys? Can you drain users?" (Toly, Mert)
 
@@ -172,7 +173,7 @@ SIWS payload the registrar's.
 
 That's the point: give the idle phone a job, not "use your phone less". About 118.9k of about 121k
 .skr IDs look dormant per SeekerTracker. Each shift starts with a user-signed transaction into ORE,
-and clock-out will be a second one (next). We don't claim to measure your focus; we measure this
+and clock-out is a second one. We don't claim to measure your focus; we measure this
 phone's face-down time. Unknown: whether digs that list the wallet as writable count toward Seeker
 Activity Tracking. That's an open question for Solana Mobile.
 

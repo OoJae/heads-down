@@ -384,7 +384,8 @@ constants are compile-time constants; SKR fuel is a client-side swap). Also:
   vectors; it keeps the v1.3 governance events raw), the indexer (all 27 events and
   32 instructions) and the Android chain layer (every instruction a phone sends,
   byte for byte). `vectors/CROSSCHECK.md` records the disagreements found while they
-  were still on v1.1; they are resolved. The app has no screens yet for Stack, Gift,
-  Revoke, Unfreeze or Claim.
+  were still on v1.1; they are resolved. The app has screens for the Focus Bond,
+  Unfreeze and the clock-out (`end_shift`, `release_focus_bond`, ORE's claim); none
+  yet for Stack, Gift, Revoke or Close rig.
 - No physical device was available. Keystore signatures are simulated with p256 in
   Keystore's format (DER, then low-S raw).

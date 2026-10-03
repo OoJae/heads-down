@@ -51,12 +51,13 @@ built; the Stack and Gift screens are not yet.
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 105 tests on real attestation chains |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 347 tests |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain |
-| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, widget. 760 JVM unit tests |
+| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, widget. 797 JVM unit tests |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
 **Not done yet, in plain words.** Nothing is deployed on mainnet. The app has not run on a real
 phone (everything above is unit tests, a fork of mainnet and a phone-less end-to-end run). The
-app has no screens yet for Stack, Gift, Revoke or Claim. There has been no third-party audit.
+app has no screens yet for Stack, Gift, Revoke or Close rig, and its clock-out cannot buy ORE yet.
+There has been no third-party audit.
 
 ## Security
 

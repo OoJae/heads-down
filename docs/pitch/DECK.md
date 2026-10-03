@@ -89,12 +89,14 @@ The slide text and speaker notes below contain no word from its banned list.
   5. Pick it up: 10 s cooling grace, then cold. Unlock: cold at once. **Built, not on a device**
   6. Morning haul reveal at your alarm, replayed round by round from chain data.
      **Built, not on a device**
-  7. Clock-out and "buy the rest" leg. Transactions **Built** and tested against recorded
-     Jupiter quotes; the screen is **Next**
+  7. Clock-out: seal the shift, take back a Focus Bond, claim the ORE or leave it in your
+     Miner. **Built, not on a device.** The "buy the rest" leg: transactions **Built** and tested
+     against recorded Jupiter quotes; offering it in the screen is **Next**
 - **Visual:** A circular night-to-morning loop with a status chip on each step.
 - **Speaker notes:** "The habit hangs on three things people already do every night: bedtime, the
   charger and the alarm. If the OS kills the app, the rig goes cold and nothing is spent. The
-  clock-out screen is the next build item; its transactions already exist and are tested."
+  clock-out screen is built; the buy leg is the next item, and its transactions already exist and
+  are tested."
 - **Serves:** Public: Stickiness & PMF, UX. Align: UX, UI.
 - **Sources:** `android/README.md` (clock-in, shift loop, "still stubbed"), `docs/SPEC.md`
   (CORE_LOOP).
@@ -238,7 +240,7 @@ The slide text and speaker notes below contain no word from its banned list.
   - "`specialUse` foreground service. Killed by the OS = cold, nothing spent."
   - "HyperOS/MIUI keep-alive onboarding and a 'killed last night' health check"
   - "Android 16 Live Update notification with a 14/15 fallback"
-  - "760 JVM unit tests"
+  - "797 JVM unit tests"
 - **Visual:** Phone captures: the tile in the Quick Settings panel, the wallet sheet, the ongoing
   notification `[TBD after device test]`.
 - **Speaker notes:** "Only the launcher activity and the tile service are exported. The trampoline
@@ -343,7 +345,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
   | Indexer | 347 passed | re-run 2026-10-03 |
   | Dashboard | 48 passed | re-run 2026-10-03 |
-  | Android | 760 JVM unit tests | re-run 2026-10-03 |
+  | Android | 797 JVM unit tests | re-run 2026-10-03 |
   | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |
 
   - "16 bug classes mapped to named tests; 9,000 fuzzed instructions on the program binary, no aborts"

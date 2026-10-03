@@ -154,7 +154,8 @@ sign and send:
   when it covers this wallet and key, was signed by `Config.registrar` and expires well after the
   current slot; a guest rig with the same key is upgraded once. Anything else registers a guest:
   a level-0 or unusable voucher would fail the whole clock-in on-chain.
-- **end_shift** when `Rig.shift_open` (@336) is set; a Frozen rig is refused on the phone.
+- **end_shift** when `Rig.shift_open` (@336) is set. A Frozen rig's clock-in carries
+  `unfreeze_rig` first, signed by the wallet ("Unfreeze and clock in" on the home screen).
 - The shift arms only when the signature is confirmed with `err == null`. If heads_down is not
   initialized on the cluster, the tile arms a zero-SOL focus-only shift locally.
 
@@ -198,6 +199,32 @@ price per ORE, streak before and after, and an explorer link. `first_pickup_ts` 
 on-chain, so the phone fills it from its own shift journal. A real haul updates the widget; a
 `simulated` one is labelled and never does. With no haul the reveal says so and offers the
 labelled sample night only on request.
+
+## Clock-out (one wallet approval)
+
+Home → "Clock out", or the morning reveal's "Clock out" button (after unlocking), opens a
+non-exported screen. It first reads the chain (the Rig, ORE's Board,
+the wallet's ORE Miner, ORE's Treasury and the Focus Bond on the current shift) and says what a
+clock-out would do, in amounts, before the wallet opens. One MWA session then builds, from a
+fresh read:
+
+`[end_shift?] [SKR account?] [release_focus_bond?] [ORE claim_sol?] [ORE claim_ore?]`
+
+- **end_shift** only when ending changes nothing for the worse: the shift would seal `completed`,
+  or its outcome is already fixed (Broken, Frozen, or past its window). A shift inside its window
+  is left open unless the user chooses "End the shift now". The screen states the lost streak and
+  the forfeit of a Focus Bond beside that choice, and the composer refuses a forfeit the screen
+  did not state.
+- **release_focus_bond** with a `completed` seal. A bond that is forfeit is said to be forfeit;
+  the phone sends nothing for it (forfeiting is permissionless).
+- **claim_ore** only on "Claim all to my wallet". The default leaves the ORE in the user's own
+  ORE Miner. The screen states what arrives and ORE's 10% refining fee on the unrefined part.
+- Success is shown only when the signature is confirmed with `err == null`. A transaction that
+  failed or expired, and one whose outcome is unknown, are worded differently. A wallet other
+  than the rig's is refused before anything is built. A confirmed `end_shift` also stops the
+  phone's shift service.
+- Not offered yet: "buy the rest at market". Its transactions are built and tested
+  (`ClockOutService`, `SwapLegBuilder`), but no swap provider is wired into the app.
 
 ## Local devstack (`localdev` build type)
 
@@ -277,7 +304,7 @@ tests to prove no lab class is compiled into release.
 
 - Only `MainActivity` is exported, plus the tile service (`BIND_QUICK_SETTINGS_TILE`) and the two
   widget providers (they must receive `APPWIDGET_UPDATE`; they read nothing from the Intent).
-  The trampoline, reveal, receiver, shift service, the reveal's `RevealShareFileProvider` and,
+  The trampoline, clock-out screen, reveal, receiver, shift service, the reveal's `RevealShareFileProvider` and,
   in debug and localdev only, the sensor lab and the rig debug screen are not exported. The
   trampoline reads no intent extras. Glance pulls in WorkManager (services and receivers guarded
   by system permissions) and the `ACCESS_NETWORK_STATE` and `RECEIVE_BOOT_COMPLETED` permissions;
