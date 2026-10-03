@@ -35,14 +35,16 @@ import javax.inject.Inject
  * (manifest: `showWhenLocked` + `turnScreenOn`, not exported), or from the home screen.
  *
  * The drumroll plays with the board replay; the Motherlode flourish only if the rig really
- * shared one. Sharing asks to unlock first, because the share sheet cannot show over the lock
- * screen. "Buy the rest at market" is a stub until the Jupiter leg is wired.
+ * shared one. Sharing and clocking out ask to unlock first, because neither the share sheet nor
+ * a wallet can show over the lock screen. "Buy the rest at market" is a stub until the Jupiter
+ * leg is wired.
  */
 @AndroidEntryPoint
 class RevealActivity : ComponentActivity() {
 
     @Inject lateinit var haulRepository: HaulRepository
     @Inject lateinit var haptics: Haptics
+    @Inject lateinit var clockOut: ClockOutNavigator
 
     private var state by mutableStateOf<RevealUiState>(RevealUiState.Loading)
 
@@ -71,6 +73,7 @@ class RevealActivity : ComponentActivity() {
                 onShare = ::share,
                 onDone = ::finish,
                 onOpenExplorer = ::openExplorer,
+                onClockOut = { whenUnlocked { startActivity(clockOut.intent(this)) } },
                 // The labelled sample, only on request and only when there is no real haul.
                 onShowSample = {
                     state = RevealUiState.Ready(FakeHaulRepository.sampleNight(System.currentTimeMillis(), ZoneId.systemDefault()))
@@ -89,14 +92,16 @@ class RevealActivity : ComponentActivity() {
         }
     }
 
-    private fun share(haul: HaulSummary) {
-        val open = {
-            try {
-                startActivity(RevealShare.chooser(this, ShareGrid.from(haul), haul.shiftId))
-            } catch (_: ActivityNotFoundException) {
-                // No app can receive an image: nothing to do.
-            }
+    private fun share(haul: HaulSummary) = whenUnlocked {
+        try {
+            startActivity(RevealShare.chooser(this, ShareGrid.from(haul), haul.shiftId))
+        } catch (_: ActivityNotFoundException) {
+            // No app can receive an image: nothing to do.
         }
+    }
+
+    /** Runs [open] now, or after the user unlocks when the reveal is showing over the lock screen. */
+    private fun whenUnlocked(open: () -> Unit) {
         val keyguard = getSystemService<KeyguardManager>()
         if (keyguard?.isKeyguardLocked == true) {
             keyguard.requestDismissKeyguard(

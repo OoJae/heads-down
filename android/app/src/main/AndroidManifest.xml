@@ -32,6 +32,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Clock out: started only by MainActivity, with an explicit intent and no extras. -->
+        <activity
+            android:name=".clockout.ClockOutActivity"
+            android:exported="false" />
     </application>
 
 </manifest>

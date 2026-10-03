@@ -43,6 +43,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import xyz.headsdown.feature.reveal.board.BoardReplay
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
+import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HaulSummary
 import xyz.headsdown.feature.reveal.haul.RevealCopy
 import xyz.headsdown.feature.reveal.haul.RevealCopyBuilder
@@ -53,6 +54,7 @@ object RevealTags {
     const val SAMPLE_BADGE = "reveal-sample-badge"
     const val BUY = "reveal-buy"
     const val BUY_STUB = "reveal-buy-stub"
+    const val CLOCK_OUT = "reveal-clock-out"
     const val SHARE = "reveal-share"
     const val DONE = "reveal-done"
     const val VERDICT = "reveal-verdict"
@@ -82,6 +84,8 @@ fun RevealRoute(
     onOpenExplorer: (String) -> Unit = {},
     /** Shows the labelled sample night when there is no real haul yet; null hides the offer. */
     onShowSample: (() -> Unit)? = null,
+    /** Opens the clock-out screen; null hides the button. Never offered under a sample night. */
+    onClockOut: (() -> Unit)? = null,
 ) = RevealTheme {
     Box(Modifier.fillMaxSize().background(RevealColors.Charcoal)) {
         when (state) {
@@ -97,6 +101,7 @@ fun RevealRoute(
                 onShare = { onShare(state.summary) },
                 onDone = onDone,
                 onOpenExplorer = onOpenExplorer,
+                onClockOut = onClockOut,
             )
         }
     }
@@ -118,6 +123,7 @@ fun RevealScreen(
     onShare: () -> Unit = {},
     onDone: () -> Unit = {},
     onOpenExplorer: (String) -> Unit = {},
+    onClockOut: (() -> Unit)? = null,
 ) {
     val copy = remember(summary, zone) { RevealCopyBuilder.build(summary, zone) }
     val replay = remember(summary) { BoardReplay(summary.rounds) }
@@ -175,6 +181,16 @@ fun RevealScreen(
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.testTag(RevealTags.STREAK),
         )
+
+        // A sample night is nobody's shift: there is nothing of the user's to clock out of.
+        if (onClockOut != null && summary.provenance != HaulProvenance.SAMPLE) {
+            Button(
+                onClick = onClockOut,
+                modifier = Modifier.fillMaxWidth().testTag(RevealTags.CLOCK_OUT),
+                colors = ButtonDefaults.buttonColors(containerColor = RevealColors.Ember, contentColor = RevealColors.Charcoal),
+            ) { Text(RevealCopyBuilder.CLOCK_OUT_BUTTON) }
+            Text(RevealCopyBuilder.CLOCK_OUT_DETAIL, color = RevealColors.AshMuted, style = MaterialTheme.typography.bodySmall)
+        }
 
         OutlinedButton(
             onClick = onShare,

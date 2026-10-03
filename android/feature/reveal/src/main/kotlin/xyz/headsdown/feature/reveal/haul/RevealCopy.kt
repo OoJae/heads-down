@@ -33,6 +33,12 @@ data class RevealCopy(
 }
 
 object RevealCopyBuilder {
+    const val CLOCK_OUT_BUTTON = "Clock out"
+
+    /** Under the button: what the next screen does, and that nothing is signed by opening it. */
+    const val CLOCK_OUT_DETAIL =
+        "Seals the shift and shows the ORE in your Miner. Nothing is signed until you approve it in your wallet."
+
 
     fun build(h: HaulSummary, zone: ZoneId): RevealCopy {
         val verdict = HaulMath.verdict(h)

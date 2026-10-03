@@ -1,6 +1,7 @@
 package xyz.headsdown.di
 
 import android.content.Context
+import android.content.Intent
 import android.os.SystemClock
 import com.solana.mobilewalletadapter.clientlib.MobileWalletAdapter
 import com.solana.mobilewalletadapter.clientlib.Solana
@@ -16,6 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import xyz.headsdown.BuildConfig
 import xyz.headsdown.DebugLog
+import xyz.headsdown.clockout.ChainClockOut
+import xyz.headsdown.clockout.ClockOutActivity
+import xyz.headsdown.clockout.ClockOutChain
 import xyz.headsdown.config.BuildTransports
 import xyz.headsdown.config.EndpointKind
 import xyz.headsdown.config.EndpointPolicy
@@ -23,6 +27,7 @@ import xyz.headsdown.config.EndpointVerdict
 import xyz.headsdown.core.chain.Ore
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.clockin.ClockInService
+import xyz.headsdown.core.chain.clockout.ClockOutService
 import xyz.headsdown.core.chain.http.JsonHttp
 import xyz.headsdown.core.chain.indexer.IndexerHaulClient
 import xyz.headsdown.core.chain.registrar.RegistrarClient
@@ -41,6 +46,7 @@ import xyz.headsdown.core.wallet.KeystoreAesGcmCipher
 import xyz.headsdown.core.wallet.SharedPreferencesSecretStore
 import xyz.headsdown.core.wallet.TransactionSubmitter
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
+import xyz.headsdown.feature.reveal.ClockOutNavigator
 import xyz.headsdown.feature.reveal.RevealScheduler
 import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.shift.BoardRoundSource
@@ -106,6 +112,14 @@ object AppModule {
 
     @Provides @Singleton
     fun clockInService(rpc: SolanaJsonRpc): ClockInService = ClockInService(rpc)
+
+    /** No swap provider yet: the clock-out seals, releases and claims; it does not buy. */
+    @Provides @Singleton
+    fun clockOutService(rpc: SolanaJsonRpc): ClockOutService = ClockOutService(rpc)
+
+    /** The morning reveal's "Clock out" button opens the clock-out screen (explicit intent, no extras). */
+    @Provides
+    fun clockOutNavigator(): ClockOutNavigator = ClockOutNavigator { context -> Intent(context, ClockOutActivity::class.java) }
 
     /** The clock-in this APK arms (`-Pheadsdown.policy.*` build properties). */
     @Provides @Singleton
@@ -225,4 +239,5 @@ abstract class BindingsModule {
     @Binds abstract fun rigSigner(impl: RigKeyRepository): RigSignerProvider
     @Binds abstract fun rigBinding(impl: RigBindingStore): RigBindingProvider
     @Binds abstract fun clockIn(impl: ChainClockIn): ClockInTransactions
+    @Binds abstract fun clockOut(impl: ChainClockOut): ClockOutChain
 }
