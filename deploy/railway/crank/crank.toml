@@ -33,7 +33,7 @@ simulate = true
 cu_margin_percent = 15
 start_rounds = false               # never make the crank's dig the first deploy of a round
 checkpoint_sweep = true            # settle idle miners before ORE's 12 h bot window
-ore_programdata_slot = 450496378   # ORE upgrade pin (docs/ORE.md): a mismatch trips the breaker
+ore_programdata_slot = 452682055   # ORE upgrade pin (docs/ORE.md): a mismatch trips the breaker
 config_poll_secs = 30
 
 [intake]

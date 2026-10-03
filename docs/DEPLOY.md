@@ -194,8 +194,8 @@ scripts/mainnet/preflight.sh            # read-only; exit 0 = GO
 | SIMD-0500 | active or pending for an SBPF v0-v2 build (or SBPFv3 not enabled for a v3 build) |
 | program account | something already lives at `HDn4vg…` (fresh mode) |
 | deployer balance | below ProgramData(max-len) + Program + fees + Config + float, all from `getMinimumBalanceForRentExemption` |
-| ORE upgrade slot | ORE's ProgramData slot is not 450,496,378 (docs/ORE.md) |
-| ORE program hash | ORE's bytes are not the verified build `d9601d4e…` (commit `b92c5043`) |
+| ORE upgrade slot | ORE's ProgramData slot is not 452,682,055 (docs/ORE.md) |
+| ORE program hash | ORE's bytes are not the verified build `9dbd2e0d…` (commit `48c203bd`) |
 | ORE singletons | Board/Treasury/Config/Round owner, size or discriminator differ from 40/105, 48/104, 232/101, 952/109 |
 | ORE user accounts | a sampled Automation or Miner from recent ORE transactions is not 160/100 or 752/103 |
 | init params | `executor_fee` 0 or `crank_fee > executor_fee` |

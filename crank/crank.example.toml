@@ -43,7 +43,7 @@ checkpoint_sweep = true            # settle idle miners before ORE's 12 h bot wi
 checkpoint_sweep_after_rounds = 400
 checkpoint_sweep_interval_rounds = 20
 checkpoints_per_tx = 8
-ore_programdata_slot = 450496378   # ORE upgrade pin (docs/ORE.md); 0 disables. A mismatch trips the breaker.
+ore_programdata_slot = 452682055   # ORE upgrade pin (docs/ORE.md); 0 disables. A mismatch trips the breaker.
 config_poll_secs = 30
 
 [dig.cu_estimate]                  # used before simulation / when simulate = false
