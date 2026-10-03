@@ -569,6 +569,7 @@ const SKIP_LABELS: Readonly<Record<number, string>> = {
   1: "price gate closed: mining cost more than the plan allows",
   2: "Automation revoked or not pointed at Heads Down",
   3: "ORE miner account missing",
+  4: "rig closed: nothing to dig",
   6: "heartbeat for a future round (rejected)",
   7: "replay rejected: heartbeat counter not newer",
   8: "phone went quiet: no heartbeat lease covers this round",

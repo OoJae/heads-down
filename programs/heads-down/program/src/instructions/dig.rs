@@ -223,6 +223,13 @@ fn dig_one(
 ) -> Result<Result<Dug, u32>, ProgramError> {
     // ---- 1. accounts (fail) ---------------------------------------------
     let rig_address = *rig.address();
+    // A rig closed after the crank planned this batch (a tombstone, or nothing
+    // at all at the PDA) is skipped like any other rig that cannot be dug. As a
+    // failure it let one wallet, by closing its rig just before the batch
+    // landed, make every other rig in the batch miss the round.
+    if !rig.owned_by(&crate::ID) || rig.data_len() != core::mem::size_of::<Rig>() {
+        skip!(HdError::InvalidAccountTag);
+    }
     let mut g = state::load_mut::<Rig>(rig)?;
     if authority.address().as_array() != &g.authority {
         return Err(HdError::Unauthorized.into());

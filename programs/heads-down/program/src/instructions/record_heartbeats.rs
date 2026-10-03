@@ -67,6 +67,12 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
                 .ok_or(HdError::InvalidInstruction)?,
         )?;
         let rig_address = *rig.address();
+        // A rig closed after the batch was planned (a tombstone, or nothing
+        // at the PDA) is skipped: it must not fail the other rigs' records.
+        if !rig.owned_by(&crate::ID) || rig.data_len() != core::mem::size_of::<Rig>() {
+            events::rig_skipped(&rig_address, board_round, HdError::InvalidAccountTag.code());
+            continue;
+        }
         let mut g = state::load_mut::<Rig>(rig)?;
         let outcome = match g.state {
             _ if entry.hb_ix == NO_HEARTBEAT => Err(HdError::InvalidHeartbeat.code()),

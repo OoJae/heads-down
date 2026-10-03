@@ -813,7 +813,10 @@ above the tombstone's rent (§12.4). Same data, same accounts, same event.
 6. The instructions sysvar address is correct.
 7. No rig appears twice (`DuplicateRig`).
 8. Per rig, before any skip decision:
-   * the rig account is valid;
+   * the rig account is valid. An account that is not program-owned with a
+     Rig's length (the tombstone or the empty PDA a `close_rig` leaves) is the
+     one exception: it is **skipped** with `InvalidAccountTag` (4), so a rig
+     closed after the batch was planned does not fail the others (§12.13);
    * `authority == rig.authority` (else `Unauthorized`);
    * the Automation and Miner equal the PDAs re-derived from `rig.authority`
      with the cached bumps (else `InvalidOreAccount`);
@@ -825,6 +828,7 @@ above the tombstone's rent (§12.4). Same data, same accounts, same event.
 
 | Step | Condition | Skip code |
 |---|---|---|
+| 0 | the rig account is not program-owned with a Rig's length (closed: a tombstone or nothing) | 4 InvalidAccountTag |
 | 1 | Automation closed or revoked (not an ORE Automation) | 2 InvalidExecutor |
 | 1 | `automation.executor != Executor PDA` | 2 InvalidExecutor |
 | 1 | `automation.strategy != 2` or `automation.fee != config.executor_fee` (including 0) | 23 StrategyMismatch |
@@ -2243,7 +2247,7 @@ safely): `dig` with one rig 39,385 → 39,414, with two rigs 67,385 → 67,421.
 
 ### 12.13 Audit fixes (2026-10-03, before the first deployment)
 
-A security review of v1.3 ran before anything was deployed. Six rules were
+A security review of v1.3 ran before anything was deployed. Seven rules were
 tightened. None adds a tag, an event or an error, no instruction changed its
 bytes or its account list, and no account changed its size. They are part of
 v1.3: no build without them was ever deployed.
@@ -2256,6 +2260,7 @@ v1.3: no build without them was ever deployed.
 | 4 | Permissionless `end_shift` (§5, tag 11) | window over and `lease_to_round < Board.round_id` | window over and `lease_to_round + 3 < Board.round_id` | 5 `Unauthorized` |
 | 5 | Bury auction (§11.8) | every deposit restarted price and clock at `4 × last_clear_price`; every sale set `last_clear_price` | a deposit restarts only an empty lot or one it at least doubles, never below half the previous start; only a sale of 10 SKR or more sets `last_clear_price` | none |
 | 6 | Rig tombstone (§12.4) | kept `shift_id` and `hb_counter` | also keeps `last_dug_round` (the 8 bytes that were reserved) | none |
+| 7 | `dig` and `record_heartbeats` with a closed rig (§6.1, §6.2) | failed the whole transaction | skip that rig | 4 `InvalidAccountTag` as a skip code |
 
 **Why, one line each.**
 
@@ -2277,6 +2282,9 @@ v1.3: no build without them was ever deployed.
    price for the cost of a signature.
 6. Ending a shift, closing the rig and registering it again inside one ORE
    round reset the once-per-round rule.
+7. A wallet that froze and closed its rig just before a batch landed made
+   every other rig in that batch miss the round, at the price of one
+   transaction fee.
 
 **What a client must do.**
 

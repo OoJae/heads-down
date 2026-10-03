@@ -488,17 +488,28 @@ fn a_tombstone_is_not_a_rig_and_only_register_rig_can_use_it() {
     ] {
         assert_hd(&env.send_as(&w, &[ix], &[]), 0, HdError::InvalidAccountTag);
     }
+    // The two batched, permissionless instructions skip it instead of failing:
+    // a rig closed after a batch was planned must not sink the other rigs.
     let hb = u.heartbeat(1, env.board_round, 1);
-    let res = env.send(
+    let meta = ok(env.send(
         &[
             secp_ix_for(&[hb]),
             ix_record(&[(u.rig, entry_for(&hb, 0, 0))]),
         ],
         &[],
+    ));
+    assert_eq!(
+        skipped_code(&events(&meta.logs), &u.rig),
+        Some(HdError::InvalidAccountTag.code())
     );
-    assert_hd(&res, 1, HdError::InvalidAccountTag);
-    let res = env.dig_with(&[hb], &[DigRig::new(&u, entry_for(&hb, 1, 0))]);
-    assert_hd(&res, 2, HdError::InvalidAccountTag);
+    let meta = ok(env.dig_with(&[hb], &[DigRig::new(&u, entry_for(&hb, 1, 0))]));
+    let evs = events(&meta.logs);
+    assert_eq!(
+        skipped_code(&evs, &u.rig),
+        Some(HdError::InvalidAccountTag.code())
+    );
+    assert!(dug(&evs, &u.rig).is_none());
+    assert_eq!(env.rig_slot(&u.rig), RigSlot::Tombstone, "a skip changes nothing");
     env.fund_skr(&w.pubkey(), 10 * ONE_SKR);
     let res = env.send_as(
         &w,
