@@ -836,23 +836,25 @@ mod real {
         let a = f.add_user(60);
         let b = f.add_user(61);
         let r = f.board.round_id;
-        // A: the window ended and the lease lapsed: anyone may end it.
+        // A: the window ended and the lease lapsed more than the 3-round grace ago: anyone
+        // may end it.
         f.set_rig(a, |rig| {
             rig.state = RigState::Down;
             rig.plan_window_end_ts = NOW - 120;
-            rig.lease_from_round = r - 3;
-            rig.lease_to_round = r - 1;
-            rig.shift_start_round = r - 5;
+            rig.lease_from_round = r - 6;
+            rig.lease_to_round = r - 4;
+            rig.shift_start_round = r - 8;
             rig.shift_dark_rounds = 3;
             rig.shift_rounds_dug = 2;
             rig.spent_shift = 2_010_000;
         });
-        // B: the window ended but the lease still covers the round: the crank may not.
+        // B: the window ended and the lease lapsed, but inside the grace (its next heartbeat
+        // may still be on its way): the crank may not.
         f.set_rig(b, |rig| {
             rig.state = RigState::Down;
             rig.plan_window_end_ts = NOW - 120;
-            rig.lease_from_round = r;
-            rig.lease_to_round = r;
+            rig.lease_from_round = r - 3;
+            rig.lease_to_round = r - 3;
         });
         let cranker = f.cranker.pubkey();
         let before = f.balance(&cranker);
@@ -871,7 +873,7 @@ mod real {
         match evs[0] {
             HdEvent::ShiftEndedV2 { shift_id, dark_rounds, rounds_dug, lamports, reason, start_round, end_round, mode, .. } => {
                 assert_eq!((shift_id, dark_rounds, rounds_dug, lamports, reason, mode), (1, 3, 2, 2_010_000, 0, 0));
-                assert_eq!((start_round, end_round), (r - 5, r));
+                assert_eq!((start_round, end_round), (r - 8, r));
             }
             ref other => panic!("{other:?}"),
         }
@@ -881,10 +883,10 @@ mod real {
         let rig = f.rig(a);
         assert!(!rig.shift_open);
         assert_eq!(rig.state, RigState::Idle);
-        // B is refused: its lease has not expired.
+        // B is refused: its lease has not been expired for the grace.
         let ixs = tx::end_shift_instructions(&hd::PROGRAM_ID, &cranker, &f.users[b].rig, 1, 30_000, 1_000);
         let t = tx::sign_legacy(&ixs, &f.cranker, f.svm.latest_blockhash()).unwrap();
-        let err = f.send(t).expect_err("lease still live");
+        let err = f.send(t).expect_err("lease inside the grace");
         assert!(err.contains("Custom(5)"), "Unauthorized: {err}");
     }
 

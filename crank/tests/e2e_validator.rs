@@ -302,10 +302,11 @@ async fn crank_digs_on_a_local_validator() {
     let mut stale_rig = rig_account(stale_wallet, Phone::new(7_101).pubkey(), now);
     stale_rig.state = RigState::Down;
     stale_rig.plan_window_end_ts = now - 600;
-    stale_rig.shift_start_round = round_id - 5;
+    // The lease lapsed more than the program's 3-round grace ago (INTERFACE §12.13).
+    stale_rig.shift_start_round = round_id - 8;
     stale_rig.shift_dark_rounds = 2;
-    stale_rig.lease_from_round = round_id - 3;
-    stale_rig.lease_to_round = round_id - 2;
+    stale_rig.lease_from_round = round_id - 6;
+    stale_rig.lease_to_round = round_id - 5;
     add(&mut args, &stale, account_json(dir.path(), &stale, 10_000_000, &hd::PROGRAM_ID, &stale_rig.encode()));
 
     // ---- validator ------------------------------------------------------------------------------

@@ -38,6 +38,7 @@ loaded_accounts_data_size_limit = 4194304   # v1 only
 clock_margin_secs = 5              # caps expiry / plan window safety margin
 start_rounds = false               # never make the crank's dig the round's first deploy
 executor_reserve_lamports = 0
+dig_unpaid = false                 # true: also dig rigs whose Miner already deployed this round (no fee, no reimbursement)
 checkpoint_sweep = true            # settle idle miners before ORE's 12 h bot window
 checkpoint_sweep_after_rounds = 400
 checkpoint_sweep_interval_rounds = 20

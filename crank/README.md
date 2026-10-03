@@ -240,8 +240,10 @@ focus-only rig that is due with `record_heartbeats` (tag 7, no CPI), so its dark
 ## Permissionless end_shift
 
 Every `end_shift.poll_secs` the crank lists Rigs with `shift_open = 1` (memcmp at offset 336) and seals those
-whose window ended more than `grace_secs` ago and whose lease has expired (`lease_to_round < Board.round_id`),
-exactly the program's condition for a caller that is not the authority. The crank pays the ShiftLog rent
+whose window ended more than `grace_secs` ago and whose lease has been expired for more than three rounds
+(`lease_to_round + 3 < Board.round_id`), exactly the program's condition for a caller that is not the
+authority. The three rounds are the program's grace: a rig whose next heartbeat is still on its way cannot have
+its shift ended by someone else between two heartbeats. The crank pays the ShiftLog rent
 (1,781,760 lamports for 128 bytes) plus the fee, so it is capped: at most `max_per_pass` per pass and
 `max_lamports_per_day` (default 0.05 SOL, about 27 shifts). Oldest window first; a (rig, shift) that fails is
 left alone for 10 minutes. The program emits `ShiftEnded` (tag 4) and then `ShiftEndedV2` (tag 10); the crank's
@@ -317,8 +319,11 @@ program, CU limit sized by simulation (+15% + 1,000), 1,000 micro-lamports/CU, `
 | v0 + table, lease reuse (`hb_ix = 0xFF`) | 12 | 453-455 | 7,000 | **+6,545 to +6,546** |
 | legacy, fresh heartbeat | 2 | 7,538-7,541 | 7,000 | −538 to −541 |
 
-- **Reimbursement** is `Config.crank_fee`, paid by the program from the Executor PDA only after a real deploy,
-  and only while the Executor keeps `rent(0) + 100,000 + crank_fee`. A `crank_fee` around 6,100 covers
+- **Reimbursement** is `Config.crank_fee`, paid by the program from the Executor PDA only after a real deploy
+  that brought the Executor at least `crank_fee` in the same dig, and only while the Executor keeps
+  `rent(0) + 100,000 + crank_fee`. ORE charges the Automation fee on a Miner's first deploy of a round only, so
+  a rig whose Miner already deployed this round (its owner deployed by hand) would be dug at the crank's own
+  cost: the planner skips it (`miner_already_deployed`) unless `dig_unpaid = true`. A `crank_fee` around 6,100 covers
   fresh-heartbeat digs at normal priority; the devstack uses 7,000 (ORE's own executor charges 7,000).
 - **The user's side** (not the crank's): the Automation pays `per_tile·k` on squares plus `executor_fee` on the
   rig's first deploy of each round, all inside the wallet-signed caps.

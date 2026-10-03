@@ -263,7 +263,8 @@ impl RecordConfig {
     }
 }
 
-/// Permissionless `end_shift` for shifts past their window whose lease has expired. The
+/// Permissionless `end_shift` for shifts past their window whose lease has been expired for
+/// more than the program's 3-round grace. The
 /// caller pays the ShiftLog rent (128 bytes: 1,781,760 lamports at the default rent) plus the
 /// fee, and nothing reimburses it, so it is capped.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -517,6 +518,8 @@ pub struct DigConfig {
     pub start_rounds: bool,
     /// Extra lamports the Executor PDA must keep.
     pub executor_reserve_lamports: u64,
+    /// Dig rigs whose Miner already deployed this round (no fee, so no reimbursement).
+    pub dig_unpaid: bool,
     /// Checkpoint idle miners before their unsettled round expires.
     pub checkpoint_sweep: bool,
     /// Sweep miners whose unsettled round is this many rounds old.
@@ -553,6 +556,7 @@ impl Default for DigConfig {
             clock_margin_secs: 5,
             start_rounds: false,
             executor_reserve_lamports: 0,
+            dig_unpaid: false,
             checkpoint_sweep: true,
             checkpoint_sweep_after_rounds: 400,
             checkpoint_sweep_interval_rounds: 20,
@@ -570,6 +574,7 @@ impl DigConfig {
             clock_margin_secs: self.clock_margin_secs,
             start_rounds: self.start_rounds,
             executor_reserve: self.executor_reserve_lamports,
+            dig_unpaid: self.dig_unpaid,
         }
     }
 }

@@ -756,9 +756,11 @@ fn crank_forfeits_broken_focus_bonds_and_refunds_expired_gifts() {
         f.fund_skr(&wallet, FUNDED);
         f.set_rig(u, |rig| {
             rig.state = RigState::Down;
-            rig.shift_start_round = r - 3;
-            rig.lease_from_round = r - 1;
-            rig.lease_to_round = r - 1;
+            // The lease lapsed more than the program's 3-round grace ago (INTERFACE §12.13),
+            // so that the crank may seal the shift once the window is over.
+            rig.shift_start_round = r - 6;
+            rig.lease_from_round = r - 5;
+            rig.lease_to_round = r - 4;
             rig.shift_dark_rounds = 2;
         });
         let rig = f.users[u].rig;
@@ -784,7 +786,7 @@ fn crank_forfeits_broken_focus_bonds_and_refunds_expired_gifts() {
     let err = f.send_crank(&[early]).expect_err("the bonded shift is still open");
     assert!(err.contains(&format!("Custom({})", hd::code::BOND_NOT_RESOLVABLE)), "{err}");
 
-    // kai: the window ends, the lease lapses, the crank seals the shift: completed.
+    // kai: the window ends (the lease lapsed long ago), the crank seals the shift: completed.
     f.set_rig(kai, |rig| rig.plan_window_end_ts = NOW - 120);
     let ixs = tx::end_shift_instructions(&hd::PROGRAM_ID, &cranker, &f.users[kai].rig, 1, 15_000, 1_000);
     f.send_crank(&ixs).expect("permissionless end_shift");
