@@ -118,6 +118,16 @@ class HomeAndIntroTest {
     }
 
     @Test
+    fun `a frozen rig offers the way back - unfreeze with the wallet`() {
+        var clocked = 0
+        home(ShiftSnapshot(ShiftState.Frozen(shiftId = 3, at = 0)), onClockIn = { clocked++ })
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Frozen")
+        rule.onNodeWithTag(HomeTags.UNFREEZE).performScrollTo().performClick()
+        assertEquals(1, clocked)
+        rule.onAllNodesWithTag(HomeTags.CLOCK_IN).assertCountEquals(0)
+    }
+
+    @Test
     fun `hot rig shows ember state and shift controls`() {
         home(
             ShiftSnapshot(

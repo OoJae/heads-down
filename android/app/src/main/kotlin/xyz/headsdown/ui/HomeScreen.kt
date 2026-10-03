@@ -72,6 +72,7 @@ object HomeTags {
     const val HOW_IT_WORKS = "home-how-it-works"
     const val CRANK_REFUSAL = "home-crank-refusal"
     const val CLOCK_IN_AMOUNTS = "home-clock-in-amounts"
+    const val UNFREEZE = "home-unfreeze"
 }
 
 internal data class RigLook(val word: String, val color: Color, val line: String, val pixels: Int)
@@ -227,7 +228,18 @@ private fun RigCard(
                     OutlinedButton(onClick = onEndShift, modifier = Modifier.weight(1f)) { Text("End shift") }
                     OutlinedButton(onClick = onFreeze, modifier = Modifier.weight(1f)) { Text("Freeze") }
                 }
-                is ShiftState.Frozen -> Text("Unfreezing needs your wallet and arrives with the on-chain program.", color = HdColors.AshMuted)
+                is ShiftState.Frozen -> {
+                    Button(
+                        onClick = onClockIn,
+                        modifier = Modifier.fillMaxWidth().testTag(HomeTags.UNFREEZE),
+                        colors = ButtonDefaults.buttonColors(containerColor = HdColors.Frost, contentColor = HdColors.Charcoal),
+                    ) { Text("Unfreeze and clock in") }
+                    Text(
+                        "Freezing took the phone's key. Coming back takes your wallet: one approval unfreezes the rig and arms a new shift.",
+                        color = HdColors.AshMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }

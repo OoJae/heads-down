@@ -153,8 +153,8 @@ schedule is pinned to the suite's clock). heads_down is loaded at its real progr
 id through the upgradeable loader, with a test upgrade authority written into its
 ProgramData. SKR and ORE balances are account surgery: the fork cannot mint either.
 
-Last run, `bash scripts/test.sh` (2026-10-03): **170 passed, 0 failed, 1 ignored**
-(33 unit + 137 fork; the ignored one is `crosscheck`). The table below was written for
+Last run, `bash scripts/test.sh` (2026-10-03): **171 passed, 0 failed, 1 ignored**
+(33 unit + 138 fork; the ignored one is `crosscheck`). The table below was written for
 v1.2: v1.3 added `tombstone`, `governance`, `shift_log`, `fuzz_v13` and `v13_capacity`,
 and the review added one regression test per fix. The fork reads the live ORE
 bytecode and accounts as fetched, except the two inputs of the cost gate
