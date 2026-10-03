@@ -63,6 +63,31 @@ class AuthTokenVaultTest {
     }
 
     @Test
+    fun `a Keystore that cannot seal the token loses the token, never the session`() {
+        // What a phone with no secure lock screen did: KeyGenerator.generateKey threw ProviderException.
+        val broken = object : AeadCipher {
+            override fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray =
+                throw java.security.ProviderException("Keystore key generation failed")
+
+            override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray = throw IllegalStateException("unused")
+        }
+        // An older session's token is in the store: it must not survive as if it were current.
+        vault.save("solana:devnet", token)
+        val refusing = AuthTokenVault(broken, store)
+        assertFalse(refusing.save("solana:devnet", AuthToken("newer-token")))
+        assertTrue(store.map.isEmpty())
+        assertNull(refusing.load("solana:devnet"))
+        // A store that fails is handled the same way.
+        val failingStore = object : SecretStore {
+            override fun get(key: String): String? = null
+            override fun put(key: String, value: String) = throw IllegalStateException("disk full")
+            override fun remove(key: String) = throw IllegalStateException("disk full")
+        }
+        assertFalse(AuthTokenVault(SoftwareAesGcm(), failingStore).save("solana:devnet", token))
+        assertTrue(vault.save("solana:devnet", token))
+    }
+
+    @Test
     fun `tampered blob fails closed and is cleared`() {
         vault.save("solana:devnet", token)
         val key = store.map.keys.single()

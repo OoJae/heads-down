@@ -13,8 +13,15 @@ sealed interface RouteVerdict {
     /** Within half a percent of market. */
     data class AboutMarket(val effective: Long, val market: Long) : RouteVerdict
 
-    /** The price gate never opened: no digs, nothing placed, so the cheaper route was buying. */
+    /**
+     * The phone was dark for some rounds and none of them was dug, so nothing was placed. The
+     * usual reason is the price gate staying closed; the haul does not say why a round was not
+     * dug, so the wording does not claim to know.
+     */
     data class GateClosed(val market: Long?) : RouteVerdict
+
+    /** The phone never went dark in this shift: there was no round a dig could have used. */
+    data object NeverDark : RouteVerdict
 
     /** Digs happened but no ORE came back yet: there is no price to compare. */
     data class NothingMined(val market: Long?) : RouteVerdict
@@ -38,7 +45,9 @@ object HaulMath {
 
     fun verdict(h: HaulSummary): RouteVerdict {
         if (h.focusOnly) return RouteVerdict.FocusOnly
-        if (h.digs == 0 && h.solPlacedLamports == 0L) return RouteVerdict.GateClosed(h.marketLamportsPerOre)
+        if (h.digs == 0 && h.solPlacedLamports == 0L) {
+            return if (h.roundsDark == 0) RouteVerdict.NeverDark else RouteVerdict.GateClosed(h.marketLamportsPerOre)
+        }
         val effective = h.effectiveLamportsPerOre ?: return RouteVerdict.NothingMined(h.marketLamportsPerOre)
         val market = h.marketLamportsPerOre ?: return RouteVerdict.NoMarket(effective)
         val tenthsOfPercent = (effective - market) * 1000 / market

@@ -134,8 +134,18 @@ object ClockOutCopy {
             }
         is ShiftOutcome.LeftOpen -> {
             val until = TIME.format(Instant.ofEpochSecond(outcome.windowEndTs).atZone(zone))
-            val later = if (outcome.ifEndedNow == ShiftEndReason.MANUAL) " Left alone, it seals as completed once the window is over." else ""
-            "Your shift is still inside its window (until $until), so clocking out leaves it open.$later"
+            when (outcome.ifEndedNow) {
+                // Still running: it only has to be left alone.
+                ShiftEndReason.MANUAL ->
+                    "Your shift is still inside its window (until $until), so clocking out leaves it open. " +
+                        "Left alone, it seals as completed once the window is over."
+                ShiftEndReason.LEASE_LAPSE ->
+                    "Your shift has no dark round on-chain yet and is still inside its window (until $until), so clocking out leaves it open."
+                // Cooled by a pickup, the screen or the charger: it will not seal as completed any more.
+                else ->
+                    "Your shift cooled (${reason(outcome.ifEndedNow)}) and is still inside its window (until $until), so clocking out " +
+                        "leaves it open. It will be sealed as ended early: by \"End the shift now\", or by your next clock-in."
+            }
         }
     }
 

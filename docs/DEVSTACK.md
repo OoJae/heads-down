@@ -329,9 +329,39 @@ Real output, 2026-10-04, Android 14 emulator, fork carrying ORE's build of 2026-
 EMULATOR SMOKE PASSED: setup, Keystore key, attach, heartbeat, on-chain dig, pickup, BREAK landed. No crash.
 ```
 
+**With a wallet app.** `emulator-smoke.sh --wallet <fakewallet.apk>` replaces the Mac-held dev
+wallet with Solana Mobile's test wallet on the emulator (build it once from
+`github.com/solana-mobile/mobile-wallet-adapter`, tag `v2.2.0`: `cd android && ./gradlew
+:fakewallet:assembleDebug`, then pass `fakewallet/build/outputs/apk/v1/debug/fakewallet-v1-debug.apk`).
+The app's own "Clock in" opens the wallet, builds the transaction for the account the wallet
+authorizes, gets it signed, submits it through its own RPC and waits for the confirmation. After
+the dig and the BREAK the same wallet signs the clock-out that ends the shift early, then the
+withdrawal and the rig's close, which the script checks against the wallet's balance to the
+lamport, and at last a second clock-in over the tombstone, which must arm shift 2.
+
+```text
+[emulator-smoke +   3s] installed app-localdev.apk on emulator-5554 (Android 14) and started it
+[emulator-smoke +  52s] setup done: notifications, background running, tile, rig key in the device's Keystore
+[emulator-smoke + 105s] CLOCKED IN with the wallet C4s3tEBsAojMXBRpcZGTrJEGWAG2qzV7MCMrCvh3YEw7: the app built the transaction, the wallet signed, the app submitted and confirmed it; rig 735DRy96YMNgR37RJG5Ty4tfCKZyT4AUGKWsoQjU8rt2 is armed
+[emulator-smoke + 139s] the crank accepted a heartbeat signed by the device's Keystore key
+[emulator-smoke + 248s] DIG LANDED on-chain with that heartbeat: tx 2eb9L2zTXkktmM2yusYMtXbnxsUsQhAtGrunNYwEY7hQqWSfdFdFzpjDo3YkAuzbZgKDGTGByaxSrtAT65BGAh2H
+[emulator-smoke + 260s] LIFTED: the app signed a BREAK and the crank landed it (the rig is now Cooling on-chain)
+[emulator-smoke + 309s] CLOCKED OUT with the wallet: Confirmed on-chain. Shift sealed as ended early.
+[emulator-smoke + 356s] TOOK IT BACK with the wallet: +23639400 lamports, exactly what the screen said; the rig is closed
+[emulator-smoke + 391s] CLOCKED IN AGAIN over the tombstone: the same rig address, now on shift 2
+
+EMULATOR SMOKE PASSED (with a wallet app): setup, clock-in, heartbeat, on-chain dig, pickup, BREAK, clock-out, SOL back, rig closed, clock-in again. No crash.
+```
+
+The Quick Settings tile was tapped on the same emulator by hand (`adb shell cmd statusbar
+click-tile xyz.headsdown.localdev/xyz.headsdown.surface.tile.HeadsDownTileService`): from a
+running shift it ends the shift, from a cold rig it opens the wallet and the clock-in arms the
+next shift. The morning reveal rendered a real haul from the local indexer.
+
 What an emulator does not show: a hardware-backed Keystore and its attestation (the emulator's is
-software, so the rig is a guest), HyperOS's background killing, a real accelerometer, and every
-flow that needs a wallet app to sign.
+software, so the rig is a guest), HyperOS's background killing, a real accelerometer, a
+production wallet (Solflare, Phantom, Seed Vault) and its own checks, and mainnet. The localdev
+build also submits the signed transaction itself, where a release build lets the wallet send it.
 
 ## Logs, status, troubleshooting
 

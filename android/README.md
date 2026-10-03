@@ -139,9 +139,12 @@ PLAN (113):        "HDv1" | program_id(32) | rig(32) | kind=4 | counter u64 | ma
 
 `scripts/devstack/emulator-smoke.sh` (docs/DEVSTACK.md, "The app on an emulator") installs the
 `localdev` APK on a running emulator and drives it end to end against the local stack: setup, a
-Keystore rig key, heartbeats, an on-chain dig, a pickup and its BREAK. It found what unit tests
-had not: a Focus Bond choice drawn one letter per line, and a plan window that ended after the
-user's alarm.
+Keystore rig key, heartbeats, an on-chain dig, a pickup and its BREAK. With `--wallet` and
+Solana Mobile's test wallet it also runs everything a wallet signs: clock-in, clock-out, taking
+SOL back, closing the rig, and a second clock-in over the tombstone. It found what unit tests had
+not: a crash right after the wallet signed on a phone with no secure lock screen (the Keystore
+refused the key that seals the wallet's session token), a plan window that ended after the user's
+alarm, and a Focus Bond choice drawn one letter per line.
 
 ## Clock-in (one wallet approval)
 
