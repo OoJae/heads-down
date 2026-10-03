@@ -53,7 +53,22 @@ HD_CRANK_RESERVE_DIGS="${HD_CRANK_RESERVE_DIGS:-100}"
 # Priority fee for deploy / admin transactions (micro-lamports per CU; ~0.001 SOL for the whole deploy).
 HD_CU_PRICE="${HD_CU_PRICE:-100000}"
 HD_MAX_SIGN_ATTEMPTS="${HD_MAX_SIGN_ATTEMPTS:-20}"
-HD_DEPLOY_FEE_BUDGET="${HD_DEPLOY_FEE_BUDGET:-5000000}"
+# deploy_fee_budget: lamports the payer must hold for fees before one deploy, upgrade or buffer
+# write. `solana program deploy` refuses to start unless the payer holds the CLI's own fee
+# estimate on top of the rent, and with a priority fee that estimate prices every transaction at
+# the 1.4M compute-unit maximum (the CLI simulates the real limit only afterwards). So this is
+# that estimate for a program of --max-len, not what a deploy costs (about 0.001 SOL): the
+# difference stays in the deployer. scripts/mainnet/dry-run.sh --tight proves it is enough.
+#   transactions = ceil(max-len / 900 bytes per write) + 4    (the CLI packs about 960 per write)
+#   each         = 5,000 lamports + 1,400,000 CU x HD_CU_PRICE micro-lamports
+# HD_DEPLOY_FEE_BUDGET overrides it. Call it after the flags are parsed (--max-len, --cu-price).
+deploy_fee_budget() {
+  if [[ -n "${HD_DEPLOY_FEE_BUDGET:-}" ]]; then
+    echo "$HD_DEPLOY_FEE_BUDGET"
+  else
+    echo $(( ((HD_MAX_LEN + 899) / 900 + 4) * (5000 + 1400000 * HD_CU_PRICE / 1000000) ))
+  fi
+}
 # Recommended balances for the service keys (lamports).
 HD_CRANK_PAYER_LAMPORTS="${HD_CRANK_PAYER_LAMPORTS:-50000000}"   # 0.05 SOL
 HD_GOVERNANCE_LAMPORTS="${HD_GOVERNANCE_LAMPORTS:-10000000}"     # 0.01 SOL

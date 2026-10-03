@@ -116,7 +116,7 @@ if [[ -n "$PROGRAM" && -n "$DEPLOYER" && -f "$HD_SO" ]]; then
   [[ -n "$JSON" ]] || JSON="$HD_STATE/preflight-$CLUSTER-$(timestamp).json"
   tool preflight --so "$HD_SO" --max-len "$HD_MAX_LEN" --program-id "$PROGRAM" --deployer "$DEPLOYER" --mode "$MODE" \
     --executor-fee "$HD_EXECUTOR_FEE" --crank-fee "$HD_CRANK_FEE" --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" \
-    --fee-budget "$HD_DEPLOY_FEE_BUDGET" ${KEYS_ARGS[@]+"${KEYS_ARGS[@]}"} ${EXTRA[@]+"${EXTRA[@]}"} --json "$JSON" || CHAIN_RC=$?
+    --fee-budget "$(deploy_fee_budget)" ${KEYS_ARGS[@]+"${KEYS_ARGS[@]}"} ${EXTRA[@]+"${EXTRA[@]}"} --json "$JSON" || CHAIN_RC=$?
 else
   line FAIL "chain checks" "skipped: fix the local failures above first"
 fi
