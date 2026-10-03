@@ -472,6 +472,36 @@ async fn per_ip_and_per_rig_rate_limits() {
     assert_eq!(s.metrics.heartbeats_rejected.get("rate_limited_ip"), 2);
 }
 
+/// A rig's allowance is spent only by frames that verified under its key. Before, the bucket
+/// was charged ahead of the signature check, so anyone could name a victim rig in garbage
+/// frames and silence its heartbeats, its BREAK and its FREEZE.
+#[tokio::test]
+async fn forged_frames_do_not_spend_the_rigs_allowance() {
+    let phone = Phone::new(4);
+    let thief = Phone::new(5);
+    let rig = Address::new_from_array([0x62; 32]);
+    let src = MapSource::default();
+    src.0.lock().unwrap().insert(rig, rig_for(&phone));
+    let cfg = IntakeConfig { ip_quota: Quota::new(100, 0.001), rig_quota: Quota::new(2, 0.001), ..IntakeConfig::default() };
+    let hub = SignalHubConfig { rig_quota: Quota::new(1, 0.0001), ..SignalHubConfig::default() };
+    let s = start_with(cfg, src, hub).await;
+    s.chain.send_replace(live_view(200));
+    let _rx = s.signals.take_receiver();
+    let mut ws = connect(s.addr).await;
+    for c in 1..=6 {
+        assert_eq!(ask(&mut ws, heartbeat_json(&thief, &rig, c)).await, ack(c, "bad_signature"));
+        assert_eq!(ask(&mut ws, signal_json(&thief, &rig, SignalKind::Break, c, hd::reason::PICKUP)).await, ack(c, "bad_signature"));
+    }
+    // The real phone still has its whole allowance: two heartbeats and one signal.
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 1)).await, ack(1, "accepted"));
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 2)).await, ack(2, "accepted"));
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 3)).await, ack(3, "rate_limited"));
+    assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Break, 4, hd::reason::PICKUP)).await, ack(4, "accepted"));
+    assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Freeze, 5, hd::reason::FREEZE)).await, ack(5, "rate_limited"));
+    assert_eq!(s.metrics.heartbeats_rejected.get("rate_limited_rig"), 1);
+    assert_eq!(s.metrics.signals_rejected.get("rate_limited_rig"), 1);
+}
+
 #[tokio::test]
 async fn connection_caps() {
     let s = start(IntakeConfig { max_connections_per_ip: 2, ..IntakeConfig::default() }, MapSource::default()).await;

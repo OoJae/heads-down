@@ -231,16 +231,23 @@ impl SignalHub {
         self.budget.available()
     }
 
-    /// Per-rig rate limit, checked before the (costlier) verification.
+    /// Per-rig rate limit, peeked before the (costlier) verification. It takes no token:
+    /// only [`Self::charge_rate`], called after the signature verified, does.
     pub fn check_rate(&self, rig: &Address) -> Result<(), Reject> {
         if !self.cfg.enabled {
             return Err(Reject::SignalsDisabled);
         }
-        if self.limiter.check(rig) {
+        if self.limiter.has_token(rig) {
             Ok(())
         } else {
             Err(Reject::RateLimitedRig)
         }
+    }
+
+    /// Take one token from the rig's signal bucket. Call only for a signal whose P-256
+    /// signature verified under the rig's registered key.
+    pub fn charge_rate(&self, rig: &Address) {
+        let _ = self.limiter.check(rig);
     }
 
     /// Accept a verified signal for landing (see the module docs for the rules).
@@ -347,8 +354,12 @@ mod tests {
         let cfg = SignalHubConfig { max_lamports_per_hour: 25_000, est_fee: 10_000, rig_quota: Quota::new(1, 0.0001), ..SignalHubConfig::default() };
         let hub = SignalHub::new(cfg);
         let _rx = hub.take_receiver();
-        assert_eq!(hub.check_rate(&Address::new_from_array([1; 32])), Ok(()));
-        assert_eq!(hub.check_rate(&Address::new_from_array([1; 32])), Err(Reject::RateLimitedRig));
+        // A peek takes nothing; only a signal that verified is charged.
+        let rig = Address::new_from_array([1; 32]);
+        assert_eq!(hub.check_rate(&rig), Ok(()));
+        assert_eq!(hub.check_rate(&rig), Ok(()));
+        hub.charge_rate(&rig);
+        assert_eq!(hub.check_rate(&rig), Err(Reject::RateLimitedRig));
         assert_eq!(hub.offer(sig(1, 1, 1, SignalKind::Break, RigState::Down)), Ok(Offered::Queued));
         assert_eq!(hub.offer(sig(2, 1, 1, SignalKind::Break, RigState::Down)), Ok(Offered::Queued));
         assert_eq!(hub.offer(sig(3, 1, 1, SignalKind::Break, RigState::Down)), Err(Reject::SignalBudget));

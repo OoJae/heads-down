@@ -216,7 +216,9 @@ impl<S: RigSource> Intake<S> {
     async fn heartbeat(&self, v: Value) -> Result<(), Reject> {
         let sub: HeartbeatSubmission = serde_json::from_value(v).map_err(|_| self.reject(Reject::Malformed))?;
         let parsed = ParsedHeartbeat::parse(&sub).map_err(|r| self.reject(r))?;
-        if !self.rig_limiter.check(&parsed.rig) {
+        // Peek only: the rig's bucket is charged below, after the signature verified. Frames
+        // that merely name a rig must not be able to spend its allowance.
+        if !self.rig_limiter.has_token(&parsed.rig) {
             return Err(self.reject(Reject::RateLimitedRig));
         }
         // A BREAK / FREEZE with this or a higher counter was already accepted.
@@ -228,6 +230,7 @@ impl<S: RigSource> Intake<S> {
         };
         let round = self.chain.borrow().board.map(|b| b.round_id);
         let v = self.verifier.process(&parsed, round).await.map_err(|r| self.reject(r))?;
+        let _ = self.rig_limiter.check(&parsed.rig); // authenticated: now it counts
         self.metrics.heartbeats_accepted.inc();
         self.metrics.heartbeats_held.set_u64(self.verifier.store.len() as u64);
         self.mirror.mirror(&v);
@@ -242,6 +245,7 @@ impl<S: RigSource> Intake<S> {
             return Err(self.reject_signal(Reject::Busy));
         };
         let verified = self.verifier.process_signal(&parsed).await.map_err(|r| self.reject_signal(r))?;
+        self.signals.charge_rate(&parsed.rig); // authenticated: now it counts
         // Streak protection: a BREAK whose rig's plan window has ended is never landed (it
         // would turn a completed night into a break). Contract A has no "accepted but
         // ignored" code, so the phone gets `ok: false, reason: lease_invalid`.
