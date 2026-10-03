@@ -65,9 +65,10 @@ stay in the user's own ORE Automation and Miner accounts.
    are not. Whoever holds that key could replace the program and take what the program's own
    accounts hold: Stack and Focus Bond SKR vaults, gift escrows, the Bury lot and the Executor
    float. It could not withdraw from anyone's ORE Automation or claim anyone's ORE.
-3. **The app does not yet offer Revoke, Unfreeze, Close rig or Claim ORE.** The instruction
-   builders exist and are tested; the screens do not. Until they do, those actions need another
-   client (the ORE app for the Automation and the claim).
+3. **The app does not yet offer Revoke, Close rig or Claim ORE.** The instruction builders exist
+   and are tested; the screens do not. Until they do, those actions need another client (the ORE
+   app for the Automation and the claim). Unfreeze is built: a frozen rig's next clock-in carries
+   `unfreeze_rig`, signed by the wallet, so Freeze is no longer a one-way door in the app.
 4. **An in-person Stack table is open to any rig that pays the bond.** The program does not check
    that the players are in one room.
 5. **The registrar's log is a local file.** It records every voucher, but nothing yet lets a third
@@ -89,11 +90,11 @@ stay in the user's own ORE Automation and Miner accounts.
 
 | Component | Tests |
 |---|---|
-| `programs/heads-down` (LiteSVM on a fork of live mainnet ORE, plus host unit tests, fuzz and golden vectors) | 170 |
+| `programs/heads-down` (LiteSVM on a fork of live mainnet ORE, plus host unit tests, fuzz and golden vectors) | 171 |
 | `crank` | 168, and 14 against the real program on the fork |
 | `registrar` | 105 |
 | `services/indexer` | 347 |
-| `android` (JVM unit tests, all modules) | 760 (4 more are skipped: they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 761, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

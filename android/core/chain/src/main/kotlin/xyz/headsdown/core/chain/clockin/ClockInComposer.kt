@@ -99,7 +99,6 @@ class ClockInChainState(
 /** Why a clock-in cannot be built. The message is fixed text, safe to show. */
 class ClockInRefusedException(val reason: Reason) : IllegalStateException(reason.message) {
     enum class Reason(val message: String) {
-        RIG_FROZEN("Rig frozen. Unfreeze it with your wallet first."),
         OTHER_AUTHORITY("This Rig belongs to a different wallet."),
         RIG_BUSY("This Rig is in a state that cannot be armed. End its shift with your wallet first."),
         BOND_WOULD_FORFEIT("Your last shift still holds a Focus Bond and its window has not ended. Clocking in now would forfeit it."),
@@ -141,6 +140,8 @@ class ClockInPlan(
     val registersRig: Boolean,
     val rotatesKey: Boolean,
     val endsPreviousShift: Boolean,
+    /** The rig was Frozen and this transaction, signed by the wallet, unfreezes it first. */
+    val unfreezes: Boolean = false,
     /** `rig.shift_id` after `arm_shift` (it increments by one). */
     val expectedShiftId: ULong,
     /** On-chain `hb_counter`: the local counter must be raised to at least this. */
@@ -155,8 +156,12 @@ class ClockInPlan(
 /**
  * Composes the single clock-in transaction:
  *
- * `[ComputeBudget?] [end_shift?] [release_focus_bond?] [ed25519 voucher? rotate_key?] [ORE automate?] [ed25519 voucher? register_rig?] set_caps arm_shift [bond vault, lock_focus_bond]?`
+ * `[ComputeBudget?] [unfreeze_rig?] [end_shift?] [release_focus_bond?] [ed25519 voucher? rotate_key?] [ORE automate?] [ed25519 voucher? register_rig?] set_caps arm_shift [bond vault, lock_focus_bond]?`
  *
+ * - **unfreeze_rig** when the Rig is Frozen. Freezing takes one tap and the phone's key; coming
+ *   back takes the wallet, and this is where the wallet signs it: a frozen rig clocks in again
+ *   with one approval instead of being stuck. A shift the freeze interrupted is then ended like
+ *   any other open shift (it seals with reason `freeze`).
  * - **ORE automate** points the user's own Automation at the heads_down Executor PDA with the
  *   Discretionary strategy and `fee = Config.executor_fee` (read at Config @80; any other fee
  *   makes every dig a `StrategyMismatch` skip), per-tile cap `dig_lamports / tiles`, and tops the
@@ -197,10 +202,12 @@ object ClockInComposer {
         val rig = state.rig
         if (rig != null) {
             if (rig.authority != authority) throw ClockInRefusedException(ClockInRefusedException.Reason.OTHER_AUTHORITY)
-            if (rig.state == RigSignalState.FROZEN) throw ClockInRefusedException(ClockInRefusedException.Reason.RIG_FROZEN)
             // arm_shift needs Idle: only an open shift can be closed here (end_shift requires shift_open).
-            if (rig.state != RigSignalState.IDLE && !rig.shiftOpen) throw ClockInRefusedException(ClockInRefusedException.Reason.RIG_BUSY)
+            // A Frozen rig is unfrozen below: to Idle, or to Broken with its shift still open.
+            val armable = rig.state == RigSignalState.IDLE || rig.state == RigSignalState.FROZEN || rig.shiftOpen
+            if (!armable) throw ClockInRefusedException(ClockInRefusedException.Reason.RIG_BUSY)
         }
+        val unfreezes = rig != null && rig.state == RigSignalState.FROZEN
 
         // The fee is read from an RPC, and the caps and the deposit are built from it: without a
         // ceiling, one forged Config would make the wallet prompt move any amount.
@@ -240,6 +247,7 @@ object ClockInComposer {
             ixs += ComputeBudgetInstructions.setComputeUnitPrice(request.priorityMicroLamports)
         }
 
+        if (unfreezes) ixs += HeadsDownInstructions.unfreezeRig(authority)
         val endsPrevious = rig != null && rig.shiftOpen
         if (rig != null && endsPrevious) ixs += HeadsDownInstructions.endShift(authority, rigAddress, rig.shiftId)
 
@@ -329,6 +337,7 @@ object ClockInComposer {
             registersRig = registers,
             rotatesKey = rotates,
             endsPreviousShift = endsPrevious,
+            unfreezes = unfreezes,
             expectedShiftId = expectedShiftId,
             hbCounterFloor = rig?.hbCounter ?: 0uL,
             voucher = voucherUse,

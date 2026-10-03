@@ -333,6 +333,64 @@ fn phone_can_freeze_only_the_wallet_can_unfreeze() {
     assert_eq!(env.rig(&u.rig).state, rig_state::IDLE);
 }
 
+/// What the app's clock-in sends for a frozen rig, in ONE wallet transaction:
+/// unfreeze, end the shift the freeze interrupted, new caps, arm. Freezing is
+/// one tap with the phone's key; this is the way back.
+#[test]
+fn a_frozen_rig_comes_back_in_one_wallet_transaction() {
+    let mut env = Env::new();
+    let u = User::new(&mut env, 21);
+    env.onboard_standard(&u);
+    let w = u.wallet.insecure_clone();
+    // Frozen in the middle of shift 1.
+    ok(env.send_as(&w, &[ix_freeze_wallet(&w.pubkey())], &[]));
+    assert_eq!(env.rig(&u.rig).state, rig_state::FROZEN);
+    let meta = ok(env.send_as(
+        &w,
+        &[
+            ix_unfreeze(&w.pubkey(), true),
+            ix_end_shift(&w.pubkey(), &u.rig, 1),
+            ix_set_caps(&w.pubkey(), Caps::standard()),
+            ix_arm_wallet(&w.pubkey(), &standard_plan()),
+        ],
+        &[],
+    ));
+    let rig = env.rig(&u.rig);
+    assert_eq!(
+        (rig.state, rig.shift_id.get(), rig.shift_open),
+        (rig_state::ARMED, 2, 1)
+    );
+    assert_eq!(
+        env.shift_log(&shift_log_pda(&u.rig, 1)).break_reason,
+        break_reason::FREEZE
+    );
+    assert!(events(&meta.logs)
+        .iter()
+        .any(|e| matches!(e, Event::ShiftArmed { shift_id: 2, .. })));
+
+    // Frozen outside a shift: unfreeze goes straight to Idle, so no end_shift.
+    ok(env.send_as(
+        &w,
+        &[
+            ix_end_shift(&w.pubkey(), &u.rig, 2),
+            ix_freeze_wallet(&w.pubkey()),
+        ],
+        &[],
+    ));
+    assert_eq!(env.rig(&u.rig).state, rig_state::FROZEN);
+    ok(env.send_as(
+        &w,
+        &[
+            ix_unfreeze(&w.pubkey(), true),
+            ix_set_caps(&w.pubkey(), Caps::standard()),
+            ix_arm_wallet(&w.pubkey(), &standard_plan()),
+        ],
+        &[],
+    ));
+    let rig = env.rig(&u.rig);
+    assert_eq!((rig.state, rig.shift_id.get()), (rig_state::ARMED, 3));
+}
+
 #[test]
 fn anyone_may_end_a_shift_only_after_the_window_and_the_lease() {
     let mut env = Env::new();

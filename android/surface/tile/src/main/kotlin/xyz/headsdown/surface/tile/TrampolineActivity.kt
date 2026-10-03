@@ -54,7 +54,7 @@ fun interface ClockInTransactions {
  * Security:
  * - `exported=false`: no other app can start it.
  * - It trusts **no intent extras** and reads nothing from its Intent: the action is decided
- *   solely from local shift state (clock in when cold, end when running).
+ *   solely from local shift state (clock in when cold or frozen, end when running).
  * - A clock-in only arms the shift after the wallet's transactions are **confirmed on-chain
  *   with err == null** ([HeadsDownWallet.signAndSendInSession]); any other outcome arms nothing.
  * - Recreated mid-flow (process death) it finishes instead of replaying a wallet request.
@@ -84,7 +84,8 @@ class TrampolineActivity : ComponentActivity() {
                         shifts.end()
                         toast("Shift ended. Rig cold.")
                     }
-                    is ShiftState.Frozen -> toast("Rig frozen. Open Heads Down to unfreeze with your wallet.")
+                    // The clock-in transaction unfreezes a frozen rig first: the wallet signs both.
+                    is ShiftState.Frozen -> clockIn()
                 }
             } finally {
                 finish()

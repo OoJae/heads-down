@@ -14,10 +14,10 @@ code, and the rest of the document should be read with it. The review that produ
 
 | Named below | Today |
 |---|---|
-| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 170 tests on a fork of live mainnet ORE) |
+| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 171 tests on a fork of live mainnet ORE) |
 | Crank, registrar, indexer, dashboard | **Built** |
-| Freeze from the phone | **Built** |
-| Revoke, Unfreeze, Close rig and Claim ORE in the app | **Not built.** The instruction builders exist and are tested; the screens do not. Use the ORE app for the Automation and the claim until they do |
+| Freeze from the phone, Unfreeze with the wallet | **Built.** A frozen rig's next clock-in carries `unfreeze_rig`, signed by the wallet |
+| Revoke, Close rig and Claim ORE in the app | **Not built.** The instruction builders exist and are tested; the screens do not. Use the ORE app for the Automation and the claim until they do |
 | Competing cranks | **Possible, not present.** The crank is open source and permissionless; the team's is the only one running |
 | Heartbeats mirrored to a public Nostr relay | **Not built** (a hook only) |
 | Phones posting their own heartbeats to the chain | **Not built.** The phone sends them to one crank |

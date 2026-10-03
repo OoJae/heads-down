@@ -230,11 +230,22 @@ class ClockInComposerTest {
     }
 
     @Test
-    fun `a frozen rig is refused`() {
-        val e = assertThrows(ClockInRefusedException::class.java) {
-            compose(ClockInChainState(config, rig(state = RigSignalState.FROZEN), null))
-        }
-        assertEquals(ClockInRefusedException.Reason.RIG_FROZEN, e.reason)
+    fun `a frozen rig is unfrozen by the wallet in the same clock-in`() {
+        // Freezing is one tap with the phone's key. It used to be a one-way door in this app: the
+        // composer refused a frozen rig and nothing else could unfreeze it.
+        val idle = compose(ClockInChainState(config, rig(state = RigSignalState.FROZEN, shiftId = 4), automation(balance = 25_000_000)))
+        assertEquals(listOf("hd:10", "hd:3", "hd:5"), idle.instructions.tags())
+        assertEquals(HeadsDownInstructions.unfreezeRig(authority), idle.instructions[0])
+        assertTrue(idle.unfreezes && !idle.endsPreviousShift)
+        assertEquals(5uL, idle.expectedShiftId)
+        // Frozen in the middle of a shift: unfreeze leaves it Broken with the shift open, so the
+        // shift is ended (sealed with reason freeze) before the new one is armed.
+        val mid = compose(ClockInChainState(config, rig(state = RigSignalState.FROZEN, shiftId = 4, shiftOpen = true), automation(balance = 25_000_000)))
+        assertEquals(listOf("hd:10", "hd:11", "hd:3", "hd:5"), mid.instructions.tags())
+        assertEquals(HeadsDownInstructions.endShift(authority, rigAddress, 4uL), mid.instructions[1])
+        assertTrue(mid.unfreezes && mid.endsPreviousShift)
+        // A rig that is not frozen gets no unfreeze.
+        assertFalse(compose(ClockInChainState(config, rig(shiftId = 4), automation(balance = 25_000_000))).unfreezes)
     }
 
     @Test
