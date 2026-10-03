@@ -19,12 +19,16 @@ import cohortsJson from "./fixtures/cohorts.json";
 import shareJson from "./fixtures/share.json";
 import digsJson from "./fixtures/digs.json";
 import milestonesJson from "./fixtures/milestones.json";
+import skrJson from "./fixtures/skr.json";
+import { SkrView } from "@/components/SkrView";
+import type { SkrSummary } from "@/lib/types";
 
 const summary = summaryJson as unknown as Envelope<Summary>;
 const cohorts = cohortsJson as unknown as Envelope<CohortReport>;
 const share = shareJson as unknown as Envelope<ShareByHour>;
 const digs = digsJson as unknown as Envelope<FeedItem[]>;
 const milestones = milestonesJson as unknown as Envelope<Milestones>;
+const skr = skrJson as unknown as Envelope<SkrSummary>;
 
 const SIG = "5uZWBsNQamLCRqmLrCpf5G78U1G3eK2wY8qVaQQBvk1Zk4sjNaz56JDZi4VAoBMSDv6YS5vUcnejYJHsGD24MjfQ";
 
@@ -32,7 +36,7 @@ afterEach(cleanup);
 
 describe("fixtures", () => {
   it("are simulated responses (so tests never pass real-looking data off as real)", () => {
-    for (const f of [summary, cohorts, share, digs, milestones]) {
+    for (const f of [summary, cohorts, share, digs, milestones, skr]) {
       expect(f.dataset.name).toBe("simulated");
       expect(f.dataset.simulated).toBe(true);
     }
@@ -207,5 +211,40 @@ describe("MilestoneList", () => {
     expect(meters.length).toBe(milestones.data.milestones.reduce((n, m) => n + m.metrics.length, 0));
     expect(meters[0]!.getAttribute("aria-valuetext")).toMatch(/of 250/);
     expect(screen.getByRole("region", { name: "M3 Durability" }).textContent).toMatch(/Immutable v1/);
+  });
+});
+
+describe("SkrView", () => {
+  it("shows the SKR totals as amounts with their units, and where forfeited SKR went", () => {
+    render(<SkrView data={skr.data} simulated />);
+    const tile = (label: string) => within(screen.getByRole("region", { name: label }));
+    tile("Tables opened").getByText("3");
+    tile("Seats taken").getByText("2,200 SKR bonded in total");
+    tile("Finishers").getByText("of 8 seats at settled tables");
+    tile("Forfeited SKR to finishers").getByText("480 SKR");
+    tile("Forfeited SKR to the Bury lot").getByText("120 SKR");
+    tile("Bonds locked").getByText("3,500 SKR");
+    tile("Gifts sent").getByText("0.08 SOL; 1 addressed to a Seeker");
+    tile("SKR into the lot").getByText("620 SKR");
+    // 0.1 ORE paid: 0.09 burned, 0.01 passed on by ORE's bury. Never "all burned".
+    tile("ORE paid by buyers").getByText("0.1 ORE");
+    tile("ORE burned").getByText("0.09 ORE");
+    tile("ORE burned").getByText(/the other 10% \(0\.01 ORE\)/);
+    tile("On offer now").getByText("220 SKR");
+    // Simulated numbers are labelled on every tile.
+    expect(screen.getAllByText("SIM").length).toBeGreaterThan(10);
+  });
+
+  it("says so when nothing has happened yet, instead of a wall of zeros with no explanation", () => {
+    const zero = JSON.parse(JSON.stringify(skr.data)) as SkrSummary;
+    for (const group of [zero.stack, zero.focusBond, zero.gift, zero.bury] as Record<string, unknown>[]) {
+      for (const k of Object.keys(group)) group[k] = typeof group[k] === "number" ? 0 : "0";
+    }
+    zero.bury.lotSkr = null;
+    zero.bury.lastPrice = null;
+    render(<SkrView data={zero} simulated={false} />);
+    screen.getByText("No Stack table, Focus Bond, gift or Bury lot on this dataset yet.");
+    within(screen.getByRole("region", { name: "On offer now" })).getByText("no sale yet");
+    expect(screen.queryByText("SIM")).toBeNull();
   });
 });

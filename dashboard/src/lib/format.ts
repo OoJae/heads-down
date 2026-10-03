@@ -27,6 +27,11 @@ export function formatOre(baseUnits: string, maxFrac = 4): string {
   return `${fixedPoint(baseUnits, 11, maxFrac)} ORE`;
 }
 
+/** SKR base units (6 decimals) → "1,250.5 SKR". */
+export function formatSkr(baseUnits: string, maxFrac = 2): string {
+  return `${fixedPoint(baseUnits, 6, maxFrac)} SKR`;
+}
+
 export function formatInt(n: number | null | undefined): string {
   return n === null || n === undefined || !Number.isFinite(n) ? "—" : intFmt.format(Math.round(n));
 }

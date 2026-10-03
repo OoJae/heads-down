@@ -1,0 +1,66 @@
+{
+  "dataset": {
+    "name": "simulated",
+    "simulated": true,
+    "programId": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+    "executorPda": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge",
+    "simSeed": "heads-down-demo-v1"
+  },
+  "asOf": 1791000000,
+  "generatedAt": "2026-10-03T21:00:00.000Z",
+  "data": {
+    "stack": {
+      "tablesOpened": 3,
+      "seatsJoined": 11,
+      "skrBonded": "2200000000",
+      "tablesSettled": 2,
+      "seatsSettled": 8,
+      "finishers": 5,
+      "skrToFinishers": "480000000",
+      "skrToBury": "120000000",
+      "checkinsCounted": 412,
+      "checkinsRefused": 9,
+      "payouts": 5,
+      "skrPaidOut": "1480000000",
+      "refunds": 0,
+      "skrRefunded": "0"
+    },
+    "focusBond": {
+      "locked": 7,
+      "skrLocked": "3500000000",
+      "released": 5,
+      "skrReleased": "2500000000",
+      "forfeited": 1,
+      "skrForfeited": "500000000"
+    },
+    "gift": {
+      "created": 4,
+      "lamportsCreated": "80000000",
+      "createdForSeeker": 1,
+      "claimed": 3,
+      "lamportsClaimed": "60000000",
+      "claimedBySeeker": 1,
+      "refunded": 0,
+      "lamportsRefunded": "0"
+    },
+    "bury": {
+      "lots": 3,
+      "skrIn": "620000000",
+      "skrFromStack": "120000000",
+      "skrFromBonds": "500000000",
+      "sales": 2,
+      "skrSold": "400000000",
+      "orePaid": "10000000000",
+      "oreBurned": "9000000000",
+      "oreToStakers": "1000000000",
+      "lotSkr": "220000000",
+      "lastPrice": "25000000",
+      "startPrice": "100000000",
+      "startSlot": "451700240"
+    },
+    "units": {
+      "skrDecimals": 6,
+      "oreDecimals": 11
+    }
+  }
+}

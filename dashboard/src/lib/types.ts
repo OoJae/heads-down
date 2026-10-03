@@ -140,6 +140,53 @@ export interface Milestones {
   milestones: { id: "M1" | "M2" | "M3"; title: string; deadline: string; metrics: MilestoneMetric[]; manual: string[] }[];
 }
 
+/** GET /v1/skr/summary: counts and sums of the program's SKR events. Amounts are base units as decimal strings. */
+export interface SkrSummary {
+  stack: {
+    tablesOpened: number;
+    seatsJoined: number;
+    skrBonded: string;
+    tablesSettled: number;
+    seatsSettled: number;
+    finishers: number;
+    skrToFinishers: string;
+    skrToBury: string;
+    checkinsCounted: number;
+    checkinsRefused: number;
+    payouts: number;
+    skrPaidOut: string;
+    refunds: number;
+    skrRefunded: string;
+  };
+  focusBond: { locked: number; skrLocked: string; released: number; skrReleased: string; forfeited: number; skrForfeited: string };
+  gift: {
+    created: number;
+    lamportsCreated: string;
+    createdForSeeker: number;
+    claimed: number;
+    lamportsClaimed: string;
+    claimedBySeeker: number;
+    refunded: number;
+    lamportsRefunded: string;
+  };
+  bury: {
+    lots: number;
+    skrIn: string;
+    skrFromStack: string;
+    skrFromBonds: string;
+    sales: number;
+    skrSold: string;
+    orePaid: string;
+    oreBurned: string;
+    oreToStakers: string;
+    lotSkr: string | null;
+    lastPrice: string | null;
+    startPrice: string | null;
+    startSlot: string | null;
+  };
+  units: { skrDecimals: number; oreDecimals: number };
+}
+
 export interface Health {
   status: "ok";
   txs: number;
