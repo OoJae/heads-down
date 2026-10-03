@@ -135,6 +135,14 @@ PLAN (113):        "HDv1" | program_id(32) | rig(32) | kind=4 | counter u64 | ma
     ./gradlew :core:chain:testDebugUnitTest --tests '*DevstackClockInE2ETest*'
   ```
 
+## Run it for real, without a phone
+
+`scripts/devstack/emulator-smoke.sh` (docs/DEVSTACK.md, "The app on an emulator") installs the
+`localdev` APK on a running emulator and drives it end to end against the local stack: setup, a
+Keystore rig key, heartbeats, an on-chain dig, a pickup and its BREAK. It found what unit tests
+had not: a Focus Bond choice drawn one letter per line, and a plan window that ended after the
+user's alarm.
+
 ## Clock-in (one wallet approval)
 
 Tile → non-exported trampoline → one MWA session: authorize, `get_capabilities` (v0 if
@@ -154,6 +162,11 @@ sign and send:
   when it covers this wallet and key, was signed by `Config.registrar` and expires well after the
   current slot; a guest rig with the same key is upgraded once. Anything else registers a guest:
   a level-0 or unusable voucher would fail the whole clock-in on-chain.
+- **The plan window ends just before the user's alarm.** Inside the window a pickup is a BREAK,
+  and the shift then seals as ended early (no streak, a Focus Bond forfeit). So a Night Shift's
+  window is not a fixed length: it ends two minutes before `AlarmManager.getNextAlarmClock()`
+  when that alarm is between 30 minutes and 14 hours away, and otherwise runs for the policy's
+  eight hours (`ShiftWindow`). The home screen says until when a shift started now would run.
 - **end_shift** when `Rig.shift_open` (@336) is set. A Frozen rig's clock-in carries
   `unfreeze_rig` first, signed by the wallet ("Unfreeze and clock in" on the home screen).
 - The shift arms only when the signature is confirmed with `err == null`. If heads_down is not

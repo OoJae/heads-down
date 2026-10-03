@@ -11,6 +11,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -75,6 +76,7 @@ object HomeTags {
     const val HOW_IT_WORKS = "home-how-it-works"
     const val CRANK_REFUSAL = "home-crank-refusal"
     const val CLOCK_IN_AMOUNTS = "home-clock-in-amounts"
+    const val SHIFT_WINDOW = "home-shift-window"
     const val UNFREEZE = "home-unfreeze"
     const val BOND_CARD = "home-focus-bond"
     const val BOND_CHOICE = "home-focus-bond-choice-"
@@ -123,6 +125,8 @@ fun HomeScreen(
     crank: CrankLinkStatus = CrankLinkStatus(),
     /** What a clock-in can move, stated before the wallet opens (ClockInPolicy.disclosure). */
     clockInAmounts: String? = null,
+    /** Until when a shift started now would run, and that a pickup before then ends it early. */
+    shiftWindow: String? = null,
     /** The Focus Bond locked at the next clock-in, SKR base units (0 = none). */
     bondSkr: ULong = 0uL,
     /** Null hides the Focus Bond card (previews, tests that do not need it). */
@@ -151,7 +155,7 @@ fun HomeScreen(
         }
 
         HealthBanner(health, onOpenSetup)
-        RigCard(snapshot, crank, clockInAmounts, onClockIn, onEndShift, onFreeze)
+        RigCard(snapshot, crank, clockInAmounts, shiftWindow, onClockIn, onEndShift, onFreeze)
         // The bond is chosen before a shift, never changed during one.
         if (onBondChange != null && (snapshot.state is ShiftState.Idle || snapshot.state is ShiftState.Broken || snapshot.state is ShiftState.Frozen)) {
             FocusBondCard(bondSkr, onBondChange)
@@ -189,6 +193,7 @@ private fun RigCard(
     snapshot: ShiftSnapshot,
     crank: CrankLinkStatus,
     clockInAmounts: String?,
+    shiftWindow: String?,
     onClockIn: () -> Unit,
     onEndShift: () -> Unit,
     onFreeze: () -> Unit,
@@ -235,6 +240,9 @@ private fun RigCard(
                         modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_IN),
                         colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
                     ) { Text("Clock in") }
+                    shiftWindow?.let {
+                        Text(it, color = HdColors.Ash, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag(HomeTags.SHIFT_WINDOW))
+                    }
                     clockInAmounts?.let {
                         Text(
                             it,
@@ -290,7 +298,9 @@ private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
                 color = HdColors.AshMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // The choices wrap to a second line on a narrow phone: in a plain Row the last one was
+            // squeezed to one letter per line.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (choice in FocusBondSetting.CHOICES) {
                     val label = FocusBondSetting.label(choice)
                     val tag = Modifier.testTag(HomeTags.BOND_CHOICE + label).semantics {
@@ -301,9 +311,9 @@ private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
                             onClick = {},
                             modifier = tag,
                             colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
-                        ) { Text(label) }
+                        ) { Text(label, maxLines = 1, softWrap = false) }
                     } else {
-                        OutlinedButton(onClick = { onBondChange(choice) }, modifier = tag) { Text(label) }
+                        OutlinedButton(onClick = { onBondChange(choice) }, modifier = tag) { Text(label, maxLines = 1, softWrap = false) }
                     }
                 }
             }

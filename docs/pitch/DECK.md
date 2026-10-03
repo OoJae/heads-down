@@ -10,8 +10,9 @@ Every number cites the repo file it comes from.
 - Replace a TBD only with a measured value and its source.
 
 **Status chips used on slides.** **Built** = code plus passing tests in the repo. **Built, not on a
-device** = tested in CI or LiteSVM, never run on a phone. **Designed** = specified in `docs/`, not
-in code. **Next** = planned for the build.
+device** = tested in CI or LiteSVM, never run on a phone. **On an emulator** = the real app ran it
+on an Android 14 emulator against a local fork of mainnet (`scripts/devstack/emulator-smoke.sh`),
+never on a phone. **Designed** = specified in `docs/`, not in code. **Next** = planned for the build.
 
 **Rubrics** (`docs/research/judges-preferences.md`):
 
@@ -84,9 +85,9 @@ The slide text and speaker notes below contain no word from its banned list.
   2. One wallet approval: fund a capped shift in your own ORE Automation and arm the rig.
      **Built, not on a device**
   3. Face-down on the charger. The phone signs a heartbeat every ORE round (about 78 s).
-     **Built, not on a device**
+     **On an emulator**
   4. Digs happen only when the on-chain price gate opens. **Built**
-  5. Pick it up: 10 s cooling grace, then cold. Unlock: cold at once. **Built, not on a device**
+  5. Pick it up: 10 s cooling grace, then cold. Unlock: cold at once. **On an emulator**
   6. Morning haul reveal at your alarm, replayed round by round from chain data.
      **Built, not on a device**
   7. Clock-out: seal the shift, take back a Focus Bond, claim the ORE or leave it in your
@@ -104,6 +105,9 @@ The slide text and speaker notes below contain no word from its banned list.
   byte (`android/core/chain/src/test/kotlin/xyz/headsdown/core/chain/ix/GoldenInstructionsTest.kt`),
   and the phone-less end-to-end run passes on a local fork of mainnet (`docs/DEVSTACK.md`):
   clock-in, dig, lift, replay refused, indexed.
+- **Checked 2026-10-04:** the app itself, on an Android 14 emulator against that fork: its
+  Keystore-signed heartbeat was verified on-chain and dug a round; lifting it landed a BREAK
+  (`scripts/devstack/emulator-smoke.sh`).
 
 ## Slide 5: The trustless rig
 
@@ -240,7 +244,7 @@ The slide text and speaker notes below contain no word from its banned list.
   - "`specialUse` foreground service. Killed by the OS = cold, nothing spent."
   - "HyperOS/MIUI keep-alive onboarding and a 'killed last night' health check"
   - "Android 16 Live Update notification with a 14/15 fallback"
-  - "846 JVM unit tests"
+  - "853 JVM unit tests"
 - **Visual:** Phone captures: the tile in the Quick Settings panel, the wallet sheet, the ongoing
   notification `[TBD after device test]`.
 - **Speaker notes:** "Only the launcher activity and the tile service are exported. The trampoline
@@ -345,7 +349,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
   | Indexer | 347 passed | re-run 2026-10-03 |
   | Dashboard | 48 passed | re-run 2026-10-03 |
-  | Android | 846 JVM unit tests | re-run 2026-10-03 |
+  | Android | 853 JVM unit tests | re-run 2026-10-03 |
   | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |
 
   - "16 bug classes mapped to named tests; 9,000 fuzzed instructions on the program binary, no aborts"

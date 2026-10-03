@@ -9,6 +9,7 @@ import xyz.headsdown.core.chain.clockin.ClockInService
 import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.wallet.WalletAccount
 import xyz.headsdown.core.wallet.WalletCapabilities
+import xyz.headsdown.feature.reveal.RevealScheduler
 import xyz.headsdown.feature.shift.ShiftMode
 import xyz.headsdown.feature.shift.ShiftSpec
 import xyz.headsdown.surface.tile.ClockInTransactions
@@ -121,6 +122,7 @@ class ChainClockIn @Inject constructor(
     private val vouchers: VoucherStore,
     private val policy: ClockInPolicy,
     private val focusBond: FocusBondSetting,
+    private val reveal: RevealScheduler,
 ) : ClockInTransactions {
 
     @Volatile private var lastRefusal: String? = null
@@ -133,7 +135,9 @@ class ChainClockIn @Inject constructor(
         // No rig key means nothing could ever heartbeat: fail the session, send nothing.
         lastRefusal = null
         val key = checkNotNull(rigKeys.compressedPublicKey()) { "no rig key" }
-        val request = policy.request().copy(focusBondSkr = focusBond.amount.value)
+        // A Night Shift ends just before the user's own alarm, so waking up is not a BREAK.
+        val window = ShiftWindow.seconds(policy, System.currentTimeMillis(), reveal.nextSystemAlarmWallMillis())
+        val request = policy.request().copy(windowSeconds = window, focusBondSkr = focusBond.amount.value)
         val authority = Pubkey(account.publicKey)
         // The composer uses it only if it covers this wallet and key and the program will accept it.
         val voucher = vouchers.forKey(key)

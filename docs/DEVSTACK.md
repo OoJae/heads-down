@@ -287,7 +287,51 @@ cable or restarting adb. Undo it with `phone.sh --remove`.
    submits through its own RPC. Fund the wallet with `phone.sh --fund <pubkey>`.
 
 The Redmi 14C has no gyroscope and a virtual proximity sensor. That affects face-down detection,
-not this stack. An emulator works too: the same `adb reverse` rules apply to it.
+not this stack.
+
+## The app on an emulator
+
+`scripts/devstack/emulator-smoke.sh` runs the real app end to end on a running emulator, with no
+wallet app and nobody touching it (about five minutes):
+
+1. installs the `localdev` APK, clears its data and walks the setup screens (notifications,
+   background running, the Quick Settings tile, the rig key, created in the emulator's Keystore);
+2. reads the key from the app's debug screen, arms a rig for it with a new Mac-held dev wallet,
+   and attaches the app to that rig;
+3. puts the emulator face-down, on the charger, screen off (`adb emu sensor set acceleration
+   0:0:-9.81`, `adb emu power ac on`, `KEYCODE_SLEEP`) and waits until the crank has accepted a
+   heartbeat signed by that key and landed a dig on-chain;
+4. lifts it (upright, screen on) and waits until the BREAK the app signed has landed and the rig
+   reads Cooling or Broken on-chain. It fails if the app crashed at any point.
+
+One-time setup of an emulator (Apple Silicon; any Android 12+ image should do, Android 14 is what
+the Redmi 14C runs):
+
+```bash
+sdkmanager "system-images;android-34;google_apis;arm64-v8a"
+avdmanager create avd -n hd34 -k "system-images;android-34;google_apis;arm64-v8a" -d pixel_6
+$ANDROID_HOME/emulator/emulator -avd hd34 -no-window -no-audio -no-boot-anim &
+cd android && ./gradlew :app:assembleLocaldev && cd ..
+scripts/devstack/up.sh && scripts/devstack/emulator-smoke.sh
+```
+
+Real output, 2026-10-04, Android 14 emulator, fork carrying ORE's build of 2026-10-02:
+
+```text
+[emulator-smoke +   4s] installed app-localdev.apk on emulator-5554 (Android 14) and started it
+[emulator-smoke +  55s] setup done: notifications, background running, tile, rig key in the device's Keystore
+[emulator-smoke +  69s] rig EL4oQC576rKZhtcZLjiykyc8QNUqwBZTXSuBeZCF4jLY armed for key 02ef4ab6520a2e68… by the dev wallet 7LxsWUi155FfZ3nLhkbVPq3NWqkhCRVAFJcNVgmRxkSK
+[emulator-smoke +  88s] app attached: Attached to shift 1 (NIGHT, lease 2). Lay the phone face-down.
+[emulator-smoke + 156s] the crank accepted a heartbeat signed by the device's Keystore key
+[emulator-smoke + 265s] DIG LANDED on-chain with that heartbeat: tx 5JnyHyKxDcxBPELQcQhYfZ8U4vfUHRe74cC7ja27XLMToJU5CymZGrSbvV1ZyxPoW6YbHDfR2pSURSnDi9QK2XMR
+[emulator-smoke + 277s] LIFTED: the app signed a BREAK and the crank landed it (the rig is now Cooling on-chain)
+
+EMULATOR SMOKE PASSED: setup, Keystore key, attach, heartbeat, on-chain dig, pickup, BREAK landed. No crash.
+```
+
+What an emulator does not show: a hardware-backed Keystore and its attestation (the emulator's is
+software, so the rig is a guest), HyperOS's background killing, a real accelerometer, and every
+flow that needs a wallet app to sign.
 
 ## Logs, status, troubleshooting
 

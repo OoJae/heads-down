@@ -33,7 +33,9 @@ import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.ShiftSnapshot
 import xyz.headsdown.feature.shift.ShiftStatusRepository
 import xyz.headsdown.feature.shift.isRunning
+import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.rig.FocusBondSetting
+import xyz.headsdown.rig.ShiftWindow
 import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.rig.RigBindingStore
@@ -84,7 +86,13 @@ class HomeViewModel @Inject constructor(
     private val binding: RigBindingStore,
     crankLink: CrankLinkMonitor,
     private val focusBond: FocusBondSetting,
+    private val policy: ClockInPolicy,
 ) : ViewModel() {
+
+    private val _shiftWindow = MutableStateFlow<String?>(null)
+
+    /** Until when a shift started now would run (ShiftWindow.describe), re-read on every resume. */
+    val shiftWindow: StateFlow<String?> = _shiftWindow.asStateFlow()
 
     /** The Focus Bond locked at the next clock-in, SKR base units (0 = none). */
     val bond: StateFlow<ULong> = focusBond.amount
@@ -129,6 +137,9 @@ class HomeViewModel @Inject constructor(
                 rigRegistered = binding.current().isRegistered,
             )
             _health.value = withContext(Dispatchers.Default) { evaluateHealth() }
+            _shiftWindow.value = runCatching {
+                ShiftWindow.describe(policy, System.currentTimeMillis(), reveal.nextSystemAlarmWallMillis())
+            }.getOrNull()
         }
     }
 

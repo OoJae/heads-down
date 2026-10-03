@@ -92,7 +92,7 @@ object ClockOutCopy {
 
     const val ORE_KEPT = "ORE left in your Miner stays yours: only your wallet can claim it, here or in ORE's own app."
 
-    const val NOTHING_TO_SIGN = "Nothing to sign right now: no shift to seal, no bond to take back and no ORE claimed."
+    const val NOTHING_TO_SIGN = "Nothing to sign right now: with these choices no shift is sealed, no bond comes back and no ORE is claimed."
 
     fun lines(f: ClockOutFacts, zone: ZoneId = ZoneId.systemDefault()): ClockOutLines = ClockOutLines(
         shift = shift(f.shift, zone),
