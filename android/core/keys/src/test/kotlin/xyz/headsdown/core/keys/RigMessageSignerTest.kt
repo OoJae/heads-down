@@ -60,6 +60,30 @@ class RigCounterTest {
     }
 
     @Test
+    fun `one chain read moves the counter by at most a million - a forged hb_counter cannot end the sequence`() {
+        val store = RecordingCounterStore(initial = 7uL)
+        val counter = RigCounter(store)
+        // The audit's forged Rig: hb_counter = u64::MAX (and one below it).
+        for (forged in listOf(ULong.MAX_VALUE, ULong.MAX_VALUE - 1uL)) {
+            val before = counter.current()
+            assertFalse(counter.raiseFloor(forged))
+            assertEquals(before + RigCounter.MAX_FLOOR_STEP, counter.current())
+        }
+        // Still far inside the program's 2^32 step bound above the real on-chain counter (7 here),
+        // so the next message is accepted and the sequence carries on.
+        assertTrue(counter.current() - 7uL < (1uL shl 32))
+        assertEquals(7uL + 2uL * RigCounter.MAX_FLOOR_STEP + 1uL, counter.next())
+        // A real gap larger than one step closes over the next raises.
+        val far = counter.current() + 3uL * RigCounter.MAX_FLOOR_STEP - 5uL
+        assertFalse(counter.raiseFloor(far))
+        assertFalse(counter.raiseFloor(far))
+        assertTrue(counter.raiseFloor(far))
+        assertEquals(far + 1uL, counter.next())
+        // Exactly one step is reached at once.
+        assertTrue(counter.raiseFloor(counter.current() + RigCounter.MAX_FLOOR_STEP))
+    }
+
+    @Test
     fun `the u64 counter never wraps`() {
         val counter = RigCounter(RecordingCounterStore(initial = ULong.MAX_VALUE - 1uL))
         assertEquals(ULong.MAX_VALUE, counter.next())

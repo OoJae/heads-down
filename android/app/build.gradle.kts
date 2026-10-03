@@ -12,21 +12,42 @@ fun prop(name: String): String? = findProperty(name) as String?
 // in the APK (they stay behind the team proxy, THREAT_MODEL §8 "Network"). Override per build:
 //   ./gradlew :app:assembleDebug -Pheadsdown.cluster=mainnet \
 //       -Pheadsdown.rpcUrl=https://rpc.example.org -Pheadsdown.crankUrl=wss://crank.example.org/ws \
-//       -Pheadsdown.registrarUrl=https://registrar.example.org -Pheadsdown.indexerUrl=https://indexer.example.org
+//       -Pheadsdown.registrarUrl=https://registrar.example.org -Pheadsdown.indexerUrl=https://indexer.example.org \
+//       -Pheadsdown.identityUri=https://example.org
 // An empty crankUrl builds a local-only app (heartbeats stay on the device; no digs). An empty
 // registrarUrl registers every rig as a guest; an empty indexerUrl shows no morning haul.
+//
+// No service has a default host: a default would be a name somebody else can register. A devnet
+// build without the three service URLs is a local-only app. A mainnet build must name all four
+// (an empty value is a deliberate "off") and the site the app identifies itself with.
 val cluster = prop("headsdown.cluster") ?: "devnet"
 require(cluster == "devnet" || cluster == "mainnet") { "headsdown.cluster must be devnet or mainnet" }
-val defaultRpc = if (cluster == "mainnet") "https://api.mainnet-beta.solana.com" else "https://api.devnet.solana.com"
-// Placeholders until the services are deployed: they do not resolve, so the uplink backs off,
-// the rig registers as a guest and the reveal says "no haul yet" (fail-safe).
-val defaultCrank = "wss://crank-$cluster.headsdown.xyz/ws"
-val defaultRegistrar = "https://registrar-$cluster.headsdown.xyz"
-val defaultIndexer = "https://indexer-$cluster.headsdown.xyz"
-val rpcUrl = prop("headsdown.rpcUrl") ?: defaultRpc
-val crankUrl = prop("headsdown.crankUrl") ?: defaultCrank
-val registrarUrl = prop("headsdown.registrarUrl") ?: defaultRegistrar
-val indexerUrl = prop("headsdown.indexerUrl") ?: defaultIndexer
+if (cluster == "mainnet") {
+    for (name in listOf("rpcUrl", "crankUrl", "registrarUrl", "indexerUrl", "identityUri")) {
+        require(prop("headsdown.$name") != null) {
+            "a mainnet build must set -Pheadsdown.$name=... explicitly (empty turns a service off; rpcUrl and identityUri cannot be empty)"
+        }
+    }
+}
+val rpcUrl = prop("headsdown.rpcUrl") ?: "https://api.devnet.solana.com"
+val crankUrl = prop("headsdown.crankUrl") ?: ""
+val registrarUrl = prop("headsdown.registrarUrl") ?: ""
+val indexerUrl = prop("headsdown.indexerUrl") ?: ""
+
+// WHO THE APP SAYS IT IS. The wallet shows this site next to every signing prompt (Mobile Wallet
+// Adapter identity) and the SIWS message names its host, so it must be a site the team controls:
+// whoever controls it can present itself as Heads Down. The default is the project's GitHub Pages
+// address, which only the repository owner's GitHub account can publish to.
+//   -Pheadsdown.identityUri=https://example.org          (https, no query, no fragment)
+//   -Pheadsdown.siwsDomain=example.org                   (default: the host of identityUri; the
+//                                                         registrar's HD_SIWS_DOMAIN must equal it)
+val identityUri = prop("headsdown.identityUri") ?: "https://oojae.github.io/heads-down"
+val identity = URI(identityUri)
+require(identity.scheme == "https" && !identity.host.isNullOrEmpty() && identity.rawQuery == null && identity.rawFragment == null && identity.rawUserInfo == null) {
+    "headsdown.identityUri must be an https:// URL with a host and no credentials, query string or fragment"
+}
+val siwsDomain = prop("headsdown.siwsDomain") ?: identity.host.lowercase()
+require(siwsDomain.isNotEmpty() && siwsDomain.none { it.isWhitespace() || it == '/' || it == ':' }) { "headsdown.siwsDomain must be a bare host name" }
 
 // LOCAL DEVSTACK (the `localdev` build type only): validator, hd-crank, indexer and registrar on
 // the laptop, reached from the phone through `scripts/devstack/phone.sh` (adb reverse).
@@ -110,8 +131,10 @@ android {
         buildConfigField("String", "CRANK_WS_URL", "\"$crankUrl\"")
         buildConfigField("String", "REGISTRAR_URL", "\"$registrarUrl\"")
         buildConfigField("String", "INDEXER_URL", "\"$indexerUrl\"")
-        // The domain the app signs in to (SIWS); the registrar must answer for exactly this one.
-        buildConfigField("String", "SIWS_DOMAIN", "\"headsdown.xyz\"")
+        // The site the wallet shows for this app, and the domain the app signs in to (SIWS); the
+        // registrar must answer for exactly this domain.
+        buildConfigField("String", "IDENTITY_URI", "\"$identityUri\"")
+        buildConfigField("String", "SIWS_DOMAIN", "\"$siwsDomain\"")
         buildConfigField("boolean", "LOOPBACK_CLEARTEXT_ALLOWED", "false")
         // true: the wallet only signs and the app submits through its own RPC (localdev).
         buildConfigField("boolean", "SUBMIT_THROUGH_APP_RPC", "false")

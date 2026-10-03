@@ -54,6 +54,23 @@ class ClockInPolicyTest {
     }
 
     @Test
+    fun `the amounts are stated from the policy alone, before the wallet opens`() {
+        // 0.02 SOL a shift and 0.14 a week on squares; the deposit bound adds one fee ceiling
+        // (0.0001 SOL) per possible dig: 20 x 100_000 lamports.
+        assertEquals(
+            "This shift can place up to 0.02 SOL on ORE squares (0.14 SOL a week). " +
+                "Clock-in moves at most 0.022 SOL into your own ORE Automation; the first one also pays one-time account rent.",
+            ClockInPolicy().disclosure(),
+        )
+        assertEquals("1", ClockInPolicy.sol(1_000_000_000uL))
+        assertEquals("0.000000001", ClockInPolicy.sol(1uL))
+        assertEquals("12.5", ClockInPolicy.sol(12_500_000_000uL))
+        assertEquals("0", ClockInPolicy.sol(0uL))
+        // Nothing in it promises a return.
+        assertFalse(Regex("\\b(earn|yield|profit|income|reward)", RegexOption.IGNORE_CASE).containsMatchIn(ClockInPolicy().disclosure()))
+    }
+
+    @Test
     fun `an impossible policy fails before anything is signed`() {
         assertThrows(IllegalArgumentException::class.java) { ClockInPolicy(leaseRounds = 4).request() }
         assertThrows(IllegalArgumentException::class.java) { ClockInPolicy(planMaxEvCostPerOre = 2_000_000_000uL).request() }

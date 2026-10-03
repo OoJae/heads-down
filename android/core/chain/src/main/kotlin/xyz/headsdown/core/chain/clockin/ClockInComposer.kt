@@ -104,6 +104,7 @@ class ClockInRefusedException(val reason: Reason) : IllegalStateException(reason
         RIG_BUSY("This Rig is in a state that cannot be armed. End its shift with your wallet first."),
         BOND_WOULD_FORFEIT("Your last shift still holds a Focus Bond and its window has not ended. Clocking in now would forfeit it."),
         INSUFFICIENT_SKR("Not enough SKR in this wallet for the Focus Bond."),
+        FEE_OUT_OF_BOUNDS("The network reported a fee Heads Down does not accept. Nothing was sent."),
     }
 }
 
@@ -201,7 +202,10 @@ object ClockInComposer {
             if (rig.state != RigSignalState.IDLE && !rig.shiftOpen) throw ClockInRefusedException(ClockInRefusedException.Reason.RIG_BUSY)
         }
 
+        // The fee is read from an RPC, and the caps and the deposit are built from it: without a
+        // ceiling, one forged Config would make the wallet prompt move any amount.
         val fee = state.config.executorFee
+        if (fee > MAX_EXECUTOR_FEE) throw ClockInRefusedException(ClockInRefusedException.Reason.FEE_OUT_OF_BOUNDS)
         val focus = request.focusOnly
         val tiles = if (focus) 0 else request.splitTiles + request.soloTiles
         val flags = (if (focus) ShiftPlan.FLAG_FOCUS_ONLY else 0) or (if (request.day) ShiftPlan.FLAG_DAY else 0)
@@ -285,6 +289,7 @@ object ClockInComposer {
             val target = caps.capShift
             val current = state.automation?.balance ?: 0uL
             deposit = if (target > current) target - current else 0uL
+            check(deposit <= maxDeposit(request)) { "deposit above the request's bound" }
             val a = state.automation
             val upToDate = a != null && a.executor == HeadsDownProgram.executor.address && a.isDiscretionary &&
                 a.fee == fee && a.amount == perTile && a.reload == 1uL && a.authority == authority
@@ -331,6 +336,21 @@ object ClockInComposer {
             bondReleased = bondReleased,
         )
     }
+
+    /**
+     * The highest `Config.executor_fee` the app builds a clock-in for, in lamports (0.0001 SOL).
+     * The deployed value is 10,000 and cannot change after `initialize_config`; the ceiling leaves
+     * room for another deployment and bounds what RPC data can add to a clock-in.
+     */
+    const val MAX_EXECUTOR_FEE: ULong = 100_000uL
+
+    /**
+     * The most SOL a clock-in built from [request] can move from the wallet into the user's own ORE
+     * Automation, whatever the RPC answers: the shift budget plus one [MAX_EXECUTOR_FEE] per dig
+     * round. Known before any network read, so it can be shown before the wallet opens.
+     */
+    fun maxDeposit(request: ClockInRequest): ULong =
+        if (request.focusOnly) 0uL else withFees(request.shiftBudgetLamports, request.digLamports, MAX_EXECUTOR_FEE)
 
     /**
      * Covers ORE automate (account creation), register_rig with a voucher, the two small updates,

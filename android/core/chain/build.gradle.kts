@@ -32,7 +32,7 @@ dependencies {
 
 // ------------------------------------------------------------------------ golden vectors
 //
-// programs/heads-down/vectors/*.json are the frozen contract (INTERFACE v1.2): every instruction
+// programs/heads-down/vectors/*.json are the frozen contract (INTERFACE v1.3): every instruction
 // executed in LiteSVM on a fork of live ORE. The unit tests read a copy under
 // src/test/resources/golden so this module also builds from an android/-only checkout. The copy
 // can never silently drift: every unit-test run first compares it byte for byte with the source

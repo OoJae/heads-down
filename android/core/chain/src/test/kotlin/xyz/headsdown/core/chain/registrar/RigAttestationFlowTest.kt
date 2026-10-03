@@ -34,7 +34,7 @@ class RigAttestationFlowTest {
     private val tls = TlsServer()
     private val fake = FakeRegistrar().also { tls.server.dispatcher = it }
     private val client = RegistrarClient(OkHttpJsonHttp(tls.url(), tls.client))
-    private val flow = RigAttestationFlow(client, domain = "headsdown.xyz", chainId = "solana:devnet")
+    private val flow = RigAttestationFlow(client, domain = "headsdown.example", chainId = "solana:devnet")
 
     private val wallet = Pubkey.fromBase58("FGdcxXEsrhitpAXFa17Wn3eV5TCAjaCV1QzfoceyPPyx")
     private val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
@@ -46,7 +46,7 @@ class RigAttestationFlowTest {
 
     private val signIn: suspend (SiwsRequest) -> SignInProof? = { request ->
         signInRequest = request
-        SignInProof(WalletAccount(wallet.bytes, "test"), "headsdown.xyz wants you to sign in".toByteArray(), ByteArray(64) { 7 })
+        SignInProof(WalletAccount(wallet.bytes, "test"), "headsdown.example wants you to sign in".toByteArray(), ByteArray(64) { 7 })
     }
 
     private val generateKey: suspend (ByteArray) -> ChallengedKey = { challenge ->
@@ -67,7 +67,7 @@ class RigAttestationFlowTest {
         assertEquals(wallet, run.authority)
         // The SIWS payload is the registrar's (N7), with this build's chain id.
         val request = signInRequest!!
-        assertEquals("https://headsdown.xyz", request.uri)
+        assertEquals("https://headsdown.example", request.uri)
         assertEquals("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", request.nonce)
         assertEquals("2026-10-01T12:00:00Z", request.issuedAt)
         assertEquals("2026-10-01T12:10:00Z", request.expirationTime)
@@ -112,7 +112,7 @@ class RigAttestationFlowTest {
         assertNull(challengeUsed)
         // No server at all (connection refused) is the same outcome.
         tls.close()
-        val offline = RigAttestationFlow(RegistrarClient(OkHttpJsonHttp(tls.url(), tls.client)), "headsdown.xyz", "solana:devnet")
+        val offline = RigAttestationFlow(RegistrarClient(OkHttpJsonHttp(tls.url(), tls.client)), "headsdown.example", "solana:devnet")
         assertEquals(AttestationOutcome.REGISTRAR_UNAVAILABLE, offline.run(signIn, generateKey).outcome)
     }
 
@@ -147,7 +147,7 @@ class RigAttestationFlowTest {
         var walletAsked = false
         fake.domain = "evil.example"
         assertEquals(AttestationOutcome.REGISTRAR_UNAVAILABLE, flow.run({ walletAsked = true; null }, generateKey).outcome)
-        fake.domain = "headsdown.xyz"
+        fake.domain = "headsdown.example"
         fake.chainIds = listOf("solana:mainnet")
         assertEquals(AttestationOutcome.REGISTRAR_UNAVAILABLE, flow.run({ walletAsked = true; null }, generateKey).outcome)
         assertFalse(walletAsked)

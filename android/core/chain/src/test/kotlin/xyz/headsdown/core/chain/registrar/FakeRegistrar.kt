@@ -23,8 +23,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 class FakeRegistrar : Dispatcher() {
     var down = false
-    var domain = "headsdown.xyz"
-    var uri = "https://headsdown.xyz"
+    var domain = "headsdown.example"
+    var uri = "https://headsdown.example"
     var chainIds = listOf("solana:devnet")
     var level = 2
     var expirySlot = 458_180_000uL

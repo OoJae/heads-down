@@ -47,14 +47,20 @@ data class SubmissionReport(val outcomes: List<ConfirmationOutcome>) {
     val allConfirmed: Boolean get() = outcomes.isNotEmpty() && outcomes.all { it.isSuccess }
 }
 
-/** Where the dApp identifies itself to the wallet. */
+/**
+ * How the dApp identifies itself to the wallet. The site is build configuration
+ * (`headsdown.identityUri`), never a constant here: it must be one the team controls, because
+ * whoever controls it can present itself to wallets as Heads Down.
+ */
 object HeadsDownIdentity {
-    val connectionIdentity = ConnectionIdentity(
-        identityUri = "https://headsdown.xyz".toUri(),
-        iconUri = "favicon.ico".toUri(), // resolved relative to identityUri by the wallet
-        identityName = "Heads Down",
-    )
-    const val SIWS_DOMAIN = "headsdown.xyz"
+    const val NAME = "Heads Down"
+
+    /** @param identityUri an absolute `https` URL; the icon is resolved relative to it by the wallet. */
+    fun connectionIdentity(identityUri: String): ConnectionIdentity {
+        val uri = identityUri.toUri()
+        require(uri.scheme == "https" && !uri.host.isNullOrEmpty()) { "the identity URI must be an https URL" }
+        return ConnectionIdentity(identityUri = uri, iconUri = "favicon.ico".toUri(), identityName = NAME)
+    }
 }
 
 /**

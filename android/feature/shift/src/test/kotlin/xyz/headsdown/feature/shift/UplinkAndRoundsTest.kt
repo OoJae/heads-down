@@ -229,6 +229,50 @@ class UplinkAndRoundsTest {
     }
 
     @Test
+    fun `one implausible answer is neither signed for nor latched`() = runTest {
+        // The audit's sequence: a single bogus 500000 used to be emitted (a heartbeat for a round
+        // far in the future) and then wedged the feed for the rest of the shift.
+        val reads = ArrayDeque(listOf(422_700uL, 422_701uL, 500_000uL, 422_702uL, 422_703uL))
+        val source = BoardRoundSource({ reads.removeFirst() }, { currentTime }, pollMillis = 5_000, maxErrorDelayMillis = 60_000)
+        assertEquals(listOf(422_700uL, 422_701uL, 422_702uL, 422_703uL), source.rounds().take(4).toList().map { it.id })
+    }
+
+    @Test
+    fun `a jump is believed at the pace ORE allows, or when three answers in a row agree`() = runTest {
+        // After a gap in reads (the phone was offline for five minutes) several rounds have passed.
+        var calls = 0
+        val offline = BoardRoundSource(
+            readRoundId = {
+                calls++
+                when {
+                    calls == 1 -> 100uL
+                    calls <= 6 -> throw IOException("offline")
+                    else -> 104uL
+                }
+            },
+            clock = { currentTime },
+            pollMillis = 5_000,
+            maxErrorDelayMillis = 60_000,
+        )
+        assertEquals(listOf(100uL, 104uL), offline.rounds().take(2).toList().map { it.id })
+
+        // A first answer far too high (nothing to compare it with) is corrected once three honest
+        // answers agree with each other, instead of stalling the feed for the whole shift.
+        val reads = ArrayDeque(listOf(900_000uL, 422_700uL, 422_700uL, 422_701uL, 422_701uL, 422_702uL))
+        val wedged = BoardRoundSource({ reads.removeFirst() }, { currentTime }, pollMillis = 5_000, maxErrorDelayMillis = 60_000)
+        val t0 = currentTime
+        val rounds = wedged.rounds().take(3).toList()
+        assertEquals(listOf(900_000uL, 422_701uL, 422_702uL), rounds.map { it.id })
+        assertEquals(listOf(0L, 15_000L, 25_000L), rounds.map { it.observedAtMillis - t0 })
+
+        // A far-ahead answer that keeps being repeated is accepted after three reads: a single
+        // client cannot tell a node that lies consistently from the chain.
+        val insistent = ArrayDeque(listOf(10uL, 5_000uL, 5_000uL, 5_000uL))
+        val moved = BoardRoundSource({ insistent.removeFirst() }, { currentTime }, pollMillis = 5_000, maxErrorDelayMillis = 60_000)
+        assertEquals(listOf(10uL, 5_000uL), moved.rounds().take(2).toList().map { it.id })
+    }
+
+    @Test
     fun `read failures back off and emit nothing, then recover`() = runTest {
         var calls = 0
         val source = BoardRoundSource(

@@ -22,7 +22,7 @@ class EndpointPolicyTest {
         listOf(false, true).forEach { allow ->
             assertEquals(Secure, EndpointPolicy.check(RPC, "https://api.devnet.solana.com", allow))
             assertEquals(Secure, EndpointPolicy.check(RPC, "https://rpc-proxy.example.org:8443/solana", allow))
-            assertEquals(Secure, EndpointPolicy.check(CRANK, "wss://crank-devnet.headsdown.xyz/v1/heartbeats", allow))
+            assertEquals(Secure, EndpointPolicy.check(CRANK, "wss://crank-devnet.headsdown.example/v1/heartbeats", allow))
         }
     }
 
@@ -99,7 +99,7 @@ class EndpointPolicyTest {
     @Test
     fun `registrar and indexer follow the same rules as RPC`() {
         for (kind in listOf(EndpointKind.REGISTRAR, EndpointKind.INDEXER)) {
-            assertEquals(Secure, release(kind, "https://registrar-devnet.headsdown.xyz"))
+            assertEquals(Secure, release(kind, "https://registrar-devnet.headsdown.example"))
             assertEquals(Secure, release(kind, "https://indexer.example.org/api"))
             assertTrue(refused(release(kind, "http://127.0.0.1:8790")))
             assertEquals(LoopbackCleartext, localdev(kind, "http://127.0.0.1:8790"))
@@ -133,8 +133,14 @@ class EndpointPolicyTest {
         // The crank intake path is contract A's /ws.
         assertTrue(BuildConfig.CRANK_WS_URL.isEmpty() || BuildConfig.CRANK_WS_URL.endsWith("/ws"))
         assertFalse(BuildConfig.SUBMIT_THROUGH_APP_RPC)
-        // The app signs in to its own domain; only localdev uses the devstack's "localhost".
-        assertEquals("headsdown.xyz", BuildConfig.SIWS_DOMAIN)
+        // The app signs in to the host of its own identity site (build configuration, a site the
+        // team controls); only localdev uses the devstack's "localhost". No service URL has a
+        // default host that somebody else could register.
+        assertEquals(java.net.URI(BuildConfig.IDENTITY_URI).host, BuildConfig.SIWS_DOMAIN)
+        assertEquals("https", java.net.URI(BuildConfig.IDENTITY_URI).scheme)
+        for (url in listOf(BuildConfig.IDENTITY_URI, BuildConfig.CRANK_WS_URL, BuildConfig.REGISTRAR_URL, BuildConfig.INDEXER_URL)) {
+            assertFalse(url, url.contains("headsdown.xyz"))
+        }
         assertTrue(BuildTransports.transports === SecureTransports)
     }
 }

@@ -71,6 +71,7 @@ object HomeTags {
     const val RIG_DEBUG = "home-rig-debug"
     const val HOW_IT_WORKS = "home-how-it-works"
     const val CRANK_REFUSAL = "home-crank-refusal"
+    const val CLOCK_IN_AMOUNTS = "home-clock-in-amounts"
 }
 
 internal data class RigLook(val word: String, val color: Color, val line: String, val pixels: Int)
@@ -110,6 +111,8 @@ fun HomeScreen(
     onOpenRigDebug: (() -> Unit)? = null,
     /** The crank intake's acks (contract A): a current refusal is shown on the rig card. */
     crank: CrankLinkStatus = CrankLinkStatus(),
+    /** What a clock-in can move, stated before the wallet opens (ClockInPolicy.disclosure). */
+    clockInAmounts: String? = null,
 ) {
     Column(
         Modifier
@@ -134,7 +137,7 @@ fun HomeScreen(
         }
 
         HealthBanner(health, onOpenSetup)
-        RigCard(snapshot, crank, onClockIn, onEndShift, onFreeze)
+        RigCard(snapshot, crank, clockInAmounts, onClockIn, onEndShift, onFreeze)
         HaulCard(onPreviewReveal)
         if (onAddWidget != null) WidgetCard(onAddWidget)
 
@@ -161,7 +164,14 @@ fun HomeScreen(
 }
 
 @Composable
-private fun RigCard(snapshot: ShiftSnapshot, crank: CrankLinkStatus, onClockIn: () -> Unit, onEndShift: () -> Unit, onFreeze: () -> Unit) {
+private fun RigCard(
+    snapshot: ShiftSnapshot,
+    crank: CrankLinkStatus,
+    clockInAmounts: String?,
+    onClockIn: () -> Unit,
+    onEndShift: () -> Unit,
+    onFreeze: () -> Unit,
+) {
     val look = lookOf(snapshot.state)
     val hot = snapshot.state is ShiftState.Down
     Card(
@@ -198,11 +208,21 @@ private fun RigCard(snapshot: ShiftSnapshot, crank: CrankLinkStatus, onClockIn: 
             }
             Spacer(Modifier.height(4.dp))
             when (snapshot.state) {
-                ShiftState.Idle, is ShiftState.Broken -> Button(
-                    onClick = onClockIn,
-                    modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_IN),
-                    colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
-                ) { Text("Clock in") }
+                ShiftState.Idle, is ShiftState.Broken -> {
+                    Button(
+                        onClick = onClockIn,
+                        modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_IN),
+                        colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
+                    ) { Text("Clock in") }
+                    clockInAmounts?.let {
+                        Text(
+                            it,
+                            color = HdColors.AshMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag(HomeTags.CLOCK_IN_AMOUNTS),
+                        )
+                    }
+                }
                 is ShiftState.Armed, is ShiftState.Down, is ShiftState.Cooling -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = onEndShift, modifier = Modifier.weight(1f)) { Text("End shift") }
                     OutlinedButton(onClick = onFreeze, modifier = Modifier.weight(1f)) { Text("Freeze") }

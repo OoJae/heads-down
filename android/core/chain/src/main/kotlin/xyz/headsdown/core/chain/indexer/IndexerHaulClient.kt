@@ -136,7 +136,7 @@ class IndexerHaulClient(private val http: JsonHttp) {
                 oreMinedAtoms = oreAtoms(o["ore_mined_atoms"]),
                 effectiveLamportsPerOre = price(o["effective_lamports_per_ore"]),
                 marketLamportsPerOre = price(o["market_lamports_per_ore"]),
-                marketSource = o.optionalString("market_source")?.take(64),
+                marketSource = o.optionalString("market_source")?.let(::sourceLabel),
                 streakBefore = o.u64("streak_before").toLongCapped(),
                 streakAfter = o.u64("streak_after").toLongCapped(),
                 breakReason = breakReason(o["break_reason"]),
@@ -196,11 +196,29 @@ class IndexerHaulClient(private val http: JsonHttp) {
             return BigDecimal(text)
         }
 
-        /** Only https links (the reveal opens them in a browser). */
+        /**
+         * Only an https link to a transaction or an account on one of the explorers the indexer
+         * links to. The reveal opens it with `ACTION_VIEW`, and an https URL can also be another
+         * app's App Link (a wallet's "browse" link, for one), so the host and the shape are fixed
+         * here: the indexer picks *which* page of a known explorer, never where the tap goes.
+         */
         private fun httpsUrl(text: String): String? {
+            if (text.length > 512) return null
             val url = text.toHttpUrlOrNull() ?: return null
-            return if (url.isHttps && text.length <= 512) url.toString() else null
+            if (!url.isHttps || url.port != 443 || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
+            if (url.host !in EXPLORER_HOSTS) return null
+            val segments = url.pathSegments
+            if (segments.size != 2 || segments[0] !in EXPLORER_PAGES || !BASE58.matches(segments[1])) return null
+            return url.toString()
         }
+
+        /** A short plain label for where the market price came from, or null: it is shown next to the price. */
+        private fun sourceLabel(text: String): String? = text.takeIf { SOURCE_LABEL.matches(it) }
+
+        private val EXPLORER_HOSTS = setOf("solscan.io", "explorer.solana.com")
+        private val EXPLORER_PAGES = setOf("tx", "account", "address")
+        private val BASE58 = Regex("[1-9A-HJ-NP-Za-km-z]{32,88}")
+        private val SOURCE_LABEL = Regex("[A-Za-z0-9][A-Za-z0-9 ._/-]{0,39}")
 
         private fun JsonObject.string(key: String): String =
             (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw HaulFormatException(key)

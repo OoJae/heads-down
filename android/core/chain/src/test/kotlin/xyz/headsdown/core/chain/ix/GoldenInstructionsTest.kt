@@ -49,6 +49,8 @@ class GoldenInstructionsTest {
     private val androidBuilds: Map<String, (JsonObject) -> Instruction> = mapOf(
         "register_rig_guest" to { v -> HeadsDownInstructions.registerRig(role(v, "authority"), p256(v), attestation(v)) },
         "register_rig_attested" to { v -> HeadsDownInstructions.registerRig(role(v, "authority"), p256(v), attestation(v)) },
+        // v1.3: registering over a closed rig's tombstone is the very same instruction.
+        "register_rig_resumed" to { v -> HeadsDownInstructions.registerRig(role(v, "authority"), p256(v), attestation(v)) },
         "rotate_key_unattested" to { v -> HeadsDownInstructions.rotateKey(role(v, "authority"), p256(v), attestation(v)) },
         "rotate_key_attested" to { v -> HeadsDownInstructions.rotateKey(role(v, "authority"), p256(v), attestation(v)) },
         "set_caps" to { v ->
@@ -103,6 +105,9 @@ class GoldenInstructionsTest {
             SkrInstructions.claimGift(role(v, "claimer"), a.pubkey("gift"), role(v, "sender"), SgtAccounts(a.pubkey("sgt_token_account"), a.pubkey("sgt_mint")))
         },
         "refund_gift" to { v -> SkrInstructions.refundGift(v.obj("args").pubkey("gift"), role(v, "sender")) },
+        // v1.3: the wallet takes back the rent of a ShiftLog it paid for, 30 days on.
+        "close_shift_log" to { v -> closeShiftLog(v) },
+        "close_shift_log_crank_paid" to { v -> closeShiftLog(v) },
     )
 
     /**
@@ -115,6 +120,8 @@ class GoldenInstructionsTest {
         "dig_fresh_heartbeat", "dig_reuse_lease", "dig_batch_two_rigs", "record_heartbeats",
         "stack_checkin_heartbeat", "stack_checkin_observe", "settle_stack", "forfeit_focus_bond",
         "init_bury_vault", "bury_auction_buy",
+        // v1.3 governance rotation: the governance key's business, never the phone's.
+        "propose_governance", "cancel_governance", "accept_governance",
     )
 
     // ------------------------------------------------------------------------------ helpers
@@ -156,6 +163,11 @@ class GoldenInstructionsTest {
     private fun endShift(v: JsonObject): Instruction {
         val a = v.obj("args")
         return HeadsDownInstructions.endShift(a.pubkey("caller"), a.pubkey("rig"), a.u64("shift_id"))
+    }
+
+    private fun closeShiftLog(v: JsonObject): Instruction {
+        val a = v.obj("args")
+        return HeadsDownInstructions.closeShiftLog(a.pubkey("rig"), a.u64("shift_id"), a.pubkey("rent_recipient"))
     }
 
     private fun sgtMint(): Pubkey = vectors.getValue("verify_seeker").obj("args").pubkey("sgt_mint")
@@ -201,8 +213,8 @@ class GoldenInstructionsTest {
     // ------------------------------------------------------------------------------ tests
 
     @Test
-    fun `the golden file is the frozen contract for this program - v1_1 core plus additive v1_2`() {
-        assertEquals("1.2", Golden.instructions.str("interface_version"))
+    fun `the golden file is the frozen contract for this program - v1_1 core plus additive v1_2 and v1_3`() {
+        assertEquals("1.3", Golden.instructions.str("interface_version"))
         assertEquals(HeadsDownProgram.ID, Golden.instructions.pubkey("program_id"))
         val c = Golden.instructions.obj("constants")
         assertEquals(HeadsDownProgram.config.address, c.pubkey("config"))
@@ -249,18 +261,23 @@ class GoldenInstructionsTest {
     fun `every golden vector is either built by the phone or deliberately not`() {
         assertEquals(vectors.keys, androidBuilds.keys + notOnPhone)
         assertTrue(androidBuilds.keys.intersect(notOnPhone).isEmpty())
-        assertEquals(41, vectors.size)
-        // All 28 tags are covered by the file: the v1.1 core (0..14) and the additive v1.2 SKR set (15..27).
-        assertEquals((0..27).toSet(), vectors.values.map { it.int("tag") }.toSet())
+        assertEquals(47, vectors.size)
+        // All 32 tags are covered by the file: the v1.1 core (0..14), the additive v1.2 SKR set
+        // (15..27) and v1.3 (28..31: governance rotation and close_shift_log).
+        assertEquals((0..31).toSet(), vectors.values.map { it.int("tag") }.toSet())
         // Of the core, the phone builds 10 tags (not 0, 6, 7, 12, 13). Of the v1.2 SKR set it builds
         // 8: Stack open / join / claim, Focus Bond lock / release, Gift create / claim / refund.
         // The crank sends the rest: 17 stack_checkin, 18 settle_stack, 22 forfeit_focus_bond, 26, 27.
+        // Of v1.3 it builds 31 close_shift_log (the wallet's own rent); 28..30 are governance's.
         assertEquals(
-            setOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 14) + setOf(15, 16, 19, 20, 21, 23, 24, 25),
+            setOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 14) + setOf(15, 16, 19, 20, 21, 23, 24, 25) + setOf(31),
             androidBuilds.keys.map { vectors.getValue(it).int("tag") }.toSet(),
         )
-        assertEquals(setOf(0, 6, 7, 12, 13) + setOf(17, 18, 22, 26, 27), notOnPhone.map { vectors.getValue(it).int("tag") }.toSet())
-        assertEquals(28, androidBuilds.size)
+        assertEquals(
+            setOf(0, 6, 7, 12, 13) + setOf(17, 18, 22, 26, 27) + setOf(28, 29, 30),
+            notOnPhone.map { vectors.getValue(it).int("tag") }.toSet(),
+        )
+        assertEquals(31, androidBuilds.size)
     }
 
     @Test

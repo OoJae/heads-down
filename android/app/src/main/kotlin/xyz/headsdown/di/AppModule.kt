@@ -94,7 +94,7 @@ object AppModule {
 
     @Provides @Singleton
     fun wallet(@ApplicationContext context: Context, rpc: SolanaJsonRpc): HeadsDownWallet = HeadsDownWallet(
-        adapter = MobileWalletAdapter(HeadsDownIdentity.connectionIdentity),
+        adapter = MobileWalletAdapter(HeadsDownIdentity.connectionIdentity(BuildConfig.IDENTITY_URI)),
         vault = AuthTokenVault(KeystoreAesGcmCipher(), SharedPreferencesSecretStore(context)),
         // Success is only ever "confirmed with err == null" as seen by this RPC.
         poller = ConfirmationPoller(rpc),

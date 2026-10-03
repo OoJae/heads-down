@@ -156,6 +156,23 @@ class ClockInComposerTest {
     }
 
     @Test
+    fun `a fee above the ceiling is refused - RPC data cannot size the wallet prompt`() {
+        // The audit's forged Config: executor_fee 5 SOL would have asked the wallet for 100.02 SOL
+        // and signed caps of 5.001 / 100.02 / 700.14 SOL.
+        for (fee in listOf(100_001L, 5_000_000_000L, 50_000_000_000L)) {
+            val refused = assertThrows(ClockInRefusedException::class.java) { compose(ClockInChainState(configWith(executorFee = fee), null, null)) }
+            assertEquals(ClockInRefusedException.Reason.FEE_OUT_OF_BOUNDS, refused.reason)
+        }
+        // At the ceiling the deposit is exactly the bound that is known before any network read.
+        val atCeiling = compose(ClockInChainState(configWith(executorFee = 100_000), null, null))
+        assertEquals(ClockInComposer.maxDeposit(request), atCeiling.deposit)
+        assertEquals(20_000_000uL + 20uL * 100_000uL, ClockInComposer.maxDeposit(request))
+        // The deployed fee stays far inside it, and a focus-only shift moves nothing at all.
+        assertTrue(compose(ClockInChainState(config, null, null)).deposit < ClockInComposer.maxDeposit(request))
+        assertEquals(0uL, ClockInComposer.maxDeposit(request.copy(focusOnly = true)))
+    }
+
+    @Test
     fun `a funded, correctly pointed automation is left alone`() {
         val out = compose(ClockInChainState(config, rig(shiftId = 6, hb = 99), automation(balance = 25_000_000)))
         assertEquals(listOf("hd:3", "hd:5"), out.instructions.tags())

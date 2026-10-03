@@ -13,12 +13,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
+import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.core.wallet.WalletResult
 import xyz.headsdown.devtools.RigDebug
@@ -89,6 +91,8 @@ private fun HeadsDownRoot(
     val snapshot by vm.shift.collectAsStateWithLifecycle()
     val health by vm.health.collectAsStateWithLifecycle()
     val crank by vm.crank.collectAsStateWithLifecycle()
+    // What a clock-in can move, from the build's policy alone: on screen before the wallet opens.
+    val clockInAmounts = remember { runCatching { ClockInPolicy.fromBuildConfig().disclosure() }.getOrNull() }
     // null = decide from onboarding progress; true/false = the user chose.
     var setupChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
     // Re-reading the ritual from the home screen.
@@ -116,6 +120,7 @@ private fun HeadsDownRoot(
             onOpenSensorLab = onOpenSensorLab,
             onOpenRigDebug = onOpenRigDebug,
             crank = crank,
+            clockInAmounts = clockInAmounts,
         )
     }
 }

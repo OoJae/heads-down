@@ -2,6 +2,7 @@ package xyz.headsdown.rig
 
 import xyz.headsdown.BuildConfig
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.clockin.ClockInComposer
 import xyz.headsdown.core.chain.clockin.ClockInRequest
 import xyz.headsdown.core.chain.clockin.ClockInService
 import xyz.headsdown.core.keys.RigCounter
@@ -37,6 +38,19 @@ data class ClockInPolicy(
 ) {
     val mode: ShiftMode get() = if (day) ShiftMode.DAY else ShiftMode.NIGHT
 
+    /**
+     * What a clock-in with this policy can move, in words, for the screen that opens the wallet.
+     * Every number comes from the policy alone ([ClockInComposer.maxDeposit] is the composer's own
+     * bound), so it is true whatever the network answers: the wallet prompt is not the first place
+     * the user sees an amount.
+     */
+    fun disclosure(): String {
+        val request = request()
+        return "This shift can place up to ${sol(shiftBudgetLamports)} SOL on ORE squares (${sol(weeklyBudgetLamports)} SOL a week). " +
+            "Clock-in moves at most ${sol(ClockInComposer.maxDeposit(request))} SOL into your own ORE Automation; " +
+            "the first one also pays one-time account rent."
+    }
+
     fun request(): ClockInRequest = ClockInRequest(
         shiftBudgetLamports = shiftBudgetLamports,
         weeklyBudgetLamports = weeklyBudgetLamports,
@@ -68,6 +82,13 @@ data class ClockInPolicy(
         )
 
         fun plannedRounds(windowSeconds: Long): Int = ((windowSeconds + 77) / 78).toInt()
+
+        /** Lamports as SOL without trailing zeros: 20_000_000 is "0.02", 22_000_000 "0.022". */
+        fun sol(lamports: ULong): String {
+            val whole = lamports / 1_000_000_000uL
+            val frac = (lamports % 1_000_000_000uL).toString().padStart(9, '0').trimEnd('0')
+            return if (frac.isEmpty()) whole.toString() else "$whole.$frac"
+        }
     }
 }
 
@@ -114,14 +135,16 @@ class ChainClockIn @Inject constructor(
     override suspend fun confirmed(account: WalletAccount, prepared: PreparedClockIn): ShiftSpec {
         val authority = Pubkey(account.publicKey)
         binding.save(authority)
-        // Re-read the Rig: its shift_id is authoritative (the prediction is the fallback).
+        // The shift id the phone signs for is the one this clock-in armed: the Rig's id before the
+        // transaction, plus one. A re-read can only confirm it. It is never adopted from the RPC:
+        // a node answering with a later id would have the phone sign BREAKs for a shift that has
+        // not started, which anyone could replay into it.
         val rig = runCatching { service.readRig(authority) }.getOrNull()
-        rig?.let {
+        rig?.takeIf { it.shiftId.toLong() == prepared.spec.shiftId }?.let {
             counter.raiseFloor(it.hbCounter)
             // The streak lives on-chain in the Rig; the widget shows the last value read.
             widgets.onStreak(it.streak.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
         }
-        val shiftId = rig?.shiftId?.toLong()?.takeIf { it >= 0 } ?: prepared.spec.shiftId
-        return prepared.spec.copy(shiftId = shiftId)
+        return prepared.spec
     }
 }

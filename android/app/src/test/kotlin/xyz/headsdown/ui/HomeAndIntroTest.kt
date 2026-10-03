@@ -93,6 +93,28 @@ class HomeAndIntroTest {
         rule.onNodeWithTag(HomeTags.CLOCK_IN).performScrollTo().performClick()
         assertEquals(1, clocked)
         rule.onNodeWithText("Your phone's night shift").assertIsDisplayed()
+        // No amounts line unless the caller states one.
+        rule.onAllNodesWithTag(HomeTags.CLOCK_IN_AMOUNTS).assertCountEquals(0)
+    }
+
+    @Test
+    fun `the amounts a clock-in can move are on screen next to the button, before any wallet prompt`() {
+        val line = xyz.headsdown.rig.ClockInPolicy().disclosure()
+        rule.setContent {
+            HeadsDownTheme {
+                HomeScreen(
+                    snapshot = ShiftSnapshot.IDLE,
+                    onboarding = OnboardingState(),
+                    health = ShiftHealth.NoRecentShift,
+                    onClockIn = {},
+                    onEndShift = {},
+                    onFreeze = {},
+                    onOpenSetup = {},
+                    clockInAmounts = line,
+                )
+            }
+        }
+        rule.onNodeWithTag(HomeTags.CLOCK_IN_AMOUNTS).performScrollTo().assertTextEquals(line)
     }
 
     @Test
