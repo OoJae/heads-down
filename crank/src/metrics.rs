@@ -125,6 +125,59 @@ pub struct Metrics {
     pub shifts_ended: Counter,
     pub end_shift_failed: LabeledCounter,
     pub end_shift_lamports: Counter,
+    // ---- Stack (INTERFACE v1.2) ----
+    /// Open StackTables the crank knows.
+    pub stack_tables_open: Gauge,
+    /// Tables whose window holds the live round.
+    pub stack_tables_active: Gauge,
+    /// Seats of active tables that can still count rounds.
+    pub stack_seats_active: Gauge,
+    /// Seats of active tables that have not counted the live round yet.
+    pub stack_seats_pending: Gauge,
+    /// Check-in transactions sent.
+    pub stack_txs_sent: Counter,
+    /// Seat entries sent, by mode (`verify`, `observe`, `mark_broken`).
+    pub stack_checkins_sent: LabeledCounter,
+    /// `StackCheckin` events of the crank's transactions, by result (`counted` or the error name).
+    pub stack_checkins_landed: LabeledCounter,
+    /// Rounds a seat could have counted and did not, by reason (the alert metric).
+    pub stack_checkins_missed: LabeledCounter,
+    /// Seats that can no longer finish after a missed round, by the reason of that miss.
+    pub stack_seats_lost: LabeledCounter,
+    /// Seats skipped because they cannot count, by reason (per round).
+    pub stack_seats_skipped: LabeledCounter,
+    /// Check-in or settle transactions that did not land, by stage.
+    pub stack_tx_failed: LabeledCounter,
+    /// Fees paid for Stack transactions (landed, from `getTransaction`).
+    pub stack_fees_lamports: Counter,
+    /// Seat-rounds not checked in because a fee budget was spent, by scope (`table`, `hour`).
+    pub stack_budget_blocked: LabeledCounter,
+    /// Tables settled by the crank.
+    pub stack_settled: Counter,
+    /// Seats that finished at tables the crank settled.
+    pub stack_finishers: Counter,
+    /// SKR base units the crank's settles moved to the Bury lot.
+    pub stack_bury_skr: Counter,
+    /// Lamports of rent the crank paid to create the Bury vault and the lot's token account.
+    pub bury_init_lamports: Counter,
+    // ---- cleanups ----
+    /// Focus Bonds forfeited by the crank, by the ShiftLog reason (`abandoned` for 255).
+    pub bonds_forfeited: LabeledCounter,
+    /// SKR base units of those bonds (moved to the Bury lot).
+    pub bonds_forfeited_skr: Counter,
+    /// Expired gifts refunded to their sender by the crank.
+    pub gifts_refunded: Counter,
+    /// Lamports those refunds returned to senders (never to the crank).
+    pub gifts_refunded_lamports: Counter,
+    /// Cleanup transactions that did not land, by stage.
+    pub cleanup_failed: LabeledCounter,
+    /// Fees paid for cleanups (estimated at send).
+    pub cleanup_fees_lamports: Counter,
+    // ---- process ----
+    /// 1 while the process is draining after SIGTERM / SIGINT.
+    pub shutting_down: Gauge,
+    /// Transactions sent and not yet confirmed or given up on.
+    pub in_flight: Gauge,
 }
 
 fn counter(out: &mut String, name: &str, help: &str, v: u64) {
@@ -192,6 +245,37 @@ impl Metrics {
         counter(&mut o, "hd_crank_shifts_ended_total", "Shifts sealed by the crank's permissionless end_shift", self.shifts_ended.get());
         labeled(&mut o, "hd_crank_end_shift_failed_total", "end_shift attempts that did not land, by stage", "stage", &self.end_shift_failed);
         counter(&mut o, "hd_crank_end_shift_lamports_total", "ShiftLog rent + fees paid for end_shift", self.end_shift_lamports.get());
+        gauge(&mut o, "hd_crank_stack_tables_open", "Open StackTables the crank knows", self.stack_tables_open.get());
+        gauge(&mut o, "hd_crank_stack_tables_active", "StackTables whose window holds the live round", self.stack_tables_active.get());
+        gauge(&mut o, "hd_crank_stack_seats_active", "Seats of active tables that can still count rounds", self.stack_seats_active.get());
+        gauge(&mut o, "hd_crank_stack_seats_pending", "Seats of active tables that have not counted the live round yet", self.stack_seats_pending.get());
+        counter(&mut o, "hd_crank_stack_txs_sent_total", "stack_checkin transactions sent", self.stack_txs_sent.get());
+        labeled(&mut o, "hd_crank_stack_checkins_sent_total", "Seat entries sent in stack_checkin, by mode", "mode", &self.stack_checkins_sent);
+        labeled(&mut o, "hd_crank_stack_checkins_landed_total", "StackCheckin events of the crank's transactions, by result", "result", &self.stack_checkins_landed);
+        labeled(
+            &mut o,
+            "hd_crank_stack_checkins_missed_total",
+            "Rounds a seat could have counted and did not (a gap: Stack is fail-closed), by reason",
+            "reason",
+            &self.stack_checkins_missed,
+        );
+        labeled(&mut o, "hd_crank_stack_seats_lost_total", "Seats that can no longer finish after a missed round, by the reason of the miss", "reason", &self.stack_seats_lost);
+        labeled(&mut o, "hd_crank_stack_seats_skipped_total", "Seat-rounds that could not count whatever the crank sent, by reason", "reason", &self.stack_seats_skipped);
+        labeled(&mut o, "hd_crank_stack_tx_failed_total", "Stack transactions that did not land, by stage", "stage", &self.stack_tx_failed);
+        counter(&mut o, "hd_crank_stack_fees_lamports_total", "Fees paid for stack_checkin and settle_stack (landed)", self.stack_fees_lamports.get());
+        labeled(&mut o, "hd_crank_stack_budget_blocked_total", "Seat-rounds not checked in because a fee budget was spent, by scope", "scope", &self.stack_budget_blocked);
+        counter(&mut o, "hd_crank_stack_settled_total", "StackTables settled by the crank", self.stack_settled.get());
+        counter(&mut o, "hd_crank_stack_finishers_total", "Seats that finished at tables the crank settled", self.stack_finishers.get());
+        counter(&mut o, "hd_crank_stack_bury_skr_total", "SKR base units the crank's settles moved to the Bury lot", self.stack_bury_skr.get());
+        counter(&mut o, "hd_crank_bury_init_lamports_total", "Rent paid to create the Bury vault and the lot's token account", self.bury_init_lamports.get());
+        labeled(&mut o, "hd_crank_bonds_forfeited_total", "Focus Bonds forfeited by the crank, by the shift's reason", "reason", &self.bonds_forfeited);
+        counter(&mut o, "hd_crank_bonds_forfeited_skr_total", "SKR base units of forfeited bonds (moved to the Bury lot)", self.bonds_forfeited_skr.get());
+        counter(&mut o, "hd_crank_gifts_refunded_total", "Expired gifts refunded to their sender by the crank", self.gifts_refunded.get());
+        counter(&mut o, "hd_crank_gifts_refunded_lamports_total", "Lamports those refunds returned to senders", self.gifts_refunded_lamports.get());
+        labeled(&mut o, "hd_crank_cleanup_failed_total", "Cleanup transactions that did not land, by stage", "stage", &self.cleanup_failed);
+        counter(&mut o, "hd_crank_cleanup_fees_lamports_total", "Fees paid for forfeit_focus_bond and refund_gift", self.cleanup_fees_lamports.get());
+        gauge(&mut o, "hd_crank_shutting_down", "1 while the process drains after SIGTERM / SIGINT", self.shutting_down.get());
+        gauge(&mut o, "hd_crank_in_flight", "Transactions sent and not yet confirmed or given up on", self.in_flight.get());
         o
     }
 }

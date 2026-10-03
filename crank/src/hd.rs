@@ -1,10 +1,12 @@
 //! The `heads_down` program interface, built strictly from the frozen contract
-//! `programs/heads-down/INTERFACE.md` v1.1 and its machine-checked golden vectors
-//! (`programs/heads-down/vectors/`, cross-checked byte for byte in `tests/golden.rs`):
-//! PDAs, the Config / Rig / ShiftLog layouts, the signed P-256 preimages, the instruction
-//! builders the crank sends (`dig`, `record_heartbeats`, `break_shift` / `freeze_rig` on the
-//! P-256 path, `end_shift`), error names and every event (tags 1..=10). The program is not
-//! imported: the vectors are the contract.
+//! `programs/heads-down/INTERFACE.md` (the v1.1 core plus the additive v1.2 SKR section, §11)
+//! and its machine-checked golden vectors (`programs/heads-down/vectors/`, cross-checked byte
+//! for byte in `tests/golden.rs`): PDAs, the Config / Rig / ShiftLog layouts, the signed P-256
+//! preimages, the instruction builders the crank sends (`dig`, `record_heartbeats`,
+//! `break_shift` / `freeze_rig` on the P-256 path, `end_shift`), error names (0..=48) and
+//! every event (tags 1..=23). The v1.2 accounts and instructions (Stack, Focus Bond, Gift a
+//! Rig, the Bury vault) are in [`crate::skr`]. The program is not imported: the vectors are
+//! the contract.
 
 use sha2::{Digest, Sha256};
 use solana_address::Address;
@@ -150,7 +152,7 @@ pub enum AccountError {
     },
 }
 
-fn check_header(
+pub(crate) fn check_header(
     program_id: &Address,
     owner: &Address,
     data: &[u8],
@@ -1007,9 +1009,42 @@ pub fn end_shift_ix(program_id: &Address, caller: &Address, rig: &Address, shift
     }
 }
 
-/// `ProgramError::Custom` codes of `heads_down` (INTERFACE §8), including the precise
-/// `p256-introspect` codes (`0x2560_00xx`) that `RigSkipped.error` carries unchanged, and the
-/// builtin-error encoding `u32::MAX - k` of `skip_code`.
+/// `ProgramError::Custom` codes the crank acts on (INTERFACE §8 and §11.10).
+pub mod code {
+    /// A heartbeat for a future round, or `lease_rounds == 0`.
+    pub const INVALID_HEARTBEAT: u32 = 6;
+    /// P-256 counter at or below `rig.hb_counter`.
+    pub const STALE_HEARTBEAT: u32 = 7;
+    /// No lease covers the round (a check-in: no heartbeat for this round landed in it).
+    pub const LEASE_EXPIRED: u32 = 8;
+    /// Idle, Broken, a closed rig, or no open shift.
+    pub const RIG_NOT_ARMED: u32 = 13;
+    /// A duplicate rig or seat in one batch.
+    pub const DUPLICATE_RIG: u32 = 22;
+    /// The instruction does not fit the rig's state.
+    pub const INVALID_RIG_STATE: u32 = 24;
+    /// `settle_stack` while `Board.round_id <= end_round`.
+    pub const STACK_NOT_ENDED: u32 = 37;
+    /// A check-in outside the window or on a table that is not Open; settle twice.
+    pub const INVALID_STACK_STATE: u32 = 38;
+    /// A seat of another table or rig; a missing or repeated seat at settle.
+    pub const STACK_SEAT_MISMATCH: u32 = 39;
+    /// Check-in result: the rig is in another shift than the seat's.
+    pub const STACK_SHIFT_MISMATCH: u32 = 40;
+    /// Check-in result: the rig's plan allows leases of more than one round.
+    pub const STACK_LEASE_TOO_LONG: u32 = 41;
+    /// Check-in result: the bound shift recorded a BREAK or FREEZE.
+    pub const STACK_SEAT_BROKEN: u32 = 42;
+    /// A release or forfeit with the other outcome, or before the shift is sealed.
+    pub const BOND_NOT_RESOLVABLE: u32 = 43;
+    /// A claim at or after `expiry_ts`; a refund before it.
+    pub const GIFT_EXPIRY: u32 = 45;
+}
+
+/// `ProgramError::Custom` codes of `heads_down` (INTERFACE §8, and §11.10 for the v1.2 SKR
+/// codes 32..=48), including the precise `p256-introspect` codes (`0x2560_00xx`) that
+/// `RigSkipped.error` and `StackCheckin.result` carry unchanged, and the builtin-error
+/// encoding `u32::MAX - k` of `skip_code`.
 pub fn error_name(code: u32) -> &'static str {
     match code {
         0 => "InvalidInstruction",
@@ -1044,6 +1079,24 @@ pub fn error_name(code: u32) -> &'static str {
         29 => "OreNoOp",
         30 => "FocusOnly",
         31 => "ExecutorUnderfunded",
+        // v1.2 (SKR), INTERFACE §11.10.
+        32 => "InvalidTokenAccount",
+        33 => "AmountOutOfRange",
+        34 => "InvalidStackParams",
+        35 => "StackJoinClosed",
+        36 => "StackIneligible",
+        37 => "StackNotEnded",
+        38 => "InvalidStackState",
+        39 => "StackSeatMismatch",
+        40 => "StackShiftMismatch",
+        41 => "StackLeaseTooLong",
+        42 => "StackSeatBroken",
+        43 => "BondNotResolvable",
+        44 => "GiftNotClaimable",
+        45 => "GiftExpiry",
+        46 => "AuctionEmpty",
+        47 => "PriceAboveMax",
+        48 => "BuryMismatch",
         0x2560_0001 => "P256InvalidInstructionsSysvar",
         0x2560_0002 => "P256MalformedInstructionsSysvar",
         0x2560_0003 => "P256InstructionIndexOutOfBounds",
@@ -1087,6 +1140,26 @@ pub fn reason_name(r: u8) -> &'static str {
     }
 }
 
+/// `FocusBondForfeited.reason`: the ShiftLog reason, or 255 `abandoned` (the bonded shift
+/// can never be sealed).
+pub fn bond_reason_name(r: u8) -> &'static str {
+    if r == BOND_ABANDONED {
+        "abandoned"
+    } else {
+        reason_name(r)
+    }
+}
+
+/// `StackCheckin.result`: `counted` for 0, else the error name of the reason the round did
+/// not count (INTERFACE §11.5).
+pub fn checkin_result_name(result: u32) -> &'static str {
+    if result == 0 {
+        "counted"
+    } else {
+        error_name(result)
+    }
+}
+
 /// `ShiftLog.mode` name.
 pub fn mode_name(m: u8) -> &'static str {
     match m {
@@ -1097,8 +1170,9 @@ pub fn mode_name(m: u8) -> &'static str {
     }
 }
 
-/// Events logged with `sol_log_data` (one slice, byte 0 = tag), INTERFACE §7. A tag's length
-/// never changes, so each tag is decoded by its exact length.
+/// Events logged with `sol_log_data` (one slice, byte 0 = tag), INTERFACE §7 (tags 1..=10)
+/// and §11.9 (the v1.2 SKR tags 11..=23). A tag's length never changes, so each tag is
+/// decoded by its exact length.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HdEvent {
     /// Tag 1 (61 bytes).
@@ -1120,7 +1194,7 @@ pub enum HdEvent {
         rig: Address,
         /// Live `Board.round_id`.
         round_id: u64,
-        /// Precise error code (heads_down 0..=31 or a shared crate's code).
+        /// Precise error code (heads_down 0..=48 or a shared crate's code).
         error: u32,
     },
     /// Tag 3 (41 bytes).
@@ -1210,6 +1284,190 @@ pub enum HdEvent {
         /// 0 night, 1 day, 2 focus-only.
         mode: u8,
     },
+    /// Tag 11 (103 bytes), v1.2: `open_stack`.
+    StackOpened {
+        /// StackTable PDA.
+        table: Address,
+        /// Host wallet.
+        host: Address,
+        /// Host-chosen id.
+        table_id: u64,
+        /// SKR base units per seat.
+        bond: u64,
+        /// First ORE round of the window.
+        start_round: u64,
+        /// Last ORE round of the window (inclusive).
+        end_round: u64,
+        /// Window rounds a seat may miss.
+        grace_gaps: u32,
+        /// bit0 remote, bit1 bury-only, bit2 attested-only.
+        flags: u8,
+        /// Seat limit (2..=8).
+        max_seats: u8,
+    },
+    /// Tag 12 (138 bytes), v1.2: `join_stack`.
+    StackJoined {
+        /// StackTable.
+        table: Address,
+        /// Seated rig.
+        rig: Address,
+        /// `rig.authority` at join.
+        authority: Address,
+        /// SGT mint re-verified at join (zero when the join was not SGT-verified).
+        sgt_mint: Address,
+        /// SKR bonded.
+        bond: u64,
+        /// Join order.
+        seat_index: u8,
+    },
+    /// Tag 13 (85 bytes), v1.2: one per seat per `stack_checkin`.
+    StackCheckin {
+        /// StackTable.
+        table: Address,
+        /// Seated rig.
+        rig: Address,
+        /// Live `Board.round_id`.
+        round_id: u64,
+        /// Window rounds the seat has counted so far.
+        checked_rounds: u64,
+        /// 0 = the round counted; else the reason it did not (INTERFACE §11.5).
+        result: u32,
+    },
+    /// Tag 14 (67 bytes), v1.2: `settle_stack`.
+    StackSettled {
+        /// StackTable.
+        table: Address,
+        /// `B`: every seat's bond.
+        total_bonds: u64,
+        /// `W`: the finishers' bonds.
+        finisher_bonds: u64,
+        /// Sum of the payouts.
+        payouts_total: u64,
+        /// SKR moved to the Bury lot.
+        bury_amount: u64,
+        /// Seats at the table.
+        seats: u8,
+        /// Seats that finished.
+        finishers: u8,
+    },
+    /// Tag 15 (106 bytes), v1.2: `claim_stack`.
+    StackClaimed {
+        /// StackTable.
+        table: Address,
+        /// The seat's rig.
+        rig: Address,
+        /// The seat's wallet (the only possible recipient).
+        authority: Address,
+        /// SKR paid.
+        amount: u64,
+        /// 0 payout, 1 timeout refund.
+        kind: u8,
+    },
+    /// Tag 16 (113 bytes), v1.2: `lock_focus_bond`.
+    FocusBondLocked {
+        /// FocusBond PDA.
+        bond: Address,
+        /// Rig.
+        rig: Address,
+        /// Owner wallet.
+        authority: Address,
+        /// The bonded shift.
+        shift_id: u64,
+        /// SKR locked.
+        amount: u64,
+    },
+    /// Tag 17 (81 bytes), v1.2: `release_focus_bond`.
+    FocusBondReleased {
+        /// FocusBond PDA.
+        bond: Address,
+        /// Rig.
+        rig: Address,
+        /// The bonded shift.
+        shift_id: u64,
+        /// SKR returned to the owner.
+        amount: u64,
+    },
+    /// Tag 18 (82 bytes), v1.2: `forfeit_focus_bond`.
+    FocusBondForfeited {
+        /// FocusBond PDA.
+        bond: Address,
+        /// Rig.
+        rig: Address,
+        /// The bonded shift.
+        shift_id: u64,
+        /// SKR moved to the Bury lot.
+        amount: u64,
+        /// The ShiftLog reason, or 255 "abandoned".
+        reason: u8,
+    },
+    /// Tag 19 (114 bytes), v1.2: `create_gift`.
+    GiftCreated {
+        /// GiftEscrow PDA.
+        gift: Address,
+        /// Sender wallet.
+        sender: Address,
+        /// A wallet, or an SGT mint.
+        recipient: Address,
+        /// Lamports escrowed.
+        lamports: u64,
+        /// Claims before, refunds from.
+        expiry_ts: i64,
+        /// 0 wallet, 1 SGT mint.
+        recipient_kind: u8,
+    },
+    /// Tag 20 (74 bytes), v1.2: `claim_gift`.
+    GiftClaimed {
+        /// GiftEscrow PDA.
+        gift: Address,
+        /// Who received the lamports.
+        claimer: Address,
+        /// Lamports paid.
+        lamports: u64,
+        /// 0 wallet, 1 SGT mint.
+        recipient_kind: u8,
+    },
+    /// Tag 21 (73 bytes), v1.2: `refund_gift`.
+    GiftRefunded {
+        /// GiftEscrow PDA.
+        gift: Address,
+        /// The stored sender (the only possible recipient).
+        sender: Address,
+        /// The gift's lamports (the escrow rent returns as well).
+        lamports: u64,
+    },
+    /// Tag 22 (66 bytes), v1.2: SKR forfeits entered the Bury lot (`settle_stack`,
+    /// `forfeit_focus_bond`).
+    BuryLotAdded {
+        /// The table or the bond the SKR came from.
+        source: Address,
+        /// SKR added.
+        amount: u64,
+        /// The lot after the deposit.
+        lot_skr: u64,
+        /// Restarted auction price (ORE atoms per whole SKR).
+        start_price: u64,
+        /// Slot the price decay restarted.
+        start_slot: u64,
+        /// 1 stack, 2 bond.
+        source_kind: u8,
+    },
+    /// Tag 23 (81 bytes), v1.2: `bury_auction_buy`.
+    BuryAuctionSold {
+        /// Buyer wallet.
+        buyer: Address,
+        /// SKR sold.
+        skr_amount: u64,
+        /// Price paid (ORE atoms per whole SKR).
+        price: u64,
+        /// ORE paid, all of it through ORE `bury`.
+        ore_paid: u64,
+        /// The burned 90%.
+        ore_burned: u64,
+        /// The 10% sent to ORE's stake program.
+        ore_shared: u64,
+        /// SKR left in the lot.
+        lot_remaining: u64,
+    },
     /// Any newer tag: kept raw.
     Other {
         /// Event tag.
@@ -1233,11 +1491,56 @@ impl HdEvent {
             HdEvent::HeartbeatsRecorded { .. } => "HeartbeatsRecorded",
             HdEvent::ShiftBroken { .. } => "ShiftBroken",
             HdEvent::ShiftEndedV2 { .. } => "ShiftEndedV2",
+            HdEvent::StackOpened { .. } => "StackOpened",
+            HdEvent::StackJoined { .. } => "StackJoined",
+            HdEvent::StackCheckin { .. } => "StackCheckin",
+            HdEvent::StackSettled { .. } => "StackSettled",
+            HdEvent::StackClaimed { .. } => "StackClaimed",
+            HdEvent::FocusBondLocked { .. } => "FocusBondLocked",
+            HdEvent::FocusBondReleased { .. } => "FocusBondReleased",
+            HdEvent::FocusBondForfeited { .. } => "FocusBondForfeited",
+            HdEvent::GiftCreated { .. } => "GiftCreated",
+            HdEvent::GiftClaimed { .. } => "GiftClaimed",
+            HdEvent::GiftRefunded { .. } => "GiftRefunded",
+            HdEvent::BuryLotAdded { .. } => "BuryLotAdded",
+            HdEvent::BuryAuctionSold { .. } => "BuryAuctionSold",
             HdEvent::Other { .. } => "Other",
         }
     }
 
-    /// The rig the event is about (every known tag starts with it).
+    /// The event's tag byte.
+    pub fn tag(&self) -> u8 {
+        match self {
+            HdEvent::RigDug { .. } => 1,
+            HdEvent::RigSkipped { .. } => 2,
+            HdEvent::ShiftArmed { .. } => 3,
+            HdEvent::ShiftEnded { .. } => 4,
+            HdEvent::SeekerVerified { .. } => 5,
+            HdEvent::RigRegistered { .. } => 6,
+            HdEvent::RigClosed { .. } => 7,
+            HdEvent::HeartbeatsRecorded { .. } => 8,
+            HdEvent::ShiftBroken { .. } => 9,
+            HdEvent::ShiftEndedV2 { .. } => 10,
+            HdEvent::StackOpened { .. } => 11,
+            HdEvent::StackJoined { .. } => 12,
+            HdEvent::StackCheckin { .. } => 13,
+            HdEvent::StackSettled { .. } => 14,
+            HdEvent::StackClaimed { .. } => 15,
+            HdEvent::FocusBondLocked { .. } => 16,
+            HdEvent::FocusBondReleased { .. } => 17,
+            HdEvent::FocusBondForfeited { .. } => 18,
+            HdEvent::GiftCreated { .. } => 19,
+            HdEvent::GiftClaimed { .. } => 20,
+            HdEvent::GiftRefunded { .. } => 21,
+            HdEvent::BuryLotAdded { .. } => 22,
+            HdEvent::BuryAuctionSold { .. } => 23,
+            HdEvent::Other { tag, .. } => *tag,
+        }
+    }
+
+    /// The rig the event is about, when it names one. Every v1.1 tag (1..=10) starts with
+    /// it; of the v1.2 tags, the seat and bond events carry it, the table, gift and Bury
+    /// events do not.
     pub fn rig(&self) -> Option<Address> {
         match self {
             HdEvent::RigDug { rig, .. }
@@ -1249,14 +1552,54 @@ impl HdEvent {
             | HdEvent::RigClosed { rig }
             | HdEvent::HeartbeatsRecorded { rig, .. }
             | HdEvent::ShiftBroken { rig, .. }
-            | HdEvent::ShiftEndedV2 { rig, .. } => Some(*rig),
-            HdEvent::Other { .. } => None,
+            | HdEvent::ShiftEndedV2 { rig, .. }
+            | HdEvent::StackJoined { rig, .. }
+            | HdEvent::StackCheckin { rig, .. }
+            | HdEvent::StackClaimed { rig, .. }
+            | HdEvent::FocusBondLocked { rig, .. }
+            | HdEvent::FocusBondReleased { rig, .. }
+            | HdEvent::FocusBondForfeited { rig, .. } => Some(*rig),
+            HdEvent::StackOpened { .. }
+            | HdEvent::StackSettled { .. }
+            | HdEvent::GiftCreated { .. }
+            | HdEvent::GiftClaimed { .. }
+            | HdEvent::GiftRefunded { .. }
+            | HdEvent::BuryLotAdded { .. }
+            | HdEvent::BuryAuctionSold { .. }
+            | HdEvent::Other { .. } => None,
+        }
+    }
+
+    /// The StackTable the event is about (tags 11..=15).
+    pub fn table(&self) -> Option<Address> {
+        match self {
+            HdEvent::StackOpened { table, .. }
+            | HdEvent::StackJoined { table, .. }
+            | HdEvent::StackCheckin { table, .. }
+            | HdEvent::StackSettled { table, .. }
+            | HdEvent::StackClaimed { table, .. } => Some(*table),
+            _ => None,
         }
     }
 }
 
-/// Exact length of each known tag, tag byte included (index = tag).
-pub const EVENT_LEN: [usize; 11] = [0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83];
+/// Exact length of each known tag, tag byte included (index = tag): v1.1 tags 1..=10, then
+/// the v1.2 SKR tags 11..=23 (INTERFACE §7 and §11.9).
+pub const EVENT_LEN: [usize; 24] = [
+    0, 61, 45, 41, 66, 73, 67, 33, 49, 42, 83, // v1.1
+    103, 138, 85, 67, 106, 113, 81, 82, 114, 74, 73, 66, 81, // v1.2 (SKR)
+];
+
+/// `StackClaimed.kind`: a settled payout.
+pub const CLAIM_PAYOUT: u8 = 0;
+/// `StackClaimed.kind`: a timeout refund of the seat's own bond.
+pub const CLAIM_REFUND: u8 = 1;
+/// `BuryLotAdded.source_kind`: a Stack table's settle.
+pub const LOT_FROM_STACK: u8 = 1;
+/// `BuryLotAdded.source_kind`: a forfeited Focus Bond.
+pub const LOT_FROM_BOND: u8 = 2;
+/// `FocusBondForfeited.reason` when the bonded shift can never be sealed.
+pub const BOND_ABANDONED: u8 = 255;
 
 /// Parse one `sol_log_data` payload. A known tag with the wrong length is `None` (ignored).
 pub fn parse_event(b: &[u8]) -> Option<HdEvent> {
@@ -1313,6 +1656,105 @@ pub fn parse_event(b: &[u8]) -> Option<HdEvent> {
             start_round: read_u64(body, 65)?,
             end_round: read_u64(body, 73)?,
             mode: read_u8(body, 81)?,
+        },
+        // ---- v1.2 (SKR), INTERFACE §11.9. Offsets below are body offsets (contract − 1). ----
+        11 => HdEvent::StackOpened {
+            table: read_address(body, 0)?,
+            host: read_address(body, 32)?,
+            table_id: read_u64(body, 64)?,
+            bond: read_u64(body, 72)?,
+            start_round: read_u64(body, 80)?,
+            end_round: read_u64(body, 88)?,
+            grace_gaps: read_u32(body, 96)?,
+            flags: read_u8(body, 100)?,
+            max_seats: read_u8(body, 101)?,
+        },
+        12 => HdEvent::StackJoined {
+            table: read_address(body, 0)?,
+            rig: read_address(body, 32)?,
+            authority: read_address(body, 64)?,
+            sgt_mint: read_address(body, 96)?,
+            bond: read_u64(body, 128)?,
+            seat_index: read_u8(body, 136)?,
+        },
+        13 => HdEvent::StackCheckin {
+            table: read_address(body, 0)?,
+            rig: read_address(body, 32)?,
+            round_id: read_u64(body, 64)?,
+            checked_rounds: read_u64(body, 72)?,
+            result: read_u32(body, 80)?,
+        },
+        14 => HdEvent::StackSettled {
+            table: read_address(body, 0)?,
+            total_bonds: read_u64(body, 32)?,
+            finisher_bonds: read_u64(body, 40)?,
+            payouts_total: read_u64(body, 48)?,
+            bury_amount: read_u64(body, 56)?,
+            seats: read_u8(body, 64)?,
+            finishers: read_u8(body, 65)?,
+        },
+        15 => HdEvent::StackClaimed {
+            table: read_address(body, 0)?,
+            rig: read_address(body, 32)?,
+            authority: read_address(body, 64)?,
+            amount: read_u64(body, 96)?,
+            kind: read_u8(body, 104)?,
+        },
+        16 => HdEvent::FocusBondLocked {
+            bond: read_address(body, 0)?,
+            rig: read_address(body, 32)?,
+            authority: read_address(body, 64)?,
+            shift_id: read_u64(body, 96)?,
+            amount: read_u64(body, 104)?,
+        },
+        17 => HdEvent::FocusBondReleased {
+            bond: read_address(body, 0)?,
+            rig: read_address(body, 32)?,
+            shift_id: read_u64(body, 64)?,
+            amount: read_u64(body, 72)?,
+        },
+        18 => HdEvent::FocusBondForfeited {
+            bond: read_address(body, 0)?,
+            rig: read_address(body, 32)?,
+            shift_id: read_u64(body, 64)?,
+            amount: read_u64(body, 72)?,
+            reason: read_u8(body, 80)?,
+        },
+        19 => HdEvent::GiftCreated {
+            gift: read_address(body, 0)?,
+            sender: read_address(body, 32)?,
+            recipient: read_address(body, 64)?,
+            lamports: read_u64(body, 96)?,
+            expiry_ts: read_i64(body, 104)?,
+            recipient_kind: read_u8(body, 112)?,
+        },
+        20 => HdEvent::GiftClaimed {
+            gift: read_address(body, 0)?,
+            claimer: read_address(body, 32)?,
+            lamports: read_u64(body, 64)?,
+            recipient_kind: read_u8(body, 72)?,
+        },
+        21 => HdEvent::GiftRefunded {
+            gift: read_address(body, 0)?,
+            sender: read_address(body, 32)?,
+            lamports: read_u64(body, 64)?,
+        },
+        22 => HdEvent::BuryLotAdded {
+            source: read_address(body, 0)?,
+            amount: read_u64(body, 32)?,
+            lot_skr: read_u64(body, 40)?,
+            start_price: read_u64(body, 48)?,
+            start_slot: read_u64(body, 56)?,
+            source_kind: read_u8(body, 64)?,
+        },
+        23 => HdEvent::BuryAuctionSold {
+            buyer: read_address(body, 0)?,
+            skr_amount: read_u64(body, 32)?,
+            price: read_u64(body, 40)?,
+            ore_paid: read_u64(body, 48)?,
+            ore_burned: read_u64(body, 56)?,
+            ore_shared: read_u64(body, 64)?,
+            lot_remaining: read_u64(body, 72)?,
         },
         0 => return None,
         _ => HdEvent::Other { tag, body: body.to_vec() },
@@ -1644,7 +2086,38 @@ mod tests {
         ] {
             assert_eq!(error_name(c), n);
         }
-        assert_eq!(error_name(32), "Unknown");
+        for (c, n) in [
+            (32, "InvalidTokenAccount"),
+            (33, "AmountOutOfRange"),
+            (34, "InvalidStackParams"),
+            (35, "StackJoinClosed"),
+            (36, "StackIneligible"),
+            (37, "StackNotEnded"),
+            (38, "InvalidStackState"),
+            (39, "StackSeatMismatch"),
+            (40, "StackShiftMismatch"),
+            (41, "StackLeaseTooLong"),
+            (42, "StackSeatBroken"),
+            (43, "BondNotResolvable"),
+            (44, "GiftNotClaimable"),
+            (45, "GiftExpiry"),
+            (46, "AuctionEmpty"),
+            (47, "PriceAboveMax"),
+            (48, "BuryMismatch"),
+        ] {
+            assert_eq!(error_name(c), n);
+        }
+        assert_eq!(error_name(49), "Unknown");
+        assert_eq!((code::STACK_SEAT_BROKEN, code::LEASE_EXPIRED, code::RIG_NOT_ARMED), (42, 8, 13));
+        assert_eq!(error_name(code::STACK_SHIFT_MISMATCH), "StackShiftMismatch");
+        assert_eq!(error_name(code::STACK_LEASE_TOO_LONG), "StackLeaseTooLong");
+        assert_eq!(error_name(code::INVALID_STACK_STATE), "InvalidStackState");
+        assert_eq!(error_name(code::INVALID_RIG_STATE), "InvalidRigState");
+        assert_eq!(checkin_result_name(0), "counted");
+        assert_eq!(checkin_result_name(42), "StackSeatBroken");
+        assert_eq!(checkin_result_name(0x2560_000d), "P256PublicKeyMismatch");
+        assert_eq!(bond_reason_name(255), "abandoned");
+        assert_eq!(bond_reason_name(6), "manual");
     }
 
     #[test]
@@ -1716,5 +2189,102 @@ mod tests {
         assert_eq!(parse_event(&[]), None);
         assert_eq!(reason_name(8), "unlocked");
         assert_eq!(mode_name(2), "focus_only");
+    }
+
+    #[test]
+    fn skr_events_decode_by_exact_length() {
+        let a = Address::new_from_array([1; 32]);
+        let b = Address::new_from_array([2; 32]);
+        let c = Address::new_from_array([3; 32]);
+        let d = Address::new_from_array([4; 32]);
+        let u = |v: u64| v.to_le_bytes();
+        let samples: Vec<(Vec<u8>, HdEvent)> = vec![
+            (
+                event_bytes(11, &[a.as_ref(), b.as_ref(), &u(7), &u(200_000_000), &u(10), &u(19), &3u32.to_le_bytes(), &[5, 8]]),
+                HdEvent::StackOpened { table: a, host: b, table_id: 7, bond: 200_000_000, start_round: 10, end_round: 19, grace_gaps: 3, flags: 5, max_seats: 8 },
+            ),
+            (
+                event_bytes(12, &[a.as_ref(), b.as_ref(), c.as_ref(), d.as_ref(), &u(9), &[2]]),
+                HdEvent::StackJoined { table: a, rig: b, authority: c, sgt_mint: d, bond: 9, seat_index: 2 },
+            ),
+            (
+                event_bytes(13, &[a.as_ref(), b.as_ref(), &u(11), &u(2), &42u32.to_le_bytes()]),
+                HdEvent::StackCheckin { table: a, rig: b, round_id: 11, checked_rounds: 2, result: 42 },
+            ),
+            (
+                event_bytes(14, &[a.as_ref(), &u(600), &u(400), &u(560), &u(40), &[3, 2]]),
+                HdEvent::StackSettled { table: a, total_bonds: 600, finisher_bonds: 400, payouts_total: 560, bury_amount: 40, seats: 3, finishers: 2 },
+            ),
+            (
+                event_bytes(15, &[a.as_ref(), b.as_ref(), c.as_ref(), &u(280), &[1]]),
+                HdEvent::StackClaimed { table: a, rig: b, authority: c, amount: 280, kind: CLAIM_REFUND },
+            ),
+            (
+                event_bytes(16, &[a.as_ref(), b.as_ref(), c.as_ref(), &u(4), &u(500)]),
+                HdEvent::FocusBondLocked { bond: a, rig: b, authority: c, shift_id: 4, amount: 500 },
+            ),
+            (
+                event_bytes(17, &[a.as_ref(), b.as_ref(), &u(4), &u(500)]),
+                HdEvent::FocusBondReleased { bond: a, rig: b, shift_id: 4, amount: 500 },
+            ),
+            (
+                event_bytes(18, &[a.as_ref(), b.as_ref(), &u(4), &u(500), &[255]]),
+                HdEvent::FocusBondForfeited { bond: a, rig: b, shift_id: 4, amount: 500, reason: BOND_ABANDONED },
+            ),
+            (
+                event_bytes(19, &[a.as_ref(), b.as_ref(), c.as_ref(), &u(5), &(-3i64).to_le_bytes(), &[1]]),
+                HdEvent::GiftCreated { gift: a, sender: b, recipient: c, lamports: 5, expiry_ts: -3, recipient_kind: 1 },
+            ),
+            (
+                event_bytes(20, &[a.as_ref(), b.as_ref(), &u(5), &[0]]),
+                HdEvent::GiftClaimed { gift: a, claimer: b, lamports: 5, recipient_kind: 0 },
+            ),
+            (event_bytes(21, &[a.as_ref(), b.as_ref(), &u(5)]), HdEvent::GiftRefunded { gift: a, sender: b, lamports: 5 }),
+            (
+                event_bytes(22, &[a.as_ref(), &u(40), &u(340), &u(100_000_000), &u(77), &[LOT_FROM_BOND]]),
+                HdEvent::BuryLotAdded { source: a, amount: 40, lot_skr: 340, start_price: 100_000_000, start_slot: 77, source_kind: 2 },
+            ),
+            (
+                event_bytes(23, &[a.as_ref(), &u(1), &u(2), &u(3), &u(4), &u(5), &u(6)]),
+                HdEvent::BuryAuctionSold { buyer: a, skr_amount: 1, price: 2, ore_paid: 3, ore_burned: 4, ore_shared: 5, lot_remaining: 6 },
+            ),
+        ];
+        assert_eq!(samples.len(), 13);
+        for (bytes, want) in &samples {
+            let tag = bytes[0];
+            assert_eq!(bytes.len(), EVENT_LEN[usize::from(tag)], "tag {tag}: the contract length");
+            let got = parse_event(bytes).unwrap_or_else(|| panic!("tag {tag}"));
+            assert_eq!(&got, want);
+            assert_eq!(got.tag(), tag);
+            let mut longer = bytes.clone();
+            longer.push(0);
+            assert_eq!(parse_event(&longer), None, "tag {tag} with a trailing byte");
+            assert_eq!(parse_event(&bytes[..bytes.len() - 1]), None, "tag {tag} truncated");
+        }
+        // The seat and bond events name their rig; table, gift and Bury events do not.
+        assert_eq!(samples[1].1.rig(), Some(b));
+        assert_eq!(samples[2].1.rig(), Some(b));
+        assert_eq!(samples[7].1.rig(), Some(b));
+        assert_eq!(samples[0].1.rig(), None);
+        assert_eq!(samples[11].1.rig(), None);
+        assert_eq!(samples[2].1.table(), Some(a));
+        assert_eq!(samples[5].1.table(), None);
+        assert_eq!(EVENT_LEN.len(), 24, "tags 0..=23");
+        // A v1.2 event is attributed like any other: only while heads_down is innermost.
+        use base64::Engine;
+        let enc = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        let pid = PROGRAM_ID.to_string();
+        let token = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+        let logs = vec![
+            format!("Program {pid} invoke [1]"),
+            format!("Program {token} invoke [2]"),
+            format!("Program data: {}", enc(&samples[3].0)), // logged inside the SPL Token CPI: ignored
+            format!("Program {token} success"),
+            format!("Program data: {}", enc(&samples[11].0)),
+            format!("Program data: {}", enc(&samples[3].0)),
+            format!("Program {pid} success"),
+        ];
+        let evs = events_from_logs(&PROGRAM_ID, &logs);
+        assert_eq!(evs.iter().map(HdEvent::name).collect::<Vec<_>>(), vec!["BuryLotAdded", "StackSettled"]);
     }
 }

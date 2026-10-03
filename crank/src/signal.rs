@@ -201,6 +201,11 @@ impl SignalHub {
         self.lock().get(rig).is_some_and(|t| t.state == SignalState::Pending)
     }
 
+    /// Signals queued or being landed (a graceful shutdown waits for these).
+    pub fn pending_count(&self) -> usize {
+        self.lock().values().filter(|t| t.state == SignalState::Pending).count()
+    }
+
     /// State of the last accepted signal for `rig`.
     pub fn state(&self, rig: &Address) -> Option<SignalState> {
         self.lock().get(rig).map(|t| t.state)
@@ -303,6 +308,7 @@ mod tests {
             pubkey: [2; 33],
             digest: [digest; 32],
             rig_state: state,
+            plan_window_end_ts: i64::MAX,
         }
     }
 

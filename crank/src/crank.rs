@@ -14,23 +14,34 @@
 //!
 //! Every pass re-reads the chain, so a retry never reuses stale instructions (the fork
 //! suite shows a stale checkpoint aborting a whole batch).
+//!
+//! INTERFACE v1.2 adds two duties, each in its own file: the Stack loop
+//! ([`stack_loop`](self): discovery, a check-in per seat per round, settles) runs in the main
+//! loop **before** the dig and record passes and owns the seated rigs' fresh heartbeats for
+//! the round; the cleanup loop (`cleanup_loop`) forfeits broken Focus Bonds and refunds
+//! expired gifts on a timer.
 
-use std::collections::{HashMap, VecDeque};
+mod cleanup_loop;
+mod stack_loop;
+
+pub use cleanup_loop::{plan_forfeits, plan_refunds, CleanupAction};
+
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_message::AddressLookupTableAccount;
 use solana_signer::Signer;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, Notify};
 
 use crate::account::RawAccount;
 use crate::alt::{self, LookupTable};
 use crate::breaker::Breaker;
-use crate::chain::ChainView;
+use crate::chain::{ChainView, ProgramEvents};
 use crate::config::Config;
 use crate::hd::{self, HdConfig, HdEvent, Rig, RigAccounts, RigState};
 use crate::heartbeat::{HeartbeatStore, VerifiedHeartbeat, VerifiedSignal};
@@ -58,15 +69,82 @@ pub const MAX_RECORD_TXS_PER_ROUND: usize = 8;
 pub const END_SHIFT_RETRY_AFTER: Duration = Duration::from_secs(600);
 /// ShiftLog rent at the default rent parameters, used if RPC cannot tell.
 pub const SHIFT_LOG_RENT_FALLBACK: u64 = 1_781_760;
-
-fn unix_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
-}
+/// A graceful shutdown waits this long for the loop's last Stack pass before it concludes
+/// that nothing is in flight (the loop wakes within 400 ms; the pass is two RPC reads).
+pub const DRAIN_FLUSH_WAIT: Duration = Duration::from_millis(2_500);
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match m.lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
+    }
+}
+
+/// Transactions sent and not yet confirmed or given up on, and messages accepted and not yet
+/// landed: what a graceful shutdown waits for.
+#[derive(Debug, Default)]
+pub struct InFlight {
+    n: AtomicUsize,
+}
+
+impl InFlight {
+    /// Count one more until the guard is dropped.
+    pub fn guard(self: &Arc<Self>, metrics: &Arc<Metrics>) -> InFlightGuard {
+        let n = self.n.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+        metrics.in_flight.set_u64(n as u64);
+        InFlightGuard { inner: self.clone(), metrics: metrics.clone() }
+    }
+
+    /// How many are in flight.
+    pub fn count(&self) -> usize {
+        self.n.load(Ordering::SeqCst)
+    }
+}
+
+/// See [`InFlight::guard`].
+#[derive(Debug)]
+pub struct InFlightGuard {
+    inner: Arc<InFlight>,
+    metrics: Arc<Metrics>,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        let before = self.inner.n.fetch_sub(1, Ordering::SeqCst);
+        self.metrics.in_flight.set_u64(before.saturating_sub(1) as u64);
+    }
+}
+
+/// Wakes the Stack loop when something about a seated rig changed: its phone's heartbeat for
+/// the round arrived, its BREAK landed, or the program logged an event about it. Shared with
+/// the intake (see [`crate::mirror::NudgeMirror`]).
+#[derive(Clone, Debug, Default)]
+pub struct StackNudge {
+    /// Notified to run a Stack pass now.
+    pub notify: Arc<Notify>,
+    /// Set by [`Self::wake`], cleared by the pass it asked for.
+    pub pending: Arc<AtomicBool>,
+    /// Rigs seated at an open table (kept current by the Stack loop's discovery).
+    pub rigs: Arc<RwLock<HashSet<Address>>>,
+}
+
+impl StackNudge {
+    /// Ask for a Stack pass now.
+    pub fn wake(&self) {
+        self.pending.store(true, Ordering::SeqCst);
+        self.notify.notify_one();
+    }
+
+    /// Is `rig` seated at an open table?
+    pub fn is_seated(&self, rig: &Address) -> bool {
+        self.rigs.read().map(|r| r.contains(rig)).unwrap_or(false)
+    }
+
+    /// A verified heartbeat for `rig` was stored: wake the Stack loop if the rig is seated.
+    pub fn heartbeat(&self, rig: &Address) {
+        if self.is_seated(rig) {
+            self.wake();
+        }
     }
 }
 
@@ -169,7 +247,9 @@ pub fn plan_with(
     let treasury = view.treasury.ok_or_else(|| anyhow::anyhow!("no Treasury yet"))?;
     let inputs = planner::Inputs {
         program_id,
-        now_ts: unix_now(),
+        // The cluster's clock (what the program compares caps and plan windows with), or the
+        // system clock until the Clock sysvar has been read.
+        now_ts: view.unix_now(),
         landing_slot: view.slot.saturating_add(LANDING_LEAD_SLOTS),
         board: &board,
         treasury: &treasury,
@@ -207,6 +287,35 @@ pub struct Crank {
     end_shift_budget: FeeBudget,
     end_shift_tried: Mutex<HashMap<(Address, u64), Instant>>,
     shift_log_rent: AtomicU64,
+    // ---- INTERFACE v1.2: Stack and the cleanups ----
+    stack: Mutex<stack_loop::StackRuntime>,
+    stack_budget: FeeBudget,
+    nudge: StackNudge,
+    /// Rigs whose fresh heartbeat is in an unconfirmed `record_heartbeats` transaction.
+    record_in_flight: Mutex<HashSet<Address>>,
+    bury_ready: AtomicBool,
+    /// One Bury setup at a time (a settle and a forfeit may both need it).
+    bury_sync: tokio::sync::Mutex<()>,
+    cleanup_budget: FeeBudget,
+    cleanup_tried: Mutex<HashMap<Address, Instant>>,
+    cleanup_notify: Arc<Notify>,
+    events: Mutex<Option<mpsc::Receiver<ProgramEvents>>>,
+    in_flight: Arc<InFlight>,
+    draining: AtomicBool,
+    /// The main loop ran its final Stack pass after the drain started.
+    drain_flushed: AtomicBool,
+}
+
+/// The optional parts a [`Crank`] is wired with (the binary passes all of them; tests may
+/// pass the defaults).
+#[derive(Default)]
+pub struct CrankWiring {
+    /// Shared with the intake: wakes the Stack loop when a seated rig's heartbeat arrives.
+    pub nudge: StackNudge,
+    /// The program's events from the chain stream (a hint for the Stack and cleanup loops).
+    pub events: Option<mpsc::Receiver<ProgramEvents>>,
+    /// Shared in-flight counter (the shutdown waits for it).
+    pub in_flight: Arc<InFlight>,
 }
 
 impl Crank {
@@ -223,11 +332,14 @@ impl Crank {
         signals: Arc<SignalHub>,
         chain: watch::Receiver<ChainView>,
         rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
+        wiring: CrankWiring,
     ) -> Arc<Self> {
         let program_id = cfg.program_id();
         Arc::new(Crank {
             record_budget: FeeBudget::new(cfg.record.max_lamports_per_hour, Duration::from_secs(3600)),
             end_shift_budget: FeeBudget::new(cfg.end_shift.max_lamports_per_day, Duration::from_secs(86_400)),
+            stack_budget: FeeBudget::new(cfg.stack.max_lamports_per_hour, Duration::from_secs(3600)),
+            cleanup_budget: FeeBudget::new(cfg.cleanup.max_lamports_per_day, Duration::from_secs(86_400)),
             cfg,
             program_id,
             rpc,
@@ -247,7 +359,53 @@ impl Crank {
             alt_sync: tokio::sync::Mutex::new(()),
             end_shift_tried: Mutex::new(HashMap::new()),
             shift_log_rent: AtomicU64::new(0),
+            stack: Mutex::new(stack_loop::StackRuntime::default()),
+            nudge: wiring.nudge,
+            record_in_flight: Mutex::new(HashSet::new()),
+            bury_ready: AtomicBool::new(false),
+            bury_sync: tokio::sync::Mutex::new(()),
+            cleanup_tried: Mutex::new(HashMap::new()),
+            cleanup_notify: Arc::new(Notify::new()),
+            events: Mutex::new(wiring.events),
+            in_flight: wiring.in_flight,
+            draining: AtomicBool::new(false),
+            drain_flushed: AtomicBool::new(false),
         })
+    }
+
+    /// The cluster's unix time as the chain watcher last read it (the system clock until then).
+    fn now_ts(&self) -> i64 {
+        self.chain.borrow().unix_now()
+    }
+
+    /// The process is shutting down: no new pass starts.
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::SeqCst)
+    }
+
+    /// Stop starting new work, then wait (at most `grace`) for what is in flight: transactions
+    /// sent and unconfirmed, and phone-signed BREAK / FREEZE messages that were acknowledged
+    /// and are not landed yet. Returns what was still in flight when the wait ended.
+    ///
+    /// One thing is still started: the running loop makes a last Stack pass that sends the
+    /// check-in of every seat whose heartbeat for this round is already held, without waiting
+    /// for the rest of its table (Stack is fail-closed: a heartbeat that dies with this
+    /// process is a round the seat cannot get back). The wait gives that pass
+    /// [`DRAIN_FLUSH_WAIT`] to happen.
+    pub async fn drain(&self, grace: Duration) -> usize {
+        self.draining.store(true, Ordering::SeqCst);
+        self.metrics.shutting_down.set(1);
+        self.nudge.wake();
+        let started = Instant::now();
+        let deadline = started + grace;
+        loop {
+            let left = self.in_flight.count().saturating_add(self.signals.pending_count());
+            let flushed = !self.cfg.stack.enabled || self.drain_flushed.load(Ordering::SeqCst) || started.elapsed() >= DRAIN_FLUSH_WAIT;
+            if (left == 0 && flushed) || Instant::now() >= deadline {
+                return left;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     fn cranker(&self) -> Address {
@@ -267,6 +425,7 @@ impl Crank {
         if let Err(e) = self.load_alts().await {
             tracing::warn!(error = %e, "could not load lookup tables");
         }
+        self.load_stack_spend();
         tokio::spawn(self.clone().poll_loop());
         if let Some(rx) = self.signals.take_receiver() {
             tokio::spawn(self.clone().signal_loop(rx));
@@ -274,16 +433,43 @@ impl Crank {
         if self.cfg.end_shift.enabled {
             tokio::spawn(self.clone().end_shift_loop());
         }
+        if self.cfg.cleanup.enabled {
+            tokio::spawn(self.clone().cleanup_loop());
+        }
+        if let Some(rx) = lock(&self.events).take() {
+            tokio::spawn(self.clone().events_loop(rx));
+        }
         let mut chain = self.chain.clone();
         let mut current_round = 0u64;
         let mut round_seen = Instant::now();
         let mut recorded_round = 0u64;
         let mut last_pass_slot: Option<u64> = None;
         loop {
-            if let Ok(Err(_)) = tokio::time::timeout(Duration::from_millis(400), chain.changed()).await {
-                anyhow::bail!("chain watcher stopped");
+            // Wake on a chain update, on a Stack nudge (a seated rig's heartbeat arrived, a
+            // check-in landed), or after 400 ms.
+            tokio::select! {
+                r = tokio::time::timeout(Duration::from_millis(400), chain.changed()) => {
+                    if let Ok(Err(_)) = r {
+                        anyhow::bail!("chain watcher stopped");
+                    }
+                }
+                _ = self.nudge.notify.notified() => {}
             }
             let view = chain.borrow().clone();
+            if self.is_draining() {
+                // Shutting down: no dig, no record, no settle. Only the check-ins of seats whose
+                // heartbeat is already held go out (see `drain`); what is in flight finishes on
+                // its own.
+                if let Some(board) = view.board.filter(|_| view.ready() && self.cfg.stack.enabled && !self.breaker.is_tripped()) {
+                    if !self.drain_flushed.load(Ordering::SeqCst) || self.stack_due(board.round_id) {
+                        if let Err(e) = self.stack_tick(&view).await {
+                            tracing::warn!(error = %e, round = board.round_id, "the last Stack pass failed");
+                        }
+                    }
+                }
+                self.drain_flushed.store(true, Ordering::SeqCst);
+                continue;
+            }
             let Some(board) = view.board.filter(|_| view.ready()) else { continue };
             if board.round_id != current_round {
                 current_round = board.round_id;
@@ -294,6 +480,13 @@ impl Crank {
             }
             if self.breaker.is_tripped() {
                 continue;
+            }
+            // Stack first: a seat's check-in must land inside its round (fail-closed), and the
+            // pass decides which rigs' fresh heartbeats the record and dig passes leave alone.
+            if self.stack_due(current_round) {
+                if let Err(e) = self.stack_tick(&view).await {
+                    tracing::warn!(error = %e, round = current_round, "Stack pass failed");
+                }
             }
             // record_heartbeats once per round, once the phones' heartbeats for it are in.
             if self.cfg.record.enabled
@@ -449,8 +642,15 @@ impl Crank {
     /// One planning + submission pass for the current round.
     pub async fn dig_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
         let board = view.board.ok_or_else(|| anyhow::anyhow!("no Board"))?;
-        let heartbeats: HashMap<Address, VerifiedHeartbeat> =
+        let mut heartbeats: HashMap<Address, VerifiedHeartbeat> =
             self.store.snapshot().into_iter().map(|h| (h.rig, h)).collect();
+        // A seated rig's fresh heartbeat belongs to its Stack check-in this round (the check-in
+        // applies it and counts the round in one instruction); the dig then reuses the lease it
+        // leaves. Two transactions racing for one counter would cost the seat its round.
+        let stack_owned: Vec<Address> = heartbeats.keys().filter(|r| self.stack_owns(r, board.round_id)).copied().collect();
+        for r in &stack_owned {
+            heartbeats.remove(r);
+        }
         let fetched = fetch_for_plan(&self.rpc, &self.program_id, board.round_id, &heartbeats, &self.breaker).await?;
         if self.breaker.is_tripped() {
             return Ok(());
@@ -474,6 +674,13 @@ impl Crank {
             plan.digs.into_iter().partition(|d| !self.signals.is_pending(&d.dig.accounts.rig));
         plan.digs = keep;
         plan.skips.extend(pending.into_iter().map(|d| (d.dig.accounts.rig, Skip::SignalPending)));
+        // Seated rigs that are waiting for their check-in (no covering lease yet): the next dig
+        // pass of this round reuses the lease.
+        for r in stack_owned {
+            if !plan.digs.iter().any(|d| d.dig.accounts.rig == r) && !plan.skips.iter().any(|(a, _)| *a == r) {
+                plan.skips.push((r, Skip::StackCheckinPending));
+            }
+        }
         for (_, s) in &plan.skips {
             self.metrics.digs_skipped.inc(s.label());
         }
@@ -585,7 +792,9 @@ impl Crank {
             tracing::info!(%sig, round = round_id, rigs = batch.len(), cu_limit = ?p.cu_limit, "dig sent");
             let this = self.clone();
             let debits = debits.clone();
+            let guard = self.in_flight.guard(&self.metrics);
             tokio::spawn(async move {
+                let _guard = guard;
                 let slots_left = this.chain.borrow().slots_left().unwrap_or(0);
                 let policy = ConfirmPolicy {
                     rebroadcast_for: Duration::from_millis(slots_left.saturating_mul(400)),
@@ -633,6 +842,9 @@ impl Crank {
                                 self.metrics.automation_debit_lamports.add(debits.get(&rig).copied().unwrap_or(lamports));
                                 if let Some(h) = batch.iter().find(|r| r.accounts.rig == rig).and_then(|r| r.heartbeat) {
                                     self.store.remove_if_counter_at_most(&rig, h.fields.counter);
+                                    // The dig applied this round's heartbeat: a seat of this rig
+                                    // can now be counted in observe mode.
+                                    self.nudge.heartbeat(&rig);
                                 }
                             }
                             HdEvent::RigSkipped { rig, error, .. } if seen.insert(rig) => {
@@ -674,7 +886,20 @@ impl Crank {
     async fn signal_loop(self: Arc<Self>, mut rx: mpsc::Receiver<VerifiedSignal>) {
         while let Some(s) = rx.recv().await {
             let this = self.clone();
-            tokio::spawn(async move { this.land_signal(s).await });
+            // Counted as in flight until it lands or is given up on: a graceful shutdown waits
+            // for a BREAK / FREEZE the phone was told is accepted.
+            let guard = self.in_flight.guard(&self.metrics);
+            tokio::spawn(async move {
+                let _guard = guard;
+                this.land_signal(s).await
+            });
+        }
+    }
+
+    /// The program's events from the chain stream: hints for the Stack and cleanup loops.
+    async fn events_loop(self: Arc<Self>, mut rx: mpsc::Receiver<ProgramEvents>) {
+        while let Some(ev) = rx.recv().await {
+            self.on_program_events(&ev);
         }
     }
 
@@ -707,6 +932,23 @@ impl Crank {
             }
         };
         for attempt in 1..=c.max_attempts.max(1) {
+            // Streak protection, checked again at the moment of sending (the intake checked it
+            // when the phone's message arrived): a BREAK is never put on-chain once the rig's
+            // plan window has ended, or is about to within the landing margin. It would make
+            // end_shift seal a completed night as a break. The cluster's own clock decides.
+            if s.kind == hd::SignalKind::Break && c.streak_protection {
+                let now = match self.rpc.get_cluster_unix_timestamp().await {
+                    Ok(t) => t,
+                    Err(_) => self.now_ts(),
+                };
+                if !c.window_rule().allows(s.kind, s.plan_window_end_ts, now) {
+                    tracing::info!(rig = %s.rig, counter = s.counter, window_end = s.plan_window_end_ts, now, "BREAK not landed: the plan window has ended (streak protection)");
+                    self.metrics.signals_failed.inc("window_ended");
+                    self.signals.mark(&s.rig, s.counter, SignalState::Refused);
+                    self.signals.refund(c.est_fee());
+                    return;
+                }
+            }
             let (bh, lvbh) = match self.rpc.get_latest_blockhash().await {
                 Ok(x) => x,
                 Err(e) => {
@@ -758,6 +1000,9 @@ impl Crank {
                         self.metrics.signal_fees_lamports.add(i.fee);
                     }
                     tracing::info!(%sig, slot, rig = %s.rig, kind = s.kind.name(), reason = hd::reason_name(s.reason), counter = s.counter, "signal landed");
+                    // A seated rig just broke: its table must see it inside this round (a break
+                    // after the seat's last check-in of end_round is otherwise never recorded).
+                    self.nudge.heartbeat(&s.rig);
                     return;
                 }
                 Outcome::Landed { err: Some(err), slot } => {
@@ -793,12 +1038,16 @@ impl Crank {
         }
         let rigs = load_diggable_rigs(&self.rpc, &self.program_id).await?;
         let policy = self.cfg.record.policy(self.cfg.dig.clock_margin_secs);
-        let (decisions, skips) = planner::plan_records(&board, &treasury, unix_now(), &rigs, &heartbeats, &policy);
+        let (decisions, skips) = planner::plan_records(&board, &treasury, view.unix_now(), &rigs, &heartbeats, &policy);
         for (_, s) in &skips {
             if *s != planner::RecordSkip::NotEligible {
                 self.metrics.record_skipped.inc(s.label());
             }
         }
+        // A seated rig's heartbeat is recorded by its Stack check-in (verify mode applies it
+        // exactly as record_heartbeats does, and counts the round): never by both.
+        let (decisions, stack_owned): (Vec<_>, Vec<_>) = decisions.into_iter().partition(|d| !self.stack_owns(&d.rig, board.round_id));
+        self.metrics.record_skipped.add("stack_owned", stack_owned.len() as u64);
         let decisions: Vec<_> = decisions.into_iter().filter(|d| !self.signals.is_pending(&d.rig)).collect();
         if decisions.is_empty() {
             return Ok(());
@@ -830,9 +1079,23 @@ impl Crank {
             }
             self.metrics.record_txs_sent.inc();
             tracing::info!(%sig, round = board.round_id, rigs = b.rigs.len(), "record_heartbeats sent");
+            // While this is unconfirmed the Stack loop does not put the same heartbeats in a
+            // check-in (should one of these rigs be seated without being owned by it).
+            lock(&self.record_in_flight).extend(b.rigs.iter().map(|r| r.rig));
             let this = self.clone();
+            let guard = self.in_flight.guard(&self.metrics);
             tokio::spawn(async move {
+                let _guard = guard;
                 let out = this.submitter.confirm(&sig, &wire, lvbh, ConfirmPolicy::default()).await;
+                {
+                    let mut busy = lock(&this.record_in_flight);
+                    for r in &b.rigs {
+                        busy.remove(&r.rig);
+                    }
+                }
+                if b.rigs.iter().any(|r| this.nudge.is_seated(&r.rig)) {
+                    this.stack_nudge();
+                }
                 if let Outcome::Landed { err: None, .. } = out {
                     let max_version = if this.cfg.dig.tx_format == TxFormat::V1 { 1 } else { 0 };
                     if let Some(i) = this.fetch_events(&sig, max_version).await {
@@ -865,7 +1128,7 @@ impl Crank {
         let every = Duration::from_secs(self.cfg.end_shift.poll_secs.max(1));
         loop {
             tokio::time::sleep(every).await;
-            if self.breaker.is_tripped() {
+            if self.breaker.is_tripped() || self.is_draining() {
                 continue;
             }
             if let Err(e) = self.end_shift_sweep().await {
@@ -890,7 +1153,7 @@ impl Crank {
     pub async fn end_shift_sweep(&self) -> anyhow::Result<usize> {
         let c = &self.cfg.end_shift;
         let Some(board) = self.chain.borrow().board else { return Ok(0) };
-        let now = unix_now();
+        let now = self.now_ts();
         let mut due: Vec<(Address, Rig)> = self
             .rpc
             .get_program_accounts(&self.program_id, &rpc::open_shift_filters())
@@ -941,6 +1204,7 @@ impl Crank {
 
     /// Sign `ixs` (legacy, crank pays), simulate, send, confirm.
     async fn send_signed(&self, ixs: &[Instruction]) -> anyhow::Result<(String, Outcome)> {
+        let _guard = self.in_flight.guard(&self.metrics);
         let (bh, lvbh) = self.rpc.get_latest_blockhash().await?;
         let t = tx::sign_legacy(ixs, self.key.keypair(), bh)?;
         let wire = tx::serialize(&t)?;

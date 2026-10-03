@@ -591,7 +591,225 @@ pub fn sign_record_batch(
 }
 
 // ---------------------------------------------------------------------------------------
-// Single-purpose legacy transactions: phone-signed BREAK / FREEZE, permissionless end_shift.
+// stack_checkin batches (INTERFACE v1.2 §11.4, tag 17).
+
+/// One seat in a `stack_checkin` batch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckinSeat {
+    /// StackSeat PDA.
+    pub seat: Address,
+    /// The seat's rig.
+    pub rig: Address,
+    /// `Some`: verify mode, the heartbeat is verified and applied by the check-in itself (one
+    /// secp256r1 signature). `None`: observe mode (`hb_ix = 0xFF`), the check-in counts the
+    /// one-round lease a `dig`, a `record_heartbeats` or another check-in already applied in
+    /// this round.
+    pub heartbeat: Option<VerifiedHeartbeat>,
+}
+
+/// Compute estimate of a check-in: `base + per_verify × verified seats + per_observe ×
+/// observed seats` (measured with the real program: 8,846 CU for 4 verified seats, 8,171 for
+/// 8 observed ones, INTERFACE §11.11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckinCu {
+    /// Fixed overhead.
+    pub base: u32,
+    /// Per seat whose heartbeat is verified here.
+    pub per_verify: u32,
+    /// Per seat observed.
+    pub per_observe: u32,
+}
+
+impl Default for CheckinCu {
+    fn default() -> Self {
+        CheckinCu { base: 4_000, per_verify: 3_500, per_observe: 2_000 }
+    }
+}
+
+impl CheckinCu {
+    /// Estimated units for `seats`, saturating, capped at the transaction ceiling.
+    pub fn units(&self, seats: &[CheckinSeat]) -> u32 {
+        let verify = u32::try_from(seats.iter().filter(|s| s.heartbeat.is_some()).count()).unwrap_or(u32::MAX);
+        let observe = u32::try_from(seats.len()).unwrap_or(u32::MAX).saturating_sub(verify);
+        self.base
+            .saturating_add(self.per_verify.saturating_mul(verify))
+            .saturating_add(self.per_observe.saturating_mul(observe))
+            .min(MAX_COMPUTE_UNITS)
+    }
+}
+
+/// A `stack_checkin` batch that fits one transaction.
+#[derive(Clone, Debug)]
+pub struct CheckinBatch {
+    /// Seats in entry order.
+    pub seats: Vec<CheckinSeat>,
+    /// Serialized size with placeholder signatures.
+    pub wire_size: usize,
+    /// Declared compute limit.
+    pub cu_limit: u32,
+    /// Secp256r1 signatures carried (verify-mode seats): each costs one signature fee.
+    pub precompile_signatures: usize,
+}
+
+/// `[ComputeBudget limit, price]` (legacy / v0) `+ Secp256r1SigVerify` (only when a seat is in
+/// verify mode; at most 8 seats, so one instruction) `+ stack_checkin`. Verify-mode entries
+/// name the precompile by its absolute index; observe-mode entries carry `hb_ix = 0xFF`.
+pub fn build_checkin_instructions(
+    p: &BuildParams,
+    cu_limit: u32,
+    table: &Address,
+    seats: &[CheckinSeat],
+) -> Result<Vec<Instruction>, TxError> {
+    if seats.is_empty() {
+        return Err(TxError::Empty);
+    }
+    let mut ixs = Vec::new();
+    if p.format != TxFormat::V1 {
+        ixs.push(set_compute_unit_limit(cu_limit));
+        ixs.push(set_compute_unit_price(p.cu_price_micro_lamports));
+    }
+    let with_hb: Vec<&VerifiedHeartbeat> = seats.iter().filter_map(|s| s.heartbeat.as_ref()).collect();
+    if with_hb.len() > MAX_SIGS_PER_PRECOMPILE {
+        return Err(TxError::TooManyInstructions);
+    }
+    let mut entries: Vec<(Address, Address, DigEntry)> = Vec::with_capacity(seats.len());
+    let ix_index = u8::try_from(ixs.len()).map_err(|_| TxError::TooManyInstructions)?;
+    if !with_hb.is_empty() {
+        let sigs: Vec<_> = with_hb.iter().map(|h| (h.sig, h.pubkey, h.digest)).collect();
+        ixs.push(precompile_ix(&sigs)?);
+    }
+    let mut sig_index = 0u8;
+    for s in seats {
+        let entry = match &s.heartbeat {
+            Some(h) => {
+                let e = DigEntry {
+                    hb_ix: ix_index,
+                    hb_sig_index: sig_index,
+                    counter: h.fields.counter,
+                    round_id: h.fields.round_id,
+                    lease_rounds: h.fields.lease_rounds,
+                };
+                sig_index = sig_index.checked_add(1).ok_or(TxError::TooManyInstructions)?;
+                e
+            }
+            None => DigEntry::reuse_lease(),
+        };
+        entries.push((s.seat, s.rig, entry));
+    }
+    ixs.push(crate::skr::stack_checkin_ix(&p.program_id, table, &entries)?);
+    if let Some((to, lamports)) = p.tip {
+        ixs.push(system_transfer(&p.cranker, &to, lamports));
+    }
+    Ok(ixs)
+}
+
+/// Greedy packing of one table's check-ins in the given order: at most 8 seats per
+/// instruction (`p.max_rigs_per_tx` may lower it), every candidate compiled and measured
+/// against the wire limit. A seat that does not fit even alone comes back in the second
+/// vector.
+pub fn pack_checkins(
+    p: &BuildParams,
+    cu: &CheckinCu,
+    table: &Address,
+    seats: &[CheckinSeat],
+    alts: &[AddressLookupTableAccount],
+) -> (Vec<CheckinBatch>, Vec<(CheckinSeat, Misfit)>) {
+    let measure_one = |batch: &[CheckinSeat]| -> Result<CheckinBatch, Misfit> {
+        if batch.len() > p.max_rigs_per_tx.min(crate::skr::MAX_SEATS) {
+            return Err(Misfit::Rigs);
+        }
+        let cu_limit = p.cu_limit.unwrap_or_else(|| cu.units(batch)).min(MAX_COMPUTE_UNITS);
+        let ixs = build_checkin_instructions(p, cu_limit, table, batch).map_err(|_| Misfit::Build)?;
+        let (wire_size, _) = measure_instructions(p, &ixs, alts, cu_limit)?;
+        Ok(CheckinBatch {
+            seats: batch.to_vec(),
+            wire_size,
+            cu_limit,
+            precompile_signatures: batch.iter().filter(|s| s.heartbeat.is_some()).count(),
+        })
+    };
+    let (mut out, mut rejected) = (Vec::new(), Vec::new());
+    let mut current: Option<CheckinBatch> = None;
+    for s in seats {
+        let mut candidate = current.as_ref().map(|b| b.seats.clone()).unwrap_or_default();
+        candidate.push(*s);
+        match measure_one(&candidate) {
+            Ok(b) => current = Some(b),
+            Err(_) if current.is_some() => {
+                out.extend(current.take());
+                match measure_one(std::slice::from_ref(s)) {
+                    Ok(b) => current = Some(b),
+                    Err(m) => rejected.push((*s, m)),
+                }
+            }
+            Err(m) => rejected.push((*s, m)),
+        }
+    }
+    out.extend(current);
+    (out, rejected)
+}
+
+/// Build and sign a check-in batch with `cu_limit`.
+pub fn sign_checkin_batch(
+    p: &BuildParams,
+    cu_limit: u32,
+    table: &Address,
+    seats: &[CheckinSeat],
+    alts: &[AddressLookupTableAccount],
+    blockhash: Hash,
+    signer: &Keypair,
+) -> Result<VersionedTransaction, TxError> {
+    let ixs = build_checkin_instructions(p, cu_limit, table, seats)?;
+    let msg = compile_message(p, &ixs, blockhash, alts, cu_limit)?;
+    make_transaction(msg, Some(signer))
+}
+
+// ---------------------------------------------------------------------------------------
+// Single-purpose legacy transactions: phone-signed BREAK / FREEZE, permissionless end_shift,
+// settle_stack, forfeit_focus_bond, refund_gift, and the Bury vault's one-time setup.
+
+/// `[SetComputeUnitLimit, SetComputeUnitPrice]` followed by `ixs`.
+pub fn with_compute_budget(cu_limit: u32, cu_price_micro_lamports: u64, ixs: impl IntoIterator<Item = Instruction>) -> Vec<Instruction> {
+    let mut out = vec![set_compute_unit_limit(cu_limit), set_compute_unit_price(cu_price_micro_lamports)];
+    out.extend(ixs);
+    out
+}
+
+/// `[SetComputeUnitLimit, SetComputeUnitPrice, settle_stack]` with every seat of the table.
+pub fn settle_stack_instructions(
+    program_id: &Address,
+    table: &Address,
+    vault: &Address,
+    seats: &[Address],
+    cu_limit: u32,
+    cu_price_micro_lamports: u64,
+) -> Vec<Instruction> {
+    with_compute_budget(cu_limit, cu_price_micro_lamports, [crate::skr::settle_stack_ix(program_id, table, vault, seats)])
+}
+
+/// `[SetComputeUnitLimit, SetComputeUnitPrice, ATA CreateIdempotent(BuryVault, SKR)?,
+/// init_bury_vault?]`: the Bury auction's singleton (`init_vault`; init-only, so it is left
+/// out when the account exists) and the lot's token account (`create_skr_ata`), which
+/// `settle_stack` and `forfeit_focus_bond` need once anything is forfeited. The payer funds
+/// both rents; neither account has an owner who could take them back.
+pub fn init_bury_vault_instructions(
+    program_id: &Address,
+    payer: &Address,
+    init_vault: bool,
+    create_skr_ata: bool,
+    cu_limit: u32,
+    cu_price_micro_lamports: u64,
+) -> Vec<Instruction> {
+    let bury = crate::skr::bury_vault_pda(program_id).0;
+    let mut ixs = Vec::new();
+    if create_skr_ata {
+        ixs.push(crate::skr::create_ata_idempotent_ix(payer, &bury, &crate::skr::SKR_MINT));
+    }
+    if init_vault {
+        ixs.push(crate::skr::init_bury_vault_ix(program_id, payer));
+    }
+    with_compute_budget(cu_limit, cu_price_micro_lamports, ixs)
+}
 
 /// Top-level index of the precompile in [`signal_instructions`] (after the two ComputeBudget
 /// instructions); `break_shift` / `freeze_rig` name it as `p256_ix`.

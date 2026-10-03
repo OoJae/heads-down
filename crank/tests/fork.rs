@@ -48,10 +48,20 @@ const CRANK_FEE: u64 = 7_000;
 const TILE_CAP: u64 = 100_000;
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
+/// `ORE_FIXTURES_DIR`, else the program's fixture set when it was fetched
+/// (`programs/heads-down/tests/fixtures/fetch-fixtures.sh`: a superset that also holds the SKR
+/// mint the Stack tests need), else the ORE spike's.
 fn fixtures() -> PathBuf {
-    std::env::var_os("ORE_FIXTURES_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../spikes/ore-executor/fixtures"))
+    if let Some(p) = std::env::var_os("ORE_FIXTURES_DIR") {
+        return PathBuf::from(p);
+    }
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let program = base.join("../programs/heads-down/tests/fixtures");
+    if program.join("ore.so").exists() {
+        program
+    } else {
+        base.join("../spikes/ore-executor/fixtures")
+    }
 }
 
 fn program_so() -> PathBuf {
@@ -86,7 +96,8 @@ fn read_fixture_text(name: &str) -> String {
 }
 
 struct User {
-    _wallet: Keypair,
+    #[allow(dead_code)] // signs the wallet-side SKR instructions in the real-program suite
+    wallet: Keypair,
     phone: Phone,
     rig: Address,
     accounts: RigAccounts,
@@ -275,7 +286,7 @@ impl Fork {
         self.svm
             .set_account(rig_addr, Account { lamports: 10_000_000, data: rig.encode(), owner: hd::PROGRAM_ID, executable: false, rent_epoch: u64::MAX })
             .unwrap();
-        self.users.push(User { _wallet: wallet, phone, rig: rig_addr, accounts });
+        self.users.push(User { wallet, phone, rig: rig_addr, accounts });
         self.users.len() - 1
     }
 
@@ -652,6 +663,10 @@ mod real {
     use hd_crank::heartbeat::{ParsedSignal, SignalSubmission};
     use hd_crank::rpc::FetchedInstruction;
     use p256::ecdsa::{signature::Signer as _, Signature};
+
+    /// The SKR duties (INTERFACE v1.2 §11): a full Stack table, the check-in capacity and its
+    /// cost, missed rounds against grace, and the permissionless cleanups (`tests/real/skr_suite.rs`).
+    mod skr_suite;
 
     impl Fork {
         fn balance(&self, a: &Address) -> u64 {

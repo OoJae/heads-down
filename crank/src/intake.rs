@@ -43,7 +43,7 @@ use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
 use crate::breaker::Breaker;
 use crate::chain::ChainView;
 use crate::hd::SignalKind;
-use crate::heartbeat::{HeartbeatSubmission, ParsedHeartbeat, ParsedSignal, Reject, RigSource, SignalSubmission, Verifier};
+use crate::heartbeat::{HeartbeatSubmission, ParsedHeartbeat, ParsedSignal, Reject, RigSource, SignalSubmission, Verifier, WindowRule};
 use crate::metrics::Metrics;
 use crate::mirror::HeartbeatMirror;
 use crate::ratelimit::{ip_key, KeyedLimiter, Quota};
@@ -74,6 +74,8 @@ pub struct IntakeConfig {
     pub trust_forwarded_for: bool,
     /// `/healthz` reports degraded when the slot has not advanced for this long.
     pub stale_chain_after: Duration,
+    /// Streak protection: a BREAK is accepted only while its rig's plan window is open.
+    pub window_rule: WindowRule,
 }
 
 impl Default for IntakeConfig {
@@ -90,6 +92,7 @@ impl Default for IntakeConfig {
             send_timeout: Duration::from_secs(5),
             trust_forwarded_for: false,
             stale_chain_after: Duration::from_secs(30),
+            window_rule: WindowRule::default(),
         }
     }
 }
@@ -108,6 +111,7 @@ pub struct Intake<S: RigSource> {
     breaker: Arc<Breaker>,
     chain: watch::Receiver<ChainView>,
     mirror: Arc<dyn HeartbeatMirror>,
+    draining: std::sync::atomic::AtomicBool,
 }
 
 /// The counter to echo in an ack: a JSON number or decimal string, else 0.
@@ -152,12 +156,25 @@ impl<S: RigSource> Intake<S> {
             breaker,
             chain,
             mirror,
+            draining: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
     /// The verifier (the crank loop seeds its rig cache and reads its store).
     pub fn verifier(&self) -> &Verifier<S> {
         &self.verifier
+    }
+
+    /// The process is shutting down: answer `rate_limited` to new messages (the phone keeps
+    /// its record and reconnects to the next instance) and report `draining` on `/healthz`,
+    /// so the platform stops routing here. Messages already accepted are still landed.
+    pub fn set_draining(&self) {
+        self.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// True once [`Self::set_draining`] was called.
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn reject(&self, r: Reject) -> Reject {
@@ -180,6 +197,9 @@ impl<S: RigSource> Intake<S> {
             _ => return ack_json(0, Err(self.reject(Reject::Malformed))),
         };
         let counter = counter_hint(&v);
+        if self.is_draining() {
+            return ack_json(counter, Err(self.reject(Reject::Busy)));
+        }
         if !self.ip_limiter.check(&ip_key(ip)) {
             return ack_json(counter, Err(self.reject(Reject::RateLimitedIp)));
         }
@@ -222,6 +242,21 @@ impl<S: RigSource> Intake<S> {
             return Err(self.reject_signal(Reject::Busy));
         };
         let verified = self.verifier.process_signal(&parsed).await.map_err(|r| self.reject_signal(r))?;
+        // Streak protection: a BREAK whose rig's plan window has ended is never landed (it
+        // would turn a completed night into a break). Contract A has no "accepted but
+        // ignored" code, so the phone gets `ok: false, reason: lease_invalid`.
+        let now = self.chain.borrow().unix_now();
+        if let Err(r) = self.cfg.window_rule.check(&verified, now) {
+            tracing::info!(
+                rig = %parsed.rig,
+                counter = parsed.counter,
+                reason = parsed.reason,
+                window_end = verified.plan_window_end_ts,
+                now,
+                "BREAK after the plan window: not landed (streak protection)"
+            );
+            return Err(self.reject_signal(r));
+        }
         match self.signals.offer(verified).map_err(|r| self.reject_signal(r))? {
             Offered::Queued => {
                 self.metrics.signals_accepted.inc(kind.name());
@@ -344,18 +379,29 @@ async fn healthz<S: RigSource>(State(st): State<Arc<Intake<S>>>) -> (StatusCode,
     let age = v.slot_age(Instant::now());
     let stale = age.is_none_or(|a| a > st.cfg.stale_chain_after);
     let tripped = st.breaker.is_tripped();
-    let ok = !tripped && !stale && v.ready();
+    let draining = st.is_draining();
+    let ok = !tripped && !stale && v.ready() && !draining;
+    let m = &st.metrics;
     let body = json!({
-        "status": if ok { "ok" } else { "degraded" },
+        "status": if draining { "draining" } else if ok { "ok" } else { "degraded" },
+        "version": env!("CARGO_PKG_VERSION"),
         "breaker": st.breaker.reason(),
         "chain_ready": v.ready(),
         "round_id": v.board.map(|b| b.round_id),
         "slot": v.slot,
         "slot_age_ms": age.map(|a| a.as_millis() as u64),
+        "cluster_unix_ts": v.cluster_now(Instant::now()),
         "ema_ev": v.ema_ev(),
         "heartbeats_held": st.verifier.store.len(),
         "signals_enabled": st.signals.enabled(),
         "signal_budget_lamports": st.signals.budget_available(),
+        "stack": {
+            "tables_open": m.stack_tables_open.get(),
+            "tables_active": m.stack_tables_active.get(),
+            "seats_active": m.stack_seats_active.get(),
+            "seats_pending": m.stack_seats_pending.get(),
+        },
+        "in_flight": m.in_flight.get(),
     });
     (if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE }, Json(body))
 }

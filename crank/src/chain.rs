@@ -28,6 +28,21 @@ use crate::metrics::Metrics;
 use crate::ore::{self, Board, OreConfig, Round, Treasury};
 use crate::rpc::{self, redact_url, RpcClient};
 
+/// The Clock sysvar (`slot u64 | epoch_start_timestamp i64 | epoch u64 | leader_schedule_epoch
+/// u64 | unix_timestamp i64`): the time the program compares plan windows, caps and gift
+/// expiries against.
+pub const CLOCK_SYSVAR_ID: Address = Address::from_str_const("SysvarC1ock11111111111111111111111111111111");
+/// Owner of every sysvar account.
+pub const SYSVAR_OWNER_ID: Address = Address::from_str_const("Sysvar1111111111111111111111111111111111111");
+
+/// `Clock.unix_timestamp` from the sysvar account's data.
+pub fn clock_unix_timestamp(owner: &Address, data: &[u8]) -> Option<i64> {
+    if owner != &SYSVAR_OWNER_ID || data.len() < 40 {
+        return None;
+    }
+    crate::bytes::read_i64(data, 32)
+}
+
 /// Something that happened on chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChainEvent {
@@ -44,6 +59,28 @@ pub enum ChainEvent {
     Slot(u64),
     /// The stream (re)connected; state may have changed while it was down.
     Reconnected,
+    /// The logs of a transaction that mentions the heads_down program (`logsSubscribe`).
+    Logs {
+        /// Transaction signature.
+        signature: String,
+        /// Context slot.
+        slot: u64,
+        /// The transaction failed (its events did not happen).
+        failed: bool,
+        /// Log lines.
+        logs: Vec<String>,
+    },
+}
+
+/// The heads_down events of one landed transaction, as the chain stream reported them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProgramEvents {
+    /// Transaction signature.
+    pub signature: String,
+    /// Slot.
+    pub slot: u64,
+    /// Decoded events (tags 1..=23).
+    pub events: Vec<crate::hd::HdEvent>,
 }
 
 /// Subscription changes the watcher asks the source for.
@@ -79,9 +116,30 @@ pub struct ChainView {
     pub last_account_update: Option<Instant>,
     /// When the slot last advanced.
     pub last_slot_update: Option<Instant>,
+    /// `Clock.unix_timestamp` as last read, and when it was read.
+    pub cluster_time: Option<(i64, Instant)>,
+}
+
+/// The system clock as unix seconds.
+pub fn system_unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 impl ChainView {
+    /// The cluster's unix time now: the last `Clock.unix_timestamp` read plus the time since
+    /// (`None` until the Clock sysvar was read, or when the reading is older than 2 minutes).
+    pub fn cluster_now(&self, now: Instant) -> Option<i64> {
+        let (ts, at) = self.cluster_time?;
+        let age = now.saturating_duration_since(at);
+        (age < Duration::from_secs(120)).then(|| ts.saturating_add(i64::try_from(age.as_secs()).unwrap_or(i64::MAX)))
+    }
+
+    /// The cluster's unix time, or the system clock when the cluster's is not known. This is
+    /// what plan windows, caps and gift expiries are compared with.
+    pub fn unix_now(&self) -> i64 {
+        self.cluster_now(Instant::now()).unwrap_or_else(system_unix_now)
+    }
+
     /// Gate value for this round (`None` until Board and Treasury are known, or on overflow).
     pub fn ema_ev(&self) -> Option<u64> {
         let (b, t) = (self.board?, self.treasury?);
@@ -142,6 +200,17 @@ impl Watcher {
                 }
             }
             ChainEvent::Reconnected => self.metrics.chain_reconnects.inc(),
+            // Program logs are for the Stack and cleanup loops; the ORE view ignores them.
+            ChainEvent::Logs { .. } => {}
+            ChainEvent::Account { address, slot, account } if address == CLOCK_SYSVAR_ID => {
+                if slot > self.view.slot {
+                    self.view.slot = slot;
+                    self.view.last_slot_update = Some(now);
+                }
+                if let Some(ts) = account.and_then(|a| clock_unix_timestamp(&a.owner, &a.data)) {
+                    self.view.cluster_time = Some((ts, now));
+                }
+            }
             ChainEvent::Account { address, slot, account } => {
                 if slot > self.view.slot {
                     self.view.slot = slot;
@@ -227,13 +296,34 @@ pub struct WsChainSource {
     commitment: String,
     /// Reconnect if nothing arrives for this long.
     pub idle_timeout: Duration,
+    /// Also stream the logs of transactions that mention this program (`logsSubscribe`).
+    program_logs: Option<Address>,
 }
 
 impl WsChainSource {
-    /// New source for `url` (treated as a secret).
+    /// New source for `url` (treated as a secret: it is never logged, and connection errors
+    /// are scrubbed of it before they are).
     pub fn new(url: impl Into<String>, commitment: impl Into<String>) -> Self {
-        WsChainSource { url: url.into(), commitment: commitment.into(), idle_timeout: Duration::from_secs(30) }
+        WsChainSource { url: url.into(), commitment: commitment.into(), idle_timeout: Duration::from_secs(30), program_logs: None }
     }
+
+    /// Also deliver [`ChainEvent::Logs`] for every transaction that mentions `program_id`.
+    pub fn with_program_logs(mut self, program_id: Address) -> Self {
+        self.program_logs = Some(program_id);
+        self
+    }
+}
+
+impl std::fmt::Debug for WsChainSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WsChainSource").field("url", &redact_url(&self.url)).field("commitment", &self.commitment).finish()
+    }
+}
+
+fn logs_subscribe(id: u64, program_id: &Address, commitment: &str) -> String {
+    json!({ "jsonrpc": "2.0", "id": id, "method": "logsSubscribe",
+            "params": [{ "mentions": [program_id.to_string()] }, { "commitment": commitment }] })
+    .to_string()
 }
 
 fn account_subscribe(id: u64, a: &Address, commitment: &str) -> String {
@@ -246,8 +336,13 @@ fn account_subscribe(id: u64, a: &Address, commitment: &str) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pending {
     Slot,
+    Logs,
     Account(Address),
 }
+
+/// Lines kept from one `logsNotification` at most (a transaction's log is capped at 10 kB by
+/// the validator; this only bounds what a hostile endpoint could make the crank hold).
+const MAX_LOG_LINES: usize = 512;
 
 /// Parse one WebSocket text message into events, tracking subscription ids.
 fn handle_ws_text(
@@ -276,6 +371,22 @@ fn handle_ws_text(
                 Ok(account) => vec![ChainEvent::Account { address, slot, account }],
                 Err(_) => vec![],
             }
+        }
+        Some("logsNotification") => {
+            let r = &v["params"]["result"];
+            let value = &r["value"];
+            let (Some(signature), Some(lines)) = (value["signature"].as_str(), value["logs"].as_array()) else {
+                return vec![];
+            };
+            if signature.len() > 90 {
+                return vec![];
+            }
+            vec![ChainEvent::Logs {
+                signature: signature.to_string(),
+                slot: r["context"]["slot"].as_u64().unwrap_or(0),
+                failed: value.get("err").is_some_and(|e| !e.is_null()),
+                logs: lines.iter().take(MAX_LOG_LINES).filter_map(|l| l.as_str().map(str::to_string)).collect(),
+            }]
         }
         _ => vec![],
     }
@@ -317,6 +428,11 @@ impl ChainSource for WsChainSource {
             pending.insert(next_id, Pending::Slot);
             next_id += 1;
             let mut ok = sink.send(Message::text(sub)).await.is_ok();
+            if let Some(program_id) = &self.program_logs {
+                pending.insert(next_id, Pending::Logs);
+                ok &= sink.send(Message::text(logs_subscribe(next_id, program_id, &self.commitment))).await.is_ok();
+                next_id += 1;
+            }
             for a in &wanted {
                 pending.insert(next_id, Pending::Account(*a));
                 ok &= sink.send(Message::text(account_subscribe(next_id, a, &self.commitment))).await.is_ok();
@@ -385,9 +501,11 @@ impl ChainSource for LaserStreamSource {
     }
 }
 
-/// Fetch Board, Treasury, ORE Config, the followed Round and the slot over HTTP, as events.
+/// Fetch Board, Treasury, ORE Config, the Clock sysvar, the followed Round and the slot over
+/// HTTP, as events.
 pub async fn poll_events(rpc: &RpcClient, round: Option<Address>) -> anyhow::Result<Vec<ChainEvent>> {
     let mut keys = Watcher::initial_subscriptions();
+    keys.push(CLOCK_SYSVAR_ID);
     keys.extend(round);
     let slot = rpc.get_slot(rpc.commitment()).await?;
     let accs = rpc.get_multiple_accounts(&keys).await?;
@@ -405,6 +523,22 @@ pub async fn run_watcher(
     metrics: Arc<Metrics>,
     poll_every: Duration,
 ) -> anyhow::Result<()> {
+    run_watcher_with(source, rpc, out, breaker, metrics, poll_every, None).await
+}
+
+/// [`run_watcher`], also decoding the heads_down events of every successful transaction the
+/// source reports ([`ChainEvent::Logs`]) and forwarding them to `program`'s channel. The
+/// stream is a hint, never the truth: the Stack and cleanup loops re-read the accounts, and
+/// also poll, so a missed notification only delays them.
+pub async fn run_watcher_with(
+    source: Arc<dyn ChainSource>,
+    rpc: RpcClient,
+    out: watch::Sender<ChainView>,
+    breaker: Arc<Breaker>,
+    metrics: Arc<Metrics>,
+    poll_every: Duration,
+    program: Option<(Address, mpsc::Sender<ProgramEvents>)>,
+) -> anyhow::Result<()> {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
     let (ev_tx, mut ev_rx) = mpsc::channel(1024);
     for a in Watcher::initial_subscriptions() {
@@ -416,7 +550,7 @@ pub async fn run_watcher(
             tracing::error!(error = %e, "chain source stopped");
         }
     });
-    let mut w = Watcher::new(breaker, metrics);
+    let mut w = Watcher::new(breaker, metrics.clone());
     let mut poll = tokio::time::interval(poll_every);
     loop {
         let evs: Vec<ChainEvent> = tokio::select! {
@@ -426,6 +560,17 @@ pub async fn run_watcher(
                     let mut v = vec![ChainEvent::Reconnected];
                     v.extend(poll_events(&rpc, w.round_address()).await.unwrap_or_default());
                     v
+                }
+                Some(ChainEvent::Logs { signature, slot, failed, logs }) => {
+                    if let Some((program_id, tx)) = program.as_ref().filter(|_| !failed) {
+                        let events = crate::hd::events_from_logs(program_id, &logs);
+                        if !events.is_empty() {
+                            metrics.chain_updates.inc("program_events");
+                            // Bounded: a full queue drops the hint (the loops also poll).
+                            let _ = tx.try_send(ProgramEvents { signature, slot, events });
+                        }
+                    }
+                    continue;
                 }
                 Some(e) => vec![e],
                 None => anyhow::bail!("chain source ended"),
@@ -560,5 +705,63 @@ mod tests {
         assert!(handle_ws_text(&n.replace("900}", "901}"), &mut pending, &mut subs).is_empty());
         assert!(handle_ws_text("not json", &mut pending, &mut subs).is_empty());
         assert!(handle_ws_text(r#"{"method":"slotNotification","params":{"result":{"slot":-1}}}"#, &mut pending, &mut subs).is_empty());
+    }
+
+    #[test]
+    fn program_logs_become_events() {
+        let mut pending = HashMap::from([(3u64, Pending::Logs)]);
+        let mut subs = HashMap::new();
+        // The subscription confirmation is consumed and tracks no account.
+        assert!(handle_ws_text(r#"{"jsonrpc":"2.0","result":77,"id":3}"#, &mut pending, &mut subs).is_empty());
+        assert!(subs.is_empty() && pending.is_empty());
+        let n = r#"{"jsonrpc":"2.0","method":"logsNotification","params":{"result":{"context":{"slot":9},"value":{"signature":"5h6xBEauJ3PK6SWCZ1PGjBvj8vDdWG3KpwATGy1ARAXFSDwt8GFXM7W5Ncn16wmqokgpiKRLuS83KUxyZyv2sUYv","err":null,"logs":["Program HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p invoke [1]","Program HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p success"]}},"subscription":77}}"#;
+        let evs = handle_ws_text(n, &mut pending, &mut subs);
+        assert!(matches!(&evs[..], [ChainEvent::Logs { slot: 9, failed: false, logs, .. }] if logs.len() == 2), "{evs:?}");
+        // A failed transaction is flagged (its events did not happen).
+        let failed = n.replace(r#""err":null"#, r#""err":{"InstructionError":[1,{"Custom":38}]}"#);
+        assert!(matches!(&handle_ws_text(&failed, &mut pending, &mut subs)[..], [ChainEvent::Logs { failed: true, .. }]));
+        // Malformed notifications are ignored.
+        assert!(handle_ws_text(r#"{"method":"logsNotification","params":{"result":{"value":{"logs":"x"}}}}"#, &mut pending, &mut subs).is_empty());
+        let sub = logs_subscribe(4, &crate::hd::PROGRAM_ID, "confirmed");
+        assert!(sub.contains(r#""method":"logsSubscribe""#) && sub.contains("HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"));
+        // The watcher's ORE view ignores log events.
+        let (mut w, b) = watcher();
+        assert!(w.apply(evs[0].clone(), Instant::now()).is_empty());
+        assert!(!b.is_tripped() && w.view.board.is_none());
+    }
+
+    #[test]
+    fn the_cluster_clock_is_read_from_the_sysvar() {
+        let (mut w, b) = watcher();
+        let t0 = Instant::now();
+        assert_eq!(w.view.cluster_now(t0), None);
+        let mut clock = vec![0u8; 40];
+        clock[..8].copy_from_slice(&500u64.to_le_bytes());
+        clock[32..40].copy_from_slice(&1_790_000_000i64.to_le_bytes());
+        let ev = ChainEvent::Account {
+            address: CLOCK_SYSVAR_ID,
+            slot: 500,
+            account: Some(RawAccount { owner: SYSVAR_OWNER_ID, lamports: 1, data: clock.clone() }),
+        };
+        assert!(w.apply(ev, t0).is_empty());
+        assert_eq!(w.view.cluster_now(t0), Some(1_790_000_000));
+        assert_eq!(w.view.cluster_now(t0 + Duration::from_secs(7)), Some(1_790_000_007), "extrapolated between reads");
+        assert_eq!(w.view.cluster_now(t0 + Duration::from_secs(300)), None, "a stale reading is not trusted");
+        assert_eq!(w.view.slot, 500);
+        // Not the sysvar's owner, or a short account: ignored (and no breaker trip).
+        assert_eq!(clock_unix_timestamp(&ore::SYSTEM_PROGRAM_ID, &clock), None);
+        assert_eq!(clock_unix_timestamp(&SYSVAR_OWNER_ID, &clock[..39]), None);
+        w.apply(ChainEvent::Account { address: CLOCK_SYSVAR_ID, slot: 501, account: None }, t0);
+        assert_eq!(w.view.cluster_now(t0), Some(1_790_000_000), "a missing reading keeps the last one");
+        assert!(!b.is_tripped());
+        // Without a reading the system clock is used.
+        assert!((ChainView::default().unix_now() - system_unix_now()).abs() <= 1);
+    }
+
+    #[test]
+    fn the_websocket_url_never_appears_in_debug_output() {
+        let s = WsChainSource::new("wss://mainnet.helius-rpc.com/?api-key=SECRET-KEY-123", "confirmed").with_program_logs(crate::hd::PROGRAM_ID);
+        let d = format!("{s:?}");
+        assert!(!d.contains("SECRET-KEY-123") && d.contains("mainnet.helius-rpc.com"), "{d}");
     }
 }
