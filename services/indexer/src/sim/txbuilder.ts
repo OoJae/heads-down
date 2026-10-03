@@ -10,7 +10,7 @@
  */
 import { encodeBase58, decodeBase58 } from "../codec/base58.ts";
 import { ByteWriter } from "../codec/bytes.ts";
-import { encodeHdEvent, type HdEvent } from "../codec/events.ts";
+import { encodeHdEvent, type HdEvent, type HdExtEvent } from "../codec/events.ts";
 import { findProgramAddress, seed, addrBytes, u64le } from "../codec/pda.ts";
 import type { RawInstruction, RawTransaction } from "../codec/tx.ts";
 import { ORE_BOARD, ORE_CONFIG, ORE_PROGRAM_ID, ORE_TREASURY, ORE_LOG_IX_TAG } from "../constants.ts";
@@ -349,13 +349,14 @@ export function buildEventTx(input: {
   blockTime: number;
   signer: string;
   programId: string;
-  events: HdEvent[];
+  /** v1.2 / v1.3 events (`kind: "Ext"`) need `ix`: there is no default instruction for them. */
+  events: (HdEvent | HdExtEvent)[];
   /** The instruction (default: inferred from the first event). */
   ix?: { data: Uint8Array; accounts: string[] };
   /** arm_shift plan when the instruction is inferred from a ShiftArmed. */
   plan?: PlanInput;
 }): RawTransaction {
-  const ix = input.ix ?? defaultIx(input.events, input.signer, input.programId, input.plan);
+  const ix = input.ix ?? defaultIx(input.events.filter((e): e is HdEvent => e.kind !== "Ext"), input.signer, input.programId, input.plan);
   const t = new KeyTable();
   t.idx(input.signer);
   const accounts = ix.accounts.map((k) => t.idx(k));

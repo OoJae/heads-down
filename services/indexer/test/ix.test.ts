@@ -1,6 +1,6 @@
 /**
- * heads_down instruction decoding against programs/heads-down/vectors/instructions.json: all 15
- * instructions, both auth paths, 25 vectors executed in LiteSVM on a fork of live mainnet ORE.
+ * heads_down instruction decoding against programs/heads-down/vectors/instructions.json: all 32
+ * instructions, both auth paths, 47 vectors executed in LiteSVM on a fork of live mainnet ORE.
  * Every data field (name, offset, size, value) and every account role must match.
  */
 import { readFileSync } from "node:fs";
@@ -22,12 +22,12 @@ interface Vector {
 const file = JSON.parse(readFileSync(FILE, "utf8")) as { interface_version: string; program_id: string; instructions: Vector[] };
 
 describe("instructions.json (program golden file)", () => {
-  it("is v1.1 and covers all 15 instructions with 25 vectors", () => {
-    expect(file.interface_version).toBe("1.1");
+  it("is v1.3 and covers all 32 instructions with 47 vectors", () => {
+    expect(file.interface_version).toBe("1.3");
     expect(file.program_id).toBe("HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p");
-    expect(file.instructions).toHaveLength(25);
-    expect(new Set(file.instructions.map((v) => v.tag)).size).toBe(15);
-    expect(Object.keys(HD_IX)).toHaveLength(15);
+    expect(file.instructions).toHaveLength(47);
+    expect(new Set(file.instructions.map((v) => v.tag)).size).toBe(32);
+    expect(Object.keys(HD_IX)).toHaveLength(32);
   });
 
   for (const v of file.instructions) {
@@ -82,7 +82,13 @@ describe("instruction decoding: negative cases", () => {
   });
 
   it("enforces the program's own field rules", () => {
-    expect(() => decodeHdInstruction(new Uint8Array([15]))).toThrow(/BAD_TAG/);
+    expect(() => decodeHdInstruction(new Uint8Array([32]))).toThrow(/BAD_TAG/);
+    // stack_checkin takes 1..=8 seats (dig takes up to 32 rigs).
+    expect(() => decodeHdInstruction(new Uint8Array([17, 9, ...new Uint8Array(180)]))).toThrow(/BAD_LENGTH/);
+    // create_gift: recipient_kind is 0 (wallet) or 1 (SGT mint)
+    const gift = fromHex(hex("create_gift_wallet"));
+    gift[9] = 2;
+    expect(() => decodeHdInstruction(gift)).toThrow(/BAD_FIELD/);
     expect(() => decodeHdInstruction(new Uint8Array())).toThrow(/BAD_LENGTH/);
     // dig with n = 0, and n inconsistent with the length
     expect(() => decodeHdInstruction(new Uint8Array([6, 0]))).toThrow(/BAD_LENGTH/);
@@ -107,7 +113,7 @@ describe("instruction decoding: negative cases", () => {
     for (let i = 0; i < 4000; i++) {
       const len = rnd() % 120;
       const b = Uint8Array.from({ length: len }, rnd);
-      if (len > 0) b[0] = rnd() % 16;
+      if (len > 0) b[0] = rnd() % 34;
       try {
         decodeHdInstruction(b);
       } catch (e) {

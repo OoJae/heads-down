@@ -8,6 +8,7 @@ import type { ExtractedTx } from "../codec/tx.ts";
 import type { OreResetEvent } from "../codec/ore.ts";
 import type { OreRoundAccount } from "../codec/round.ts";
 import type { ConfigAccount, RigAccount, SeekerSeatAccount, ShiftLogAccount } from "../codec/accounts.ts";
+import { SKR_SUM_FIELDS, type BuryState, type SkrEventGroup, type SkrSumField } from "../metrics/skr.ts";
 import type {
   ArmRow,
   ClosedRow,
@@ -147,6 +148,7 @@ export class Store {
       const closed: Param[][] = [];
       const recorded: Param[][] = [];
       const broken: Param[][] = [];
+      const ext: Param[][] = [];
       const heartbeats: Param[][] = [];
       const plans: Param[][] = [];
       const deploys: Param[][] = [];
@@ -189,6 +191,12 @@ export class Store {
               break;
           }
         }
+        for (const { index, event: e, raw } of x.hdExtEvents) {
+          const rig = typeof e.fields.rig === "string" ? e.fields.rig : null;
+          // u64 / i64 as strings: a JSON number cannot hold them.
+          const fields = JSON.stringify(e.fields, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
+          ext.push([...base, index, x.slot, x.blockTime, e.tag, e.name, rig, fields, raw]);
+        }
         for (const h of x.heartbeats) {
           heartbeats.push([
             d, x.signature, h.ixIndex, h.entryIndex, x.slot, x.blockTime, h.rig, h.authority, h.kind, h.fresh, s(h.counter),
@@ -220,6 +228,7 @@ export class Store {
       await insertMany(db, "ev_rig_closed", [...ev, "raw"], closed);
       await insertMany(db, "ev_heartbeats_recorded", [...ev, "round_id", "dark_rounds_added", "raw"], recorded);
       await insertMany(db, "ev_shift_broken", [...ev, "shift_id", "reason", "raw"], broken);
+      await insertMany(db, "ev_ext", ["dataset", "signature", "idx", "slot", "block_time", "tag", "name", "rig", "fields", "raw"], ext);
       await insertMany(
         db,
         "hd_heartbeats",
@@ -563,6 +572,50 @@ export class Store {
       problems: problems.map((p) => ({ code: p.code, count: num(p.n) })),
       lastSlot: optNum(t?.last_slot),
       lastBlockTime: optNum(t?.last_bt),
+    };
+  }
+
+  // ------------------------------------------------------------------ SKR (v1.2 events)
+
+  /** Counts and sums of the SKR events (tags 11..=23), grouped by name and by their kind-like field. */
+  async skrEventGroups(): Promise<SkrEventGroup[]> {
+    // Guarded by a digits test: a name can be an amount in one event and an address in another
+    // (`bond` is the bonded SKR of a Stack event and the FocusBond account of a bond event).
+    const sums = SKR_SUM_FIELDS.map((f) => `COALESCE(sum(CASE WHEN fields->>'${f}' ~ '^[0-9]+$' THEN (fields->>'${f}')::numeric END), 0)::text AS ${f}`).join(", ");
+    const rows = await this.db.query<Record<string, unknown>>(
+      `SELECT name,
+              COALESCE(fields->>'kind', fields->>'recipient_kind', fields->>'source_kind', fields->>'result') AS variant,
+              count(*)::int AS n, ${sums}
+       FROM ev_ext WHERE dataset = $1 AND tag >= 11 AND tag <= 23
+       GROUP BY 1, 2 ORDER BY 1, 2`,
+      [this.dataset],
+    );
+    return rows.map((r) => ({
+      name: r.name as string,
+      variant: optNum(r.variant),
+      count: num(r.n),
+      sums: Object.fromEntries(SKR_SUM_FIELDS.map((f) => [f, big(r[f])])) as Record<SkrSumField, bigint>,
+    }));
+  }
+
+  /** The Bury auction after its latest event, or null before the first lot. */
+  async buryState(): Promise<BuryState | null> {
+    const latest = (name: string) =>
+      this.db.query<{ name: string; fields: unknown }>(
+        `SELECT name, fields::text AS fields FROM ev_ext WHERE dataset = $1 AND name = ANY($2::text[])
+         ORDER BY slot DESC, signature DESC, idx DESC LIMIT 1`,
+        [this.dataset, name],
+      );
+    const parse = (r: { fields: unknown } | undefined) => (r ? (JSON.parse(r.fields as string) as Record<string, string | number>) : null);
+    const any = parse((await latest("{BuryLotAdded,BuryAuctionSold}"))[0]);
+    if (!any) return null;
+    const lot = parse((await latest("{BuryLotAdded}"))[0]);
+    const sale = parse((await latest("{BuryAuctionSold}"))[0]);
+    return {
+      lotSkr: BigInt(any.lot_skr ?? any.lot_remaining ?? 0),
+      lastPrice: sale ? BigInt(sale.price ?? 0) : null,
+      startPrice: lot ? BigInt(lot.start_price ?? 0) : null,
+      startSlot: lot ? BigInt(lot.start_slot ?? 0) : null,
     };
   }
 

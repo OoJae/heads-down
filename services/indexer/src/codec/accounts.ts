@@ -11,6 +11,12 @@ import { rigAddress, seekerSeatAddress, shiftLogAddress, canonicalProgramAddress
 export const ACCOUNT_TAG = { Config: 1, Rig: 2, SeekerSeat: 3, ShiftLog: 4 } as const;
 export const ACCOUNT_SIZE = { Config: 256, Rig: 384, SeekerSeat: 128, ShiftLog: 128 } as const;
 export const ACCOUNT_VERSION = 1;
+/**
+ * Account tags the program owns that the indexer does not snapshot (v1.2: StackTable, StackSeat,
+ * FocusBond, GiftEscrow, BuryVault; v1.3: the RigTombstone a closed rig leaves at its PDA). Their
+ * history is in the events (ev_ext); a tombstone is a closed rig.
+ */
+export const UNINDEXED_ACCOUNT_TAGS: ReadonlySet<number> = new Set([5, 6, 7, 8, 9, 10]);
 const ZERO_ADDRESS = "11111111111111111111111111111111";
 
 export const RIG_STATE_NAMES = ["Idle", "Armed", "Down", "Cooling", "Broken", "Frozen"] as const;

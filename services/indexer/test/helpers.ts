@@ -1,8 +1,46 @@
+import { readFileSync } from "node:fs";
 import { encodeBase58 } from "../src/codec/base58.ts";
+import { fromHex } from "../src/codec/bytes.ts";
+import { decodeHdEvent, type HdEvent, type HdExtEvent } from "../src/codec/events.ts";
 import type { RawTransaction } from "../src/codec/tx.ts";
+import { buildEventTx } from "../src/sim/txbuilder.ts";
 
 export const addr = (n: number) => encodeBase58(Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + n) & 0xff));
 export const sig = (n: number) => encodeBase58(Uint8Array.from({ length: 64 }, (_, i) => (i * 13 + n + 1) & 0xff));
+
+export interface GoldenVector {
+  name: string;
+  tag: number;
+  step: number;
+  data_hex: string;
+  accounts: { role: string; pubkey: string }[];
+  transaction: { fee_payer: string };
+  litesvm: { events?: { event: string; hex: string; fields: Record<string, string | number> }[] };
+}
+/** The program's golden instruction vectors (real LiteSVM runs on a fork of live mainnet ORE). */
+export const GOLDEN_VECTORS = JSON.parse(readFileSync(new URL("../../../programs/heads-down/vectors/instructions.json", import.meta.url), "utf8")) as {
+  program_id: string;
+  instructions: GoldenVector[];
+};
+export function goldenVector(name: string): GoldenVector {
+  const v = GOLDEN_VECTORS.instructions.find((i) => i.name === name);
+  if (!v) throw new Error(`no golden vector ${name}`);
+  return v;
+}
+/** A transaction rebuilt from a golden vector: its instruction data, its accounts and the events the program logged. */
+export function goldenTx(name: string, signature: string, slot: number): RawTransaction {
+  const v = goldenVector(name);
+  const events = (v.litesvm.events ?? []).map((e) => decodeHdEvent(fromHex(e.hex)) as HdEvent | HdExtEvent);
+  return buildEventTx({
+    signature,
+    slot,
+    blockTime: 1_790_800_000 + slot,
+    signer: v.transaction.fee_payer,
+    programId: GOLDEN_VECTORS.program_id,
+    events,
+    ix: { data: fromHex(v.data_hex), accounts: v.accounts.map((a) => a.pubkey) },
+  });
+}
 
 export interface FakeChain {
   /** address -> signatures, oldest first */

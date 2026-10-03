@@ -27,6 +27,7 @@ import {
   type MetricsOptions,
 } from "../metrics/metrics.ts";
 import { DAY, MAX_TZ_OFFSET, MIN_TZ_OFFSET, formatTzOffset } from "../metrics/time.ts";
+import { computeSkrSummary } from "../metrics/skr.ts";
 import { HD_ERROR, P256_INTROSPECT_NAMES, P256_INTROSPECT_BASE, hdErrorName, hdErrorRange, skipLabel } from "../codec/events.ts";
 import { isAddress, isSignature } from "../codec/base58.ts";
 import { toCsv } from "./csv.ts";
@@ -251,6 +252,11 @@ export function createApiServer(deps: ApiDeps): http.Server {
       });
     },
 
+    "/v1/skr/summary": async (_q, res) => {
+      const [groups, bury] = await Promise.all([deps.store.skrEventGroups(), deps.store.buryState()]);
+      ok(res, computeSkrSummary(groups, bury));
+    },
+
     "/v1/milestones": async (q, res) => {
       const tz = intParam(q, "tz", deps.defaultTzOffsetMinutes, MIN_TZ_OFFSET, MAX_TZ_OFFSET);
       const input = await loadInput();
@@ -411,6 +417,7 @@ export const API_ROUTES = [
   "/v1/digs/recent",
   "/v1/skips",
   "/v1/milestones",
+  "/v1/skr/summary",
   "/v1/rigs/{rig}/haul/latest",
   "/v1/rigs/{rig}/haul/{shift_id}",
   "/v1/rigs/{rig}/shifts",

@@ -6,6 +6,7 @@ import { parseProgramData } from "../src/codec/logs.ts";
 import { TxShapeError, extractTransaction, type RawTransaction } from "../src/codec/tx.ts";
 import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID, ORE_BOARD, ORE_PROGRAM_ID } from "../src/constants.ts";
 import { buildDigTx, buildEventTx, buildRecordTx, encodeOreDeployEvent } from "../src/sim/txbuilder.ts";
+import { GOLDEN_VECTORS, goldenTx, goldenVector } from "./helpers.ts";
 
 const HD = HEADS_DOWN_PROGRAM_ID;
 const OPTS = { programId: HD, executorPda: EXECUTOR_PDA };
@@ -266,6 +267,38 @@ describe("extractTransaction", () => {
       ["record", addr(2), false, null],
     ]);
     expect(x.hdEvents.map((e) => e.event.kind)).toEqual(["HeartbeatsRecorded", "RigSkipped"]);
+  });
+
+  it("reads stack_checkin from the program's golden vectors: verify mode applies heartbeats, observe mode none", () => {
+    const x = extractTransaction(goldenTx("stack_checkin_heartbeat", sig(40), 40), OPTS);
+    expect(x.problems).toEqual([]);
+    expect(x.hdInstructions.map((h) => h.ix.name)).toEqual(["stack_checkin"]);
+    // A heartbeat verified at a table logs HeartbeatsRecorded (v1.1 bytes), then the seat's StackCheckin.
+    expect(x.hdEvents.map((e) => e.event.kind)).toEqual(["HeartbeatsRecorded", "HeartbeatsRecorded", "HeartbeatsRecorded"]);
+    expect(x.hdExtEvents.map((e) => [e.event.name, e.event.fields.result, e.event.fields.round_id])).toEqual(Array(3).fill(["StackCheckin", 0, 422_702n]));
+    expect([...x.hdEvents, ...x.hdExtEvents].map((e) => e.index).sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+    const rigs = goldenVector("stack_checkin_heartbeat").accounts.filter((a) => a.role.startsWith("rig[")).map((a) => a.pubkey);
+    expect(rigs).toHaveLength(3);
+    // Stored as `record`: the program applies it exactly as record_heartbeats does, so the haul counts its lease.
+    expect(x.heartbeats.map((h) => [h.kind, h.rig, h.fresh, h.applied, h.boardRound, h.hbRound, h.leaseRounds, h.authority])).toEqual(
+      rigs.map((r) => ["record", r, true, true, 422_702n, 422_702n, 1, null]),
+    );
+
+    const o = extractTransaction(goldenTx("stack_checkin_observe", sig(41), 41), OPTS);
+    expect(o.problems).toEqual([]);
+    expect(o.hdEvents).toEqual([]);
+    expect(o.hdExtEvents.map((e) => e.event.fields.result)).toEqual([0, 0, 42]); // the third seat is broken
+    expect(o.heartbeats.map((h) => [h.fresh, h.applied, h.boardRound])).toEqual(Array(3).fill([false, false, 422_703n]));
+  });
+
+  it("keeps the SKR and v1.3 events of every golden vector apart from the v1.1 events", () => {
+    for (const v of GOLDEN_VECTORS.instructions.filter((i) => i.tag >= 15)) {
+      const x = extractTransaction(goldenTx(v.name, sig(50 + v.step), v.step), OPTS);
+      expect(x.problems, v.name).toEqual([]);
+      expect(x.unknownHdEventTags, v.name).toEqual([]);
+      const want = (v.litesvm.events ?? []).filter((e) => Number(e.fields.tag) >= 11).map((e) => e.event);
+      expect(x.hdExtEvents.map((e) => e.event.name), v.name).toEqual(want);
+    }
   });
 
   it("an undecodable heads_down instruction or truncated logs are reported, never guessed", () => {

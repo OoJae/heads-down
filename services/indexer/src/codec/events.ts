@@ -1,6 +1,6 @@
 /**
- * heads_down program events (INTERFACE.md v1.1 §7): logged with `sol_log_data` as ONE slice,
- * byte 0 = tag, then the fields in declaration order, little-endian, no padding.
+ * heads_down program events (INTERFACE.md v1.3: §7, §11.9, §12.8): logged with `sol_log_data` as
+ * ONE slice, byte 0 = tag, then the fields in declaration order, little-endian, no padding.
  *
  *    1 RigDug              rig[32] round_id u64 lamports u64 mask u32 ema_ev u64                       61 B
  *    2 RigSkipped          rig[32] round_id u64 error u32                                              45 B
@@ -12,6 +12,9 @@
  *    8 HeartbeatsRecorded  rig[32] round_id u64 dark_rounds_added u64                                  49 B
  *    9 ShiftBroken         rig[32] shift_id u64 reason u8                                              42 B
  *   10 ShiftEndedV2        tag 4's fields, then start_round u64 end_round u64 mode u8                  83 B
+ *   11..=23 (v1.2, SKR: Stack, Focus Bond, Gift a Rig, Bury auction) and 24..=27 (v1.3: governance
+ *   rotation, ShiftLogClosed): see {@link HD_EVENT_LAYOUTS}. They decode into {@link HdExtEvent},
+ *   a name plus its fields, because the haul and the v1.1 metrics read none of them.
  *
  * {@link HD_EVENT_LAYOUTS} is the single source of truth: decoding and encoding are driven by it,
  * and test/events.test.ts checks it field by field against programs/heads-down/vectors/events.json
@@ -36,18 +39,39 @@ export const HD_EVENT_TAG = {
   HeartbeatsRecorded: 8,
   ShiftBroken: 9,
   ShiftEndedV2: 10,
+  // v1.2 (SKR), INTERFACE §11.9
+  StackOpened: 11,
+  StackJoined: 12,
+  StackCheckin: 13,
+  StackSettled: 14,
+  StackClaimed: 15,
+  FocusBondLocked: 16,
+  FocusBondReleased: 17,
+  FocusBondForfeited: 18,
+  GiftCreated: 19,
+  GiftClaimed: 20,
+  GiftRefunded: 21,
+  BuryLotAdded: 22,
+  BuryAuctionSold: 23,
+  // v1.3, INTERFACE §12.8
+  GovernanceProposed: 24,
+  GovernanceAccepted: 25,
+  GovernanceCancelled: 26,
+  ShiftLogClosed: 27,
 } as const;
 
 export type HdEventKind = keyof typeof HD_EVENT_TAG;
+/** First tag decoded into {@link HdExtEvent} instead of its own interface. */
+export const FIRST_EXT_EVENT_TAG = 11;
 
-export type EventFieldType = "u8" | "u32" | "u64" | "pubkey";
+export type EventFieldType = "u8" | "u32" | "u64" | "i64" | "pubkey";
 export interface EventField {
   /** snake_case, as in INTERFACE.md and events.json. */
   name: string;
   type: EventFieldType;
 }
 
-const FIELD_SIZE: Record<EventFieldType, number> = { u8: 1, u32: 4, u64: 8, pubkey: 32 };
+const FIELD_SIZE: Record<EventFieldType, number> = { u8: 1, u32: 4, u64: 8, i64: 8, pubkey: 32 };
 
 const SHIFT_ENDED_FIELDS: readonly EventField[] = [
   { name: "rig", type: "pubkey" },
@@ -58,7 +82,7 @@ const SHIFT_ENDED_FIELDS: readonly EventField[] = [
   { name: "reason", type: "u8" },
 ];
 
-/** Field layout after the tag byte, per event (INTERFACE.md v1.1 §7). */
+/** Field layout after the tag byte, per event (INTERFACE.md §7, §11.9, §12.8). */
 export const HD_EVENT_LAYOUTS: Record<HdEventKind, readonly EventField[]> = {
   RigDug: [
     { name: "rig", type: "pubkey" },
@@ -104,6 +128,124 @@ export const HD_EVENT_LAYOUTS: Record<HdEventKind, readonly EventField[]> = {
     { name: "start_round", type: "u64" },
     { name: "end_round", type: "u64" },
     { name: "mode", type: "u8" },
+  ],
+  StackOpened: [
+    { name: "table", type: "pubkey" },
+    { name: "host", type: "pubkey" },
+    { name: "table_id", type: "u64" },
+    { name: "bond", type: "u64" },
+    { name: "start_round", type: "u64" },
+    { name: "end_round", type: "u64" },
+    { name: "grace_gaps", type: "u32" },
+    { name: "flags", type: "u8" },
+    { name: "max_seats", type: "u8" },
+  ],
+  StackJoined: [
+    { name: "table", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "authority", type: "pubkey" },
+    { name: "sgt_mint", type: "pubkey" },
+    { name: "bond", type: "u64" },
+    { name: "seat_index", type: "u8" },
+  ],
+  StackCheckin: [
+    { name: "table", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "round_id", type: "u64" },
+    { name: "checked_rounds", type: "u64" },
+    { name: "result", type: "u32" },
+  ],
+  StackSettled: [
+    { name: "table", type: "pubkey" },
+    { name: "total_bonds", type: "u64" },
+    { name: "finisher_bonds", type: "u64" },
+    { name: "payouts_total", type: "u64" },
+    { name: "bury_amount", type: "u64" },
+    { name: "seats", type: "u8" },
+    { name: "finishers", type: "u8" },
+  ],
+  StackClaimed: [
+    { name: "table", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "authority", type: "pubkey" },
+    { name: "amount", type: "u64" },
+    { name: "kind", type: "u8" },
+  ],
+  FocusBondLocked: [
+    { name: "bond", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "authority", type: "pubkey" },
+    { name: "shift_id", type: "u64" },
+    { name: "amount", type: "u64" },
+  ],
+  FocusBondReleased: [
+    { name: "bond", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "shift_id", type: "u64" },
+    { name: "amount", type: "u64" },
+  ],
+  FocusBondForfeited: [
+    { name: "bond", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "shift_id", type: "u64" },
+    { name: "amount", type: "u64" },
+    { name: "reason", type: "u8" },
+  ],
+  GiftCreated: [
+    { name: "gift", type: "pubkey" },
+    { name: "sender", type: "pubkey" },
+    { name: "recipient", type: "pubkey" },
+    { name: "lamports", type: "u64" },
+    { name: "expiry_ts", type: "i64" },
+    { name: "recipient_kind", type: "u8" },
+  ],
+  GiftClaimed: [
+    { name: "gift", type: "pubkey" },
+    { name: "claimer", type: "pubkey" },
+    { name: "lamports", type: "u64" },
+    { name: "recipient_kind", type: "u8" },
+  ],
+  GiftRefunded: [
+    { name: "gift", type: "pubkey" },
+    { name: "sender", type: "pubkey" },
+    { name: "lamports", type: "u64" },
+  ],
+  BuryLotAdded: [
+    { name: "source", type: "pubkey" },
+    { name: "amount", type: "u64" },
+    { name: "lot_skr", type: "u64" },
+    { name: "start_price", type: "u64" },
+    { name: "start_slot", type: "u64" },
+    { name: "source_kind", type: "u8" },
+  ],
+  BuryAuctionSold: [
+    { name: "buyer", type: "pubkey" },
+    { name: "skr_amount", type: "u64" },
+    { name: "price", type: "u64" },
+    { name: "ore_paid", type: "u64" },
+    { name: "ore_burned", type: "u64" },
+    { name: "ore_shared", type: "u64" },
+    { name: "lot_remaining", type: "u64" },
+  ],
+  GovernanceProposed: [
+    { name: "governance", type: "pubkey" },
+    { name: "pending_governance", type: "pubkey" },
+    { name: "eta_slot", type: "u64" },
+    { name: "eta_ts", type: "i64" },
+  ],
+  GovernanceAccepted: [
+    { name: "governance", type: "pubkey" },
+    { name: "previous_governance", type: "pubkey" },
+  ],
+  GovernanceCancelled: [
+    { name: "governance", type: "pubkey" },
+    { name: "cancelled_governance", type: "pubkey" },
+  ],
+  ShiftLogClosed: [
+    { name: "shift_log", type: "pubkey" },
+    { name: "rig", type: "pubkey" },
+    { name: "shift_id", type: "u64" },
+    { name: "lamports", type: "u64" },
   ],
 };
 
@@ -227,9 +369,30 @@ export type HdEvent =
   | ShiftBroken
   | ShiftEndedV2;
 
+/** The v1.2 (SKR) and v1.3 event names: every tag from {@link FIRST_EXT_EVENT_TAG} up. */
+export type HdExtEventKind = Exclude<HdEventKind, HdEvent["kind"]>;
+
+/**
+ * A v1.2 / v1.3 event, decoded by its layout. `fields` keeps the contract's snake_case names:
+ * u8 / u32 are numbers, u64 / i64 bigints, addresses base58.
+ */
+export interface HdExtEvent {
+  kind: "Ext";
+  name: HdExtEventKind;
+  tag: number;
+  fields: Record<string, number | bigint | string>;
+}
+
+/** `StackClaimed.kind`. */
+export const STACK_CLAIM_KIND_NAMES = ["payout", "refund"] as const;
+/** `BuryLotAdded.source_kind` (index = code; 0 is unused). */
+export const BURY_LOT_SOURCE_NAMES = ["unknown", "stack", "focus_bond"] as const;
+/** `FocusBondForfeited.reason` when the bonded shift can never be sealed. */
+export const BOND_ABANDONED = 255;
+
 // ------------------------------------------------------------------ error names
 
-/** heads_down's own codes, INTERFACE.md v1.1 §8 (index = code). */
+/** heads_down's own codes, INTERFACE.md §8, §11.10 (32..=48) and §12.9 (49, 50); index = code. */
 export const HD_ERROR_NAMES: readonly string[] = [
   "InvalidInstruction",
   "CostGate",
@@ -263,6 +426,25 @@ export const HD_ERROR_NAMES: readonly string[] = [
   "OreNoOp",
   "FocusOnly",
   "ExecutorUnderfunded",
+  "InvalidTokenAccount",
+  "AmountOutOfRange",
+  "InvalidStackParams",
+  "StackJoinClosed",
+  "StackIneligible",
+  "StackNotEnded",
+  "InvalidStackState",
+  "StackSeatMismatch",
+  "StackShiftMismatch",
+  "StackLeaseTooLong",
+  "StackSeatBroken",
+  "BondNotResolvable",
+  "GiftNotClaimable",
+  "GiftExpiry",
+  "AuctionEmpty",
+  "PriceAboveMax",
+  "BuryMismatch",
+  "ShiftLogNotExpired",
+  "ShiftLogInUse",
 ];
 export const HD_ERROR = Object.fromEntries(HD_ERROR_NAMES.map((n, i) => [n, i])) as Record<string, number>;
 export const HD_ERROR_COST_GATE = 1;
@@ -405,6 +587,10 @@ const SKIP_LABELS: Readonly<Record<number, string>> = {
   29: "ORE placed nothing",
   30: "focus-only shift: never digs",
   31: "Executor float too low",
+  36: "attestation not live at an attested-only table",
+  40: "seat is bound to another shift of this rig",
+  41: "plan allows leases longer than one round",
+  42: "seat broken: a break or freeze was recorded in its shift",
 };
 const P256_LABELS: Readonly<Record<number, string>> = {
   10: "high-S signature rejected",
@@ -465,12 +651,14 @@ function readField(r: ByteReader, f: EventField): number | bigint | string {
       return r.u32(f.name);
     case "u64":
       return r.u64(f.name);
+    case "i64":
+      return r.i64(f.name);
     case "pubkey":
       return r.address(f.name);
   }
 }
 
-export function decodeHdEvent(data: Uint8Array): HdEvent | UnknownHdEvent {
+export function decodeHdEvent(data: Uint8Array): HdEvent | HdExtEvent | UnknownHdEvent {
   if (data.length === 0) throw new DecodeError("BAD_LENGTH", "empty event");
   const tag = data[0]!;
   const kind = KIND_BY_TAG.get(tag);
@@ -481,6 +669,12 @@ export function decodeHdEvent(data: Uint8Array): HdEvent | UnknownHdEvent {
   }
   const r = new ByteReader(data);
   r.u8("tag");
+  if (tag >= FIRST_EXT_EVENT_TAG) {
+    const fields: Record<string, number | bigint | string> = {};
+    for (const f of HD_EVENT_LAYOUTS[kind]) fields[f.name] = readField(r, f);
+    r.end(`event ${kind}`);
+    return { kind: "Ext", name: kind as HdExtEventKind, tag, fields };
+  }
   const ev: Record<string, unknown> = { kind };
   for (const f of HD_EVENT_LAYOUTS[kind]) ev[camel(f.name)] = readField(r, f);
   r.end(`event ${kind}`);
@@ -497,12 +691,13 @@ function addr(a: string): Uint8Array {
 }
 
 /** Inverse of {@link decodeHdEvent}; used by the simulator and golden tests. */
-export function encodeHdEvent(ev: HdEvent): Uint8Array {
-  const tag = HD_EVENT_TAG[ev.kind];
+export function encodeHdEvent(ev: HdEvent | HdExtEvent): Uint8Array {
+  const kind: HdEventKind = ev.kind === "Ext" ? ev.name : ev.kind;
+  const tag = HD_EVENT_TAG[kind];
   const w = new ByteWriter(HD_EVENT_SIZE[tag]!).u8(tag);
   const rec = ev as unknown as Record<string, unknown>;
-  for (const f of HD_EVENT_LAYOUTS[ev.kind]) {
-    const v = rec[camel(f.name)];
+  for (const f of HD_EVENT_LAYOUTS[kind]) {
+    const v = ev.kind === "Ext" ? ev.fields[f.name] : rec[camel(f.name)];
     switch (f.type) {
       case "u8":
         w.u8(v as number);
@@ -512,6 +707,9 @@ export function encodeHdEvent(ev: HdEvent): Uint8Array {
         break;
       case "u64":
         w.u64(v as bigint);
+        break;
+      case "i64":
+        w.i64(v as bigint);
         break;
       case "pubkey":
         w.bytes(addr(v as string));

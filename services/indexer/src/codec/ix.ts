@@ -1,11 +1,13 @@
 /**
- * heads_down instruction decoder (INTERFACE.md v1.1 §5), all 15 tags, both auth paths.
+ * heads_down instruction decoder (INTERFACE.md v1.3: §5, §11.4, §12.3), all 32 tags, both auth
+ * paths.
  *
  * The indexer reads instruction data for two reasons:
  *  1. The morning haul needs every heartbeat lease a rig was granted (to mark each ORE round of a
  *     shift as dark or not). A heartbeat applied inside `dig` emits no event of its own (§10), so
  *     the lease comes from the `dig` / `record_heartbeats` entry (`round_id`, `lease_rounds`),
- *     and the plan's lease cap from the `arm_shift` data.
+ *     and the plan's lease cap from the `arm_shift` data. A `stack_checkin` entry in verify mode
+ *     applies its heartbeat exactly as `record_heartbeats` does, so it is read the same way.
  *  2. `decode <signature>` prints every heads_down instruction with its fields and account roles.
  *
  * Decoding mirrors the program's strictness: exact data length per tag and mode, `n` in 1..=32,
@@ -30,11 +32,30 @@ export const HD_IX = {
   propose_config: 12,
   apply_config: 13,
   close_rig: 14,
+  // v1.2 (SKR), INTERFACE §11.4
+  open_stack: 15,
+  join_stack: 16,
+  stack_checkin: 17,
+  settle_stack: 18,
+  claim_stack: 19,
+  lock_focus_bond: 20,
+  release_focus_bond: 21,
+  forfeit_focus_bond: 22,
+  create_gift: 23,
+  claim_gift: 24,
+  refund_gift: 25,
+  init_bury_vault: 26,
+  bury_auction_buy: 27,
+  // v1.3, INTERFACE §12.3
+  propose_governance: 28,
+  accept_governance: 29,
+  cancel_governance: 30,
+  close_shift_log: 31,
 } as const;
 export type HdIxName = keyof typeof HD_IX;
 const NAME_BY_TAG = new Map<number, HdIxName>(Object.entries(HD_IX).map(([k, v]) => [v, k as HdIxName]));
 
-export type IxFieldType = "u8" | "u16" | "u64" | "i64" | "pubkey" | "[u8;33]" | "[u8;32]";
+export type IxFieldType = "u8" | "u16" | "u32" | "u64" | "i64" | "pubkey" | "[u8;33]" | "[u8;32]";
 export interface IxField {
   /** snake_case, as in instructions.json (`entry[i].counter` for per-rig entries). */
   name: string;
@@ -58,6 +79,8 @@ export interface HeartbeatEntry {
 }
 export const NO_HEARTBEAT = 0xff;
 export const MAX_RIGS_PER_IX = 32;
+/** `stack_checkin`: seats per instruction at most (INTERFACE §11.4, tag 17). */
+export const MAX_SEATS_PER_CHECKIN = 8;
 export const ENTRY_LEN = 20;
 
 export interface ArmPlan {
@@ -78,7 +101,7 @@ export interface DecodedHdIx {
   tag: number;
   name: HdIxName;
   fields: IxField[];
-  /** dig / record_heartbeats only. */
+  /** dig / record_heartbeats / stack_checkin only. */
   entries: HeartbeatEntry[];
   /** arm_shift only. */
   plan: ArmPlan | null;
@@ -103,6 +126,10 @@ class FieldReader {
   u16(name: string): number {
     const v = this.r.u16(name);
     return this.push(name, "u16", 2, v) as number;
+  }
+  u32(name: string): number {
+    const v = this.r.u32(name);
+    return this.push(name, "u32", 4, v) as number;
   }
   u64(name: string): bigint {
     const v = this.r.u64(name);
@@ -135,11 +162,11 @@ function zeroOrOne(v: number, what: string): void {
   if (v !== 0 && v !== 1) throw new DecodeError("BAD_FIELD", `${what} must be 0 or 1, got ${v}`);
 }
 
-function readEntries(f: FieldReader, data: Uint8Array, name: string): HeartbeatEntry[] {
+function readEntries(f: FieldReader, data: Uint8Array, name: string, max = MAX_RIGS_PER_IX): HeartbeatEntry[] {
   if (data.length < 2) throw new DecodeError("BAD_LENGTH", `${name}: missing n`);
   const n = f.u8("n");
-  if (n === 0 || n > MAX_RIGS_PER_IX || data.length !== 2 + ENTRY_LEN * n) {
-    throw new DecodeError("BAD_LENGTH", `${name}: n=${n} with ${data.length} bytes (need 2 + 20n, n in 1..=32)`);
+  if (n === 0 || n > max || data.length !== 2 + ENTRY_LEN * n) {
+    throw new DecodeError("BAD_LENGTH", `${name}: n=${n} with ${data.length} bytes (need 2 + 20n, n in 1..=${max})`);
   }
   const out: HeartbeatEntry[] = [];
   for (let i = 0; i < n; i++) {
@@ -251,11 +278,56 @@ export function decodeHdInstruction(data: Uint8Array): DecodedHdIx {
       zeroOrOne(f.u8("paused"), "paused");
       break;
     }
+    case "open_stack":
+      exactLen(name, data, 39);
+      f.u64("table_id");
+      f.u64("bond");
+      f.u64("start_round");
+      f.u64("end_round");
+      f.u32("grace_gaps");
+      f.u8("flags");
+      f.u8("max_seats");
+      break;
+    case "stack_checkin":
+      out.entries = readEntries(f, data, name, MAX_SEATS_PER_CHECKIN);
+      break;
+    case "lock_focus_bond":
+      exactLen(name, data, 17);
+      f.u64("shift_id");
+      f.u64("amount");
+      break;
+    case "create_gift":
+      exactLen(name, data, 50);
+      f.u64("nonce");
+      zeroOrOne(f.u8("recipient_kind"), "recipient_kind");
+      f.pubkey("recipient");
+      f.u64("lamports");
+      break;
+    case "bury_auction_buy":
+      exactLen(name, data, 17);
+      f.u64("skr_amount");
+      f.u64("max_ore");
+      break;
+    case "propose_governance":
+      exactLen(name, data, 33);
+      f.pubkey("new_governance");
+      break;
     case "verify_seeker":
     case "unfreeze_rig":
     case "end_shift":
     case "apply_config":
     case "close_rig":
+    case "join_stack":
+    case "settle_stack":
+    case "claim_stack":
+    case "release_focus_bond":
+    case "forfeit_focus_bond":
+    case "claim_gift":
+    case "refund_gift":
+    case "init_bury_vault":
+    case "accept_governance":
+    case "cancel_governance":
+    case "close_shift_log":
       exactLen(name, data, 1);
       break;
   }
@@ -278,6 +350,9 @@ const DIG_FIXED = [
   "instructions_sysvar",
 ];
 const DIG_PER_RIG = ["rig", "authority", "ore_automation", "ore_miner"];
+const CHECKIN_FIXED = ["ore_board", "instructions_sysvar", "stack_table"];
+const CHECKIN_PER_SEAT = ["stack_seat", "rig"];
+const SETTLE_FIXED = ["stack_table", "ore_board", "table_skr_vault", "bury_vault", "bury_skr_vault", "token_program"];
 
 /**
  * Role of every account of an instruction, as instructions.json names them. Optional trailing
@@ -330,19 +405,76 @@ export function hdAccountRoles(ix: DecodedHdIx, count: number): string[] {
     case "close_rig":
       roles = ["authority", "rig", "seeker_seat"];
       break;
+    case "open_stack":
+      roles = ["host", "stack_table", "table_skr_vault", "ore_board", "system_program"];
+      break;
+    case "join_stack":
+      roles = ["authority", "rig", "stack_table", "stack_seat", "authority_skr", "table_skr_vault", "ore_board", "token_program", "system_program", "sgt_token_account", "sgt_mint"];
+      break;
+    case "stack_checkin":
+      roles = [...CHECKIN_FIXED];
+      for (let i = 0; i < ix.entries.length; i++) roles.push(...CHECKIN_PER_SEAT.map((r) => `${r}[${i}]`));
+      break;
+    case "settle_stack":
+      // One StackSeat per seat of the table after the fixed accounts.
+      roles = [...SETTLE_FIXED];
+      for (let i = 0; i < Math.max(0, count - SETTLE_FIXED.length); i++) roles.push(`stack_seat[${i}]`);
+      break;
+    case "claim_stack":
+      roles = ["stack_table", "stack_seat", "seat_authority", "authority_skr", "table_skr_vault", "token_program"];
+      break;
+    case "lock_focus_bond":
+      roles = ["authority", "rig", "focus_bond", "authority_skr", "bond_skr_vault", "shift_log", "token_program", "system_program"];
+      break;
+    case "release_focus_bond":
+      roles = ["focus_bond", "shift_log", "bond_skr_vault", "authority_skr", "authority", "token_program"];
+      break;
+    case "forfeit_focus_bond":
+      roles = ["focus_bond", "shift_log", "rig", "bond_skr_vault", "bury_vault", "bury_skr_vault", "authority", "token_program"];
+      break;
+    case "create_gift":
+      roles = ["sender", "gift_escrow", "system_program"];
+      break;
+    case "claim_gift":
+      roles = ["claimer", "gift_escrow", "sender", "sgt_token_account", "sgt_mint"];
+      break;
+    case "refund_gift":
+      roles = ["gift_escrow", "sender"];
+      break;
+    case "init_bury_vault":
+      roles = ["payer", "bury_vault", "system_program"];
+      break;
+    case "bury_auction_buy":
+      roles = [
+        "buyer", "buyer_ore", "buyer_skr", "bury_vault", "bury_ore_vault", "bury_skr_vault", "ore_board", "ore_mint", "ore_treasury",
+        "ore_treasury_ore", "ore_stake_treasury", "ore_stake_treasury_ore", "ore_stake_vesting", "token_program", "ore_program", "ore_stake_program",
+      ];
+      break;
+    case "propose_governance":
+    case "cancel_governance":
+      roles = ["governance", "config"];
+      break;
+    case "accept_governance":
+      roles = ["new_governance", "config"];
+      break;
+    case "close_shift_log":
+      roles = ["shift_log", "rent_recipient", "focus_bond"];
+      break;
   }
   const out = roles.slice(0, count);
   for (let k = out.length; k < count; k++) out.push(`extra[${k - roles.length}]`);
   return out;
 }
 
-/** Account position of the rig for entry `i` of a dig / record_heartbeats, or of a single-rig instruction. */
+/** Account position of the rig for entry `i` of a dig / record_heartbeats / stack_checkin, or of a single-rig instruction. */
 export function rigAccountIndex(ix: DecodedHdIx, entry = 0): number | null {
   switch (ix.name) {
     case "dig":
       return DIG_FIXED.length + DIG_PER_RIG.length * entry;
     case "record_heartbeats":
       return 2 + entry;
+    case "stack_checkin":
+      return CHECKIN_FIXED.length + CHECKIN_PER_SEAT.length * entry + 1;
     case "arm_shift":
     case "break_shift":
     case "freeze_rig":
@@ -354,7 +486,11 @@ export function rigAccountIndex(ix: DecodedHdIx, entry = 0): number | null {
     case "rotate_key":
     case "end_shift":
     case "close_rig":
+    case "join_stack":
+    case "lock_focus_bond":
       return 1;
+    case "forfeit_focus_bond":
+      return 2;
     default:
       return null;
   }

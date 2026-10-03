@@ -10,6 +10,7 @@ import { encodeBase58 } from "../src/codec/base58.ts";
 import { fromHex, toHex } from "../src/codec/bytes.ts";
 import {
   BREAK_REASON_NAMES,
+  FIRST_EXT_EVENT_TAG,
   HD_ERROR_NAMES,
   HD_EVENT_LAYOUTS,
   HD_EVENT_SIZE,
@@ -24,6 +25,7 @@ import {
   skipLabel,
   type HdEvent,
   type HdEventKind,
+  type HdExtEvent,
 } from "../src/codec/events.ts";
 
 // ---------------------------------------------------------------- the program's golden file
@@ -48,9 +50,10 @@ const golden = JSON.parse(readFileSync(EVENTS_JSON, "utf8")) as { format: string
 const camel = (s: string) => s.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
 
 describe("events.json (program golden file): drift check", () => {
-  it("is the v1.1 golden file", () => {
+  it("is the v1.3 golden file: the v1.1 core, the v1.2 SKR events and the v1.3 events", () => {
     expect(golden.format).toBe("heads-down/golden-events");
-    expect(golden.interface_version).toBe("1.1");
+    expect(golden.interface_version).toBe("1.3");
+    expect(golden.events.map((e) => e.tag)).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
   });
 
   it("covers exactly the tags the indexer decodes", () => {
@@ -71,7 +74,19 @@ describe("events.json (program golden file): drift check", () => {
         const bytes = fromHex(e.sample.hex);
         expect(Buffer.from(e.sample.base64, "base64").toString("hex")).toBe(e.sample.hex);
         expect(bytes.length).toBe(e.length);
-        const ev = decodeHdEvent(bytes) as unknown as Record<string, unknown>;
+        const decoded = decodeHdEvent(bytes);
+        if (e.tag >= FIRST_EXT_EVENT_TAG) {
+          // v1.2 / v1.3: a name plus its fields under the contract's own snake_case names.
+          const ext = decoded as HdExtEvent;
+          expect({ kind: ext.kind, name: ext.name, tag: ext.tag }).toEqual({ kind: "Ext", name: e.event, tag: e.tag });
+          for (const [name, want] of Object.entries(e.sample.fields)) {
+            if (name === "tag") continue;
+            expect(String(ext.fields[name]), `${e.event}.${name}`).toBe(String(want));
+          }
+          expect(Object.keys(ext.fields)).toEqual(HD_EVENT_LAYOUTS[kind].map((f) => f.name));
+          return;
+        }
+        const ev = decoded as unknown as Record<string, unknown>;
         expect(ev.kind).toBe(e.event);
         for (const [name, want] of Object.entries(e.sample.fields)) {
           if (name === "tag") continue;
@@ -81,7 +96,7 @@ describe("events.json (program golden file): drift check", () => {
       });
 
       it("re-encodes to the captured bytes", () => {
-        const ev = decodeHdEvent(fromHex(e.sample.hex)) as HdEvent;
+        const ev = decodeHdEvent(fromHex(e.sample.hex)) as HdEvent | HdExtEvent;
         expect(toHex(encodeHdEvent(ev))).toBe(e.sample.hex);
       });
     });
@@ -175,8 +190,10 @@ describe("heads_down events: negative cases", () => {
   });
 
   it("reports unknown tags without guessing a layout", () => {
-    expect(decodeHdEvent(new Uint8Array([11, 1, 2, 3]))).toEqual({ kind: "Unknown", tag: 11, length: 4 });
+    expect(decodeHdEvent(new Uint8Array([28, 1, 2, 3]))).toEqual({ kind: "Unknown", tag: 28, length: 4 });
     expect(decodeHdEvent(new Uint8Array([0x00]))).toEqual({ kind: "Unknown", tag: 0, length: 1 });
+    // A known v1.2 tag with the wrong length is an error, never a guess.
+    expect(() => decodeHdEvent(new Uint8Array([11, 1, 2, 3]))).toThrow(/BAD_LENGTH: event tag 11 must be 103 bytes, got 4/);
   });
 
   it("never throws anything but DecodeError on random input", () => {
@@ -185,7 +202,7 @@ describe("heads_down events: negative cases", () => {
     for (let i = 0; i < 4000; i++) {
       const len = rnd() % 100;
       const b = Uint8Array.from({ length: len }, rnd);
-      if (len > 0) b[0] = rnd() % 12;
+      if (len > 0) b[0] = rnd() % 30;
       try {
         decodeHdEvent(b);
       } catch (e) {
@@ -195,9 +212,18 @@ describe("heads_down events: negative cases", () => {
   });
 });
 
-describe("error codes, ranges, labels and break reasons (INTERFACE v1.1 §8, §3.5)", () => {
-  it("names heads_down codes 0..31, including the v1.1 codes 24..31", () => {
-    expect(HD_ERROR_NAMES).toHaveLength(32);
+describe("error codes, ranges, labels and break reasons (INTERFACE §8, §11.10, §12.9, §3.5)", () => {
+  it("names heads_down codes 0..50: the v1.1 core, the v1.2 SKR codes 32..48 and v1.3's 49 and 50", () => {
+    expect(HD_ERROR_NAMES).toHaveLength(51);
+    expect([32, 36, 42, 43, 48, 49, 50].map(hdErrorName)).toEqual([
+      "InvalidTokenAccount",
+      "StackIneligible",
+      "StackSeatBroken",
+      "BondNotResolvable",
+      "BuryMismatch",
+      "ShiftLogNotExpired",
+      "ShiftLogInUse",
+    ]);
     expect([24, 25, 26, 27, 28, 29, 30, 31].map(hdErrorName)).toEqual([
       "InvalidRigState",
       "RoundNotActive",
@@ -224,7 +250,8 @@ describe("error codes, ranges, labels and break reasons (INTERFACE v1.1 §8, §3
     expect(hdErrorRange(0x2560_000e)).toBe("p256-introspect");
     expect(hdErrorRange(0x5347_0001)).toBe("sgt-verify");
     expect(hdErrorRange(31)).toBe("heads_down");
-    expect(hdErrorRange(32)).toBe("unknown");
+    expect(hdErrorRange(50)).toBe("heads_down");
+    expect(hdErrorRange(51)).toBe("unknown");
     // A builtin ProgramError inside a skip: u32::MAX - k (program/src/error.rs skip_code).
     expect(hdErrorName(0xffff_ffff - 3)).toBe("builtin InvalidAccountData (u32::MAX - 3)");
     expect(hdErrorRange(0xffff_ffff)).toBe("builtin");
@@ -235,7 +262,9 @@ describe("error codes, ranges, labels and break reasons (INTERFACE v1.1 §8, §3
     expect(skipLabel(8)).toBe("phone went quiet: no heartbeat lease covers this round");
     expect(skipLabel(1)).toMatch(/price gate closed/);
     expect(skipLabel(0x2560_000e)).toMatch(/signed message did not match/);
-    for (let c = 0; c < 32; c++) expect(skipLabel(c)).not.toMatch(/\b(earn|yield|stake|profit|income)\b/i);
+    // A Stack check-in result is one of these codes too.
+    expect(skipLabel(42)).toMatch(/seat broken/);
+    for (let c = 0; c <= 50; c++) expect(skipLabel(c)).not.toMatch(/\b(earn|yield|stake|profit|income)\b/i);
   });
 
   it("knows which skips come after a verified heartbeat (its lease was granted)", () => {
