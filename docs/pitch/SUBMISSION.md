@@ -144,8 +144,9 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - **Built, not on a device:** clock-in is one Quick Settings tile tap and one wallet approval. The
   one transaction bundles ORE `automate`, rig registration, caps and arming (677 bytes as legacy).
   `android/INTERFACE-NOTES.md` §3
-- **Built, not on a device:** heartbeats need no wallet prompt. The rig key signs with the screen
-  off, and on-chain caps bound what it can do. `crates/p256-introspect/README.md`,
+- **On an emulator:** heartbeats need no wallet prompt. The rig key signs with the screen
+  off, and on-chain caps bound what it can do. In the real app on an Android 14 emulator, a
+  Keystore-signed heartbeat dug a round on a fork of mainnet (`scripts/devstack/emulator-smoke.sh`). `crates/p256-introspect/README.md`,
   `android/README.md`
 - **Built, not on a device:** fail-safe. If the OS kills the shift service, the rig goes cold and
   nothing is spent, and a health check reports it. `android/README.md`,
@@ -200,7 +201,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - The demo shows a replayed heartbeat skipped with `StaleHeartbeat` and a fresh one digging, on a
   block explorer. `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 168, registrar 105, `p256-introspect` 30, `sgt-verify` host 69,
-  indexer 347, dashboard 48, Android 846. `docs/pitch/DECK.md` slide 14
+  indexer 347, dashboard 48, Android 853. `docs/pitch/DECK.md` slide 14
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
   with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 

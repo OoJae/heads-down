@@ -54,6 +54,14 @@ has a regression test, named in the tables.
 |---|---|---|---|
 | The app decoded whatever sat at a wallet's Rig, Focus Bond, ShiftLog, ORE Automation, ORE Miner and SKR addresses. Anyone can send lamports to such an address before its program creates the account (about 0.00065 SOL at today's rent), and the app then failed to build every clock-in and clock-out for that wallet. A closed rig's 32-byte tombstone had the same effect, and a clock-in over one would have armed the wrong shift id. The program itself always handled both | medium (the app only; no funds at risk) | **Fixed.** An address that holds only lamports reads as not created. A tombstone reads as a closed rig, and the next clock-in resumes its `shift_id` and `hb_counter` | `android/core/chain`: `AccountBytes.kt` (`ifCreated`), `HeadsDownAccounts.rigSlot`; test `AbsentAccountsTest` |
 
+## 2b. Found by running the app on an emulator
+
+| Finding | Severity | Status | Where |
+|---|---|---|---|
+| A Night Shift's plan window was a fixed 8 hours from clock-in. Inside the window a pickup is a BREAK, so anyone whose alarm rang earlier had a full night sealed as ended early: no streak, and a Focus Bond on it forfeit | medium (a user's bonded SKR, on an ordinary night) | **Fixed.** The window ends two minutes before the user's own next alarm when there is one for the morning; the home screen says until when a shift started now would run and that a pickup before then ends it early | `android/app`: `ShiftWindow.kt`; test `ShiftWindowTest` |
+| Sealing a shift makes the wallet pay the rent of its log (about 0.0013 SOL, reclaimable after 30 days), and no screen said so | low (disclosure) | **Fixed.** The clock-out screen states the amount; the clock-in disclosure says it in words | `ClockOutCopy.rent`; test `sealing a shift states the log's rent` |
+| The fourth Focus Bond choice did not fit its row and was drawn one letter per line | cosmetic | **Fixed.** The choices wrap; a test measures real text | `HomeScreen.kt`; test `every Focus Bond choice stays on one line on a narrow phone` |
+
 ## 3. Open, and stated plainly
 
 These are true of what is deployed. None of them lets anyone take a user's mining funds, which
@@ -89,9 +97,12 @@ stay in the user's own ORE Automation and Miner accounts.
 ## 4. What this review did not cover
 
 - A third-party audit. There has been none.
-- Behaviour on real hardware: Keystore attestation, the foreground service surviving a HyperOS
-  night, and the wallet flows have been tested with unit tests and a phone-less end-to-end run on
-  a local fork of mainnet (`scripts/devstack/smoke.sh`), not yet on a device.
+- Behaviour on real hardware. The app has run on an Android 14 emulator against a local fork of
+  mainnet (`scripts/devstack/emulator-smoke.sh`): setup, a Keystore key, heartbeats, an on-chain
+  dig, a pickup and its BREAK. An emulator has a software Keystore and stock Android, so three
+  things are still untested: hardware Keystore attestation, the foreground service surviving a
+  HyperOS night, and every flow that needs a wallet app to sign (clock-in, clock-out, taking SOL
+  back, closing the rig).
 - ORE itself. Heads Down inherits ORE's custody of every Automation and Miner.
 
 ## 5. Tests after the fixes
@@ -102,7 +113,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 168, and 14 against the real program on the fork |
 | `registrar` | 105 |
 | `services/indexer` | 347 |
-| `android` (JVM unit tests, all modules) | 850, of which 4 are skipped (they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 857, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

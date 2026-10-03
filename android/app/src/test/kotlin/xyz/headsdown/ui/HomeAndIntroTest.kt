@@ -7,6 +7,10 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -28,6 +32,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import xyz.headsdown.core.chain.uplink.AckReason
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
 import xyz.headsdown.feature.reveal.haul.HonestCopy
@@ -102,6 +107,49 @@ class HomeAndIntroTest {
         home()
         rule.onAllNodesWithTag(HomeTags.CLOCK_OUT).assertCountEquals(0)
         rule.onAllNodesWithTag(HomeTags.WITHDRAW).assertCountEquals(0)
+    }
+
+    /** Real text measurement (Robolectric's default makes every string a few pixels wide, so nothing ever wraps). */
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun `every Focus Bond choice stays on one line on a narrow phone`() {
+        rule.setContent {
+            HeadsDownTheme {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.width(360.dp)) {
+                    HomeScreen(
+                        snapshot = ShiftSnapshot.IDLE,
+                        onboarding = OnboardingState(),
+                        health = ShiftHealth.NoRecentShift,
+                        onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {},
+                        onBondChange = {},
+                    )
+                }
+            }
+        }
+        val card = rule.onNodeWithTag(HomeTags.BOND_CARD).performScrollTo().getUnclippedBoundsInRoot()
+        for (label in listOf("Off", "10 SKR", "50 SKR", "100 SKR")) {
+            val chip = rule.onNodeWithTag(HomeTags.BOND_CHOICE + label).performScrollTo().getUnclippedBoundsInRoot()
+            // A chip whose label wraps letter by letter is several lines tall; one line is a normal button.
+            assertTrue("$label is ${chip.height} tall", chip.height < 64.dp)
+            assertTrue("$label ends at ${chip.right}, the card at ${card.right}", chip.right <= card.right)
+        }
+    }
+
+    @Test
+    fun `the shift's end time is on screen next to the clock-in button`() {
+        val line = "A shift you start now runs until 06:28, two minutes before your alarm. Picking the phone up before then ends the shift early."
+        rule.setContent {
+            HeadsDownTheme {
+                HomeScreen(
+                    snapshot = ShiftSnapshot.IDLE,
+                    onboarding = OnboardingState(),
+                    health = ShiftHealth.NoRecentShift,
+                    onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {},
+                    shiftWindow = line,
+                )
+            }
+        }
+        rule.onNodeWithTag(HomeTags.SHIFT_WINDOW).performScrollTo().assertTextEquals(line)
     }
 
     @Test

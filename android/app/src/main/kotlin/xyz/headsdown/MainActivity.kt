@@ -98,6 +98,7 @@ private fun HeadsDownRoot(
     val health by vm.health.collectAsStateWithLifecycle()
     val crank by vm.crank.collectAsStateWithLifecycle()
     val bond by vm.bond.collectAsStateWithLifecycle()
+    val shiftWindow by vm.shiftWindow.collectAsStateWithLifecycle()
     // What a clock-in can move, from the build's policy alone: on screen before the wallet opens.
     val clockInAmounts = remember(bond) { runCatching { ClockInPolicy.fromBuildConfig().disclosure(bond) }.getOrNull() }
     // null = decide from onboarding progress; true/false = the user chose.
@@ -130,6 +131,7 @@ private fun HeadsDownRoot(
             onOpenRigDebug = onOpenRigDebug,
             crank = crank,
             clockInAmounts = clockInAmounts,
+            shiftWindow = shiftWindow,
             bondSkr = bond,
             onBondChange = vm::setBond,
         )
