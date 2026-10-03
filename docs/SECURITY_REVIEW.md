@@ -102,7 +102,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 168, and 14 against the real program on the fork |
 | `registrar` | 105 |
 | `services/indexer` | 347 |
-| `android` (JVM unit tests, all modules) | 849, of which 4 are skipped (they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 850, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

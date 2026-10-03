@@ -217,6 +217,10 @@ fresh read:
 
 `[end_shift?] [SKR account?] [release_focus_bond?] [ORE claim_sol?] [ORE claim_ore?]`
 
+- Sealing a shift writes its 128-byte ShiftLog, and the wallet that seals it pays the rent (about
+  0.0013 SOL at today's rent). The screen states the amount, read from the cluster, and that
+  `close_shift_log` can send it back to the payer from 30 days after the shift ended. The
+  clock-in disclosure says the same in words, because a clock-in seals the previous shift.
 - **end_shift** only when ending changes nothing for the worse: the shift would seal `completed`,
   or its outcome is already fixed (Broken, Frozen, or past its window). A shift inside its window
   is left open unless the user chooses "End the shift now". The screen states the lost streak and

@@ -56,6 +56,12 @@ class ClockOutPreview(
     val fullClaim: OreClaimEstimate?,
     /** SKR in the wallet's token account. */
     val skrBalance: ULong,
+    /**
+     * Rent of the ShiftLog an `end_shift` writes, paid by whoever ends the shift (here: the
+     * wallet). `close_shift_log` returns it to the payer from 30 days after the shift ended.
+     * 0 when no shift is open.
+     */
+    val shiftLogRent: ULong = 0uL,
 )
 
 /** The clock-out transaction(s), serialized for MWA, plus what they will do once confirmed. */
@@ -125,6 +131,7 @@ class ClockOutService(
             unrefinedOre = miner?.rewardsOre ?: 0uL,
             fullClaim = if (miner != null && treasury != null) OreClaimMath.estimate(miner, treasury, Ore.DENOMINATOR_BPS) else null,
             skrBalance = skr,
+            shiftLogRent = if (state.rig?.shiftOpen == true) rpc.getMinimumBalanceForRentExemption(HeadsDownAccounts.SHIFT_LOG_SIZE) else 0uL,
         )
     }
 

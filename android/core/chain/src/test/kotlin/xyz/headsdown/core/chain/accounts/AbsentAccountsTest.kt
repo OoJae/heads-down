@@ -179,6 +179,8 @@ class AbsentAccountsTest {
 
         val preview = ClockOutService(chain.rpc()) { now }.preview(authority)
         assertEquals(ShiftOutcome.Ends(ShiftEndReason.COMPLETED), preview.plan.shift)
+        // The log end_shift writes is 128 bytes: its rent is read from the cluster (FakeChain: 6,960 per byte).
+        assertEquals(((128L + 128) * 6_960).toULong(), preview.shiftLogRent)
         assertEquals(BondOutcome.None, preview.plan.bond)
         assertNull(preview.state.miner)
         assertEquals(0uL, preview.skrBalance)
@@ -194,6 +196,7 @@ class AbsentAccountsTest {
         val preview = ClockOutService(chain.rpc()) { now }.preview(authority)
         assertNull(preview.state.rig)
         assertEquals(ShiftOutcome.NoOpenShift, preview.plan.shift)
+        assertEquals(0uL, preview.shiftLogRent)
         assertTrue(preview.plan.isEmpty)
         assertNull(FocusBondService(chain.rpc()) { now }.status(authority).rig)
     }

@@ -50,7 +50,8 @@ data class ClockInPolicy(
         val bond = if (focusBondSkr == 0uL) "" else " It also locks your ${FocusBondSetting.label(focusBondSkr)} Focus Bond."
         return "This shift can place up to ${sol(shiftBudgetLamports)} SOL on ORE squares (${sol(weeklyBudgetLamports)} SOL a week). " +
             "Clock-in moves at most ${sol(ClockInComposer.maxDeposit(request))} SOL into your own ORE Automation; " +
-            "the first one also pays one-time account rent." + bond
+            "the first one also pays one-time account rent. Sealing a shift stores a small log on-chain: your wallet pays its rent, " +
+            "which can be sent back to it 30 days later." + bond
     }
 
     fun request(): ClockInRequest = ClockInRequest(

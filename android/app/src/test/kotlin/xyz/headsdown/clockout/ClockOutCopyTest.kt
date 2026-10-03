@@ -53,6 +53,22 @@ class ClockOutCopyTest {
     }
 
     @Test
+    fun `sealing a shift states the log's rent and how it comes back, and only then`() {
+        val sealed = facts().copy(shiftLogRent = 1_300_480uL)
+        assertEquals(
+            "Sealing stores the shift's log on-chain, and your wallet pays 0.00130048 SOL of rent for it. " +
+                "From 30 days after the shift ended, anyone can send that rent back to your wallet.",
+            ClockOutCopy.lines(sealed, utc).rent,
+        )
+        // A shift left open writes no log: nothing to pay. Choosing to end it early does.
+        val open = sealed.copy(shift = ShiftOutcome.LeftOpen(ShiftEndReason.MANUAL, WINDOW_END), nothingByDefault = true)
+        assertNull(ClockOutCopy.lines(open, utc).rent)
+        assertTrue(ClockOutCopy.lines(open.endedEarly(), utc).rent!!.contains("0.00130048 SOL"))
+        assertNull(ClockOutCopy.lines(sealed.copy(shift = ShiftOutcome.NoOpenShift), utc).rent)
+        assertNull(ClockOutCopy.lines(facts(), utc).rent) // rent unknown (0): no line, no made-up number
+    }
+
+    @Test
     fun `the claim line states what arrives and what ORE keeps`() {
         val claim = ClockOutCopy.lines(facts(), utc).claim!!
         // 1,000 refined + 20,000,000 unrefined - 2,000,000 fee = 18,001,000 atoms.
@@ -184,7 +200,7 @@ class ClockOutCopyTest {
         )
         val text = buildList {
             for (s in shifts) for (b in bonds) {
-                val f = facts(shift = s, bond = b, sol = 5_000uL)
+                val f = facts(shift = s, bond = b, sol = 5_000uL).copy(shiftLogRent = 1_300_480uL)
                 addAll(ClockOutCopy.lines(f, utc).all())
                 ClockOutCopy.endEarlyWarning(f)?.let(::add)
                 add(ClockOutCopy.done(s, b, 5_000uL, f.fullClaim))

@@ -59,7 +59,8 @@ class ClockInPolicyTest {
         // (0.0001 SOL) per possible dig: 20 x 100_000 lamports.
         assertEquals(
             "This shift can place up to 0.02 SOL on ORE squares (0.14 SOL a week). " +
-                "Clock-in moves at most 0.022 SOL into your own ORE Automation; the first one also pays one-time account rent.",
+                "Clock-in moves at most 0.022 SOL into your own ORE Automation; the first one also pays one-time account rent. " +
+                "Sealing a shift stores a small log on-chain: your wallet pays its rent, which can be sent back to it 30 days later.",
             ClockInPolicy().disclosure(),
         )
         // With a Focus Bond chosen, the same line says so.

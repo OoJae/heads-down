@@ -28,6 +28,8 @@ data class ClockOutFacts(
     val unrefinedOre: ULong,
     /** What claiming everything now would deliver and cost; null without a Miner. */
     val fullClaim: OreClaimEstimate?,
+    /** Rent of the log that sealing the shift stores on-chain, paid by the wallet (0 = no open shift). */
+    val shiftLogRent: ULong = 0uL,
 ) {
     val oreInMiner: ULong get() = refinedOre + unrefinedOre
 
@@ -63,6 +65,7 @@ data class ClockOutFacts(
             refinedOre = preview.refinedOre,
             unrefinedOre = preview.unrefinedOre,
             fullClaim = preview.fullClaim,
+            shiftLogRent = preview.shiftLogRent,
         )
     }
 }
@@ -70,13 +73,15 @@ data class ClockOutFacts(
 /** The lines of the clock-out screen. Every one is a statement of what the transaction does. */
 data class ClockOutLines(
     val shift: String,
+    /** What sealing the shift costs in rent, and how it comes back; null when no shift is sealed. */
+    val rent: String?,
     val bond: String?,
     val ore: String,
     /** What "claim all" delivers and what ORE keeps; null when there is nothing to claim. */
     val claim: String?,
     val sol: String?,
 ) {
-    fun all(): List<String> = listOfNotNull(shift, bond, ore, claim, sol)
+    fun all(): List<String> = listOfNotNull(shift, rent, bond, ore, claim, sol)
 }
 
 /**
@@ -91,6 +96,7 @@ object ClockOutCopy {
 
     fun lines(f: ClockOutFacts, zone: ZoneId = ZoneId.systemDefault()): ClockOutLines = ClockOutLines(
         shift = shift(f.shift, zone),
+        rent = rent(f),
         bond = bond(f.bond),
         ore = if (f.oreInMiner == 0uL) {
             "No ORE in your Miner yet."
@@ -100,6 +106,15 @@ object ClockOutCopy {
         claim = f.fullClaim?.takeIf { f.canClaim }?.let(::claim),
         sol = f.returnedSolLamports.takeIf { it > 0uL }?.let { "${ClockInPolicy.sol(it)} SOL that ORE handed back to your Miner goes to your wallet." },
     )
+
+    /** Sealing a shift writes its ShiftLog, and the wallet that seals it pays that account's rent. */
+    fun rent(f: ClockOutFacts): String? =
+        if (f.shift is ShiftOutcome.Ends && f.shiftLogRent > 0uL) {
+            "Sealing stores the shift's log on-chain, and your wallet pays ${ClockInPolicy.sol(f.shiftLogRent)} SOL of rent for it. " +
+                "From 30 days after the shift ended, anyone can send that rent back to your wallet."
+        } else {
+            null
+        }
 
     fun claim(c: OreClaimEstimate): String =
         if (c.fee == 0uL) {
