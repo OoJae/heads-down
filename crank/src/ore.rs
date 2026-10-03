@@ -1,7 +1,8 @@
 //! ORE v3 account layouts, pins, PDAs and the two instructions the crank touches.
 //!
-//! Everything here is read from ORE at the pinned commit
-//! `b92c5043581a4ad513401f7d5aabd1eb21148c12` (see `docs/ORE.md`, section 1). ORE accounts are
+//! Everything here is read from ORE at commit `b92c5043581a4ad513401f7d5aabd1eb21148c12`; the
+//! build deployed since 2026-10-02, `48c203bd`, differs from it in one constant of `wrap.rs`,
+//! which the crank never calls (see `docs/ORE.md`, section 1). ORE accounts are
 //! Steel accounts: an 8-byte header whose first byte is the discriminator, then a `repr(C)`
 //! struct with no padding. Every decoder here checks **owner, exact length and discriminator**
 //! before reading a single field, and returns a [`LayoutError`] instead of panicking. A
@@ -35,8 +36,9 @@ pub const ENTROPY_PROGRAM_ID: Address =
 /// ORE's ProgramData account (BPF upgradeable loader). Header: `u32 tag = 3 | u64 slot | Option<Pubkey>`.
 pub const PROGRAMDATA_ADDRESS: Address =
     Address::from_str_const("GXa6JV9AwsccP3hxvKFcZGp4w3MMtf7PJ6HYuTSyokfJ");
-/// ORE's last upgrade slot when the layouts were pinned (`docs/ORE.md` section 1).
-pub const PINNED_PROGRAMDATA_SLOT: u64 = 450_496_378;
+/// ORE's last upgrade slot when the layouts were last checked against its source and the fork
+/// suites re-run on its bytes (`docs/ORE.md` section 1): commit `48c203bd`, 2026-10-02.
+pub const PINNED_PROGRAMDATA_SLOT: u64 = 452_682_055;
 /// `BPFLoaderUpgradeab1e11111111111111111111111`.
 pub const BPF_UPGRADEABLE_LOADER_ID: Address =
     Address::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111");

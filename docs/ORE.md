@@ -11,7 +11,7 @@ How Heads Down uses ORE: the accounts, the instructions, the CPI flow, the fees,
 - **ORE is the product.** Each rig is an ordinary ORE miner with its **own** ORE `Automation` account. The user's SOL sits in that ORE-owned account and never passes through a Heads Down vault.
 - **Heads Down is the automation's executor.** The user sets the executor to the Heads Down **Executor PDA**, with the `Discretionary` strategy and a **fixed** fee per round. Only the Heads Down program can sign for that PDA, and it signs ORE `deploy` only when the rig's phone has produced a fresh Keystore P-256 heartbeat, verified on-chain by the secp256r1 precompile.
 - **ORE stores `max_production_cost` but does not enforce it.** `deploy` checks only the Motherlode conditions. Heads Down enforces the production-cost gate itself, against `Board.production_cost_ema`.
-- **Pinned and verified.** Everything here refers to ORE commit `b92c5043`, which verify.osec.io reports as the exact source of the deployed program.
+- **Pinned and verified.** The deployed ORE program is commit `48c203bd` (verify.osec.io reports it as the exact source). It differs from `b92c5043`, the commit this document's line references use, in one constant of an instruction Heads Down never calls (section 1).
 - **Auditable by ORE from ORE's own logs.** Every Heads Down deploy emits ORE's own `DeployEvent` with `signer = Executor PDA`, so ORE can measure Heads Down usage without trusting our dashboard.
 
 ---
@@ -21,17 +21,33 @@ How Heads Down uses ORE: the accounts, the instructions, the CPI flow, the fees,
 | Item | Value |
 |---|---|
 | Repository | https://github.com/regolith-labs/ore |
-| Pinned commit | `b92c5043581a4ad513401f7d5aabd1eb21148c12` (the `master` HEAD when this was written) |
+| Deployed commit | `48c203bd75db3cc45105ec29d8f8db719e5a2263` (since 2026-10-02) |
+| Commit of the line references | `b92c5043581a4ad513401f7d5aabd1eb21148c12`. The only file that differs between the two is `program/src/wrap.rs` |
 | Crate version | `ore-api` / `ore` workspace `3.8.25` (`Cargo.toml:6`) |
 | Program ID | `oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv` (`api/src/lib.rs:19`) |
 | ProgramData | `GXa6JV9AwsccP3hxvKFcZGp4w3MMtf7PJ6HYuTSyokfJ` |
-| Last deploy slot | `450,496,378` (block time 2026-09-25 23:10:01 UTC) |
-| Verified build | verify.osec.io: `is_verified: true`, commit `b92c5043…`, on-chain hash `d9601d4e8b0e7f6db2fbf0984dced7eba23029e1e29e8d6c9c7809cb5ea238a3`, last verified 2026-09-25 23:12 UTC |
+| Last deploy slot | `452,682,055` (block time 2026-10-02 17:48:28 UTC). Before it: `450,496,378` (2026-09-25 23:10:01 UTC) |
+| Verified build | verify.osec.io: `is_verified: true`, commit `48c203bd…`, on-chain hash `9dbd2e0d232563f0e2b3eae89bf7d6f55d483c464863adb4f46d117f427ca695`, last verified 2026-10-02 17:52 UTC. Before it: commit `b92c5043…`, hash `d9601d4e8b0e7f6db2fbf0984dced7eba23029e1e29e8d6c9c7809cb5ea238a3` |
 | Upgrade authority | `J5K5tWj3nKfxuSkAJ25WTMf4u5EsxJRfUoRKKxgrfFGV` (ORE's `docs/DEPLOY.md` says upgrades go through a Squads multisig; we have not independently derived that this address is its vault) |
 | Release profile | `overflow-checks = true` (`Cargo.toml:48`), so ORE's own arithmetic panics rather than wraps |
 
 In this document a reference like `deploy.rs:76` means `program/src/deploy.rs` line 76, and `state/board.rs:20` means `api/src/state/board.rs` line 20, both at the pinned commit:
 `https://github.com/regolith-labs/ore/blob/b92c5043581a4ad513401f7d5aabd1eb21148c12/<path>#L<line>`.
+
+**The upgrade of 2 October 2026, and what we did about it.** ORE deployed two commits on top of
+`b92c5043` ("liq 15%", "no cli"). The whole source difference is one line of `program/src/wrap.rs`:
+`LIQ_PCT` went from 10 to 15, so when ORE's own bury authority wraps treasury SOL for the buyback,
+15% of it (was 10%) goes to ORE's liquidity manager. `wrap` can only be signed by ORE's bury
+authority. No account layout, no instruction Heads Down calls (`deploy`, `automate`, `checkpoint`,
+`claim_sol`, `claim_ore`, `bury`) and no line this document cites changed.
+
+Our pin did what it is for. `preflight.sh` answered NO-GO ("ORE was upgraded; re-run the fork
+suites before deploying") and a running crank would have opened its circuit breaker and stopped
+digging: nothing mined, nothing spent. We then read the diff, re-ran the program's fork suite and
+the crank's against the new bytes (the fixtures are the live program), ran the end-to-end smoke on
+a fork with the new build, and moved the pin to slot 452,682,055 and hash `9dbd2e0d…`. ORE has
+upgraded twice in eight days, so this is a routine we expect to repeat: every ORE upgrade pauses
+digs until someone has read the diff.
 
 **Reproduce** (all read-only; the Solana CLI is at `$HOME/.local/share/solana/install/active_release/bin`):
 

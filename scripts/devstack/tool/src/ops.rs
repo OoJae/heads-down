@@ -43,8 +43,8 @@ pub const FEATURE_SBPF_V3: Address = Address::from_str_const("5cC3foj77CWun58pC5
 /// Owner of feature accounts.
 pub const FEATURE_PROGRAM_ID: Address = Address::from_str_const("Feature111111111111111111111111111111111111");
 /// sha256 of ORE's deployed program bytes, trailing zeros stripped (verify.osec.io's "on-chain
-/// hash" for commit `b92c5043`, docs/ORE.md §1). Pinned together with the ProgramData slot.
-pub const ORE_PROGRAM_HASH: &str = "d9601d4e8b0e7f6db2fbf0984dced7eba23029e1e29e8d6c9c7809cb5ea238a3";
+/// hash" for commit `48c203bd`, docs/ORE.md §1). Pinned together with the ProgramData slot.
+pub const ORE_PROGRAM_HASH: &str = "9dbd2e0d232563f0e2b3eae89bf7d6f55d483c464863adb4f46d117f427ca695";
 /// Upgradeable-loader Program account (`u32 tag | programdata`).
 pub const PROGRAM_ACCOUNT_LEN: u64 = 36;
 /// Upgradeable-loader ProgramData header (`u32 tag | u64 slot | Option<Pubkey>`).
@@ -821,7 +821,7 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
             ),
         }
         match &ore_hash {
-            Some(h) if h == ORE_PROGRAM_HASH => r.add(St::Pass, "ORE program hash", format!("{h} = verify.osec.io b92c5043")),
+            Some(h) if h == ORE_PROGRAM_HASH => r.add(St::Pass, "ORE program hash", format!("{h} = verify.osec.io 48c203bd")),
             other => r.add(St::Fail, "ORE program hash", format!("{other:?} != pinned {ORE_PROGRAM_HASH}")),
         }
     } else {

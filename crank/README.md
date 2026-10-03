@@ -73,7 +73,7 @@ slot           451741378
 board          round 422724 slots [451741342, 451741582) ema 952436545 lamports/ORE
 motherlode     368.6 ORE
 ema_ev         Some(657911497) lamports/ORE (gate value)
-ore upgrade    slot Some(450496378) (pinned 450496378)
+ore upgrade    slot Some(452682055) (pinned 452682055)
 breaker        closed (all ORE pins match)
 heads_down     Config not found at inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW (program not initialized on this cluster)
 ```
