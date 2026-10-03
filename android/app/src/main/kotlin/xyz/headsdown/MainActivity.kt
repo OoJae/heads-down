@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
+import xyz.headsdown.clockout.ClockOutActivity
 import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.core.wallet.WalletResult
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
                         onClockIn = { startActivity(Intent(this, TrampolineActivity::class.java)) },
                         // The reveal shows the latest real haul, or says there is none yet.
                         onPreviewReveal = { launch(Intent(this, RevealActivity::class.java)) },
+                        onClockOut = { launch(Intent(this, ClockOutActivity::class.java)) },
                         // Debug and localdev builds only: release has no sensor lab at all.
                         onOpenSensorLab = SensorLab.intent(this)?.let { intent -> { launch(intent) } },
                         // Debug and localdev builds only: release has no rig debug screen at all.
@@ -83,6 +85,7 @@ private fun HeadsDownRoot(
     vm: HomeViewModel,
     onClockIn: () -> Unit,
     onPreviewReveal: () -> Unit,
+    onClockOut: () -> Unit,
     onOpenSensorLab: (() -> Unit)?,
     onOpenRigDebug: (() -> Unit)?,
     onCreateRigKey: () -> Unit,
@@ -117,6 +120,7 @@ private fun HeadsDownRoot(
             onOpenSetup = { setupChoice = true },
             onHowItWorks = { rereadIntro = true },
             onPreviewReveal = onPreviewReveal,
+            onClockOut = onClockOut,
             onAddWidget = if (vm.widgetPinSupported) vm::requestRigWidget else null,
             onOpenSensorLab = onOpenSensorLab,
             onOpenRigDebug = onOpenRigDebug,

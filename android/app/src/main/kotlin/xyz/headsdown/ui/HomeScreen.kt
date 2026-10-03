@@ -67,6 +67,7 @@ object HomeTags {
     const val RIG_WORD = "home-rig-word"
     const val CLOCK_IN = "home-clock-in"
     const val PREVIEW_REVEAL = "home-preview-reveal"
+    const val CLOCK_OUT = "home-clock-out"
     const val ADD_WIDGET = "home-add-widget"
     const val SENSOR_LAB = "home-sensor-lab"
     const val RIG_DEBUG = "home-rig-debug"
@@ -107,6 +108,8 @@ fun HomeScreen(
     onOpenSetup: () -> Unit,
     onHowItWorks: () -> Unit = {},
     onPreviewReveal: () -> Unit = {},
+    /** Opens the clock-out screen (seal the shift, take back a bond, claim ORE). Null hides the entry. */
+    onClockOut: (() -> Unit)? = null,
     /** Null where the launcher cannot pin widgets. */
     onAddWidget: (() -> Unit)? = null,
     /** Non-null only in debug builds (the sensor lab does not exist in release). */
@@ -150,7 +153,7 @@ fun HomeScreen(
         if (onBondChange != null && (snapshot.state is ShiftState.Idle || snapshot.state is ShiftState.Broken || snapshot.state is ShiftState.Frozen)) {
             FocusBondCard(bondSkr, onBondChange)
         }
-        HaulCard(onPreviewReveal)
+        HaulCard(onPreviewReveal, onClockOut)
         if (onAddWidget != null) WidgetCard(onAddWidget)
 
         Text(
@@ -303,7 +306,7 @@ private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
 }
 
 @Composable
-private fun HaulCard(onPreviewReveal: () -> Unit) {
+private fun HaulCard(onPreviewReveal: () -> Unit, onClockOut: (() -> Unit)?) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -315,6 +318,11 @@ private fun HaulCard(onPreviewReveal: () -> Unit) {
             Text("Your first haul appears after your first mined shift.", color = HdColors.AshMuted)
             TextButton(onClick = onPreviewReveal, modifier = Modifier.testTag(HomeTags.PREVIEW_REVEAL)) {
                 Text("Open the morning reveal", color = HdColors.OreGold)
+            }
+            if (onClockOut != null) {
+                OutlinedButton(onClick = onClockOut, modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_OUT)) {
+                    Text("Clock out: seal the shift, see your ORE")
+                }
             }
         }
     }

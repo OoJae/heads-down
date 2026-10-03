@@ -25,6 +25,7 @@ import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HaulSummary
 import xyz.headsdown.feature.reveal.haul.HonestCopy
+import xyz.headsdown.feature.reveal.haul.RevealCopyBuilder
 import xyz.headsdown.feature.reveal.haul.RoundReplay
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -150,6 +151,20 @@ class RevealScreenTest {
         }
         rule.onNodeWithTag(RevealTags.EXPLORER).performScrollTo().performClick()
         assertEquals(listOf("https://explorer.solana.com/address/x"), opened)
+    }
+
+    @Test
+    fun `a real haul leads to the clock-out screen, a sample night does not`() {
+        var opened = 0
+        var shown by mutableStateOf(night.copy(provenance = HaulProvenance.ON_CHAIN))
+        rule.setContent { RevealTheme { RevealScreen(shown, zone, animate = false, onClockOut = { opened++ }) } }
+        rule.onNodeWithTag(RevealTags.CLOCK_OUT).performScrollTo().performClick()
+        assertEquals(1, opened)
+        rule.onNodeWithText(RevealCopyBuilder.CLOCK_OUT_DETAIL).assertExists()
+        assertEquals(emptyList<String>(), HonestCopy.violations(RevealCopyBuilder.CLOCK_OUT_BUTTON + " " + RevealCopyBuilder.CLOCK_OUT_DETAIL))
+        shown = night // the sample: nobody's shift
+        rule.waitForIdle()
+        rule.onAllNodesWithTag(RevealTags.CLOCK_OUT).assertCountEquals(0)
     }
 
     @Test

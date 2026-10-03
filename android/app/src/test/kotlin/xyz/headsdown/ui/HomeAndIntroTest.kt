@@ -67,6 +67,7 @@ class HomeAndIntroTest {
         onAddWidget: (() -> Unit)? = null,
         onOpenSensorLab: (() -> Unit)? = null,
         onHowItWorks: () -> Unit = {},
+        onClockOut: (() -> Unit)? = null,
     ) = rule.setContent {
         HeadsDownTheme {
             HomeScreen(
@@ -79,10 +80,25 @@ class HomeAndIntroTest {
                 onOpenSetup = {},
                 onHowItWorks = onHowItWorks,
                 onPreviewReveal = onPreviewReveal,
+                onClockOut = onClockOut,
                 onAddWidget = onAddWidget,
                 onOpenSensorLab = onOpenSensorLab,
             )
         }
+    }
+
+    @Test
+    fun `the haul card opens the clock-out screen`() {
+        var opened = 0
+        home(onClockOut = { opened++ })
+        rule.onNodeWithTag(HomeTags.CLOCK_OUT).performScrollTo().assertTextEquals("Clock out: seal the shift, see your ORE").performClick()
+        assertEquals(1, opened)
+    }
+
+    @Test
+    fun `without a clock-out screen the entry is not shown`() {
+        home()
+        rule.onAllNodesWithTag(HomeTags.CLOCK_OUT).assertCountEquals(0)
     }
 
     @Test
