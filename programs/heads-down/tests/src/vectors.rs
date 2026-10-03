@@ -2458,8 +2458,8 @@ fn v13_vectors(rec: &mut Recorder, cranker: &Keypair, alice: &User, gov: &Keypai
             name: "register_rig_resumed",
             instruction: "register_rig",
             auth: "wallet, no attestation; the Rig PDA holds a RigTombstone",
-            description: "v1.3. The same bytes and accounts as register_rig_guest, sent after close_rig_guest left a 32-byte RigTombstone (account tag 10) at the Rig PDA. The tombstone grows back into a 384-byte Rig that resumes at shift_id 2 and hb_counter 5 (what the closed rig had); every other field starts fresh, and the wallet pays only the rent difference. The next arm_shift is shift 3, so no ShiftLog, Focus Bond or signed message of the earlier rig can collide with or be replayed on this one. Emits RigRegistered.",
-            args: json!({"authority": s(alice.pubkey()), "p256_pubkey_hex": hex(&alice.p256()), "has_attestation": 0, "tombstone": {"shift_id": s(t.shift_id.get()), "hb_counter": s(t.hb_counter.get())}}),
+            description: "v1.3. The same bytes and accounts as register_rig_guest, sent after close_rig_guest left a 32-byte RigTombstone (account tag 10) at the Rig PDA. The tombstone grows back into a 384-byte Rig that resumes at shift_id 2, hb_counter 5 and the closed rig's last_dug_round; every other field starts fresh, and the wallet pays only the rent difference. The next arm_shift is shift 3, so no ShiftLog, Focus Bond or signed message of the earlier rig can collide with or be replayed on this one. Emits RigRegistered.",
+            args: json!({"authority": s(alice.pubkey()), "p256_pubkey_hex": hex(&alice.p256()), "has_attestation": 0, "tombstone": {"shift_id": s(t.shift_id.get()), "hb_counter": s(t.hb_counter.get()), "last_dug_round": s(t.last_dug_round.get())}}),
             fields: f,
             metas: h.accounts.clone(),
             slots: vec![
