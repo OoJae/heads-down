@@ -11,6 +11,7 @@ import xyz.headsdown.core.chain.accounts.RigAccount
 import xyz.headsdown.core.chain.accounts.RigTier
 import xyz.headsdown.core.chain.accounts.SgtHolding
 import xyz.headsdown.core.chain.accounts.SplTokenAccounts
+import xyz.headsdown.core.chain.accounts.ifCreated
 import xyz.headsdown.core.chain.accounts.StackSeatAccount
 import xyz.headsdown.core.chain.accounts.StackStatus
 import xyz.headsdown.core.chain.accounts.StackTableAccount
@@ -219,9 +220,9 @@ class StackService(
         val board = OreAccounts.board(Ore.BOARD, read[1] ?: throw RpcProtocolException("no ORE Board on this cluster"))
         if (table.status != StackStatus.OPEN || board.roundId >= table.startRound) throw StackRefusedException(StackRefusedException.Reason.JOIN_CLOSED)
         if (table.full) throw StackRefusedException(StackRefusedException.Reason.TABLE_FULL)
-        val rig = read[2]?.let { HeadsDownAccounts.rig(rigAddress, it) }
-        if (!table.remote && read[4] != null) throw StackRefusedException(StackRefusedException.Reason.ALREADY_SEATED)
-        val plan = seatPlan(authority, rig, table.bond, table.remote, table.attestedOnly, SplTokenAccounts.userBalance(read[3], Skr.MINT, authority))
+        val rig = HeadsDownAccounts.rigOrNull(rigAddress, read[2])
+        if (!table.remote && read[4].ifCreated() != null) throw StackRefusedException(StackRefusedException.Reason.ALREADY_SEATED)
+        val plan = seatPlan(authority, rig, table.bond, table.remote, table.attestedOnly, SplTokenAccounts.userBalance(read[3].ifCreated(), Skr.MINT, authority))
         if (table.remote) {
             // A remote seat is keyed by the Seeker Genesis Token: one seat per Seeker.
             val seat = HeadsDownProgram.stackSeat(tableAddress, plan.sgt!!.mint).address
@@ -260,7 +261,7 @@ class StackService(
                 val held = sgt.holdings(authority).firstOrNull()
                     ?: throw StackRefusedException(if (remote) StackRefusedException.Reason.NEEDS_SEEKER_REMOTE else StackRefusedException.Reason.NEEDS_SEEKER_BOND)
                 val seatAddress = HeadsDownProgram.seekerSeat(held.mint).address
-                val previousRig = rpc.getAccountInfo(seatAddress)
+                val previousRig = rpc.getAccountInfo(seatAddress).ifCreated()
                     ?.let { HeadsDownAccounts.seekerSeat(seatAddress, it).rig }
                     ?.takeIf { it != rig.address && it != Pubkey.DEFAULT }
                 verify = HeadsDownInstructions.verifySeeker(authority, held.mint, held.tokenAccount, previousRig)
@@ -297,8 +298,8 @@ class StackService(
             throw StackRefusedException(StackRefusedException.Reason.BAD_TABLE)
         }
         if (!params.admits(board.roundId)) throw StackRefusedException(StackRefusedException.Reason.BAD_WINDOW)
-        val rig = read[1]?.let { HeadsDownAccounts.rig(rigAddress, it) }
-        val plan = seatPlan(host, rig, draft.bond, draft.remote, attestedOnly = draft.remote, SplTokenAccounts.userBalance(read[2], Skr.MINT, host))
+        val rig = HeadsDownAccounts.rigOrNull(rigAddress, read[1])
+        val plan = seatPlan(host, rig, draft.bond, draft.remote, attestedOnly = draft.remote, SplTokenAccounts.userBalance(read[2].ifCreated(), Skr.MINT, host))
         val table = HeadsDownProgram.stackTable(host, params.tableId).address
         val instructions = listOfNotNull(
             SkrInstructions.openStackVault(host, params.tableId),

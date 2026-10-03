@@ -240,7 +240,7 @@ The slide text and speaker notes below contain no word from its banned list.
   - "`specialUse` foreground service. Killed by the OS = cold, nothing spent."
   - "HyperOS/MIUI keep-alive onboarding and a 'killed last night' health check"
   - "Android 16 Live Update notification with a 14/15 fallback"
-  - "797 JVM unit tests"
+  - "805 JVM unit tests"
 - **Visual:** Phone captures: the tile in the Quick Settings panel, the wallet sheet, the ongoing
   notification `[TBD after device test]`.
 - **Speaker notes:** "Only the launcher activity and the tile service are exported. The trampoline
@@ -345,7 +345,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
   | Indexer | 347 passed | re-run 2026-10-03 |
   | Dashboard | 48 passed | re-run 2026-10-03 |
-  | Android | 797 JVM unit tests | re-run 2026-10-03 |
+  | Android | 805 JVM unit tests | re-run 2026-10-03 |
   | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |
 
   - "16 bug classes mapped to named tests; 9,000 fuzzed instructions on the program binary, no aborts"

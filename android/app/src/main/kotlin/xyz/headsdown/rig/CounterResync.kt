@@ -40,9 +40,11 @@ class CounterResync(
         val bound = binding.current()
         if (!bound.isRegistered) return null
         val address = Pubkey(bound.rigAddress)
-        val rig = rpc.getAccountInfo(address)?.let { HeadsDownAccounts.rig(address, it) } ?: return null
-        counter.raiseFloor(rig.hbCounter)
-        return rig.hbCounter
+        // A closed rig's tombstone keeps the counter the next registration resumes from.
+        val slot = HeadsDownAccounts.rigSlot(address, rpc.getAccountInfo(address))
+        val onChain = slot.rigOrNull?.hbCounter ?: slot.tombstoneOrNull?.hbCounter ?: return null
+        counter.raiseFloor(onChain)
+        return onChain
     }
 
     companion object {

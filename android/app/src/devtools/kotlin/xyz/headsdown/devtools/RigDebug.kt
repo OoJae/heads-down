@@ -171,7 +171,7 @@ class RigDebugActivity : ComponentActivity() {
             val decision = runCatching {
                 withContext(Dispatchers.IO) {
                     val address = HeadsDownProgram.rig(authority).address
-                    val rig = rpc.getAccountInfo(address)?.let { HeadsDownAccounts.rig(address, it) }
+                    val rig = HeadsDownAccounts.rigOrNull(address, rpc.getAccountInfo(address))
                     RigAttach.decide(rig, keys.compressedPublicKey(), System.currentTimeMillis() / 1000)
                 }
             }.getOrElse { AttachDecision.Refuse("Could not read the Rig (${it.javaClass.simpleName}). Is the devstack up and phone.sh run?") }

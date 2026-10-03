@@ -27,6 +27,34 @@ data class HdConfig(
 /** `Rig.tier`. */
 enum class RigTier(val wire: Int) { GUEST(0), SEEKER(1) }
 
+/**
+ * What `close_rig` leaves at the Rig PDA of a rig that armed a shift or accepted a signed message
+ * (32 bytes, tag 10; INTERFACE §12.2). `register_rig` grows it back into a Rig that resumes from
+ * these counters.
+ */
+data class RigTombstoneAccount(
+    val address: Pubkey,
+    /** `Rig.shift_id` at close: the next shift armed at this address is this plus one. */
+    val shiftId: ULong,
+    /** `Rig.hb_counter` at close: no signed message at or below it is accepted again. */
+    val hbCounter: ULong,
+    val lastDugRound: ULong,
+)
+
+/** What a wallet's Rig PDA holds (INTERFACE §12.2). Only [Live] is a registered rig. */
+sealed interface RigSlot {
+    /** Nothing, or only lamports someone sent to the address: a first registration. */
+    data object Empty : RigSlot
+
+    /** A closed rig's tombstone: registering again resumes its counters. */
+    data class Closed(val tombstone: RigTombstoneAccount) : RigSlot
+
+    data class Live(val rig: RigAccount) : RigSlot
+
+    val rigOrNull: RigAccount? get() = (this as? Live)?.rig
+    val tombstoneOrNull: RigTombstoneAccount? get() = (this as? Closed)?.tombstone
+}
+
 /** heads_down `Rig` (384 bytes, tag 2; INTERFACE "Rig"). Field names follow the contract. */
 data class RigAccount(
     val address: Pubkey,
@@ -259,6 +287,7 @@ object HeadsDownAccounts {
     const val STACK_SEAT_TAG = 6
     const val FOCUS_BOND_TAG = 7
     const val GIFT_ESCROW_TAG = 8
+    const val RIG_TOMBSTONE_TAG = 10
     const val CONFIG_SIZE = 256
     const val RIG_SIZE = 384
     const val SEEKER_SEAT_SIZE = 128
@@ -267,6 +296,7 @@ object HeadsDownAccounts {
     const val STACK_SEAT_SIZE = 200
     const val FOCUS_BOND_SIZE = 160
     const val GIFT_ESCROW_SIZE = 128
+    const val RIG_TOMBSTONE_SIZE = 32
 
     /** Offsets used as `getProgramAccounts` memcmp filters. */
     const val STACK_SEAT_TABLE_OFFSET = 8
@@ -295,6 +325,25 @@ object HeadsDownAccounts {
             pendingExists = flag(b.u8(128), "pending_exists"),
             pendingEtaSlot = b.u64(136),
         )
+    }
+
+    /**
+     * What sits at the Rig PDA [address] (INTERFACE §12.2, "What a Rig PDA can hold"). Anything
+     * that is none of the three throws [AccountLayoutException], as [rig] does.
+     */
+    fun rigSlot(address: Pubkey, account: AccountInfo?): RigSlot {
+        val held = account.ifCreated() ?: return RigSlot.Empty
+        if (held.owner == HeadsDownProgram.ID && held.size == RIG_TOMBSTONE_SIZE) return RigSlot.Closed(rigTombstone(address, held))
+        return RigSlot.Live(rig(address, held))
+    }
+
+    /** The registered Rig at [address], or null when there is none (never registered, or closed). */
+    fun rigOrNull(address: Pubkey, account: AccountInfo?): RigAccount? = rigSlot(address, account).rigOrNull
+
+    /** [address] is the Rig PDA the caller derived: a tombstone does not name its authority. */
+    fun rigTombstone(address: Pubkey, account: AccountInfo): RigTombstoneAccount {
+        val b = header(account, RIG_TOMBSTONE_SIZE, RIG_TOMBSTONE_TAG, "RigTombstone")
+        return RigTombstoneAccount(address, shiftId = b.u64(8), hbCounter = b.u64(16), lastDugRound = b.u64(24))
     }
 
     fun rig(address: Pubkey, account: AccountInfo): RigAccount {

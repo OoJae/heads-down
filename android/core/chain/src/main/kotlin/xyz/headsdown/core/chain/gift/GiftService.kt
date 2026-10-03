@@ -14,6 +14,7 @@ import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.accounts.SgtHolding
 import xyz.headsdown.core.chain.accounts.SplTokenAccounts
+import xyz.headsdown.core.chain.accounts.ifCreated
 import xyz.headsdown.core.chain.ix.ComputeBudgetInstructions
 import xyz.headsdown.core.chain.ix.GiftRecipientKind
 import xyz.headsdown.core.chain.ix.HeadsDownInstructions
@@ -257,7 +258,7 @@ class GiftService(
 
         funding as GiftFunding.Skr
         val provider = swap ?: throw GiftRefusedException(GiftRefusedException.Reason.SWAP_UNAVAILABLE, SwapSkip.NOT_AVAILABLE)
-        val skrBalance = SplTokenAccounts.userBalance(rpc.getAccountInfo(Skr.account(sender)), Skr.MINT, sender)
+        val skrBalance = SplTokenAccounts.userBalance(rpc.getAccountInfo(Skr.account(sender)).ifCreated(), Skr.MINT, sender)
         if (skrBalance < funding.skr) throw GiftRefusedException(GiftRefusedException.Reason.INSUFFICIENT_SKR)
         val result = try {
             SwapLegBuilder(rpc, provider).build(

@@ -1,9 +1,22 @@
 package xyz.headsdown.core.chain.accounts
 
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.WellKnown
+import xyz.headsdown.core.chain.rpc.AccountInfo
 
 /** The account is not the type, owner, size or version the caller expects. */
 class AccountLayoutException(message: String) : IllegalArgumentException(message)
+
+/**
+ * This account if a program has created it, null if the address holds nothing or only lamports.
+ *
+ * Anyone can send lamports to an address before its program creates the account there (a PDA
+ * included): the RPC then answers with a System-owned account that has no data. Every program
+ * the app talks to creates its account at such an address all the same, so to a reader it is
+ * "not there yet". Decoding it instead would let anyone make a wallet's transactions impossible
+ * to build, for the price of one small transfer.
+ */
+fun AccountInfo?.ifCreated(): AccountInfo? = this?.takeUnless { it.owner == WellKnown.SYSTEM_PROGRAM && it.size == 0 }
 
 /**
  * Bounds-checked little-endian reads over account data. Every read checks its range first and

@@ -7,6 +7,7 @@ import xyz.headsdown.core.chain.accounts.FocusBondAccount
 import xyz.headsdown.core.chain.accounts.HdConfig
 import xyz.headsdown.core.chain.accounts.OreAutomation
 import xyz.headsdown.core.chain.accounts.RigAccount
+import xyz.headsdown.core.chain.accounts.RigTombstoneAccount
 import xyz.headsdown.core.chain.accounts.ShiftLogAccount
 import xyz.headsdown.core.chain.clockout.ShiftSeal
 import xyz.headsdown.core.chain.ix.AssociatedTokenInstructions
@@ -94,6 +95,11 @@ class ClockInChainState(
     /** A Focus Bond still locked on the rig's current (or last) shift, and that shift's log if sealed. */
     val previousBond: FocusBondAccount? = null,
     val previousShiftLog: ShiftLogAccount? = null,
+    /**
+     * The Rig PDA holds a closed rig's tombstone ([rig] is then null): `register_rig` resumes its
+     * `shift_id` and `hb_counter`, so the shift this clock-in arms and the counter floor follow it.
+     */
+    val tombstone: RigTombstoneAccount? = null,
 )
 
 /** Why a clock-in cannot be built. The message is fixed text, safe to show. */
@@ -317,7 +323,9 @@ object ClockInComposer {
         ixs += HeadsDownInstructions.setCaps(authority, caps)
         ixs += HeadsDownInstructions.armShift(authority, plan)
 
-        val expectedShiftId = checkedAdd(rig?.shiftId ?: 0uL, 1uL)
+        // A rig registered over a tombstone starts at the tombstone's counters, not at zero.
+        val resumed = state.tombstone?.takeIf { rig == null }
+        val expectedShiftId = checkedAdd(rig?.shiftId ?: resumed?.shiftId ?: 0uL, 1uL)
         if (request.focusBondSkr > 0uL) {
             // A bond released earlier in this transaction is spendable again by now.
             if (request.focusBondSkr > checkedAdd(state.skrBalance, bondReleased)) {
@@ -339,7 +347,7 @@ object ClockInComposer {
             endsPreviousShift = endsPrevious,
             unfreezes = unfreezes,
             expectedShiftId = expectedShiftId,
-            hbCounterFloor = rig?.hbCounter ?: 0uL,
+            hbCounterFloor = rig?.hbCounter ?: resumed?.hbCounter ?: 0uL,
             voucher = voucherUse,
             bondLocked = request.focusBondSkr,
             bondReleased = bondReleased,

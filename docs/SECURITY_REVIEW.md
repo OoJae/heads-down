@@ -48,6 +48,12 @@ has a regression test, named in the tables.
 | One bogus `Board.round_id` from the RPC was signed for and then stalled the heartbeat feed | A round id far ahead of ORE's pace is not emitted; three consistent reads move the feed |
 | The phone adopted whatever `shift_id` the RPC returned after a clock-in | The shift id is the one the clock-in armed; a re-read can only confirm it |
 
+## 2a. Found after the review, while building
+
+| Finding | Severity | Status | Where |
+|---|---|---|---|
+| The app decoded whatever sat at a wallet's Rig, Focus Bond, ShiftLog, ORE Automation, ORE Miner and SKR addresses. Anyone can send lamports to such an address before its program creates the account (about 0.00065 SOL at today's rent), and the app then failed to build every clock-in and clock-out for that wallet. A closed rig's 32-byte tombstone had the same effect, and a clock-in over one would have armed the wrong shift id. The program itself always handled both | medium (the app only; no funds at risk) | **Fixed.** An address that holds only lamports reads as not created. A tombstone reads as a closed rig, and the next clock-in resumes its `shift_id` and `hb_counter` | `android/core/chain`: `AccountBytes.kt` (`ifCreated`), `HeadsDownAccounts.rigSlot`; test `AbsentAccountsTest` |
+
 ## 3. Open, and stated plainly
 
 These are true of what is deployed. None of them lets anyone take a user's mining funds, which
@@ -96,7 +102,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 168, and 14 against the real program on the fork |
 | `registrar` | 105 |
 | `services/indexer` | 347 |
-| `android` (JVM unit tests, all modules) | 801, of which 4 are skipped (they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 809, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

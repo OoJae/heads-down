@@ -13,6 +13,7 @@ import xyz.headsdown.core.chain.accounts.OreClaimEstimate
 import xyz.headsdown.core.chain.accounts.OreClaimMath
 import xyz.headsdown.core.chain.accounts.ShiftLogAccount
 import xyz.headsdown.core.chain.accounts.SplTokenAccounts
+import xyz.headsdown.core.chain.accounts.ifCreated
 import xyz.headsdown.core.chain.ix.ComputeBudgetInstructions
 import xyz.headsdown.core.chain.rpc.RpcProtocolException
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
@@ -92,11 +93,12 @@ class ClockOutService(
         val minerAddress = Ore.miner(authority).address
         val skrAddress = Skr.account(authority)
         val first = rpc.getMultipleAccounts(listOf(rigAddress, Ore.BOARD, minerAddress, Ore.TREASURY, skrAddress))
-        val rig = first[0]?.let { HeadsDownAccounts.rig(rigAddress, it) }
+        val rig = HeadsDownAccounts.rigOrNull(rigAddress, first[0])
         val board = OreAccounts.board(Ore.BOARD, first[1] ?: throw RpcProtocolException("no ORE Board on this cluster"))
-        val miner = first[2]?.let { OreAccounts.miner(minerAddress, it) }
+        val miner = first[2].ifCreated()?.let { OreAccounts.miner(minerAddress, it) }
         val treasury = first[3]?.let { OreAccounts.treasury(Ore.TREASURY, it) }
-        val skr = SplTokenAccounts.userBalance(first[4], Skr.MINT, authority)
+        val skrAccount = first[4].ifCreated()
+        val skr = SplTokenAccounts.userBalance(skrAccount, Skr.MINT, authority)
 
         // A Focus Bond lives on the rig's current (or last) shift; shift 0 means "never armed".
         var bond: FocusBondAccount? = null
@@ -105,10 +107,10 @@ class ClockOutService(
             val bondAddress = HeadsDownProgram.focusBond(rigAddress, rig.shiftId).address
             val logAddress = HeadsDownProgram.shiftLog(rigAddress, rig.shiftId).address
             val second = rpc.getMultipleAccounts(listOf(bondAddress, logAddress))
-            bond = second[0]?.let { HeadsDownAccounts.focusBond(bondAddress, it) }
-            log = if (bond != null) second[1]?.let { HeadsDownAccounts.shiftLog(logAddress, it) } else null
+            bond = second[0].ifCreated()?.let { HeadsDownAccounts.focusBond(bondAddress, it) }
+            log = if (bond != null) second[1].ifCreated()?.let { HeadsDownAccounts.shiftLog(logAddress, it) } else null
         }
-        return ClockOutChainState(rig, board, miner, treasury, bond, log, skrAccountExists = first[4] != null) to skr
+        return ClockOutChainState(rig, board, miner, treasury, bond, log, skrAccountExists = skrAccount != null) to skr
     }
 
     /** What the reveal shows before anything is signed. Read-only. */

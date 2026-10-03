@@ -10,6 +10,7 @@ import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.accounts.RigAccount
 import xyz.headsdown.core.chain.accounts.ShiftLogAccount
 import xyz.headsdown.core.chain.accounts.SplTokenAccounts
+import xyz.headsdown.core.chain.accounts.ifCreated
 import xyz.headsdown.core.chain.clockout.ShiftSeal
 import xyz.headsdown.core.chain.ix.SkrInstructions
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
@@ -80,16 +81,16 @@ class FocusBondService(
     suspend fun status(authority: Pubkey): FocusBondStatus {
         val rigAddress = HeadsDownProgram.rig(authority).address
         val read = rpc.getMultipleAccounts(listOf(rigAddress, Skr.account(authority), Ore.BOARD))
-        val rig = read[0]?.let { HeadsDownAccounts.rig(rigAddress, it) }
-        val skr = SplTokenAccounts.userBalance(read[1], Skr.MINT, authority)
+        val rig = HeadsDownAccounts.rigOrNull(rigAddress, read[0])
+        val skr = SplTokenAccounts.userBalance(read[1].ifCreated(), Skr.MINT, authority)
         var bond: FocusBondAccount? = null
         var log: ShiftLogAccount? = null
         if (rig != null && rig.shiftId > 0uL) {
             val bondAddress = HeadsDownProgram.focusBond(rigAddress, rig.shiftId).address
             val logAddress = HeadsDownProgram.shiftLog(rigAddress, rig.shiftId).address
             val (bondInfo, logInfo) = rpc.getMultipleAccounts(listOf(bondAddress, logAddress))
-            bond = bondInfo?.let { HeadsDownAccounts.focusBond(bondAddress, it) }?.takeIf { it.authority == authority }
-            log = logInfo?.let { HeadsDownAccounts.shiftLog(logAddress, it) }
+            bond = bondInfo.ifCreated()?.let { HeadsDownAccounts.focusBond(bondAddress, it) }?.takeIf { it.authority == authority }
+            log = logInfo.ifCreated()?.let { HeadsDownAccounts.shiftLog(logAddress, it) }
         }
         val board = read[2]?.let { OreAccounts.board(Ore.BOARD, it) }
         val seal = if (rig != null && rig.shiftOpen && board != null) ShiftSeal.predict(rig, board.roundId, nowUnix()) else null
