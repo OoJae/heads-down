@@ -1,6 +1,6 @@
 # Heads Down: 3:00 demo shot list (Redmi 14C)
 
-Draft for the founder, written 2026-09-29. Filmed on the builder's only phone, a Redmi 14C
+Draft for the founder, written 2026-09-29, readiness updated 2026-10-03. Filmed on the builder's only phone, a Redmi 14C
 (HyperOS, Android 14, no gyroscope, virtual proximity sensor), which is not connected yet. Every
 phone beat is therefore `[TBD after device test]` until it has been rehearsed on the device.
 
@@ -19,21 +19,21 @@ phone beat is therefore `[TBD after device test]` until it has been rehearsed on
 
 ## 1. Readiness: what must exist before filming
 
-| # | Item | Status on `main` (2026-09-29) | Blocks | Owner |
+| # | Item | Status on `main` (2026-10-03) | Blocks | Owner |
 |---|---|---|---|---|
-| R1 | `heads_down` deployed on mainnet with tiny caps, Config initialized, Executor PDA funded | Not deployed on any cluster (`crank/README.md`, `hd-crank check`: "Config not found") | 0:22 to 1:44 | founder, program |
-| R2 | Android instruction builders match the program | **Mismatch.** `android/INTERFACE-NOTES.md` §1 vs `programs/heads-down/INTERFACE-NOTES.md` §4: `register_rig` data (44 B vs 35/46 B) and account order, `arm_shift` account order and P-256 tail order, `end_shift` accounts (the program also takes the ORE Board) | clock-in | android |
-| R3 | Phone-to-crank heartbeat JSON | **Mismatch.** The phone sends `{"rig",…,"sig"}` with no `type` (`android/README.md`). The crank requires `"type":"heartbeat"` and `sig64`, and denies unknown fields (`crank/README.md`, `crank/src/heartbeat.rs`) | trustless beat | android or crank |
-| R4 | BREAK reaches the chain | The phone relays BREAK to the crank; the crank does not relay BREAK/FREEZE (`crank/README.md`, limits) | cooling shown on-chain | crank or android |
+| R1 | `heads_down` deployed on mainnet with tiny caps, Config initialized, Executor PDA funded | Not deployed on any cluster yet. The runbook is rehearsed on a local fork of mainnet (`docs/DEPLOY.md` §12); it waits for the deployer key to be funded | 0:22 to 1:44 | founder, program |
+| R2 | Android instruction builders match the program | **Done.** Every instruction the phone sends is checked byte for byte against the program's golden vectors (`android/core/chain/src/test/kotlin/xyz/headsdown/core/chain/ix/GoldenInstructionsTest.kt`) | clock-in | android |
+| R3 | Phone-to-crank heartbeat JSON | **Done.** One contract for both sides, tested over real sockets (`crank/README.md`), and the phone-less end-to-end run passes on a local fork of mainnet (`docs/DEVSTACK.md`) | trustless beat | android or crank |
+| R4 | BREAK reaches the chain | **Done.** The crank lands phone-signed BREAK and FREEZE (`crank/README.md`) | cooling shown on-chain | crank or android |
 | R5 | Redmi Keystore signature verified on-chain (TEE level, latency, screen-off signing) | Not run (`spikes/secp256r1/README.md`, "Still to do on the device") | trustless beat | android |
-| R6 | Crank reachable over `wss://` from the phone | Crank URL is a placeholder (`android/README.md`) | trustless beat | founder, crank |
-| R7 | Replay tool for the "dishonest crank" shot | Not built. Spec: take the last landed dig tx, rebuild its secp256r1 instruction and dig entry, resend with a fresh blockhash | 0:45 to 1:22 | crank |
-| R8 | Morning haul reveal | Activity is a stub (`android/README.md`, `feature/reveal`) | 2:03 | android |
-| R9 | Stack (Nearby tables, SKR bonds) | Not built; `docs/SKR.md` is the design | 2:15 (stretch) | program, android |
-| R10 | Audible arm cue | Not implemented: `ShiftStateMachine.kt` names the arm and cooling effects, and no sound or haptic code plays them | 0:00 | android |
+| R6 | Crank reachable over `wss://` from the phone | The crank URL is a build setting with no default host; it needs the Railway deployment (`docs/DEPLOY.md` §10) | trustless beat | founder, crank |
+| R7 | Replay tool for the "dishonest crank" shot | **Done.** `hd-crank replay --signature <landed dig tx>` rebuilds the dig and resends it with a fresh blockhash (`crank/README.md`, Demo tools) | 0:45 to 1:22 | crank |
+| R8 | Morning haul reveal | **Built, not on a device.** Exact alarm, full-screen reveal, rounds replayed from the indexer (`android/feature/reveal`) | 2:03 | android |
+| R9 | Stack (Nearby tables, SKR bonds) | Built and tested in the program and the crank (`docs/SKR.md` §9). No screens in the app and no Nearby pairing yet. For the SKR beat, film the Focus Bond on the home screen | 2:15 (stretch) | program, android |
+| R10 | Audible arm cue | **Built, not on a device.** A composed haptic with an audible fallback for motors that cannot compose (`android/surface/haptics`) | 0:00 | android |
 | R11 | Dashboard on real data | Indexer runs the simulated dataset until the program is deployed (`services/indexer/README.md`) | 2:35 | indexer |
-| R12 | Debug-only sensor view (live tilt angle and face-down verdict), excluded from release | Not built; optional, for the 1:44 detector shot | 1:44 | android |
-| R13 | Plan settings for the take: `lease_rounds = 1` and a raised, disclosed ceiling | `ClockInPolicy` is fixed today: plan 0.53 SOL/ORE under a 0.67 SOL/ORE wallet cap (`android/INTERFACE-NOTES.md` §2, item 7). A demo build needs them as build-time settings | trustless beat | android |
+| R12 | Debug-only sensor view (live tilt angle and face-down verdict), excluded from release | **Built.** The Sensor lab, in debug builds only (`android/README.md`) | 1:44 | android |
+| R13 | Plan settings for the take: `lease_rounds = 1` and a raised, disclosed ceiling | **Done.** Build properties `headsdown.policy.*` (`android/README.md`) | trustless beat | android |
 
 ---
 
