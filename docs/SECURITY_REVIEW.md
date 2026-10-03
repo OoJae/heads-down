@@ -71,12 +71,12 @@ stay in the user's own ORE Automation and Miner accounts.
    are not. Whoever holds that key could replace the program and take what the program's own
    accounts hold: Stack and Focus Bond SKR vaults, gift escrows, the Bury lot and the Executor
    float. It could not withdraw from anyone's ORE Automation or claim anyone's ORE.
-3. **The app does not yet offer Revoke or Close rig.** The instruction builders exist and are
-   tested; the screens do not. Until they do, those actions need another client (the ORE app for
-   the Automation). Two others are built. Unfreeze: a frozen rig's next clock-in carries
-   `unfreeze_rig`, signed by the wallet, so Freeze is no longer a one-way door in the app.
-   Claim: the clock-out screen sends ORE's own `claim_ore` to the wallet, or leaves the ORE in
-   the user's Miner, and states ORE's refining fee before the wallet opens.
+3. **The ways out are in the app, and none of them has run on a device yet.** Revoke ("Take SOL
+   back") closes the wallet's ORE Automation and returns every lamport in it; it is never refused
+   and works without a rig bound to the phone, so it survives a reinstall. Close rig returns the
+   Rig's rent, and is offered only when no shift is open and no Focus Bond is still locked.
+   Unfreeze rides on the next clock-in. Claim is on the clock-out screen. All four are unit-tested
+   against the program's golden vectors and an in-memory cluster only (section 4).
 4. **An in-person Stack table is open to any rig that pays the bond.** The program does not check
    that the players are in one room.
 5. **The registrar's log is a local file.** It records every voucher, but nothing yet lets a third
@@ -102,7 +102,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 168, and 14 against the real program on the fork |
 | `registrar` | 105 |
 | `services/indexer` | 347 |
-| `android` (JVM unit tests, all modules) | 809, of which 4 are skipped (they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 849, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

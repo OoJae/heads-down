@@ -68,6 +68,7 @@ object HomeTags {
     const val CLOCK_IN = "home-clock-in"
     const val PREVIEW_REVEAL = "home-preview-reveal"
     const val CLOCK_OUT = "home-clock-out"
+    const val WITHDRAW = "home-withdraw"
     const val ADD_WIDGET = "home-add-widget"
     const val SENSOR_LAB = "home-sensor-lab"
     const val RIG_DEBUG = "home-rig-debug"
@@ -110,6 +111,8 @@ fun HomeScreen(
     onPreviewReveal: () -> Unit = {},
     /** Opens the clock-out screen (seal the shift, take back a bond, claim ORE). Null hides the entry. */
     onClockOut: (() -> Unit)? = null,
+    /** Opens the withdraw screen (take SOL back from the ORE Automation, close the rig). Null hides the entry. */
+    onWithdraw: (() -> Unit)? = null,
     /** Null where the launcher cannot pin widgets. */
     onAddWidget: (() -> Unit)? = null,
     /** Non-null only in debug builds (the sensor lab does not exist in release). */
@@ -168,6 +171,9 @@ fun HomeScreen(
                     Text("Sensor lab (debug)", color = HdColors.Cooling)
                 }
             }
+        }
+        if (onWithdraw != null) {
+            TextButton(onClick = onWithdraw, modifier = Modifier.testTag(HomeTags.WITHDRAW)) { Text("Take SOL back or close the rig") }
         }
         if (onOpenRigDebug != null) {
             TextButton(onClick = onOpenRigDebug, modifier = Modifier.testTag(HomeTags.RIG_DEBUG)) {

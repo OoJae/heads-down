@@ -37,6 +37,11 @@
         <activity
             android:name=".clockout.ClockOutActivity"
             android:exported="false" />
+
+        <!-- Take SOL back, close the rig: started only by MainActivity, explicit intent, no extras. -->
+        <activity
+            android:name=".withdraw.WithdrawActivity"
+            android:exported="false" />
     </application>
 
 </manifest>

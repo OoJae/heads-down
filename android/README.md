@@ -233,6 +233,27 @@ fresh read:
 - Not offered yet: "buy the rest at market". Its transactions are built and tested
   (`ClockOutService`, `SwapLegBuilder`), but no swap provider is wired into the app.
 
+## Taking SOL back and closing the rig (one wallet approval)
+
+Home → "Take SOL back or close the rig" opens a non-exported screen that reads the wallet's ORE
+Automation and its Rig, says what each holds, and offers two choices. Neither is on by default.
+
+`[ORE automate(executor = none)?] [close_rig?]`
+
+- **Take it back** (Revoke) is ORE's own `automate` with no executor: ORE closes the Automation
+  and sends every lamport in it to the wallet. Nothing more is dug until the next clock-in, which
+  creates the Automation again. It is never refused, whatever the rig is doing, and it works for a
+  wallet with no rig bound to this phone: the screen asks the wallet which account it is
+  ("Connect wallet"), so SOL left in an Automation can be taken back after a reinstall.
+- **Close my rig** (`close_rig`) returns the Rig account's rent. The program requires Idle or
+  Frozen; the app also requires no open shift and no Focus Bond still locked, because closing
+  under either forfeits the bond ("Clock out first"). A rig that armed a shift or accepted a
+  signed message leaves a 32-byte tombstone that keeps its own rent. The screen says that the
+  streak and lifetime counts are erased and that it cannot be undone. A confirmed close unbinds
+  the phone from the rig.
+- Success is shown only when the signature is confirmed with `err == null`, and a wallet other
+  than the one the screen was read for is refused before anything is built.
+
 ## Local devstack (`localdev` build type)
 
 For the validator, `hd-crank`, the indexer and the registrar on the laptop
@@ -311,7 +332,7 @@ tests to prove no lab class is compiled into release.
 
 - Only `MainActivity` is exported, plus the tile service (`BIND_QUICK_SETTINGS_TILE`) and the two
   widget providers (they must receive `APPWIDGET_UPDATE`; they read nothing from the Intent).
-  The trampoline, clock-out screen, reveal, receiver, shift service, the reveal's `RevealShareFileProvider` and,
+  The trampoline, the clock-out and withdraw screens, reveal, receiver, shift service, the reveal's `RevealShareFileProvider` and,
   in debug and localdev only, the sensor lab and the rig debug screen are not exported. The
   trampoline reads no intent extras. Glance pulls in WorkManager (services and receivers guarded
   by system permissions) and the `ACCESS_NETWORK_STATE` and `RECEIVE_BOOT_COMPLETED` permissions;

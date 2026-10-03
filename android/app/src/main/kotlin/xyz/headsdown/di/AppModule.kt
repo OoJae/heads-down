@@ -35,6 +35,7 @@ import xyz.headsdown.core.chain.registrar.RigAttestationFlow
 import xyz.headsdown.core.chain.rpc.OkHttpJsonRpcTransport
 import xyz.headsdown.core.chain.rpc.RpcProtocolException
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
+import xyz.headsdown.core.chain.withdraw.WithdrawService
 import xyz.headsdown.core.keys.PrefsCounterStore
 import xyz.headsdown.core.keys.RigCounter
 import xyz.headsdown.core.keys.RigKeyManager
@@ -71,6 +72,8 @@ import xyz.headsdown.surface.haptics.Haptics
 import xyz.headsdown.surface.tile.ClockInTransactions
 import xyz.headsdown.surface.widget.GlanceRigWidgetUpdates
 import xyz.headsdown.surface.widget.RigWidgetUpdates
+import xyz.headsdown.withdraw.ChainWithdraw
+import xyz.headsdown.withdraw.WithdrawChain
 import javax.inject.Singleton
 
 /**
@@ -116,6 +119,9 @@ object AppModule {
     /** No swap provider yet: the clock-out seals, releases and claims; it does not buy. */
     @Provides @Singleton
     fun clockOutService(rpc: SolanaJsonRpc): ClockOutService = ClockOutService(rpc)
+
+    @Provides @Singleton
+    fun withdrawService(rpc: SolanaJsonRpc): WithdrawService = WithdrawService(rpc)
 
     /** The morning reveal's "Clock out" button opens the clock-out screen (explicit intent, no extras). */
     @Provides
@@ -240,4 +246,5 @@ abstract class BindingsModule {
     @Binds abstract fun rigBinding(impl: RigBindingStore): RigBindingProvider
     @Binds abstract fun clockIn(impl: ChainClockIn): ClockInTransactions
     @Binds abstract fun clockOut(impl: ChainClockOut): ClockOutChain
+    @Binds abstract fun withdraw(impl: ChainWithdraw): WithdrawChain
 }
