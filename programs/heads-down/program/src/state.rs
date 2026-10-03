@@ -72,6 +72,8 @@ pub mod tag {
     pub const GIFT_ESCROW: u8 = 8;
     /// [`super::BuryVault`] (v1.2, SKR).
     pub const BURY_VAULT: u8 = 9;
+    /// [`super::RigTombstone`] (v1.3): what `close_rig` leaves at the Rig PDA.
+    pub const RIG_TOMBSTONE: u8 = 10;
 }
 
 /// Layout version written into every header.
@@ -189,8 +191,24 @@ pub struct Config {
     pub pending_bury_bps: U16,
     /// Proposed paused flag.
     pub pending_paused: u8,
-    /// Padding to 256.
-    pub _pad2: [u8; 69],
+    /// Padding.
+    pub _pad2: [u8; 5],
+    /// v1.3: the governance proposed by `propose_governance` (all-zero = no
+    /// rotation pending). It becomes `governance` only when it signs
+    /// `accept_governance` itself, once both `pending_governance_eta_slot`
+    /// and `pending_governance_eta_ts` have passed.
+    pub pending_governance: [u8; 32],
+    /// v1.3: first slot at which the pending governance may accept.
+    pub pending_governance_eta_slot: U64,
+    /// v1.3: first cluster time (unix s) at which the pending governance may
+    /// accept.
+    pub pending_governance_eta_ts: I64,
+    /// v1.3: first cluster time (unix s) at which the pending config proposal
+    /// may be applied, next to `pending_eta_slot`. Zero for a proposal made
+    /// by a v1.2 program: only its slot bound applies.
+    pub pending_eta_ts: I64,
+    /// Reserved, zero (to 256).
+    pub reserved: [u8; 8],
 }
 
 /// A rig, PDA `[b"rig", authority]`, 384 bytes.
@@ -351,8 +369,31 @@ pub struct ShiftLog {
     pub start_ts: I64,
     /// Unix time ended.
     pub end_ts: I64,
-    /// Reserved.
-    pub reserved: [u8; 16],
+    /// v1.3 (was `reserved`): the first 16 bytes of the address that paid
+    /// this log's rent (the `end_shift` caller). `close_shift_log` returns
+    /// the rent only to an address with this prefix. All-zero in a log sealed
+    /// before v1.3: its rent goes to the rig's authority.
+    pub payer_prefix: [u8; 16],
+}
+
+/// What `close_rig` leaves at the Rig PDA `[b"rig", authority]` once the rig
+/// has armed a shift or accepted a P-256 message (v1.3), 32 bytes.
+///
+/// `register_rig` on a tombstone grows it back into a Rig that resumes from
+/// these two counters, so a rig address never reuses a `shift_id` (the seed
+/// of its ShiftLogs and Focus Bonds, and what a Stack seat binds to) and
+/// never accepts a P-256 message twice, however often it is closed.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
+pub struct RigTombstone {
+    /// Header (tag 10; the Rig PDA's canonical bump).
+    pub header: Header,
+    /// `Rig::shift_id` at close.
+    pub shift_id: U64,
+    /// `Rig::hb_counter` at close.
+    pub hb_counter: U64,
+    /// Reserved, zero.
+    pub reserved: [u8; 8],
 }
 
 // ---- v1.2 (SKR): additive accounts ------------------------------------------
@@ -616,6 +657,12 @@ const _: () = {
     assert!(offset_of!(Config, pending_bury_bps) == 184);
     assert!(offset_of!(Config, pending_paused) == 186);
     assert!(offset_of!(Config, _pad2) == 187);
+    // v1.3: the governance rotation lives in the old tail padding.
+    assert!(offset_of!(Config, pending_governance) == 192);
+    assert!(offset_of!(Config, pending_governance_eta_slot) == 224);
+    assert!(offset_of!(Config, pending_governance_eta_ts) == 232);
+    assert!(offset_of!(Config, pending_eta_ts) == 240);
+    assert!(offset_of!(Config, reserved) == 248);
 
     assert!(size_of::<Rig>() == 384);
     assert!(offset_of!(Rig, authority) == 8);
@@ -684,7 +731,15 @@ const _: () = {
     assert!(offset_of!(ShiftLog, mode) == 89);
     assert!(offset_of!(ShiftLog, start_ts) == 96);
     assert!(offset_of!(ShiftLog, end_ts) == 104);
-    assert!(offset_of!(ShiftLog, reserved) == 112);
+    // v1.3: `payer_prefix` is the old `reserved[16]`.
+    assert!(offset_of!(ShiftLog, payer_prefix) == 112);
+
+    // v1.3, additive.
+    assert!(core::mem::align_of::<RigTombstone>() == 1);
+    assert!(size_of::<RigTombstone>() == 32);
+    assert!(offset_of!(RigTombstone, shift_id) == 8);
+    assert!(offset_of!(RigTombstone, hb_counter) == 16);
+    assert!(offset_of!(RigTombstone, reserved) == 24);
 
     // v1.2 (SKR), additive.
     assert!(core::mem::align_of::<StackTable>() == 1);
@@ -833,6 +888,12 @@ impl Account for GiftEscrow {
 }
 impl Account for BuryVault {
     const TAG: u8 = tag::BURY_VAULT;
+    fn header(&self) -> &Header {
+        &self.header
+    }
+}
+impl Account for RigTombstone {
+    const TAG: u8 = tag::RIG_TOMBSTONE;
     fn header(&self) -> &Header {
         &self.header
     }

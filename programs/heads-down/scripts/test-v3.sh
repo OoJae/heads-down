@@ -1,28 +1,17 @@
 #!/usr/bin/env bash
-# SBPFv3: build both heads_down variants with `--arch v3` (SIMD-0500 will
-# disable new v0/v1/v2 deploys) and run the whole LiteSVM fork suite against
-# them (HD_SBF_ARCH=v3 makes tests/src/lib.rs load target/deploy-v3 and
-# target/deploy-devnet-v3). The golden-vector test then also proves the v3
-# binary produces byte-identical instructions, events and accounts.
+# SBPFv3, explicitly: build both heads_down variants with `--arch v3` into
+# target/deploy-v3 and target/deploy-devnet-v3 (scripts/build.sh asserts ELF e_flags 3)
+# and run the whole LiteSVM fork suite against exactly those files (HD_SBF_ARCH=v3 makes
+# tests/src/lib.rs load them). target/deploy is left alone.
+#
+# SBPFv3 is also the default of scripts/build.sh and scripts/test.sh since v1.3; this
+# script stays as the arch-pinned run, next to scripts/test-v0.sh. The golden-vector
+# test proves both arches produce byte-identical instructions, events and results.
 set -euo pipefail
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 cd "$(dirname "$0")/.."
 TOOLCHAIN="${HD_TOOLCHAIN:-+1.97.1}"
 
 [[ -f tests/fixtures/ore.so && -f tests/fixtures/ore_stake.so ]] || bash tests/fixtures/fetch-fixtures.sh
-[[ -f target/deploy-mock/mock_ore.so ]] || bash scripts/build.sh
-
-cargo-build-sbf --manifest-path program/Cargo.toml --features mainnet --arch v3 --sbf-out-dir target/deploy-v3
-env -u SGT_VERIFY_TEST_GROUP -u SGT_VERIFY_TEST_AUTHORITY \
-  cargo-build-sbf --manifest-path program/Cargo.toml --features devnet --arch v3 --sbf-out-dir target/deploy-devnet-v3
-
-python3 - <<'PY'
-import struct
-for p in ("target/deploy-v3/heads_down.so", "target/deploy-devnet-v3/heads_down.so"):
-    d = open(p, "rb").read()
-    flags = struct.unpack_from("<I", d, 48)[0]
-    assert flags == 3, f"{p}: e_flags {flags}, expected 3 (SBPFv3)"
-    print(f"{p}: SBPFv3 (e_flags 3), {len(d)} bytes")
-PY
-
+HD_SBF_ARCH=v3 HD_SBF_INSTALL=0 bash scripts/build.sh
 HD_SBF_ARCH=v3 cargo "$TOOLCHAIN" test -p heads-down-tests "$@"

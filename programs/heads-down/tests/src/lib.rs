@@ -39,9 +39,11 @@ use solana_transaction::Transaction;
 pub use solana_transaction_error::TransactionError;
 
 pub mod skr;
+pub mod v13;
 pub mod vectors;
 
 pub use skr::*;
+pub use v13::*;
 
 // ---- ids --------------------------------------------------------------------
 
@@ -126,18 +128,30 @@ pub enum Build {
     Devnet,
 }
 
-/// Path of the built `.so`. With `HD_SBF_ARCH=v3` the suite loads the
-/// SBPFv3 builds instead (`scripts/test-v3.sh`: `cargo build-sbf --arch v3`
-/// into `target/deploy-v3` and `target/deploy-devnet-v3`).
+/// Path of the built `.so`.
+///
+/// Without `HD_SBF_ARCH` the suite loads `target/deploy` and
+/// `target/deploy-devnet`: what `scripts/build.sh` installed, SBPFv3 by
+/// default since v1.3 (the artifact the deploy scripts ship). With
+/// `HD_SBF_ARCH=v3` or `v0` it loads that arch's own directory
+/// (`target/deploy-v3`, `target/deploy-devnet-v0`, ...), which
+/// `scripts/test-v3.sh` and `scripts/test-v0.sh` build without touching
+/// `target/deploy`.
 pub fn so_path(build: Build) -> PathBuf {
-    let v3 = std::env::var("HD_SBF_ARCH").is_ok_and(|a| a == "v3");
-    let dir = match (build, v3) {
-        (Build::Mainnet, false) => "deploy",
-        (Build::Devnet, false) => "deploy-devnet",
-        (Build::Mainnet, true) => "deploy-v3",
-        (Build::Devnet, true) => "deploy-devnet-v3",
+    let suffix = match std::env::var("HD_SBF_ARCH").ok().as_deref() {
+        None | Some("") => "",
+        Some("v3") => "-v3",
+        Some("v0") => "-v0",
+        Some(other) => panic!("HD_SBF_ARCH must be v3 or v0, not {other:?}"),
     };
-    root().join("target").join(dir).join("heads_down.so")
+    let dir = match build {
+        Build::Mainnet => "deploy",
+        Build::Devnet => "deploy-devnet",
+    };
+    root()
+        .join("target")
+        .join(format!("{dir}{suffix}"))
+        .join("heads_down.so")
 }
 
 fn read_json(path: &Path) -> serde_json::Value {
@@ -529,6 +543,42 @@ pub enum Event {
         /// Lot left.
         lot_remaining: u64,
     },
+    /// GovernanceProposed (v1.3).
+    GovernanceProposed {
+        /// The current governance (signer).
+        governance: Address,
+        /// The proposed successor.
+        pending: Address,
+        /// First slot it may accept.
+        eta_slot: u64,
+        /// First cluster time (unix s) it may accept.
+        eta_ts: i64,
+    },
+    /// GovernanceAccepted (v1.3).
+    GovernanceAccepted {
+        /// The new governance (signer).
+        governance: Address,
+        /// The one it replaced.
+        previous: Address,
+    },
+    /// GovernanceCancelled (v1.3).
+    GovernanceCancelled {
+        /// The current governance (signer).
+        governance: Address,
+        /// The successor that was dropped.
+        cancelled: Address,
+    },
+    /// ShiftLogClosed (v1.3).
+    ShiftLogClosed {
+        /// The closed ShiftLog.
+        shift_log: Address,
+        /// Its rig.
+        rig: Address,
+        /// Its shift.
+        shift_id: u64,
+        /// Rent returned.
+        lamports: u64,
+    },
 }
 
 fn addr_at(d: &[u8], off: usize) -> Address {
@@ -692,6 +742,26 @@ fn decode_event(d: &[u8]) -> Option<Event> {
             ore_burned: u64_at(d, 57),
             ore_shared: u64_at(d, 65),
             lot_remaining: u64_at(d, 73),
+        },
+        (&tag::GOVERNANCE_PROPOSED, 81) => Event::GovernanceProposed {
+            governance: addr_at(d, 1),
+            pending: addr_at(d, 33),
+            eta_slot: u64_at(d, 65),
+            eta_ts: u64_at(d, 73) as i64,
+        },
+        (&tag::GOVERNANCE_ACCEPTED, 65) => Event::GovernanceAccepted {
+            governance: addr_at(d, 1),
+            previous: addr_at(d, 33),
+        },
+        (&tag::GOVERNANCE_CANCELLED, 65) => Event::GovernanceCancelled {
+            governance: addr_at(d, 1),
+            cancelled: addr_at(d, 33),
+        },
+        (&tag::SHIFT_LOG_CLOSED, 81) => Event::ShiftLogClosed {
+            shift_log: addr_at(d, 1),
+            rig: addr_at(d, 33),
+            shift_id: u64_at(d, 65),
+            lamports: u64_at(d, 73),
         },
         _ => return None,
     })

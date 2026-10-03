@@ -2,8 +2,9 @@
 //!
 //! Codes 0..=31 are fixed by `INTERFACE.md` §8 (24..=31 were added for the
 //! `dig` pre-flight skips and state-machine violations; they are frozen in
-//! v1.1). Codes 32..=48 are the additive v1.2 SKR codes (§11.7). Errors
-//! raised inside the shared crates keep their own namespaces:
+//! v1.1). Codes 32..=48 are the additive v1.2 SKR codes (§11.10) and codes
+//! 49..=50 the additive v1.3 codes (§12.9). Errors raised inside the shared
+//! crates keep their own namespaces:
 //! `p256-introspect` = `0x2560_00xx`, `sgt-verify` = `0x5347_00xx`.
 
 use pinocchio::error::ProgramError;
@@ -130,6 +131,13 @@ pub enum HdError {
     /// After the ORE `bury` CPI, the vault did not lose exactly the paid ORE
     /// or the ORE supply did not drop by the burned 90%.
     BuryMismatch = 48,
+
+    // ---- added in INTERFACE.md v1.3, additive ------------------------------
+    /// `close_shift_log` before the log is 30 days old.
+    ShiftLogNotExpired = 49,
+    /// `close_shift_log` while a Focus Bond on that shift is still
+    /// unresolved (the bond is released or forfeited from this log).
+    ShiftLogInUse = 50,
 }
 
 impl HdError {

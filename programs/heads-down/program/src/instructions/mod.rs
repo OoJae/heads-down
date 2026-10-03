@@ -14,6 +14,7 @@ pub mod record_heartbeats;
 pub mod register_rig;
 pub mod rotate_key;
 pub mod set_caps;
+pub mod shift_log;
 pub mod signals;
 pub mod stack;
 pub mod verify_seeker;

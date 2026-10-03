@@ -13,6 +13,10 @@
 //! Emits `ShiftEnded` (tag 4, v1) and then `ShiftEndedV2` (tag 10), which
 //! adds `start_round`, `end_round` and `mode`.
 //!
+//! v1.3: the log records the first 16 bytes of the caller's address
+//! (`payer_prefix`), so `close_shift_log` can return the rent to whoever
+//! paid it, 30 days later.
+//!
 //! The rig's authority may end its shift at any time. Anyone else may end it
 //! only once `now > plan_window_end_ts` **and** the heartbeat lease has
 //! expired (`lease_to_round < board.round_id`).
@@ -35,6 +39,18 @@ use crate::{
 
 /// Seconds per day (streak days are UTC unix days).
 pub const DAY_SECONDS: i64 = 86_400;
+
+/// The first 16 bytes of `address`: what a ShiftLog keeps of its rent payer
+/// (v1.3). 128 bits bind the refund to that address as firmly as a full
+/// address would: finding another address with the same prefix is a
+/// 2^128 search.
+pub fn payer_prefix(address: &[u8; 32]) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    for (o, b) in out.iter_mut().zip(address.iter()) {
+        *o = *b;
+    }
+    out
+}
 
 /// Handler.
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -122,6 +138,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
         l.mode = mode;
         l.start_ts.set(start_ts);
         l.end_ts.set(now);
+        l.payer_prefix = payer_prefix(caller.address().as_array());
     }
 
     let mut g = state::load_mut::<Rig>(rig)?;

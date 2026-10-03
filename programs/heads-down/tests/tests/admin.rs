@@ -2,7 +2,10 @@
 //! timelock, rig registration with the registrar's Ed25519 attestation,
 //! key rotation and caps authorization.
 
-use hd::{error::HdError, instructions::governance::TIMELOCK_SLOTS};
+use hd::{
+    error::HdError,
+    instructions::governance::{TIMELOCK_SECS, TIMELOCK_SLOTS},
+};
 use heads_down_tests::*;
 use p256_introspect::IntrospectError;
 
@@ -157,7 +160,7 @@ fn config_changes_wait_72_hours() {
     );
     assert_hd(&res, 0, HdError::InvalidInstruction);
 
-    let s0 = env.slot;
+    let (s0, t0) = (env.slot, env.now);
     ok(env.send_as(
         &gov,
         &[ix_propose(&gov.pubkey(), &new_registrar, 1_000, 250, 0)],
@@ -166,7 +169,8 @@ fn config_changes_wait_72_hours() {
     let c = env.config();
     assert_eq!(c.pending_exists, 1);
     assert_eq!(c.pending_eta_slot.get(), s0 + TIMELOCK_SLOTS);
-    assert_eq!(TIMELOCK_SLOTS, 864_000);
+    assert_eq!(c.pending_eta_ts.get(), t0 + TIMELOCK_SECS);
+    assert_eq!((TIMELOCK_SLOTS, TIMELOCK_SECS), (864_000, 72 * 3_600));
     assert_eq!(c.crank_fee.get(), CRANK_FEE, "not applied yet");
 
     assert_hd(
@@ -174,19 +178,37 @@ fn config_changes_wait_72_hours() {
         0,
         HdError::TimelockNotElapsed,
     );
-    env.set_clock(s0 + TIMELOCK_SLOTS - 1, env.now);
+    // The timelock has two halves, and both must pass. Every slot but one,
+    // with all the time:
+    env.set_clock(s0 + TIMELOCK_SLOTS - 1, t0 + TIMELOCK_SECS);
     assert_hd(
         &env.send(&[ix_apply()], &[]),
         0,
         HdError::TimelockNotElapsed,
     );
-    env.set_clock(s0 + TIMELOCK_SLOTS, env.now);
+    // all the slots, one second short:
+    env.set_clock(s0 + TIMELOCK_SLOTS, t0 + TIMELOCK_SECS - 1);
+    assert_hd(
+        &env.send(&[ix_apply()], &[]),
+        0,
+        HdError::TimelockNotElapsed,
+    );
+    // and slots alone never do it. 864,000 of them take about 64 hours at
+    // mainnet's 268 ms (2026-10-01); here five times as many have passed.
+    env.set_clock(s0 + 5 * TIMELOCK_SLOTS, t0 + 64 * 3_600);
+    assert_hd(
+        &env.send(&[ix_apply()], &[]),
+        0,
+        HdError::TimelockNotElapsed,
+    );
+    env.set_clock(s0 + 5 * TIMELOCK_SLOTS, t0 + TIMELOCK_SECS);
     ok(env.send(&[ix_apply()], &[])); // anyone
     let c = env.config();
     assert_eq!(c.registrar, new_registrar.to_bytes());
     assert_eq!(c.crank_fee.get(), 1_000);
     assert_eq!(c.bury_bps.get(), 250);
     assert_eq!(c.pending_exists, 0);
+    assert_eq!(c.pending_eta_ts.get(), 0);
     assert_eq!(
         c.executor_fee.get(),
         EXECUTOR_FEE,
@@ -206,29 +228,59 @@ fn pausing_is_immediate_unpausing_waits() {
     ));
     assert_eq!(env.config().paused, 1);
     // Proposing to unpause does not unpause.
-    let s0 = env.slot;
+    let (s0, t0) = (env.slot, env.now);
     ok(env.send_as(
         &gov,
         &[ix_propose(&gov.pubkey(), &reg, CRANK_FEE, 0, 0)],
         &[],
     ));
     assert_eq!(env.config().paused, 1);
-    // A newer proposal restarts the clock.
-    env.set_clock(s0 + 10, env.now);
+    // A newer proposal restarts the clock (both halves).
+    env.set_clock(s0 + 10, t0 + 4);
     ok(env.send_as(
         &gov,
         &[ix_propose(&gov.pubkey(), &reg, CRANK_FEE, 0, 0)],
         &[],
     ));
-    env.set_clock(s0 + TIMELOCK_SLOTS, env.now);
+    env.set_clock(s0 + TIMELOCK_SLOTS, t0 + TIMELOCK_SECS);
     assert_hd(
         &env.send(&[ix_apply()], &[]),
         0,
         HdError::TimelockNotElapsed,
     );
-    env.set_clock(s0 + 10 + TIMELOCK_SLOTS, env.now);
+    env.set_clock(s0 + 10 + TIMELOCK_SLOTS, t0 + 4 + TIMELOCK_SECS);
     ok(env.send(&[ix_apply()], &[]));
     assert_eq!(env.config().paused, 0);
+}
+
+/// A proposal written by the v1.2 program has no `pending_eta_ts` (bytes
+/// 240..248 were reserved, zero): after an upgrade it still applies on its
+/// slot bound, exactly as it was promised when it was made.
+#[test]
+fn a_proposal_made_before_v1_3_applies_on_its_slot_bound() {
+    let mut env = Env::new();
+    let gov = env.governance.insecure_clone();
+    let reg = env.registrar.pubkey();
+    let s0 = env.slot;
+    ok(env.send_as(
+        &gov,
+        &[ix_propose(&gov.pubkey(), &reg, 1_234, 0, 0)],
+        &[],
+    ));
+    let mut acc = env.account(&CONFIG);
+    assert_ne!(acc.data[240..248], [0u8; 8]);
+    acc.data[240..248].fill(0);
+    env.svm.set_account(CONFIG, acc).unwrap();
+
+    env.set_clock(s0 + TIMELOCK_SLOTS - 1, env.now);
+    assert_hd(
+        &env.send(&[ix_apply()], &[]),
+        0,
+        HdError::TimelockNotElapsed,
+    );
+    env.set_clock(s0 + TIMELOCK_SLOTS, env.now);
+    ok(env.send(&[ix_apply()], &[]));
+    assert_eq!(env.config().crank_fee.get(), 1_234);
 }
 
 // ---- register_rig / attestation -------------------------------------------------

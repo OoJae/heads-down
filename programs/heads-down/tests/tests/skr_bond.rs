@@ -238,12 +238,13 @@ fn a_bond_on_a_rig_closed_mid_shift_is_abandoned_and_forfeits() {
 fn a_rig_re_registered_after_closing_cannot_revive_an_abandoned_bond() {
     let mut env = Env::new();
     env.init_bury_vault();
-    let mut u = bonded_user(&mut env, 5);
+    let u = bonded_user(&mut env, 5);
     ok(lock(&mut env, &u, 1, AMOUNT));
     let w = u.wallet.insecure_clone();
     ok(env.send_as(&w, &[ix_freeze_wallet(&w.pubkey())], &[]));
     ok(env.send_as(&w, &[ix_close_rig(&w.pubkey(), None)], &[]));
-    // Re-register and arm again: shift ids restart at 1, but at a new time.
+    // Re-register and arm again. v1.3: the rig resumes from its tombstone,
+    // so the new shift is 2 (under v1.2 the id restarted at 1).
     env.advance_time(60);
     let plan = standard_plan();
     ok(env.send_as(
@@ -255,9 +256,13 @@ fn a_rig_re_registered_after_closing_cannot_revive_an_abandoned_bond() {
         ],
         &[],
     ));
-    u.counter = 0;
-    assert_eq!(env.rig(&u.rig).shift_id.get(), 1);
-    // The bonded shift (armed at T0) is gone: forfeit, reason abandoned.
+    assert_eq!(env.rig(&u.rig).shift_id.get(), 2);
+    // The bonded shift 1 is gone for good: forfeit, reason abandoned.
+    assert_hd(
+        &env.send(&[ix_release_focus_bond(&u.pubkey(), 1)], &[]),
+        0,
+        HdError::InvalidAccountTag, // shift 1 was never sealed: no ShiftLog
+    );
     let meta = ok(env.send(&[ix_forfeit_focus_bond(&u.pubkey(), 1)], &[]));
     assert!(events(&meta.logs).iter().any(|e| matches!(
         e,

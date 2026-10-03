@@ -516,8 +516,12 @@ fn close_rig_requires_an_idle_rig_and_its_authority() {
     );
     assert_hd(&res, 1, HdError::InvalidAccountTag);
     ok(env.send_as(&w, &[ix_close_rig(&w.pubkey(), None)], &[]));
-    assert!(env.svm.get_account(&u.rig).is_none());
-    // The address can be registered again from scratch.
+    // v1.3: a rig that armed a shift leaves a tombstone, not an empty address.
+    assert_eq!(env.rig_slot(&u.rig), RigSlot::Tombstone);
+    // The address can be registered again; the new rig starts fresh except
+    // for the shift id (and the P-256 counter), which carry on.
     ok(env.send_as(&w, &[ix_register_rig(&w.pubkey(), &u.p256(), None)], &[]));
-    assert_eq!(env.rig(&u.rig).shift_id.get(), 0);
+    let rig = env.rig(&u.rig);
+    assert_eq!((rig.shift_id.get(), rig.shift_open), (1, 0));
+    assert_eq!((rig.state, rig.cap_round.get()), (rig_state::IDLE, 0));
 }

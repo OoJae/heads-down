@@ -274,7 +274,7 @@ fn mutated_skr_instructions_never_abort() {
         let res = send(&mut env, &u, &pre, ix);
         assert_clean(&res, &format!("mutation #{i}"));
         failures += usize::from(res.is_err());
-        if env.svm.get_account(&u.rig).is_none() {
+        if env.rig_slot(&u.rig) != RigSlot::Rig {
             break;
         }
         u.counter = env.rig(&u.rig).hb_counter.get();

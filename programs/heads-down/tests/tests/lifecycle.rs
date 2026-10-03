@@ -174,6 +174,8 @@ fn shift_ends_into_a_shift_log_and_the_rig_closes() {
     assert_eq!(l.mode, 0);
     assert_eq!(l.start_ts.get(), T0);
     assert_eq!(l.end_ts.get(), T0);
+    // v1.3: the log names who paid its rent (the first 16 address bytes).
+    assert_eq!(l.payer_prefix[..], w.pubkey().to_bytes()[..16]);
     assert_eq!(
         events(&meta.logs),
         vec![
@@ -209,11 +211,16 @@ fn shift_ends_into_a_shift_log_and_the_rig_closes() {
     let res = env.send_as(&w, &[ix_end_shift(&w.pubkey(), &user.rig, 1)], &[]);
     assert_hd(&res, 0, hd::error::HdError::InvalidRigState);
 
-    // close_rig returns every lamport to the stored authority.
+    // close_rig returns the rent to the stored authority, less the rent of
+    // the 32-byte tombstone a rig that armed a shift leaves behind (v1.3).
     let rent = env.lamports(&user.rig);
     let before = env.lamports(&w.pubkey());
     let meta = ok(env.send_as(&w, &[ix_close_rig(&w.pubkey(), None)], &[]));
-    assert_eq!(env.lamports(&w.pubkey()), before + rent - meta.fee);
-    assert!(env.svm.get_account(&user.rig).is_none(), "rig closed");
+    assert_eq!(
+        env.lamports(&w.pubkey()),
+        before + rent - TOMBSTONE_RENT - meta.fee
+    );
+    assert_eq!(env.rig_slot(&user.rig), RigSlot::Tombstone, "rig closed");
+    assert_eq!(env.tombstone(&user.rig).shift_id.get(), 1);
     assert_eq!(events(&meta.logs), vec![Event::RigClosed { rig: user.rig }]);
 }

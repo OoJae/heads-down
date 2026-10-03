@@ -1,7 +1,7 @@
 //! Cross-check example, compiled inside a temporary copy of `registrar/` by
-//! `registrar_voucher.sh` (the registrar directory itself is never edited):
-//! the registrar's own `voucher.rs` signs the voucher described in
-//! `vectors/registrar.json` and every byte is compared.
+//! `run.sh` (the registrar directory itself is never edited): the registrar's
+//! own `voucher.rs` signs the voucher described in `vectors/registrar.json`
+//! and every byte is compared.
 use hd_registrar::voucher::{RegistrarKey, Voucher, HEADS_DOWN_PROGRAM_ID, IX_HEADER};
 
 fn main() {
@@ -18,16 +18,24 @@ fn main() {
         level: v["level"].as_u64().unwrap() as u8,
         expiry_slot: v["expiry_slot"].as_str().unwrap().parse().unwrap(),
     });
-    let check = |what: &str, ours: String, golden: &serde_json::Value| {
+    let (mut matched, mut mismatched) = (0, 0);
+    let mut check = |what: &str, ours: String, golden: &serde_json::Value| {
         let ok = ours == golden.as_str().unwrap();
+        if ok {
+            matched += 1;
+        } else {
+            mismatched += 1;
+        }
         println!("[{}] registrar {what}", if ok { "MATCH" } else { "MISMATCH" });
         if !ok {
             println!("  registrar {ours}\n  golden    {golden}");
         }
     };
+    check("program id", HEADS_DOWN_PROGRAM_ID.to_string(), &g["program_id"]);
     check("pubkey", bs58::encode(key.pubkey()).into_string(), &g["registrar_key"]["pubkey"]);
     check("HDreg preimage (111 B)", hex::encode(signed.message), &v["preimage_hex"]);
     check("Ed25519 signature", hex::encode(signed.signature), &v["ed25519_signature_hex"]);
     check("IX_HEADER", hex::encode(IX_HEADER), &g["ed25519_instruction"]["header_hex"]);
     check("Ed25519SigVerify data (223 B)", hex::encode(signed.instruction_data()), &g["ed25519_instruction"]["data_hex"]);
+    println!("\nTOTAL registrar src/voucher.rs: MATCH {matched} / MISMATCH {mismatched}");
 }

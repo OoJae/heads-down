@@ -340,6 +340,10 @@ pub fn event_name(tag: u8) -> &'static str {
         ev::tag::GIFT_REFUNDED => "GiftRefunded",
         ev::tag::BURY_LOT_ADDED => "BuryLotAdded",
         ev::tag::BURY_AUCTION_SOLD => "BuryAuctionSold",
+        ev::tag::GOVERNANCE_PROPOSED => "GovernanceProposed",
+        ev::tag::GOVERNANCE_ACCEPTED => "GovernanceAccepted",
+        ev::tag::GOVERNANCE_CANCELLED => "GovernanceCancelled",
+        ev::tag::SHIFT_LOG_CLOSED => "ShiftLogClosed",
         _ => "Unknown",
     }
 }
@@ -500,6 +504,26 @@ pub fn event_layout(tag: u8) -> Vec<(&'static str, &'static str, usize, usize)> 
             ("ore_shared", "u64", 8),
             ("lot_remaining", "u64", 8),
         ],
+        ev::tag::GOVERNANCE_PROPOSED => &[
+            ("governance", "pubkey", 32),
+            ("pending_governance", "pubkey", 32),
+            ("eta_slot", "u64", 8),
+            ("eta_ts", "i64", 8),
+        ],
+        ev::tag::GOVERNANCE_ACCEPTED => &[
+            ("governance", "pubkey", 32),
+            ("previous_governance", "pubkey", 32),
+        ],
+        ev::tag::GOVERNANCE_CANCELLED => &[
+            ("governance", "pubkey", 32),
+            ("cancelled_governance", "pubkey", 32),
+        ],
+        ev::tag::SHIFT_LOG_CLOSED => &[
+            ("shift_log", "pubkey", 32),
+            ("rig", "pubkey", 32),
+            ("shift_id", "u64", 8),
+            ("lamports", "u64", 8),
+        ],
         _ => &[],
     };
     let mut off = 1;
@@ -633,6 +657,12 @@ impl Recorder {
                 f.logs.join("\n")
             ),
         };
+        // `HD_VECTOR_CU=1 cargo test --test vectors golden -- --nocapture`
+        // prints the compute units of every golden transaction. The scenario
+        // is deterministic, so two builds can be compared line by line.
+        if std::env::var_os("HD_VECTOR_CU").is_some() {
+            println!("CU {} {}", spec.name, meta.compute_units_consumed);
+        }
         let raw = raw_events(&meta.logs);
         for b in &raw {
             self.samples
@@ -842,6 +872,17 @@ fn pinned_json(env: &Env) -> Value {
                 "window_slots": s(hd::skr::WINDOW_SLOTS),
             },
         },
+        "v1_3": {
+            "governance_timelock_slots": s(hd::instructions::governance::TIMELOCK_SLOTS),
+            "governance_timelock_secs": s(hd::instructions::governance::TIMELOCK_SECS),
+            "shift_log_ttl_secs": s(hd::instructions::shift_log::SHIFT_LOG_TTL_SECS),
+            "rig_tombstone": {"account_tag": hd::state::tag::RIG_TOMBSTONE, "len": 32, "shift_id_offset": 8, "hb_counter_offset": 16},
+            "config_pending_governance_offset": 192,
+            "config_pending_governance_eta_slot_offset": 224,
+            "config_pending_governance_eta_ts_offset": 232,
+            "config_pending_eta_ts_offset": 240,
+            "shift_log_payer_prefix_offset": 112,
+        },
     })
 }
 
@@ -882,6 +923,7 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         "cranker": {"pubkey": s(env.cranker.pubkey()), "seed": "[0x0c; 32] (public test seed)"},
         "governance": {"pubkey": s(env.governance.pubkey()), "seed": "[0x06; 32] (public test seed)"},
         "registrar": {"pubkey": s(env.registrar.pubkey()), "seed": "[0x05; 32] (public test seed, the key registrar/src/voucher.rs tests use)"},
+        "new_governance": {"pubkey": s(new_governance().pubkey()), "seed": "[0x07; 32] (public test seed; the successor named by propose_governance, v1.3)"},
     });
     let pinned = pinned_json(&env);
     let mut rec = Recorder {
@@ -1613,7 +1655,7 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
             name: "propose_config",
             instruction: "propose_config",
             auth: "governance",
-            description: "Propose crank_fee 4500 (<= executor_fee), bury_bps 250, paused 0: pending_* with pending_eta_slot = slot + 864000. (paused = 1 would also pause immediately.)",
+            description: "Propose crank_fee 4500 (<= executor_fee), bury_bps 250, paused 0: pending_* with pending_eta_slot = slot + 864000 and (v1.3) pending_eta_ts = unix_timestamp + 259200. (paused = 1 would also pause immediately.)",
             args: json!({"registrar": s(registrar.pubkey()), "crank_fee": "4500", "bury_bps": 250, "paused": 0}),
             fields: f,
             metas: h.accounts.clone(),
@@ -1624,16 +1666,18 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         &govk,
         &[],
     );
-    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS)");
+    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS) and, for apply_config only, unix_timestamp += 259200 (TIMELOCK_SECS, v1.3); the wall clock is put back right after it, so every later vector keeps its v1.2 bytes");
     let (slot_now, now) = (rec.env.slot, rec.env.now);
-    rec.env
-        .set_clock(slot_now + hd::instructions::governance::TIMELOCK_SLOTS, now);
+    rec.env.set_clock(
+        slot_now + hd::instructions::governance::TIMELOCK_SLOTS,
+        now + hd::instructions::governance::TIMELOCK_SECS,
+    );
     let h = ix_apply();
     rec.vector(
         Spec {
             name: "apply_config",
             instruction: "apply_config",
-            auth: "anyone, once slot >= pending_eta_slot",
+            auth: "anyone, once slot >= pending_eta_slot and (v1.3) unix_timestamp >= pending_eta_ts",
             description: "Apply the pending proposal after the timelock.",
             args: json!({}),
             fields: Fields::new(hd::tag::APPLY_CONFIG),
@@ -1645,6 +1689,8 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         &cranker,
         &[],
     );
+    rec.env
+        .set_clock(slot_now + hd::instructions::governance::TIMELOCK_SLOTS, now);
     let c = rec.env.config();
     assert_eq!((c.crank_fee.get(), c.bury_bps.get()), (4_500, 250));
 
@@ -1652,17 +1698,20 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
     let skr_users = skr_vectors(&mut rec, &cranker);
     users.as_array_mut().unwrap().extend(skr_users);
 
+    // ---- v1.3, additive: appended so every earlier vector is unchanged ------
+    v13_vectors(&mut rec, &cranker, &alice, &govk);
+
     // Every tag appears.
     let tags: std::collections::BTreeSet<u8> = rec
         .vectors
         .iter()
         .map(|v| v["tag"].as_u64().unwrap() as u8)
         .collect();
-    assert_eq!(tags.len(), 28, "every instruction tag has a vector");
+    assert_eq!(tags.len(), 32, "every instruction tag has a vector");
 
     let doc = json!({
         "format": "heads-down/golden-instructions",
-        "interface_version": "1.2",
+        "interface_version": "1.3",
         "generated_by": "programs/heads-down/tests/src/vectors.rs (HD_WRITE_VECTORS=1 cargo +1.97.1 test -p heads-down-tests --test vectors)",
         "notes": [
             "Every vector below was executed, in the order of `scenario`, on the LiteSVM fork of live mainnet ORE with the mainnet heads_down build and signature verification on; `litesvm.result` is what happened.",
@@ -1670,7 +1719,8 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
             "`accounts` is the exact ordered AccountMeta list the program accepted; `pda` gives the seeds and program each derived address comes from (bump = canonical find_program_address bump).",
             "`transaction.instructions` is the whole transaction: companion instructions (compute budget, Secp256r1SigVerify, Ed25519SigVerify) are given in full so hb_ix / p256_ix / ed25519_ix are real top-level indices.",
             "Keys are fixed public test seeds (never real keys). The ORE Board/Treasury/Round are pinned (see `pinned_fork`) so the output is independent of when the fixtures were fetched.",
-            "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned."
+            "v1.2 (SKR, additive): tags 15..=27 follow the v1.1 vectors in the same scenario. SKR and ORE balances are fixture surgery (the fork cannot mint either); the SKR / ORE mints, ORE's stake program and every account ORE `bury` touches are the live mainnet ones, with the stake Vesting schedule pinned.",
+            "v1.3 (additive): tags 28..=31 follow the v1.2 vectors in the same scenario, with one more vector for tag 1 (`register_rig_resumed`: the same register_rig bytes over the RigTombstone that alice's close_rig left). Every v1.1 and v1.2 vector above them keeps its v1.2 instruction data, account list, transaction and events byte for byte; only the wording of two entries changed (`propose_config` description, `apply_config` auth), because the config timelock now also waits for 72 hours of cluster time (Config.pending_eta_ts)."
         ],
         "program_id": s(HD),
         "program_id_hex": hex(HD.as_ref()),
@@ -2371,6 +2421,182 @@ fn skr_vectors(rec: &mut Recorder, cranker: &Keypair) -> Vec<Value> {
     users
 }
 
+// ---- v1.3 vectors ------------------------------------------------------------------
+
+/// The governance successor of the golden scenario (a fixed public test seed).
+pub fn new_governance() -> Keypair {
+    Keypair::new_from_array([0x07; 32])
+}
+
+/// Execute and record every v1.3 instruction (tags 28..=31) and the resumed
+/// registration, continuing the v1.2 scenario.
+#[allow(clippy::too_many_lines)]
+fn v13_vectors(rec: &mut Recorder, cranker: &Keypair, alice: &User, gov: &Keypair) {
+    let c = cranker.pubkey();
+    let wa = alice.wallet.insecure_clone();
+
+    // ---- 1 register_rig over a tombstone -----------------------------------------
+    // alice closed her rig in the v1.1 scenario (close_rig_guest): since v1.3
+    // that left a RigTombstone holding shift_id 2 and hb_counter 5.
+    let t = rec.env.tombstone(&alice.rig);
+    assert_eq!((t.shift_id.get(), t.hb_counter.get()), (2, 5));
+    let f = Fields::new(hd::tag::REGISTER_RIG)
+        .bytes("p256_pubkey", &alice.p256())
+        .u8("has_attestation", 0);
+    let h = ix_register_rig(&alice.pubkey(), &alice.p256(), None);
+    rec.vector(
+        Spec {
+            name: "register_rig_resumed",
+            instruction: "register_rig",
+            auth: "wallet, no attestation; the Rig PDA holds a RigTombstone",
+            description: "v1.3. The same bytes and accounts as register_rig_guest, sent after close_rig_guest left a 32-byte RigTombstone (account tag 10) at the Rig PDA. The tombstone grows back into a 384-byte Rig that resumes at shift_id 2 and hb_counter 5 (what the closed rig had); every other field starts fresh, and the wallet pays only the rent difference. The next arm_shift is shift 3, so no ShiftLog, Focus Bond or signed message of the earlier rig can collide with or be replayed on this one. Emits RigRegistered.",
+            args: json!({"authority": s(alice.pubkey()), "p256_pubkey_hex": hex(&alice.p256()), "has_attestation": 0, "tombstone": {"shift_id": s(t.shift_id.get()), "hb_counter": s(t.hb_counter.get())}}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: vec![
+                slot("authority", None),
+                slot("rig", Some(pda_rig(&alice.pubkey()))),
+                slot("config", Some(pda_config())),
+                slot("system_program", None),
+            ],
+            before: vec![],
+            harness: Some(h),
+        },
+        &wa,
+        &[],
+    );
+    let rig = rec.env.rig(&alice.rig);
+    assert_eq!((rig.shift_id.get(), rig.hb_counter.get()), (2, 5));
+    let now = rec.env.now;
+    let mut caps = Caps::standard();
+    caps.expiry = now + 7 * 86_400;
+    rec.send_setup(
+        "alice: set_caps (expiry now + 7 days) + arm_shift (wallet): ShiftArmed shift_id 3, continuing from the tombstone",
+        &wa,
+        &[
+            ix_set_caps(&alice.pubkey(), caps),
+            ix_arm_wallet(&alice.pubkey(), &plan_around(now, 3, 0)),
+        ],
+    );
+    assert_eq!(rec.env.rig(&alice.rig).shift_id.get(), 3);
+
+    // ---- 31 close_shift_log ---------------------------------------------------------
+    // alice's shift 1 was sealed by her own wallet at T0 (end_shift_authority),
+    // her shift 2 by the cranker (end_shift_permissionless). Both are more
+    // than 30 days old by now (the clock moved 30 days for refund_gift).
+    let close_slots = |shift_id: u64| {
+        vec![
+            slot("shift_log", Some(pda_shift_log(&alice.rig, shift_id))),
+            slot("rent_recipient", None),
+            slot("focus_bond", Some(pda_bond(&alice.rig, shift_id))),
+        ]
+    };
+    let h = ix_close_shift_log(&alice.rig, 1, &alice.pubkey());
+    rec.vector(
+        Spec {
+            name: "close_shift_log",
+            instruction: "close_shift_log",
+            auth: "anyone, from end_ts + 30 days (pays only the address the log names)",
+            description: "v1.3. alice's ShiftLog of shift 1 (sealed by her own wallet, so its payer_prefix is the first 16 bytes of her address) is closed 30 days later and its rent returns to her wallet. The FocusBond PDA of that shift is passed and holds no bond. The cranker only pays the transaction fee. Emits ShiftLogClosed.",
+            args: json!({"rig": s(alice.rig), "shift_id": "1", "rent_recipient": s(alice.pubkey())}),
+            fields: Fields::new(hd::tag::CLOSE_SHIFT_LOG),
+            metas: h.accounts.clone(),
+            slots: close_slots(1),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+    let h = ix_close_shift_log(&alice.rig, 2, &c);
+    rec.vector(
+        Spec {
+            name: "close_shift_log_crank_paid",
+            instruction: "close_shift_log",
+            auth: "anyone, from end_ts + 30 days (pays only the address the log names)",
+            description: "v1.3. alice's ShiftLog of shift 2 was sealed by the cranker (end_shift_permissionless), which paid its rent: the log's payer_prefix names the cranker, so the rent returns to the cranker and not to the rig's wallet.",
+            args: json!({"rig": s(alice.rig), "shift_id": "2", "rent_recipient": s(c)}),
+            fields: Fields::new(hd::tag::CLOSE_SHIFT_LOG),
+            metas: h.accounts.clone(),
+            slots: close_slots(2),
+            before: vec![],
+            harness: Some(h),
+        },
+        cranker,
+        &[],
+    );
+
+    // ---- 28 / 30 / 29 governance rotation ----------------------------------------------
+    let new_gov = new_governance();
+    rec.setup("new governance key [0x07; 32] funded with 1 SOL (it pays for its own accept_governance)");
+    rec.env.svm.airdrop(&new_gov.pubkey(), SOL).unwrap();
+    let gov_slots = |role: &str| vec![slot(role, None), slot("config", Some(pda_config()))];
+    let f = Fields::new(hd::tag::PROPOSE_GOVERNANCE).key("new_governance", &new_gov.pubkey());
+    let h = ix_propose_governance(&gov.pubkey(), &new_gov.pubkey());
+    rec.vector(
+        Spec {
+            name: "propose_governance",
+            instruction: "propose_governance",
+            auth: "governance (the current one)",
+            description: "v1.3. The current governance names its successor: Config.pending_governance (offset 192), pending_governance_eta_slot (offset 224) = slot + 864000 and pending_governance_eta_ts (offset 232) = unix_timestamp + 259200. Nothing else changes; the current governance keeps every power, including the immediate pause. Emits GovernanceProposed.",
+            args: json!({"new_governance": s(new_gov.pubkey())}),
+            fields: f,
+            metas: h.accounts.clone(),
+            slots: gov_slots("governance"),
+            before: vec![],
+            harness: Some(h),
+        },
+        gov,
+        &[],
+    );
+    let h = ix_cancel_governance(&gov.pubkey());
+    rec.vector(
+        Spec {
+            name: "cancel_governance",
+            instruction: "cancel_governance",
+            auth: "governance (the current one)",
+            description: "v1.3. The current governance drops the pending rotation: pending_governance and both etas return to zero. Emits GovernanceCancelled.",
+            args: json!({}),
+            fields: Fields::new(hd::tag::CANCEL_GOVERNANCE),
+            metas: h.accounts.clone(),
+            slots: gov_slots("governance"),
+            before: vec![],
+            harness: Some(h),
+        },
+        gov,
+        &[],
+    );
+    rec.send_setup(
+        "governance: propose_governance(new governance) again; the clock restarts",
+        gov,
+        &[ix_propose_governance(&gov.pubkey(), &new_gov.pubkey())],
+    );
+    rec.setup("clock slot += 864000 (TIMELOCK_SLOTS) and unix_timestamp += 259200 (TIMELOCK_SECS): both halves of the timelock");
+    let (slot_now, now) = (rec.env.slot, rec.env.now);
+    rec.env.set_clock(
+        slot_now + hd::instructions::governance::TIMELOCK_SLOTS,
+        now + hd::instructions::governance::TIMELOCK_SECS,
+    );
+    let h = ix_accept_governance(&new_gov.pubkey());
+    rec.vector(
+        Spec {
+            name: "accept_governance",
+            instruction: "accept_governance",
+            auth: "the pending governance itself, once slot >= pending_governance_eta_slot and unix_timestamp >= pending_governance_eta_ts",
+            description: "v1.3. The successor signs: it becomes Config.governance (offset 8), the rotation fields return to zero, and any pending config proposal of the outgoing governance is voided (paused is kept). Only the named successor can do this, so a mistyped address can never take governance. Emits GovernanceAccepted.",
+            args: json!({}),
+            fields: Fields::new(hd::tag::ACCEPT_GOVERNANCE),
+            metas: h.accounts.clone(),
+            slots: gov_slots("new_governance"),
+            before: vec![],
+            harness: Some(h),
+        },
+        &new_gov,
+        &[],
+    );
+    assert_eq!(rec.env.config().governance, new_gov.pubkey().to_bytes());
+}
+
 // ---- events.json ----------------------------------------------------------------
 
 /// A fresh pinned fork with one onboarded rig (wallet seed `seed`).
@@ -2673,7 +2899,7 @@ fn events_file(samples: BTreeMap<u8, (String, Vec<u8>)>) -> Value {
     let (_, _, _, first_skip) = &skips[0];
     all.entry(ev::tag::RIG_SKIPPED)
         .or_insert_with(|| ("skip_codes[0]".to_string(), first_skip.clone()));
-    assert_eq!(all.len(), 23, "every event tag captured: {:?}", all.keys());
+    assert_eq!(all.len(), 27, "every event tag captured: {:?}", all.keys());
     let evs: Vec<Value> = all
         .iter()
         .map(|(tag, (source, bytes))| {
@@ -2706,14 +2932,15 @@ fn events_file(samples: BTreeMap<u8, (String, Vec<u8>)>) -> Value {
         .collect();
     json!({
         "format": "heads-down/golden-events",
-        "interface_version": "1.2",
+        "interface_version": "1.3",
         "generated_by": "programs/heads-down/tests/src/vectors.rs",
         "notes": [
             "One `Program data: <base64>` log line per event: a single sol_log_data slice, byte 0 = tag, fields little-endian, no padding. Only lines emitted while heads_down is the innermost executing program are heads_down events.",
             "Every sample was captured from a real transaction on the pinned LiteSVM fork (samples come from instructions.json vectors unless noted).",
             "Lengths are exact and never change for a tag; new fields get a new tag. end_shift emits ShiftEnded (4) and then ShiftEndedV2 (10), its superset: a consumer that knows tag 10 should ignore tag 4.",
             "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it.",
-            "v1.2 (SKR, additive): tags 11..=23. StackCheckin.result is 0 when the round counted, else the reason (heads_down 0..=48 or a p256-introspect code). stack_checkin also emits HeartbeatsRecorded (8) for every heartbeat it verifies itself. BuryAuctionSold.ore_burned / ore_shared are ORE bury's 90/10 split, checked on-chain against the ORE supply."
+            "v1.2 (SKR, additive): tags 11..=23. StackCheckin.result is 0 when the round counted, else the reason (heads_down 0..=48 or a p256-introspect code). stack_checkin also emits HeartbeatsRecorded (8) for every heartbeat it verifies itself. BuryAuctionSold.ore_burned / ore_shared are ORE bury's 90/10 split, checked on-chain against the ORE supply.",
+            "v1.3 (additive): tags 24..=27 (GovernanceProposed, GovernanceAccepted, GovernanceCancelled, ShiftLogClosed). No earlier tag changed. StackCheckin.result may now also be 36 (StackIneligible) at an attested-only table whose rig's attestation is not live."
         ],
         "events": evs,
         "skip_codes": skip_json,
@@ -2868,7 +3095,7 @@ fn messages_file() -> Value {
     assert_eq!(msgs[4]["preimage_len"], 113);
     json!({
         "format": "heads-down/golden-messages",
-        "interface_version": "1.2",
+        "interface_version": "1.3",
         "generated_by": "programs/heads-down/tests/src/vectors.rs",
         "notes": [
             "The P-256 key signs the 32-byte message = SHA-256(preimage) with SHA256withECDSA (Android Keystore); the secp256r1 precompile verifies ECDSA-P256 over SHA-256 of those 32 bytes. The program rebuilds the preimage from its own state + instruction data and requires byte-equality with the precompile's message.",
@@ -2973,7 +3200,7 @@ fn registrar_file() -> Value {
     ]);
     json!({
         "format": "heads-down/golden-registrar",
-        "interface_version": "1.2",
+        "interface_version": "1.3",
         "generated_by": "programs/heads-down/tests/src/vectors.rs",
         "notes": [
             "The registrar signs the raw 111-byte HDreg preimage with Ed25519 (not SHA-256 first). This matches registrar/INTERFACE-NOTES.md N2 byte for byte.",

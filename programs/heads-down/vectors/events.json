@@ -1,13 +1,14 @@
 {
   "format": "heads-down/golden-events",
-  "interface_version": "1.2",
+  "interface_version": "1.3",
   "generated_by": "programs/heads-down/tests/src/vectors.rs",
   "notes": [
     "One `Program data: <base64>` log line per event: a single sol_log_data slice, byte 0 = tag, fields little-endian, no padding. Only lines emitted while heads_down is the innermost executing program are heads_down events.",
     "Every sample was captured from a real transaction on the pinned LiteSVM fork (samples come from instructions.json vectors unless noted).",
     "Lengths are exact and never change for a tag; new fields get a new tag. end_shift emits ShiftEnded (4) and then ShiftEndedV2 (10), its superset: a consumer that knows tag 10 should ignore tag 4.",
     "RigSkipped.error is the precise code: heads_down 0..=31, or the shared crates' 0x2560_00xx (p256-introspect) / 0x5347_00xx (sgt-verify) codes unchanged. `skip_codes` shows each dig skip code captured from a run that triggers it.",
-    "v1.2 (SKR, additive): tags 11..=23. StackCheckin.result is 0 when the round counted, else the reason (heads_down 0..=48 or a p256-introspect code). stack_checkin also emits HeartbeatsRecorded (8) for every heartbeat it verifies itself. BuryAuctionSold.ore_burned / ore_shared are ORE bury's 90/10 split, checked on-chain against the ORE supply."
+    "v1.2 (SKR, additive): tags 11..=23. StackCheckin.result is 0 when the round counted, else the reason (heads_down 0..=48 or a p256-introspect code). stack_checkin also emits HeartbeatsRecorded (8) for every heartbeat it verifies itself. BuryAuctionSold.ore_burned / ore_shared are ORE bury's 90/10 split, checked on-chain against the ORE supply.",
+    "v1.3 (additive): tags 24..=27 (GovernanceProposed, GovernanceAccepted, GovernanceCancelled, ShiftLogClosed). No earlier tag changed. StackCheckin.result may now also be 36 (StackIneligible) at an attested-only table whose rig's attestation is not live."
   ],
   "events": [
     {
@@ -1267,6 +1268,174 @@
           "ore_burned": "675022500",
           "ore_shared": "75002500",
           "lot_remaining": "330000000"
+        }
+      }
+    },
+    {
+      "tag": 24,
+      "event": "GovernanceProposed",
+      "length": 81,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "governance",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "pending_governance",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "eta_slot",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "eta_ts",
+          "type": "i64",
+          "offset": 73,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "propose_governance",
+        "hex": "188a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c1a96071b000000000262e76a00000000",
+        "base64": "GIqHX/8es4RRV3rNWv7kBUVlaN18ieCQhjoFV7x69J8X6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iwalgcbAAAAAAJi52oAAAAA",
+        "fields": {
+          "tag": 24,
+          "governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+          "pending_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+          "eta_slot": "453482010",
+          "eta_ts": "1793548802"
+        }
+      }
+    },
+    {
+      "tag": 25,
+      "event": "GovernanceAccepted",
+      "length": 65,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "governance",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "previous_governance",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        }
+      ],
+      "sample": {
+        "captured_from": "accept_governance",
+        "hex": "19ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c8a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17",
+        "base64": "GepKbGPinFIKvvVQexMuxfmVR3auvr57kkIe6mkURtIsiodf/x6zhFFXes1a/uQFRWVo3XyJ4JCGOgVXvHr0nxc=",
+        "fields": {
+          "tag": 25,
+          "governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+          "previous_governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa"
+        }
+      }
+    },
+    {
+      "tag": 26,
+      "event": "GovernanceCancelled",
+      "length": 65,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "governance",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "cancelled_governance",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        }
+      ],
+      "sample": {
+        "captured_from": "cancel_governance",
+        "hex": "1a8a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+        "base64": "GoqHX/8es4RRV3rNWv7kBUVlaN18ieCQhjoFV7x69J8X6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+        "fields": {
+          "tag": 26,
+          "governance": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+          "cancelled_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB"
+        }
+      }
+    },
+    {
+      "tag": 27,
+      "event": "ShiftLogClosed",
+      "length": 81,
+      "layout": [
+        {
+          "name": "tag",
+          "type": "u8",
+          "offset": 0,
+          "size": 1
+        },
+        {
+          "name": "shift_log",
+          "type": "pubkey",
+          "offset": 1,
+          "size": 32
+        },
+        {
+          "name": "rig",
+          "type": "pubkey",
+          "offset": 33,
+          "size": 32
+        },
+        {
+          "name": "shift_id",
+          "type": "u64",
+          "offset": 65,
+          "size": 8
+        },
+        {
+          "name": "lamports",
+          "type": "u64",
+          "offset": 73,
+          "size": 8
+        }
+      ],
+      "sample": {
+        "captured_from": "close_shift_log",
+        "hex": "1b5ae974e8e8105c87eae53b542cbf49936acf2b93eb5125fdbbcbd385dc63d16a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e010000000000000000301b0000000000",
+        "base64": "G1rpdOjoEFyH6uU7VCy/SZNqzyuT61El/bvL04XcY9FqbGlyJ05T9dCG5vetRF64iCNqLB/yBMVb48/GpItcjk4BAAAAAAAAAAAwGwAAAAAA",
+        "fields": {
+          "tag": 27,
+          "shift_log": "77tATZgGifUxMBrUSHqtdUCavhqeR8TD2JeYmB1Frb3f",
+          "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
+          "shift_id": "1",
+          "lamports": "1781760"
         }
       }
     }
