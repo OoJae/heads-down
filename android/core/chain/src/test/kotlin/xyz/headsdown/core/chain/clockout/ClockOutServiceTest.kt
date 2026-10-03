@@ -136,8 +136,10 @@ class ClockOutServiceTest {
         assertEquals(ShiftOutcome.Ends(ShiftEndReason.COMPLETED), preview.plan.shift)
         assertEquals(BondOutcome.Released(100uL * Skr.ONE_SKR), preview.plan.bond)
         assertNull(preview.plan.claimedOre)
-        // Two reads: the wallet's accounts, then the bond and its ShiftLog slot.
-        assertEquals(listOf("getMultipleAccounts", "getMultipleAccounts"), chain.methods)
+        // Sealing the open shift writes a 128-byte ShiftLog, and the wallet pays its rent.
+        assertEquals(((128L + 128) * 6_960).toULong(), preview.shiftLogRent)
+        // Two reads (the wallet's accounts, then the bond and its ShiftLog slot) and that rent.
+        assertEquals(listOf("getMultipleAccounts", "getMultipleAccounts", "getMinimumBalanceForRentExemption"), chain.methods)
     }
 
     @Test
@@ -150,6 +152,7 @@ class ClockOutServiceTest {
         assertTrue(preview.plan.isEmpty)
         assertEquals(0uL, preview.refinedOre + preview.unrefinedOre + preview.skrBalance)
         assertNull(preview.fullClaim)
+        assertEquals(0uL, preview.shiftLogRent) // no shift to seal: no rent is read or stated
         assertFalse(preview.state.skrAccountExists)
         assertNull(service(chain).prepare(authority, ClockOutRequest(), v0))
     }

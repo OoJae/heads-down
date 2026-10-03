@@ -56,6 +56,7 @@ class ClockOutScreenTest {
         refinedOre = 1_000uL,
         unrefinedOre = 20_000_000uL,
         fullClaim = OreClaimEstimate(1_000uL, 20_000_000uL, 2_000_000uL),
+        shiftLogRent = 1_300_480uL,
     )
     private val insideWindow = completed.copy(
         shift = ShiftOutcome.LeftOpen(ShiftEndReason.MANUAL, 1_790_028_800L),
@@ -86,6 +87,7 @@ class ClockOutScreenTest {
     fun `a finished shift shows what clocking out does and keeps the ORE by default`() {
         show(ClockOutState.Ready(completed))
         rule.onNodeWithTag(ClockOutTags.SHIFT).assertTextContains("seals it as completed", substring = true)
+        rule.onNodeWithTag(ClockOutTags.RENT).assertTextContains("your wallet pays 0.00130048 SOL of rent", substring = true)
         rule.onNodeWithTag(ClockOutTags.BOND).assertTextEquals("Your Focus Bond comes back to your wallet: 100 SKR.")
         rule.onNodeWithTag(ClockOutTags.ORE).assertTextContains("0.00020001 ORE", substring = true)
         rule.onNodeWithTag(ClockOutTags.KEEP_CHOICE).assertIsSelected()
@@ -115,6 +117,7 @@ class ClockOutScreenTest {
         rule.onNodeWithTag(ClockOutTags.SHIFT).assertTextContains("clocking out leaves it open", substring = true)
         rule.onNodeWithTag(ClockOutTags.BOND).assertTextEquals("Your Focus Bond of 100 SKR stays locked until the shift is sealed.")
         rule.onAllNodesWithTag(ClockOutTags.END_EARLY_WARNING).assertCountEquals(0)
+        rule.onAllNodesWithTag(ClockOutTags.RENT).assertCountEquals(0)
         rule.onNodeWithTag(ClockOutTags.CONFIRM).performScrollTo().assertIsNotEnabled()
         rule.onNodeWithTag(ClockOutTags.NOTHING).assertTextEquals(ClockOutCopy.NOTHING_TO_SIGN)
         rule.onNodeWithTag(ClockOutTags.END_EARLY).performScrollTo().assertIsNotSelected().performClick()

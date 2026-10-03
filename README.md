@@ -51,7 +51,7 @@ built; the Stack and Gift screens are not yet.
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 105 tests on real attestation chains |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 347 tests |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain |
-| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 845 JVM unit tests |
+| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 846 JVM unit tests |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
 **Not done yet, in plain words.** Nothing is deployed on mainnet. The app has not run on a real

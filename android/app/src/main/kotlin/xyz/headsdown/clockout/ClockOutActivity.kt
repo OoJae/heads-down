@@ -77,6 +77,7 @@ class ClockOutActivity : ComponentActivity() {
 
 object ClockOutTags {
     const val SHIFT = "clock-out-shift"
+    const val RENT = "clock-out-rent"
     const val BOND = "clock-out-bond"
     const val SOL = "clock-out-sol"
     const val ORE = "clock-out-ore"
@@ -147,6 +148,9 @@ private fun Ready(state: ClockOutState.Ready, onClaimAll: (Boolean) -> Unit, onE
                 Text(it, color = HdColors.Cooling, modifier = Modifier.testTag(ClockOutTags.END_EARLY_WARNING))
             }
         }
+    }
+    lines.rent?.let {
+        Text(it, color = HdColors.AshMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(ClockOutTags.RENT))
     }
     lines.bond?.let { Text(it, color = HdColors.Ash, modifier = Modifier.testTag(ClockOutTags.BOND)) }
     lines.sol?.let { Text(it, color = HdColors.Ash, modifier = Modifier.testTag(ClockOutTags.SOL)) }
