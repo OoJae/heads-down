@@ -11,17 +11,22 @@ import xyz.headsdown.core.chain.FakeTransport
 import xyz.headsdown.core.chain.HeadsDownProgram
 import xyz.headsdown.core.chain.Ore
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.Skr
 import xyz.headsdown.core.chain.TestAccounts
 import xyz.headsdown.core.chain.TestVouchers
 import xyz.headsdown.core.chain.WellKnown
+import xyz.headsdown.core.chain.accounts.FocusBondAccount
 import xyz.headsdown.core.chain.accounts.HdConfig
 import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
 import xyz.headsdown.core.chain.accounts.OreAccounts
+import xyz.headsdown.core.chain.accounts.RigAccount
+import xyz.headsdown.core.chain.accounts.ShiftLogAccount
 import xyz.headsdown.core.chain.hex
 import xyz.headsdown.core.chain.hexBytes
 import xyz.headsdown.core.chain.ix.HeadsDownInstructions
 import xyz.headsdown.core.chain.ix.OreInstructions
 import xyz.headsdown.core.chain.ix.RegistrarAttestation
+import xyz.headsdown.core.chain.ix.SkrInstructions
 import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
 import xyz.headsdown.core.chain.tx.Instruction
@@ -93,6 +98,7 @@ class ClockInComposerTest {
             Ore.PROGRAM_ID -> "ore:${it.data[0]}"
             WellKnown.COMPUTE_BUDGET -> "cb:${it.data[0]}"
             WellKnown.ED25519_SIG_VERIFY -> "ed25519"
+            WellKnown.ASSOCIATED_TOKEN -> "ata"
             else -> "hd:${it.data[0]}"
         }
     }
@@ -353,10 +359,179 @@ class ClockInComposerTest {
         assertEquals("1516050000000000", three.instructions[0].data.copyOfRange(1, 9).hex()) // 333_333 = 0x051615
     }
 
+    // ------------------------------------------------------------------ Focus Bond
+
+    private val windowEnd = now - 600 // the previous shift's window ended ten minutes ago
+
+    private fun openRig(state: RigSignalState = RigSignalState.DOWN, breakReason: Int = 0, windowEndTs: Long = windowEnd, dark: Long = 200): RigAccount =
+        HeadsDownAccounts.rig(
+            rigAddress,
+            TestAccounts.info(
+                HeadsDownProgram.ID,
+                TestAccounts.rigBytesFull(
+                    authority, key, state, shiftId = 12, shiftOpen = true, breakReason = breakReason, planWindowEndTs = windowEndTs,
+                    leaseToRound = 422_899, shiftStartRound = 422_600, shiftDarkRounds = dark, shiftStartTs = windowEndTs - 28_800,
+                ),
+            ),
+        )
+
+    private fun bondOn(shiftId: Long = 12, amount: Long = 100_000_000, windowEndTs: Long = windowEnd): FocusBondAccount = HeadsDownAccounts.focusBond(
+        HeadsDownProgram.focusBond(rigAddress, shiftId.toULong()).address,
+        TestAccounts.info(HeadsDownProgram.ID, TestAccounts.focusBondBytes(rigAddress, authority, shiftId, amount, 422_600, windowEndTs - 28_800)),
+    )
+
+    private fun stateWith(
+        rig: RigAccount?,
+        skr: ULong = 0uL,
+        bond: FocusBondAccount? = null,
+        log: ShiftLogAccount? = null,
+        skrAccount: Boolean = true,
+    ) = ClockInChainState(
+        config, rig, automation(balance = 25_000_000), slot, boardRoundId = 422_900uL,
+        skrBalance = skr, skrAccountExists = skrAccount, previousBond = bond, previousShiftLog = log,
+    )
+
+    @Test
+    fun `a focus bond is locked right after arm_shift, behind its vault companion`() {
+        val bonded = request.copy(focusBondSkr = 100uL * Skr.ONE_SKR)
+        val out = compose(stateWith(rig(shiftId = 6), skr = 250uL * Skr.ONE_SKR), bonded)
+        assertEquals(listOf("hd:3", "hd:5", "ata", "hd:20"), out.instructions.tags())
+        // The bond is on the shift this transaction arms: shift_id + 1.
+        assertEquals(7uL, out.expectedShiftId)
+        assertEquals(SkrInstructions.focusBondVault(authority, 7uL), out.instructions[2])
+        assertEquals(SkrInstructions.lockFocusBond(authority, 7uL, 100uL * Skr.ONE_SKR), out.instructions[3])
+        assertEquals(100uL * Skr.ONE_SKR, out.bondLocked)
+        assertEquals(0uL, out.bondReleased)
+        // A first clock-in bonds shift 1.
+        val first = compose(ClockInChainState(config, null, null, skrBalance = 100uL * Skr.ONE_SKR, skrAccountExists = true), bonded)
+        assertEquals(listOf("ore:0", "hd:1", "hd:3", "hd:5", "ata", "hd:20"), first.instructions.tags())
+        assertEquals(SkrInstructions.lockFocusBond(authority, 1uL, 100uL * Skr.ONE_SKR), first.instructions.last())
+        // No bond asked: nothing of it in the transaction.
+        assertEquals(0uL, compose(stateWith(rig(), skr = 250uL * Skr.ONE_SKR)).bondLocked)
+    }
+
+    @Test
+    fun `a bond the wallet cannot cover or above 5,000 SKR is refused before signing`() {
+        val bonded = request.copy(focusBondSkr = 100uL * Skr.ONE_SKR)
+        val e = assertThrows(ClockInRefusedException::class.java) { compose(stateWith(rig(), skr = 99uL * Skr.ONE_SKR), bonded) }
+        assertEquals(ClockInRefusedException.Reason.INSUFFICIENT_SKR, e.reason)
+        compose(stateWith(rig(), skr = 100uL * Skr.ONE_SKR), bonded)
+        request.copy(focusBondSkr = Skr.FOCUS_BOND_CAP)
+        assertThrows(IllegalArgumentException::class.java) { request.copy(focusBondSkr = Skr.FOCUS_BOND_CAP + 1uL) }
+    }
+
+    @Test
+    fun `ending a completed shift releases its bond in the clock-in, and the SKR can be bonded again`() {
+        // Shift 12 is past its window with dark rounds: end_shift seals it completed.
+        val out = compose(stateWith(openRig(), bond = bondOn()))
+        assertEquals(listOf("hd:11", "hd:21", "hd:3", "hd:5"), out.instructions.tags())
+        assertEquals(SkrInstructions.releaseFocusBond(authority, 12uL), out.instructions[1])
+        assertEquals(100uL * Skr.ONE_SKR, out.bondReleased)
+        // The released 100 SKR are in the wallet again by the time the new lock runs.
+        val rolled = compose(stateWith(openRig(), skr = 0uL, bond = bondOn()), request.copy(focusBondSkr = 100uL * Skr.ONE_SKR))
+        assertEquals(listOf("hd:11", "hd:21", "hd:3", "hd:5", "ata", "hd:20"), rolled.instructions.tags())
+        assertEquals(SkrInstructions.lockFocusBond(authority, 13uL, 100uL * Skr.ONE_SKR), rolled.instructions.last())
+        // The wallet's SKR account was closed meanwhile: it is created before the release.
+        val recreated = compose(stateWith(openRig(), bond = bondOn(), skrAccount = false))
+        assertEquals(listOf("hd:11", "ata", "hd:21", "hd:3", "hd:5"), recreated.instructions.tags())
+    }
+
+    @Test
+    fun `a bonded shift still inside its window is never forfeited by clocking in again`() {
+        val inside = now + 3_600
+        val e = assertThrows(ClockInRefusedException::class.java) {
+            compose(stateWith(openRig(windowEndTs = inside), bond = bondOn(windowEndTs = inside)))
+        }
+        assertEquals(ClockInRefusedException.Reason.BOND_WOULD_FORFEIT, e.reason)
+        // Cooling inside the window could still resume: refused too.
+        assertThrows(ClockInRefusedException::class.java) {
+            compose(stateWith(openRig(RigSignalState.COOLING, breakReason = 1, windowEndTs = inside), bond = bondOn(windowEndTs = inside)))
+        }
+        // Without a bond the same clock-in goes ahead as before (the shift seals manual).
+        assertEquals(listOf("hd:11", "hd:3", "hd:5"), compose(stateWith(openRig(windowEndTs = inside))).instructions.tags())
+    }
+
+    @Test
+    fun `a bond already lost to a break does not block the clock-in and is not released`() {
+        for (lost in listOf(
+            openRig(RigSignalState.BROKEN, breakReason = 8, windowEndTs = now + 3_600), // unlocked, inside the window
+            openRig(RigSignalState.COOLING, breakReason = 1), // a pickup that never resumed
+            openRig(dark = 0), // no dark round: lease_lapse
+        )) {
+            val out = compose(stateWith(lost, bond = bondOn(windowEndTs = lost.planWindowEndTs)))
+            assertEquals(listOf("hd:11", "hd:3", "hd:5"), out.instructions.tags())
+            assertEquals(0uL, out.bondReleased)
+        }
+    }
+
+    @Test
+    fun `a bond on a shift someone already sealed is resolved from its ShiftLog`() {
+        val idle = rig(shiftId = 12)
+        fun log(reason: Int, startRound: Long = 422_600) = HeadsDownAccounts.shiftLog(
+            HeadsDownProgram.shiftLog(rigAddress, 12uL).address,
+            TestAccounts.info(HeadsDownProgram.ID, TestAccounts.shiftLogBytes(rigAddress, 12, reason, startRound = startRound, startTs = windowEnd - 28_800)),
+        )
+        val released = compose(stateWith(idle, bond = bondOn(), log = log(0)))
+        assertEquals(listOf("hd:21", "hd:3", "hd:5"), released.instructions.tags())
+        assertEquals(100uL * Skr.ONE_SKR, released.bondReleased)
+        // Sealed with a break, or a log that is not this shift's: nothing to release.
+        assertEquals(listOf("hd:3", "hd:5"), compose(stateWith(idle, bond = bondOn(), log = log(6))).instructions.tags())
+        assertEquals(listOf("hd:3", "hd:5"), compose(stateWith(idle, bond = bondOn(), log = log(0, startRound = 9))).instructions.tags())
+        // Someone else's bond account is ignored.
+        val other = Pubkey(ByteArray(32) { 3 })
+        val foreign = HeadsDownAccounts.focusBond(
+            HeadsDownProgram.focusBond(HeadsDownProgram.rig(other).address, 12uL).address,
+            TestAccounts.info(HeadsDownProgram.ID, TestAccounts.focusBondBytes(HeadsDownProgram.rig(other).address, other, 12)),
+        )
+        assertEquals(listOf("hd:3", "hd:5"), compose(stateWith(idle, bond = foreign, log = log(0))).instructions.tags())
+    }
+
+    private fun sizes(plan: ClockInPlan): List<Int> =
+        TxVersion.entries.map { TransactionBuilder.unsignedSize(TransactionBuilder.compile(authority, plan.instructions, ByteArray(32), it)) }
+
+    @Test
+    fun `a bond fits the clock-in transaction in every ordinary composition`() {
+        val bonded = request.copy(focusBondSkr = 100uL * Skr.ONE_SKR)
+        val skr = 500uL * Skr.ONE_SKR
+        val cases = mapOf(
+            // A first clock-in: ORE automate, register_rig, caps, arm, bond.
+            "first, guest" to compose(ClockInChainState(config, null, null, slot, skrBalance = skr, skrAccountExists = true), bonded),
+            // The same with the registrar's 223-byte voucher.
+            "first, attested" to compose(ClockInChainState(config, null, null, slot, skrBalance = skr, skrAccountExists = true), bonded, voucher()),
+            // Every night after: end the last shift, take its bond back, top up, arm, bond again.
+            "nightly" to compose(
+                ClockInChainState(config, openRig(), automation(balance = 5_000_000), slot, 422_900uL, skr, true, bondOn()),
+                bonded.copy(priorityMicroLamports = 5_000uL),
+            ),
+        )
+        for ((name, plan) in cases) {
+            sizes(plan).forEach { assertTrue("$name: $it bytes", it <= TransactionBuilder.PACKET_DATA_SIZE) }
+            assertEquals(name, 100uL * Skr.ONE_SKR, plan.bondLocked)
+        }
+        assertEquals(listOf("ore:0", "ed25519", "hd:1", "hd:3", "hd:5", "ata", "hd:20"), cases.getValue("first, attested").instructions.tags())
+        assertEquals(listOf("cb:2", "cb:3", "hd:11", "hd:21", "ore:0", "hd:3", "hd:5", "ata", "hd:20"), cases.getValue("nightly").instructions.tags())
+    }
+
+    @Test
+    fun `only the largest composition cannot carry the bond - the service then arms without it`() {
+        // Priority fee, an open shift to end, a new device key with its voucher, a refuel and a bond.
+        val worst = compose(
+            ClockInChainState(
+                config, rig(state = RigSignalState.DOWN, shiftId = 3, p256 = otherKey), null, slot,
+                boardRoundId = 422_900uL, skrBalance = 500uL * Skr.ONE_SKR, skrAccountExists = true,
+            ),
+            request.copy(priorityMicroLamports = 5_000uL, focusBondSkr = 100uL * Skr.ONE_SKR),
+            voucher(),
+        )
+        assertEquals(listOf("cb:2", "cb:3", "hd:11", "ed25519", "hd:4", "ore:0", "hd:3", "hd:5", "ata", "hd:20"), worst.instructions.tags())
+        assertEquals(listOf(1285, 1287), sizes(worst))
+    }
+
     // ------------------------------------------------------------------ service over RPC
 
+    /** Config, Rig and Automation as given; the ORE Board and the wallet's SKR account absent. */
     private fun rpcFor(vararg accounts: String?, contextSlot: Long = 2): SolanaJsonRpc {
-        val list = accounts.joinToString(",") { it ?: "null" }
+        val list = (accounts.toList() + listOf(null, null)).joinToString(",") { it ?: "null" }
         val hash = Base58.encode(ByteArray(32) { 7 })
         return SolanaJsonRpc(
             FakeTransport.results(

@@ -197,8 +197,81 @@ class SolanaJsonRpcTest {
     }
 
     @Test
+    fun `getTokenAccountsByOwner asks by token program and returns keyed accounts`() = runTest {
+        // The real Token-2022 accounts of a mainnet wallet (fixtures/skr_miner.json).
+        val accounts = Fixtures.json("skr_miner")["token_2022_accounts"].toString()
+        val owner = Pubkey.fromBase58(Fixtures.json("skr_miner")["owner"]!!.jsonPrimitive.content)
+        val transport = FakeTransport.result("""{"context":{"slot":452137103},"value":$accounts}""")
+        val out = SolanaJsonRpc(transport).getTokenAccountsByOwner(owner, xyz.headsdown.core.chain.WellKnown.TOKEN_2022)
+        assertEquals(2, out.size)
+        assertEquals("5q7eoUGbdHjC7Fy8QfNDbUr6HJGxd7FLa2F8mU3nuJmB", out[0].pubkey.toBase58())
+        assertEquals(170, out[0].account.size)
+        assertEquals(xyz.headsdown.core.chain.WellKnown.TOKEN_2022, out[0].account.owner)
+        assertEquals("getTokenAccountsByOwner", transport.lastMethod)
+        val params = transport.requests.single()["params"]!!.jsonArray
+        assertEquals(owner.toBase58(), params[0].jsonPrimitive.content)
+        assertEquals("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", params[1].jsonObject["programId"]!!.jsonPrimitive.content)
+        assertEquals("base64", params[2].jsonObject["encoding"]!!.jsonPrimitive.content)
+        // An empty wallet, and a malformed entry.
+        assertTrue(SolanaJsonRpc(FakeTransport.result("""{"context":{"slot":1},"value":[]}""")).getTokenAccountsByOwner(owner, Ore.PROGRAM_ID).isEmpty())
+        val bad = SolanaJsonRpc(FakeTransport.result("""{"context":{"slot":1},"value":[{"pubkey":"x","account":null}]}"""))
+        assertTrue(runCatching { bad.getTokenAccountsByOwner(owner, Ore.PROGRAM_ID) }.exceptionOrNull() is RpcProtocolException)
+    }
+
+    @Test
+    fun `simulateTransaction is unsigned, returns post-state accounts and never throws for a failing transaction`() = runTest {
+        val board = Fixtures.json("ore_board")["value"].toString()
+        val ok = FakeTransport.result(
+            """{"context":{"slot":7},"value":{"err":null,"logs":["Program log: a","Program log: b"],"accounts":[$board,null],"unitsConsumed":123456,"returnData":null}}""",
+        )
+        val result = SolanaJsonRpc(ok).simulateTransaction(byteArrayOf(1, 2, 3), listOf(Ore.BOARD, Ore.TREASURY))
+        assertTrue(result.succeeded)
+        assertNull(result.err)
+        assertEquals(listOf("Program log: a", "Program log: b"), result.logs)
+        assertEquals(40, result.accounts[0]!!.size)
+        assertNull(result.accounts[1])
+        assertEquals(123_456L, result.unitsConsumed)
+        val params = ok.requests.single()["params"]!!.jsonArray
+        assertEquals(Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3)), params[0].jsonPrimitive.content)
+        val config = params[1].jsonObject
+        // The wallet has not signed yet: signatures are not verified, and the real blockhash is kept.
+        assertEquals("false", config["sigVerify"]!!.jsonPrimitive.content)
+        assertEquals("false", config["replaceRecentBlockhash"]!!.jsonPrimitive.content)
+        assertEquals("base64", config["encoding"]!!.jsonPrimitive.content)
+        assertEquals(listOf(Ore.BOARD.toBase58(), Ore.TREASURY.toBase58()), config["accounts"]!!.jsonObject["addresses"]!!.jsonArray.map { it.jsonPrimitive.content })
+
+        // A transaction that would fail: err is carried (bounded), nothing is thrown.
+        val failing = SolanaJsonRpc(FakeTransport.result("""{"context":{"slot":7},"value":{"err":{"InstructionError":[2,{"Custom":6001}]},"logs":null,"accounts":null}}"""))
+        val failed = failing.simulateTransaction(byteArrayOf(9))
+        assertFalse(failed.succeeded)
+        assertEquals("""{"InstructionError":[2,{"Custom":6001}]}""", failed.err)
+        assertTrue(failed.logs.isEmpty() && failed.accounts.isEmpty())
+        assertNull(failed.unitsConsumed)
+
+        // Fewer accounts than asked for is a protocol error; logs are bounded.
+        val short = SolanaJsonRpc(FakeTransport.result("""{"context":{"slot":7},"value":{"err":null,"logs":[],"accounts":[null]}}"""))
+        assertTrue(runCatching { short.simulateTransaction(byteArrayOf(1), listOf(Ore.BOARD, Ore.TREASURY)) }.exceptionOrNull() is RpcProtocolException)
+        val noisy = "\"" + "x".repeat(5_000) + "\""
+        val many = SolanaJsonRpc(FakeTransport.result("""{"context":{"slot":7},"value":{"err":null,"logs":[${List(400) { noisy }.joinToString(",")}]}}"""))
+        val bounded = many.simulateTransaction(byteArrayOf(1))
+        assertEquals(256, bounded.logs.size)
+        assertEquals(400, bounded.logs[0].length)
+    }
+
+    @Test
+    fun `getMinimumBalanceForRentExemption returns lamports for a size`() = runTest {
+        val transport = FakeTransport.result("2004480")
+        assertEquals(2_004_480uL, SolanaJsonRpc(transport).getMinimumBalanceForRentExemption(160))
+        assertEquals("160", transport.requests.single()["params"]!!.jsonArray[0].jsonPrimitive.content)
+        assertTrue(runCatching { SolanaJsonRpc(FakeTransport.result("\"2004480\"")).getMinimumBalanceForRentExemption(160) }.exceptionOrNull() is RpcProtocolException)
+    }
+
+    @Test
     fun `argument limits`() {
         val rpc = SolanaJsonRpc(FakeTransport.result("null"))
+        assertThrows(IllegalArgumentException::class.java) { kotlinx.coroutines.runBlocking { rpc.simulateTransaction(ByteArray(0)) } }
+        assertThrows(IllegalArgumentException::class.java) { kotlinx.coroutines.runBlocking { rpc.simulateTransaction(byteArrayOf(1), List(17) { Ore.BOARD }) } }
+        assertThrows(IllegalArgumentException::class.java) { kotlinx.coroutines.runBlocking { rpc.getMinimumBalanceForRentExemption(-1) } }
         assertThrows(IllegalArgumentException::class.java) { kotlinx.coroutines.runBlocking { rpc.getMultipleAccounts(List(101) { Ore.BOARD }) } }
         assertThrows(IllegalArgumentException::class.java) { kotlinx.coroutines.runBlocking { rpc.getSignatureStatuses(emptyList()) } }
         assertThrows(IllegalArgumentException::class.java) { AccountFilter.Memcmp(-1, byteArrayOf(1)) }

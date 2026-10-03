@@ -3,6 +3,7 @@ package xyz.headsdown.core.chain.accounts
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import xyz.headsdown.core.chain.HeadsDownProgram
+import xyz.headsdown.core.chain.ProgramAddress
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.rpc.AccountInfo
 import xyz.headsdown.core.keys.RigSignalState
@@ -78,17 +79,201 @@ data class RigAccount(
 )
 
 /**
+ * heads_down `SeekerSeat` (128 bytes, tag 3; INTERFACE §3.4): the one rig a Seeker Genesis Token
+ * is verified for. `verify_seeker` needs the seat's current rig when it points at another one.
+ */
+data class SeekerSeatAccount(
+    val address: Pubkey,
+    val sgtMint: Pubkey,
+    val rig: Pubkey,
+    val authority: Pubkey,
+    val memberNumber: ULong,
+    val verifiedSlot: ULong,
+)
+
+/**
+ * heads_down `ShiftLog` (128 bytes, tag 4; INTERFACE §3.5): a sealed shift. A Focus Bond resolves
+ * from it: `break_reason` 0 (`completed`) releases the bond, anything else forfeits it.
+ */
+data class ShiftLogAccount(
+    val address: Pubkey,
+    val rig: Pubkey,
+    val shiftId: ULong,
+    val startRound: ULong,
+    val endRound: ULong,
+    val darkRounds: ULong,
+    val roundsDug: ULong,
+    /** `spent_shift`: SOL on squares plus executor fees. */
+    val lamportsDeployed: ULong,
+    /** 0 completed … 8 unlocked (`ShiftEndReason` wire values). */
+    val breakReason: Int,
+    /** 0 night, 1 day, 2 focus-only. */
+    val mode: Int,
+    val startTs: Long,
+    val endTs: Long,
+) {
+    val completed: Boolean get() = breakReason == 0
+}
+
+/** `StackTable.status`. */
+enum class StackStatus(val wire: Int) {
+    /** Joins before `start_round`, check-ins inside the window. */
+    OPEN(0),
+
+    /** `settle_stack` ran: every seat has an outcome and a payout. */
+    SETTLED(1),
+
+    /** Nobody settled before `refund_after_ts`: every seat takes its own bond back. */
+    REFUNDING(2),
+}
+
+/** `StackSeat.outcome`. */
+enum class SeatOutcome(val wire: Int) { PENDING(0), FINISHED(1), FORFEITED(2) }
+
+/** heads_down `StackTable` (208 bytes, tag 5; INTERFACE §11.3). Amounts are SKR base units. */
+data class StackTableAccount(
+    val address: Pubkey,
+    val host: Pubkey,
+    /** `ATA(table, SKR)`: checked against the derivation. */
+    val vault: Pubkey,
+    val tableId: ULong,
+    /** What every seat bonds. */
+    val bond: ULong,
+    val startRound: ULong,
+    /** Last round of the window, inclusive. */
+    val endRound: ULong,
+    val graceGaps: Long,
+    val flags: Int,
+    val maxSeats: Int,
+    val status: StackStatus,
+    val seatCount: Int,
+    val finishers: Int,
+    val claimedCount: Int,
+    val totalBonds: ULong,
+    val finisherBonds: ULong,
+    val payoutsTotal: ULong,
+    val buryAmount: ULong,
+    val claimedTotal: ULong,
+    /** Unix time after which an unsettled table refunds every bond. */
+    val refundAfterTs: Long,
+    val openedTs: Long,
+    val openedRound: ULong,
+) {
+    val remote: Boolean get() = flags and FLAG_REMOTE != 0
+    val buryOnly: Boolean get() = flags and FLAG_BURY_ONLY != 0
+    val attestedOnly: Boolean get() = flags and FLAG_ATTESTED_ONLY != 0
+
+    /** Rounds in the window. */
+    val rounds: ULong get() = endRound - startRound + 1uL
+    val full: Boolean get() = seatCount >= maxSeats
+
+    companion object {
+        const val FLAG_REMOTE = 0x01
+        const val FLAG_BURY_ONLY = 0x02
+        const val FLAG_ATTESTED_ONLY = 0x04
+    }
+}
+
+/** heads_down `StackSeat` (200 bytes, tag 6; INTERFACE §11.3). */
+data class StackSeatAccount(
+    val address: Pubkey,
+    val table: Pubkey,
+    val rig: Pubkey,
+    /** `rig.authority` at join: payouts and the seat rent go only here. */
+    val authority: Pubkey,
+    /** The SGT re-verified at join, or null when the join was not SGT-verified. */
+    val sgtMint: Pubkey?,
+    val bond: ULong,
+    /** The rig's shift this seat is bound to; 0 until its first counted check-in. */
+    val shiftId: ULong,
+    /** Window rounds counted. */
+    val checkedRounds: ULong,
+    /** Last round counted (0 = none). */
+    val lastRound: ULong,
+    /** What the seat receives at claim, written at settle. */
+    val payout: ULong,
+    val seatIndex: Int,
+    /** A check-in saw a BREAK or FREEZE in the bound shift: final. */
+    val broken: Boolean,
+    val outcome: SeatOutcome,
+    val sgtVerified: Boolean,
+)
+
+/** heads_down `FocusBond` (160 bytes, tag 7; INTERFACE §11.3). */
+data class FocusBondAccount(
+    val address: Pubkey,
+    val rig: Pubkey,
+    /** Release and both rents go only here. */
+    val authority: Pubkey,
+    val vault: Pubkey,
+    val shiftId: ULong,
+    /** SKR base units locked. */
+    val amount: ULong,
+    val shiftStartRound: ULong,
+    val shiftStartTs: Long,
+    val lockedTs: Long,
+) {
+    /** [log] is the bonded shift's own ShiftLog (same rig, id, start round and start time). */
+    fun isResolvedBy(log: ShiftLogAccount): Boolean =
+        log.rig == rig && log.shiftId == shiftId && log.startRound == shiftStartRound && log.startTs == shiftStartTs
+}
+
+/** heads_down `GiftEscrow` (128 bytes, tag 8; INTERFACE §11.3). */
+data class GiftEscrowAccount(
+    val address: Pubkey,
+    /** The refund and the rent go only here. */
+    val sender: Pubkey,
+    /** A wallet, or an SGT mint (see [recipientKind]). */
+    val recipient: Pubkey,
+    val nonce: ULong,
+    /** The gift; it sits in the escrow on top of its rent. */
+    val lamports: ULong,
+    val createdTs: Long,
+    /** Claims before this unix time, refunds from it. */
+    val expiryTs: Long,
+    /** 0 wallet, 1 SGT mint. */
+    val recipientKind: Int,
+) {
+    val forSgtMint: Boolean get() = recipientKind == KIND_SGT_MINT
+
+    companion object {
+        const val KIND_WALLET = 0
+        const val KIND_SGT_MINT = 1
+    }
+}
+
+/**
  * Decoders for heads_down accounts. Per the INTERFACE header rule every read is preceded by an
  * owner, exact-size, tag and version check, and the address must be the canonical PDA (for a
  * Rig: re-derived from the authority stored in it, with the stored bump equal to the canonical
- * one).
+ * one). The v1.2 accounts follow the same rule: each address is re-derived from the seed fields
+ * stored in the account, and a stored vault must be the ATA the program derives.
  */
 object HeadsDownAccounts {
     const val VERSION = 1
     const val CONFIG_TAG = 1
     const val RIG_TAG = 2
+    const val SEEKER_SEAT_TAG = 3
+    const val SHIFT_LOG_TAG = 4
+    const val STACK_TABLE_TAG = 5
+    const val STACK_SEAT_TAG = 6
+    const val FOCUS_BOND_TAG = 7
+    const val GIFT_ESCROW_TAG = 8
     const val CONFIG_SIZE = 256
     const val RIG_SIZE = 384
+    const val SEEKER_SEAT_SIZE = 128
+    const val SHIFT_LOG_SIZE = 128
+    const val STACK_TABLE_SIZE = 208
+    const val STACK_SEAT_SIZE = 200
+    const val FOCUS_BOND_SIZE = 160
+    const val GIFT_ESCROW_SIZE = 128
+
+    /** Offsets used as `getProgramAccounts` memcmp filters. */
+    const val STACK_SEAT_TABLE_OFFSET = 8
+    const val STACK_SEAT_AUTHORITY_OFFSET = 72
+    const val STACK_TABLE_HOST_OFFSET = 8
+    const val GIFT_ESCROW_SENDER_OFFSET = 8
+    const val GIFT_ESCROW_RECIPIENT_OFFSET = 40
 
     fun config(address: Pubkey, account: AccountInfo): HdConfig {
         val canonical = HeadsDownProgram.config
@@ -169,6 +354,170 @@ object HeadsDownAccounts {
             breakReason = b.u8(337),
             shiftStartTs = b.i64(344),
         )
+    }
+
+    /** A Seeker seat. The address must be `["seeker", sgt_mint]` for the mint stored in it. */
+    fun seekerSeat(address: Pubkey, account: AccountInfo): SeekerSeatAccount {
+        val b = header(account, SEEKER_SEAT_SIZE, SEEKER_SEAT_TAG, "SeekerSeat")
+        val mint = b.pubkey(8)
+        canonical(address, b, HeadsDownProgram.seekerSeat(mint), "SeekerSeat")
+        return SeekerSeatAccount(
+            address = address,
+            sgtMint = mint,
+            rig = b.pubkey(40),
+            authority = b.pubkey(72),
+            memberNumber = b.u64(104),
+            verifiedSlot = b.u64(112),
+        )
+    }
+
+    /** A sealed shift. The address must be `["shift", rig, shift_id]` for the rig and id stored in it. */
+    fun shiftLog(address: Pubkey, account: AccountInfo): ShiftLogAccount {
+        val b = header(account, SHIFT_LOG_SIZE, SHIFT_LOG_TAG, "ShiftLog")
+        val rig = b.pubkey(8)
+        val shiftId = b.u64(40)
+        canonical(address, b, HeadsDownProgram.shiftLog(rig, shiftId), "ShiftLog")
+        return ShiftLogAccount(
+            address = address,
+            rig = rig,
+            shiftId = shiftId,
+            startRound = b.u64(48),
+            endRound = b.u64(56),
+            darkRounds = b.u64(64),
+            roundsDug = b.u64(72),
+            lamportsDeployed = b.u64(80),
+            breakReason = b.u8(88),
+            mode = b.u8(89),
+            startTs = b.i64(96),
+            endTs = b.i64(104),
+        )
+    }
+
+    /** A Stack table. The address must be `["stack", host, table_id]` and its vault `ATA(table, SKR)`. */
+    fun stackTable(address: Pubkey, account: AccountInfo): StackTableAccount {
+        val b = header(account, STACK_TABLE_SIZE, STACK_TABLE_TAG, "StackTable")
+        val host = b.pubkey(8)
+        val tableId = b.u64(72)
+        canonical(address, b, HeadsDownProgram.stackTable(host, tableId), "StackTable")
+        val vault = b.pubkey(40)
+        if (vault != HeadsDownProgram.skrVault(address)) throw AccountLayoutException("StackTable vault is not its SKR ATA")
+        val start = b.u64(88)
+        val end = b.u64(96)
+        if (end < start) throw AccountLayoutException("StackTable window is empty")
+        val flags = b.u8(108)
+        if (flags and 0x07.inv() != 0) throw AccountLayoutException("StackTable has unknown flags")
+        val status = StackStatus.entries.firstOrNull { it.wire == b.u8(110) } ?: throw AccountLayoutException("unknown StackTable status")
+        return StackTableAccount(
+            address = address,
+            host = host,
+            vault = vault,
+            tableId = tableId,
+            bond = b.u64(80),
+            startRound = start,
+            endRound = end,
+            graceGaps = b.u32(104),
+            flags = flags,
+            maxSeats = b.u8(109),
+            status = status,
+            seatCount = b.u8(111),
+            finishers = b.u8(112),
+            claimedCount = b.u8(113),
+            totalBonds = b.u64(120),
+            finisherBonds = b.u64(128),
+            payoutsTotal = b.u64(136),
+            buryAmount = b.u64(144),
+            claimedTotal = b.u64(152),
+            refundAfterTs = b.i64(160),
+            openedTs = b.i64(168),
+            openedRound = b.u64(176),
+        )
+    }
+
+    /**
+     * A seat. Its key is the rig at an in-person table and the SGT mint at a remote one, so the
+     * address must be `["stackseat", table, rig]` or `["stackseat", table, sgt_mint]`.
+     */
+    fun stackSeat(address: Pubkey, account: AccountInfo): StackSeatAccount {
+        val b = header(account, STACK_SEAT_SIZE, STACK_SEAT_TAG, "StackSeat")
+        val table = b.pubkey(8)
+        val rig = b.pubkey(40)
+        val sgtMint = b.optionalPubkey(104)
+        val byRig = HeadsDownProgram.stackSeat(table, rig)
+        val derived = byRig.takeIf { it.address == address }
+            ?: sgtMint?.let { HeadsDownProgram.stackSeat(table, it) }?.takeIf { it.address == address }
+            ?: throw AccountLayoutException("StackSeat is not the PDA of its table and rig or SGT")
+        if (b.u8(2) != derived.bump) throw AccountLayoutException("StackSeat bump is not canonical")
+        val outcome = SeatOutcome.entries.firstOrNull { it.wire == b.u8(178) } ?: throw AccountLayoutException("unknown seat outcome")
+        return StackSeatAccount(
+            address = address,
+            table = table,
+            rig = rig,
+            authority = b.pubkey(72),
+            sgtMint = sgtMint,
+            bond = b.u64(136),
+            shiftId = b.u64(144),
+            checkedRounds = b.u64(152),
+            lastRound = b.u64(160),
+            payout = b.u64(168),
+            seatIndex = b.u8(176),
+            broken = flag(b.u8(177), "broken"),
+            outcome = outcome,
+            sgtVerified = flag(b.u8(179), "sgt_verified"),
+        )
+    }
+
+    /** A Focus Bond. The address must be `["bond", rig, shift_id]` and its vault `ATA(bond, SKR)`. */
+    fun focusBond(address: Pubkey, account: AccountInfo): FocusBondAccount {
+        val b = header(account, FOCUS_BOND_SIZE, FOCUS_BOND_TAG, "FocusBond")
+        val rig = b.pubkey(8)
+        val shiftId = b.u64(104)
+        canonical(address, b, HeadsDownProgram.focusBond(rig, shiftId), "FocusBond")
+        val vault = b.pubkey(72)
+        if (vault != HeadsDownProgram.skrVault(address)) throw AccountLayoutException("FocusBond vault is not its SKR ATA")
+        return FocusBondAccount(
+            address = address,
+            rig = rig,
+            authority = b.pubkey(40),
+            vault = vault,
+            shiftId = shiftId,
+            amount = b.u64(112),
+            shiftStartRound = b.u64(120),
+            shiftStartTs = b.i64(128),
+            lockedTs = b.i64(136),
+        )
+    }
+
+    /** A gift escrow. The address must be `["gift", sender, nonce]` for the sender and nonce stored in it. */
+    fun giftEscrow(address: Pubkey, account: AccountInfo): GiftEscrowAccount {
+        val b = header(account, GIFT_ESCROW_SIZE, GIFT_ESCROW_TAG, "GiftEscrow")
+        val sender = b.pubkey(8)
+        val nonce = b.u64(72)
+        canonical(address, b, HeadsDownProgram.giftEscrow(sender, nonce), "GiftEscrow")
+        val kind = b.u8(104)
+        if (kind != GiftEscrowAccount.KIND_WALLET && kind != GiftEscrowAccount.KIND_SGT_MINT) {
+            throw AccountLayoutException("unknown gift recipient kind")
+        }
+        val recipient = b.pubkey(40)
+        if (recipient == Pubkey.DEFAULT) throw AccountLayoutException("GiftEscrow has no recipient")
+        val lamports = b.u64(80)
+        // The gift sits on top of the escrow's rent: an escrow holding less than it promises is not one.
+        if (account.lamports < lamports) throw AccountLayoutException("GiftEscrow holds less than the gift")
+        return GiftEscrowAccount(
+            address = address,
+            sender = sender,
+            recipient = recipient,
+            nonce = nonce,
+            lamports = lamports,
+            createdTs = b.i64(88),
+            expiryTs = b.i64(96),
+            recipientKind = kind,
+        )
+    }
+
+    /** The account sits at the canonical PDA of its own seed fields, with the canonical bump stored. */
+    private fun canonical(address: Pubkey, b: AccountBytes, expected: ProgramAddress, name: String) {
+        if (expected.address != address) throw AccountLayoutException("$name is not the PDA of its seeds")
+        if (b.u8(2) != expected.bump) throw AccountLayoutException("$name bump is not canonical")
     }
 
     private fun header(account: AccountInfo, size: Int, tag: Int, name: String): AccountBytes {

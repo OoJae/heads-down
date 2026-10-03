@@ -3,9 +3,13 @@ package xyz.headsdown.core.chain.clockin
 import xyz.headsdown.core.chain.HeadsDownProgram
 import xyz.headsdown.core.chain.Ore
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.Skr
+import xyz.headsdown.core.chain.accounts.FocusBondAccount
 import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.accounts.RigAccount
+import xyz.headsdown.core.chain.accounts.ShiftLogAccount
+import xyz.headsdown.core.chain.accounts.SplTokenAccounts
 import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
 import xyz.headsdown.core.chain.tx.TransactionBuilder
@@ -20,6 +24,12 @@ class PreparedClockIn(
     val authority: Pubkey,
     val plan: ClockInPlan,
     val version: TxVersion,
+    /**
+     * A Focus Bond was asked for but the transaction would not fit one packet with it (a first
+     * clock-in that also carries a registrar voucher): the shift is armed without it, and the
+     * bond can be locked right after, on the open shift.
+     */
+    val bondDeferred: Boolean = false,
 ) : PreparedTransactions(listOf(transaction), lastValidBlockHeight)
 
 /**
@@ -50,20 +60,47 @@ class ClockInService(
         val configAddress = HeadsDownProgram.config.address
         val rigAddress = HeadsDownProgram.rig(authority).address
         val automationAddress = Ore.automation(authority).address
-        val (configInfo, rigInfo, automationInfo) = rpc.getMultipleAccounts(listOf(configAddress, rigAddress, automationAddress))
-        if (configInfo == null) return null
+        val skrAddress = Skr.account(authority)
+        val read = rpc.getMultipleAccounts(listOf(configAddress, rigAddress, automationAddress, Ore.BOARD, skrAddress))
+        val configInfo = read[0] ?: return null
+        val rig = read[1]?.let { HeadsDownAccounts.rig(rigAddress, it) }
+
+        // A Focus Bond lives on the rig's current (or last) shift: release it here if it is due.
+        var previousBond: FocusBondAccount? = null
+        var previousLog: ShiftLogAccount? = null
+        if (rig != null && rig.shiftId > 0uL) {
+            val bondAddress = HeadsDownProgram.focusBond(rigAddress, rig.shiftId).address
+            val logAddress = HeadsDownProgram.shiftLog(rigAddress, rig.shiftId).address
+            val (bondInfo, logInfo) = rpc.getMultipleAccounts(listOf(bondAddress, logAddress))
+            previousBond = bondInfo?.let { HeadsDownAccounts.focusBond(bondAddress, it) }
+            if (previousBond != null) previousLog = logInfo?.let { HeadsDownAccounts.shiftLog(logAddress, it) }
+        }
+
         // The blockhash's context slot dates the voucher expiry check (expiry_slot > Clock.slot).
         val blockhash = rpc.getLatestBlockhash()
         val state = ClockInChainState(
             config = HeadsDownAccounts.config(configAddress, configInfo),
-            rig = rigInfo?.let { HeadsDownAccounts.rig(rigAddress, it) },
-            automation = automationInfo?.let { OreAccounts.automation(automationAddress, it) },
+            rig = rig,
+            automation = read[2]?.let { OreAccounts.automation(automationAddress, it) },
             slot = blockhash.contextSlot.takeIf { it >= 0 }?.toULong(),
+            boardRoundId = read[3]?.let { OreAccounts.board(Ore.BOARD, it).roundId },
+            skrBalance = SplTokenAccounts.userBalance(read[4], Skr.MINT, authority),
+            skrAccountExists = read[4] != null,
+            previousBond = previousBond,
+            previousShiftLog = previousLog,
         )
-        val plan = ClockInComposer.compose(authority, rigKey, request, state, nowUnix(), voucher)
         val version = if (capabilities.supportsV0) TxVersion.V0 else TxVersion.LEGACY
-        val message = TransactionBuilder.compile(authority, plan.instructions, blockhash.blockhash, version)
-        return PreparedClockIn(TransactionBuilder.unsignedTransaction(message), blockhash.lastValidBlockHeight, authority, plan, version)
+        val now = nowUnix()
+        var plan = ClockInComposer.compose(authority, rigKey, request, state, now, voucher)
+        var message = TransactionBuilder.compile(authority, plan.instructions, blockhash.blockhash, version)
+        var bondDeferred = false
+        if (!TransactionBuilder.fits(message) && request.focusBondSkr > 0uL) {
+            // Arming the shift comes first: the bond is locked right after, in its own transaction.
+            plan = ClockInComposer.compose(authority, rigKey, request.copy(focusBondSkr = 0uL), state, now, voucher)
+            message = TransactionBuilder.compile(authority, plan.instructions, blockhash.blockhash, version)
+            bondDeferred = true
+        }
+        return PreparedClockIn(TransactionBuilder.unsignedTransaction(message), blockhash.lastValidBlockHeight, authority, plan, version, bondDeferred)
     }
 
     /** The authority's Rig (checked decode), or null if it does not exist. */

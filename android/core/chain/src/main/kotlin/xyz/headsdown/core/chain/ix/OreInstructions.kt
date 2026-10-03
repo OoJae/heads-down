@@ -111,6 +111,62 @@ object OreInstructions {
         strategy = STRATEGY_DISCRETIONARY,
         reload = false,
     )
+
+    const val TAG_CLAIM_SOL = 3
+    const val TAG_CLAIM_ORE = 4
+    const val CLAIM_ORE_BYTES = 9
+
+    /**
+     * `claim_sol` (tag 3), 1 byte: pays `Miner.rewards_sol` to the wallet (`claim_sol.rs:10-27`).
+     * Only the Miner's authority can sign it. With `reload = 1` (every Heads Down Automation)
+     * returned SOL goes back into the Automation at checkpoint instead, so this is usually zero.
+     *
+     * Accounts (`sdk.rs::claim_sol`): `signer (s,w) | Board (w) | Miner (w) | system | ORE program`.
+     */
+    fun claimSol(authority: Pubkey): Instruction = Instruction(
+        Ore.PROGRAM_ID,
+        listOf(
+            AccountMeta.signer(authority),
+            AccountMeta.writable(Ore.BOARD),
+            AccountMeta.writable(Ore.miner(authority).address),
+            AccountMeta.readonly(WellKnown.SYSTEM_PROGRAM),
+            AccountMeta.readonly(Ore.PROGRAM_ID),
+        ),
+        byteArrayOf(TAG_CLAIM_SOL.toByte()),
+    )
+
+    /**
+     * `claim_ore` (tag 4), 9 bytes: `tag | bps u64`. Claims `bps / 10,000` of both the Miner's
+     * refined and unrefined ORE to the wallet's ORE account (`claim_ore.rs:8-88`), creating that
+     * account if needed. ORE takes a **10% refining fee on the unrefined part** (at least one
+     * atom) and shares it among the miners still holding unrefined ORE
+     * (`state/miner.rs:76-103`). Not sending this instruction at all keeps everything unrefined.
+     *
+     * Accounts (`sdk.rs::claim_ore`): `signer (s,w) | Board (w) | Miner (w) | ORE mint (w) |
+     * recipient = ATA(signer, ORE) (w) | Treasury (w) | Treasury ORE account (w) | system |
+     * SPL Token | ATA program | ORE program`.
+     */
+    fun claimOre(authority: Pubkey, bps: Int): Instruction {
+        // ORE clamps bps to 10,000; 0 would claim nothing and still create the token account.
+        require(bps in 1..Ore.DENOMINATOR_BPS) { "claim share must be 1..10000 bps" }
+        return Instruction(
+            Ore.PROGRAM_ID,
+            listOf(
+                AccountMeta.signer(authority),
+                AccountMeta.writable(Ore.BOARD),
+                AccountMeta.writable(Ore.miner(authority).address),
+                AccountMeta.writable(Ore.MINT),
+                AccountMeta.writable(Ore.account(authority)),
+                AccountMeta.writable(Ore.TREASURY),
+                AccountMeta.writable(Ore.treasuryTokens),
+                AccountMeta.readonly(WellKnown.SYSTEM_PROGRAM),
+                AccountMeta.readonly(WellKnown.SPL_TOKEN),
+                AccountMeta.readonly(WellKnown.ASSOCIATED_TOKEN),
+                AccountMeta.readonly(Ore.PROGRAM_ID),
+            ),
+            DataWriter(CLAIM_ORE_BYTES).u8(TAG_CLAIM_ORE).u64(bps.toULong()).build(),
+        )
+    }
 }
 
 /** Compute Budget program (priority fee and CU limit). */

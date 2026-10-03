@@ -2,17 +2,24 @@ package xyz.headsdown.core.chain.clockin
 
 import xyz.headsdown.core.chain.HeadsDownProgram
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.Skr
+import xyz.headsdown.core.chain.accounts.FocusBondAccount
 import xyz.headsdown.core.chain.accounts.HdConfig
 import xyz.headsdown.core.chain.accounts.OreAutomation
 import xyz.headsdown.core.chain.accounts.RigAccount
+import xyz.headsdown.core.chain.accounts.ShiftLogAccount
+import xyz.headsdown.core.chain.clockout.ShiftSeal
+import xyz.headsdown.core.chain.ix.AssociatedTokenInstructions
 import xyz.headsdown.core.chain.ix.ComputeBudgetInstructions
 import xyz.headsdown.core.chain.ix.HeadsDownInstructions
 import xyz.headsdown.core.chain.ix.OreInstructions
 import xyz.headsdown.core.chain.ix.RigCaps
+import xyz.headsdown.core.chain.ix.SkrInstructions
 import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.tx.Instruction
 import xyz.headsdown.core.keys.RigMessageFormat
 import xyz.headsdown.core.keys.RigSignalState
+import xyz.headsdown.core.keys.ShiftEndReason
 import xyz.headsdown.core.keys.ShiftPlan
 
 /**
@@ -39,8 +46,15 @@ data class ClockInRequest(
     val capsValiditySeconds: Long = SECONDS_PER_WEEK,
     /** 0 = no ComputeBudget instructions (the wallet may add its own priority fee). */
     val priorityMicroLamports: ULong = 0uL,
+    /**
+     * A Focus Bond: SKR base units to lock on the shift this clock-in arms (0 = none). It comes
+     * back when the shift seals `completed`; otherwise it goes to the Bury auction, never to the
+     * team (INTERFACE §11.6).
+     */
+    val focusBondSkr: ULong = 0uL,
 ) {
     init {
+        require(focusBondSkr <= Skr.FOCUS_BOND_CAP) { "a Focus Bond is at most 5,000 SKR" }
         require(windowSeconds in 60..MAX_WINDOW_SECONDS) { "shift window must be 1 minute to 24 hours" }
         require(capsValiditySeconds in 3_600..(4 * SECONDS_PER_WEEK)) { "caps validity must be 1 hour to 4 weeks" }
         require(planMaxEvCostPerOre <= capMaxCostPerOre) { "plan ceiling must not exceed the wallet cap" }
@@ -72,6 +86,14 @@ class ClockInChainState(
     val automation: OreAutomation?,
     /** The cluster slot the reads were made at (voucher expiry check); null when unknown. */
     val slot: ULong? = null,
+    /** ORE `Board.round_id`: the `end_round` an `end_shift` in this transaction would record. */
+    val boardRoundId: ULong? = null,
+    /** SKR in the wallet's token account (0 when it has none). */
+    val skrBalance: ULong = 0uL,
+    val skrAccountExists: Boolean = false,
+    /** A Focus Bond still locked on the rig's current (or last) shift, and that shift's log if sealed. */
+    val previousBond: FocusBondAccount? = null,
+    val previousShiftLog: ShiftLogAccount? = null,
 )
 
 /** Why a clock-in cannot be built. The message is fixed text, safe to show. */
@@ -80,6 +102,8 @@ class ClockInRefusedException(val reason: Reason) : IllegalStateException(reason
         RIG_FROZEN("Rig frozen. Unfreeze it with your wallet first."),
         OTHER_AUTHORITY("This Rig belongs to a different wallet."),
         RIG_BUSY("This Rig is in a state that cannot be armed. End its shift with your wallet first."),
+        BOND_WOULD_FORFEIT("Your last shift still holds a Focus Bond and its window has not ended. Clocking in now would forfeit it."),
+        INSUFFICIENT_SKR("Not enough SKR in this wallet for the Focus Bond."),
     }
 }
 
@@ -121,12 +145,16 @@ class ClockInPlan(
     /** On-chain `hb_counter`: the local counter must be raised to at least this. */
     val hbCounterFloor: ULong,
     val voucher: VoucherUse = VoucherUse.NONE,
+    /** SKR locked as a Focus Bond on the new shift by this transaction (0 = none). */
+    val bondLocked: ULong = 0uL,
+    /** SKR of the previous shift's Focus Bond that this transaction returns to the wallet (0 = none). */
+    val bondReleased: ULong = 0uL,
 )
 
 /**
  * Composes the single clock-in transaction:
  *
- * `[ComputeBudget?] [end_shift?] [ed25519 voucher? rotate_key?] [ORE automate?] [ed25519 voucher? register_rig?] set_caps arm_shift`
+ * `[ComputeBudget?] [end_shift?] [release_focus_bond?] [ed25519 voucher? rotate_key?] [ORE automate?] [ed25519 voucher? register_rig?] set_caps arm_shift [bond vault, lock_focus_bond]?`
  *
  * - **ORE automate** points the user's own Automation at the heads_down Executor PDA with the
  *   Discretionary strategy and `fee = Config.executor_fee` (read at Config @80; any other fee
@@ -145,6 +173,12 @@ class ClockInPlan(
  *   the rig as a guest (level-0 or unusable vouchers would fail the whole clock-in on-chain).
  * - **set_caps** then **arm_shift** (wallet path) with a plan inside the caps; `plan_flags` bit0
  *   for focus-only, bit1 for a Day Shift.
+ * - **A Focus Bond** ([ClockInRequest.focusBondSkr]): `lock_focus_bond` right after `arm_shift`,
+ *   behind the companion that creates the bond's SKR vault. The program only asks that the shift
+ *   be open and clean, which it is one instruction earlier (INTERFACE §11.4, tag 20).
+ * - **The previous shift's bond**: when this clock-in ends a shift that seals `completed` (or the
+ *   shift is already sealed so), its bond is released in the same transaction. A bond on a shift
+ *   still inside its window would be forfeited by ending it: that clock-in is refused.
  *
  * Pure function of its inputs: every decision is unit-tested without a network.
  */
@@ -205,6 +239,29 @@ object ClockInComposer {
         val endsPrevious = rig != null && rig.shiftOpen
         if (rig != null && endsPrevious) ixs += HeadsDownInstructions.endShift(authority, rigAddress, rig.shiftId)
 
+        // The Focus Bond on the shift being ended (or already sealed): release it when that shift
+        // is completed; never forfeit it by clocking in over a shift that could still complete.
+        var bondReleased = 0uL
+        val previousBond = state.previousBond?.takeIf { rig != null && it.rig == rigAddress && it.authority == authority && it.shiftId == rig.shiftId }
+        if (rig != null && previousBond != null) {
+            val log = state.previousShiftLog
+            val completes = when {
+                log != null -> previousBond.isResolvedBy(log) && log.completed
+                endsPrevious -> {
+                    val reason = ShiftSeal.predict(rig, state.boardRoundId ?: ULong.MAX_VALUE, nowUnix)
+                    val fixed = rig.state == RigSignalState.BROKEN || rig.state == RigSignalState.FROZEN || ShiftSeal.pastWindow(rig, nowUnix)
+                    if (reason != ShiftEndReason.COMPLETED && !fixed) throw ClockInRefusedException(ClockInRefusedException.Reason.BOND_WOULD_FORFEIT)
+                    reason == ShiftEndReason.COMPLETED
+                }
+                else -> false
+            }
+            if (completes) {
+                if (!state.skrAccountExists) ixs += AssociatedTokenInstructions.createIdempotent(authority, authority, Skr.MINT)
+                ixs += SkrInstructions.releaseFocusBond(authority, previousBond.shiftId)
+                bondReleased = previousBond.amount
+            }
+        }
+
         val registers = rig == null
         val keyChanges = rig != null && !rig.p256Pubkey.toByteArray().contentEquals(rigKey)
         val voucherUse = voucherUse(voucher, authority, rigKey, state, rig, keyChanges)
@@ -247,6 +304,16 @@ object ClockInComposer {
         ixs += HeadsDownInstructions.setCaps(authority, caps)
         ixs += HeadsDownInstructions.armShift(authority, plan)
 
+        val expectedShiftId = checkedAdd(rig?.shiftId ?: 0uL, 1uL)
+        if (request.focusBondSkr > 0uL) {
+            // A bond released earlier in this transaction is spendable again by now.
+            if (request.focusBondSkr > checkedAdd(state.skrBalance, bondReleased)) {
+                throw ClockInRefusedException(ClockInRefusedException.Reason.INSUFFICIENT_SKR)
+            }
+            ixs += SkrInstructions.focusBondVault(authority, expectedShiftId)
+            ixs += SkrInstructions.lockFocusBond(authority, expectedShiftId, request.focusBondSkr)
+        }
+
         return ClockInPlan(
             instructions = ixs,
             plan = plan,
@@ -257,13 +324,18 @@ object ClockInComposer {
             registersRig = registers,
             rotatesKey = rotates,
             endsPreviousShift = endsPrevious,
-            expectedShiftId = checkedAdd(rig?.shiftId ?: 0uL, 1uL),
+            expectedShiftId = expectedShiftId,
             hbCounterFloor = rig?.hbCounter ?: 0uL,
             voucher = voucherUse,
+            bondLocked = request.focusBondSkr,
+            bondReleased = bondReleased,
         )
     }
 
-    /** Covers ORE automate (account creation), register_rig with a voucher and the two small updates. */
+    /**
+     * Covers ORE automate (account creation), register_rig with a voucher, the two small updates,
+     * and a Focus Bond (its vault creation, the lock and a release of the previous one).
+     */
     const val COMPUTE_UNIT_LIMIT = 400_000L
 
     /**

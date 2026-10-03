@@ -5,10 +5,13 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import xyz.headsdown.core.chain.AssociatedToken
+import xyz.headsdown.core.chain.GiftLimits
 import xyz.headsdown.core.chain.Golden
 import xyz.headsdown.core.chain.HeadsDownProgram
 import xyz.headsdown.core.chain.Ore
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.Skr
 import xyz.headsdown.core.chain.WellKnown
 import xyz.headsdown.core.chain.arr
 import xyz.headsdown.core.chain.bool
@@ -19,6 +22,7 @@ import xyz.headsdown.core.chain.obj
 import xyz.headsdown.core.chain.pubkey
 import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.str
+import xyz.headsdown.core.chain.tx.AccountMeta
 import xyz.headsdown.core.chain.tx.Instruction
 import xyz.headsdown.core.chain.u64
 import xyz.headsdown.core.keys.HeartbeatPreimage
@@ -32,9 +36,10 @@ import xyz.headsdown.core.keys.SignedRigMessage
 
 /**
  * Every instruction the phone can build, against `programs/heads-down/vectors/instructions.json`
- * (INTERFACE v1.1, executed in LiteSVM on a fork of live ORE): data bytes and the ordered account
+ * (INTERFACE v1.2, executed in LiteSVM on a fork of live ORE): data bytes and the ordered account
  * metas (pubkey, signer, writable) must be identical. The companion instructions of those
- * transactions (Secp256r1SigVerify, the registrar's Ed25519SigVerify) are rebuilt too.
+ * transactions (Secp256r1SigVerify, the registrar's Ed25519SigVerify, and the Associated Token
+ * Account `CreateIdempotent` that creates a table's or a bond's SKR vault) are rebuilt too.
  */
 class GoldenInstructionsTest {
 
@@ -73,24 +78,43 @@ class GoldenInstructionsTest {
         "close_rig_guest" to { v -> HeadsDownInstructions.closeRig(v.obj("args").pubkey("authority")) },
         // The vector names the seat; the phone derives it from the SGT mint (verify_seeker's).
         "close_rig_seeker" to { v -> HeadsDownInstructions.closeRig(v.obj("args").pubkey("authority"), sgtMint()) },
-    )
 
-    /** Admin (governance, upgrade authority) and crank instructions: never built on the phone. */
-    private val notOnPhone = setOf(
-        "initialize_config", "propose_config", "apply_config",
-        "dig_fresh_heartbeat", "dig_reuse_lease", "dig_batch_two_rigs", "record_heartbeats",
+        // ---- INTERFACE v1.2 (SKR): Stack, Focus Bond, Gift a Rig ------------------------------
+        "open_stack" to { v -> SkrInstructions.openStack(role(v, "host"), stackParams(v)) },
+        // An in-person table: the seat is keyed by the rig, which the phone derives from the wallet.
+        "join_stack" to { v -> SkrInstructions.joinStack(role(v, "authority"), v.obj("args").pubkey("table"), remote = false) },
+        "claim_stack" to { v ->
+            val a = v.obj("args")
+            SkrInstructions.claimStack(a.pubkey("table"), a.pubkey("seat"), role(v, "seat_authority"))
+        },
+        "lock_focus_bond" to { v ->
+            val a = v.obj("args")
+            SkrInstructions.lockFocusBond(role(v, "authority"), a.u64("shift_id"), a.u64("amount"))
+        },
+        "release_focus_bond" to { v ->
+            val a = v.obj("args")
+            SkrInstructions.releaseFocusBond(a.pubkey("authority"), a.u64("shift_id"))
+        },
+        "create_gift_wallet" to { v -> createGift(v) },
+        "create_gift_sgt" to { v -> createGift(v) },
+        "claim_gift_wallet" to { v -> SkrInstructions.claimGift(role(v, "claimer"), v.obj("args").pubkey("gift"), role(v, "sender")) },
+        "claim_gift_sgt" to { v ->
+            val a = v.obj("args")
+            SkrInstructions.claimGift(role(v, "claimer"), a.pubkey("gift"), role(v, "sender"), SgtAccounts(a.pubkey("sgt_token_account"), a.pubkey("sgt_mint")))
+        },
+        "refund_gift" to { v -> SkrInstructions.refundGift(v.obj("args").pubkey("gift"), role(v, "sender")) },
     )
 
     /**
-     * INTERFACE v1.2 (additive SKR features, tags 15..27). The phone does not build these yet; they are
-     * listed explicitly so a new vector can never be silently ignored. Each name moves to [androidBuilds]
-     * (or to [notOnPhone] for crank-only instructions) when its builder lands.
+     * Admin (governance, upgrade authority) and crank instructions: never built on the phone. Of
+     * the v1.2 SKR set these are the permissionless ones the crank sends: the per-round
+     * `stack_checkin`, `settle_stack`, `forfeit_focus_bond`, and the Bury vault and its auction.
      */
-    private val skrPendingOnPhone = setOf(
-        "init_bury_vault", "open_stack", "join_stack", "stack_checkin_heartbeat", "stack_checkin_observe",
-        "settle_stack", "claim_stack", "lock_focus_bond", "forfeit_focus_bond", "release_focus_bond",
-        "create_gift_wallet", "claim_gift_wallet", "create_gift_sgt", "claim_gift_sgt", "refund_gift",
-        "bury_auction_buy",
+    private val notOnPhone = setOf(
+        "initialize_config", "propose_config", "apply_config",
+        "dig_fresh_heartbeat", "dig_reuse_lease", "dig_batch_two_rigs", "record_heartbeats",
+        "stack_checkin_heartbeat", "stack_checkin_observe", "settle_stack", "forfeit_focus_bond",
+        "init_bury_vault", "bury_auction_buy",
     )
 
     // ------------------------------------------------------------------------------ helpers
@@ -136,6 +160,26 @@ class GoldenInstructionsTest {
 
     private fun sgtMint(): Pubkey = vectors.getValue("verify_seeker").obj("args").pubkey("sgt_mint")
 
+    private fun stackParams(v: JsonObject): StackParams {
+        val a = v.obj("args")
+        return StackParams(
+            tableId = a.u64("table_id"),
+            bond = a.u64("bond"),
+            startRound = a.u64("start_round"),
+            endRound = a.u64("end_round"),
+            graceGaps = a.str("grace_gaps").toLong(),
+            flags = a.int("flags"),
+            maxSeats = a.int("max_seats"),
+        )
+    }
+
+    private fun createGift(v: JsonObject): Instruction {
+        val a = v.obj("args")
+        return SkrInstructions.createGift(
+            role(v, "sender"), a.u64("nonce"), GiftRecipientKind.fromWire(a.int("recipient_kind")), a.pubkey("recipient"), a.u64("lamports"),
+        )
+    }
+
     private fun txInstruction(v: JsonObject, index: Int): JsonObject =
         v.obj("transaction").arr("instructions").map { it.jsonObject }.single { it.int("index") == index }
 
@@ -173,18 +217,93 @@ class GoldenInstructionsTest {
         assertEquals(WellKnown.SECP256R1_SIG_VERIFY, c.pubkey("secp256r1_program"))
         assertEquals(WellKnown.ED25519_SIG_VERIFY, c.pubkey("ed25519_program"))
         assertEquals(WellKnown.COMPUTE_BUDGET, c.pubkey("compute_budget_program"))
+        // v1.2: the token programs, the mints and the BuryVault.
+        assertEquals(WellKnown.SYSTEM_PROGRAM, c.pubkey("system_program"))
+        assertEquals(WellKnown.TOKEN_2022, c.pubkey("token_2022_program"))
+        assertEquals(WellKnown.SPL_TOKEN, c.pubkey("spl_token_program"))
+        assertEquals(WellKnown.ASSOCIATED_TOKEN, c.pubkey("associated_token_program"))
+        assertEquals(Skr.MINT, c.pubkey("skr_mint"))
+        assertEquals(Ore.MINT, c.pubkey("ore_mint"))
+        assertEquals(HeadsDownProgram.buryVault.address, c.pubkey("bury_vault"))
+        assertEquals(255, HeadsDownProgram.buryVault.bump)
+    }
+
+    @Test
+    fun `the program's compile-time SKR limits are the ones the fork ran with`() {
+        val skr = Golden.instructions.obj("pinned_fork").obj("skr_v1_2")
+        assertEquals(Skr.MINT, skr.obj("skr_mint").pubkey("address"))
+        assertEquals(Skr.DECIMALS, skr.obj("skr_mint").int("decimals"))
+        assertEquals(Ore.MINT, skr.obj("ore_mint").pubkey("address"))
+        assertEquals(Ore.DECIMALS, skr.obj("ore_mint").int("decimals"))
+        val stack = skr.obj("stack")
+        assertEquals(Skr.STACK_BOND_CAP, stack.u64("bond_cap_in_person"))
+        assertEquals(Skr.REMOTE_BOND_CAP, stack.u64("bond_cap_remote"))
+        assertEquals(Skr.GUEST_BOND_CAP, stack.u64("guest_bond_cap"))
+        assertEquals(StackParams.MAX_SEATS, stack.int("max_seats"))
+        assertEquals(Skr.FOCUS_BOND_CAP, skr.u64("focus_bond_cap"))
+        assertEquals(GiftLimits.MAX_LAMPORTS, skr.u64("max_gift_lamports"))
+        assertEquals(GiftLimits.EXPIRY_SECONDS, skr.str("gift_expiry_secs").toLong())
     }
 
     @Test
     fun `every golden vector is either built by the phone or deliberately not`() {
-        assertEquals(vectors.keys, androidBuilds.keys + notOnPhone + skrPendingOnPhone)
-        assertTrue(androidBuilds.keys.intersect(notOnPhone + skrPendingOnPhone).isEmpty())
-        assertTrue(notOnPhone.intersect(skrPendingOnPhone).isEmpty())
+        assertEquals(vectors.keys, androidBuilds.keys + notOnPhone)
+        assertTrue(androidBuilds.keys.intersect(notOnPhone).isEmpty())
+        assertEquals(41, vectors.size)
         // All 28 tags are covered by the file: the v1.1 core (0..14) and the additive v1.2 SKR set (15..27).
         assertEquals((0..27).toSet(), vectors.values.map { it.int("tag") }.toSet())
-        assertEquals((15..27).toSet(), skrPendingOnPhone.map { vectors.getValue(it).int("tag") }.toSet())
-        // Of the core, the phone builds 10 tags (not 0, 6, 7, 12, 13).
-        assertEquals(setOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 14), androidBuilds.keys.map { vectors.getValue(it).int("tag") }.toSet())
+        // Of the core, the phone builds 10 tags (not 0, 6, 7, 12, 13). Of the v1.2 SKR set it builds
+        // 8: Stack open / join / claim, Focus Bond lock / release, Gift create / claim / refund.
+        // The crank sends the rest: 17 stack_checkin, 18 settle_stack, 22 forfeit_focus_bond, 26, 27.
+        assertEquals(
+            setOf(1, 2, 3, 4, 5, 8, 9, 10, 11, 14) + setOf(15, 16, 19, 20, 21, 23, 24, 25),
+            androidBuilds.keys.map { vectors.getValue(it).int("tag") }.toSet(),
+        )
+        assertEquals(setOf(0, 6, 7, 12, 13) + setOf(17, 18, 22, 26, 27), notOnPhone.map { vectors.getValue(it).int("tag") }.toSet())
+        assertEquals(28, androidBuilds.size)
+    }
+
+    @Test
+    fun `vault companions are the Associated Token Account CreateIdempotent the vectors ran`() {
+        // open_stack: the table's SKR vault, paid by the host, right before the instruction.
+        val open = vectors.getValue("open_stack")
+        val host = role(open, "host")
+        val tableVault = SkrInstructions.openStackVault(host, open.obj("args").u64("table_id"))
+        assertCompanion(open, tableVault, payer = host, owner = role(open, "stack_table"), vault = role(open, "table_skr_vault"))
+        // lock_focus_bond: the bond's SKR vault, paid by the wallet.
+        val lock = vectors.getValue("lock_focus_bond")
+        val wallet = role(lock, "authority")
+        val bondVault = SkrInstructions.focusBondVault(wallet, lock.obj("args").u64("shift_id"))
+        assertCompanion(lock, bondVault, payer = wallet, owner = role(lock, "focus_bond"), vault = role(lock, "bond_skr_vault"))
+    }
+
+    /**
+     * The vectors give a companion's program and data; its account list is the Associated Token
+     * Account program's own (`programs/heads-down/tests/src/skr.rs::ix_create_ata`): payer (s,w),
+     * the ATA (w), its owner, the mint, System, the token program.
+     */
+    private fun assertCompanion(v: JsonObject, ix: Instruction, payer: Pubkey, owner: Pubkey, vault: Pubkey) {
+        val name = v.str("name")
+        val golden = txInstruction(v, 0)
+        assertTrue(golden.str("role").startsWith("ata: CreateIdempotent("))
+        assertEquals("this instruction", txInstruction(v, 1).str("role"))
+        assertEquals("$name companion program", Pubkey.fromBase58(golden.str("program_id")), ix.programId)
+        assertEquals(WellKnown.ASSOCIATED_TOKEN, ix.programId)
+        assertEquals("$name companion data", golden.str("data_hex"), ix.data.hex())
+        assertEquals(golden.int("data_len"), ix.dataSize)
+        assertEquals(payer, v.obj("transaction").pubkey("fee_payer"))
+        assertEquals(
+            listOf(
+                AccountMeta.signer(payer),
+                AccountMeta.writable(vault),
+                AccountMeta.readonly(owner),
+                AccountMeta.readonly(Skr.MINT),
+                AccountMeta.readonly(WellKnown.SYSTEM_PROGRAM),
+                AccountMeta.readonly(WellKnown.SPL_TOKEN),
+            ),
+            ix.accounts,
+        )
+        assertEquals(vault, AssociatedToken.address(owner, Skr.MINT).address)
     }
 
     @Test

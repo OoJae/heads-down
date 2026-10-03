@@ -1,0 +1,16 @@
+{
+  "source": "mainnet-beta getAccountInfo (finalized) via https://api.mainnet-beta.solana.com",
+  "slot": 451707794,
+  "pubkey": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
+  "account": {
+    "lamports": 2936240,
+    "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "executable": false,
+    "rentEpoch": 18446744073709551615,
+    "space": 450,
+    "data": [
+      "AQAAAOWKqhdAvydh2LouHq0lKwjraNJka0hmiNGggbQhTCm9AQAAAAAAAAAAAQEAAADliqoXQL8nYdi6Lh6tJSsI62jSZGtIZojRoIG0IUwpvQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIAQADliqoXQL8nYdi6Lh6tJSsI62jSZGtIZojRoIG0IUwpveWJkm0XmBofiHcH5IkGhI6YGUP+gVGTmnUrqnPiEJ7pDAAgAOWKqhdAvydh2LouHq0lKwjraNJka0hmiNGggbQhTCm9AwAgAOWKqhdAvydh2LouHq0lKwjraNJka0hmiNGggbQhTCm9FgBAAOWKqhdAvydh2LouHq0lKwjraNJka0hmiNGggbQhTCm9R5qB3eHYJt6lfA70Sp5ab1MYurAagdPu+BLo9vBta8kXAEgAR5qB3eHYJt6lfA70Sp5ab1MYurAagdPu+BLo9vBta8nliZJtF5gaH4h3B+SJBoSOmBlD/oFRk5p1K6pz4hCe6cvYAQAAAAAA",
+      "base64"
+    ]
+  }
+}

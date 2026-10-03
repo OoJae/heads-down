@@ -38,6 +38,21 @@ class AccountInfo(
 
 class KeyedAccount(val pubkey: Pubkey, val account: AccountInfo)
 
+/**
+ * What `simulateTransaction` reported. [err] is the raw JSON of the `TransactionError` (null:
+ * the transaction would succeed). [logs] are program logs: they can name accounts and amounts,
+ * so they are for decisions, never for a log line.
+ */
+class SimulationResult(
+    val err: String?,
+    val logs: List<String>,
+    /** The requested accounts after the simulated transaction, in request order (null: no such account). */
+    val accounts: List<AccountInfo?>,
+    val unitsConsumed: Long?,
+) {
+    val succeeded: Boolean get() = err == null
+}
+
 class LatestBlockhash(blockhash: ByteArray, val lastValidBlockHeight: Long, val contextSlot: Long) {
     private val hash = blockhash.copyOf()
     val blockhash: ByteArray get() = hash.copyOf()
@@ -195,12 +210,79 @@ class SolanaJsonRpc(
                 }
             }
         })
-        return result.arr("result").map { entry ->
-            val o = entry.obj("keyed account")
-            val pubkey = Pubkey(decodeBase58(o.field("pubkey").string("pubkey"), 32, "pubkey"))
-            val account = parseAccount(o.field("account")) ?: throw RpcProtocolException("null account")
-            KeyedAccount(pubkey, account)
+        return result.arr("result").map(::parseKeyedAccount)
+    }
+
+    /**
+     * `getTokenAccountsByOwner` for one token program: every token account whose owner field is
+     * [owner]. Used to find a wallet's Seeker Genesis Token (Token-2022) without knowing its mint.
+     */
+    suspend fun getTokenAccountsByOwner(owner: Pubkey, tokenProgram: Pubkey, commitment: Commitment = this.commitment): List<KeyedAccount> {
+        val result = call("getTokenAccountsByOwner", buildJsonArray {
+            add(owner.toBase58())
+            addJsonObject { put("programId", tokenProgram.toBase58()) }
+            addJsonObject {
+                put("encoding", "base64")
+                put("commitment", commitment.rpcName)
+            }
+        })
+        val values = result.obj("result").field("value").arr("value")
+        if (values.size > MAX_TOKEN_ACCOUNTS) throw RpcProtocolException("too many token accounts")
+        return values.map(::parseKeyedAccount)
+    }
+
+    /** Lamports that make an account of [dataSize] bytes rent-exempt. */
+    suspend fun getMinimumBalanceForRentExemption(dataSize: Int): ULong {
+        require(dataSize in 0..MAX_ACCOUNT_DATA) { "account size out of range" }
+        return call("getMinimumBalanceForRentExemption", buildJsonArray { add(dataSize) }).ulong("result")
+    }
+
+    /**
+     * `simulateTransaction` of an **unsigned** transaction (`sigVerify: false`) against the
+     * blockhash it was built with. [accounts] are returned as they would be after it ran, so the
+     * caller can check what a third-party instruction really moves before the wallet signs.
+     * A transaction that would fail comes back with [SimulationResult.err] set; it is not thrown.
+     */
+    suspend fun simulateTransaction(
+        transaction: ByteArray,
+        accounts: List<Pubkey> = emptyList(),
+        commitment: Commitment = this.commitment,
+    ): SimulationResult {
+        require(transaction.isNotEmpty())
+        require(accounts.size <= MAX_SIMULATION_ACCOUNTS) { "at most $MAX_SIMULATION_ACCOUNTS accounts" }
+        val result = call("simulateTransaction", buildJsonArray {
+            add(Base64.getEncoder().encodeToString(transaction))
+            addJsonObject {
+                put("encoding", "base64")
+                put("sigVerify", false)
+                put("replaceRecentBlockhash", false)
+                put("commitment", commitment.rpcName)
+                if (accounts.isNotEmpty()) {
+                    putJsonObject("accounts") {
+                        put("encoding", "base64")
+                        putJsonArray("addresses") { accounts.forEach { add(it.toBase58()) } }
+                    }
+                }
+            }
+        })
+        val value = result.obj("result").field("value").obj("value")
+        val err = value["err"]
+        val post = when (val a = value["accounts"]) {
+            null, is JsonNull -> emptyList()
+            else -> a.arr("accounts").map(::parseAccount)
         }
+        if (accounts.isNotEmpty() && post.size != accounts.size) throw RpcProtocolException("simulation returned ${post.size} of ${accounts.size} accounts")
+        val logs = when (val l = value["logs"]) {
+            null, is JsonNull -> emptyList()
+            else -> l.arr("logs").take(MAX_SIMULATION_LOGS).map { it.string("log").take(MAX_LOG_CHARS) }
+        }
+        val units = value["unitsConsumed"]?.takeUnless { it is JsonNull }?.long("unitsConsumed")
+        return SimulationResult(
+            err = if (err == null || err is JsonNull) null else err.toString().take(MAX_ERROR_DETAIL),
+            logs = logs,
+            accounts = post,
+            unitsConsumed = units,
+        )
     }
 
     override suspend fun getBlockHeight(commitment: Commitment): Long {
@@ -246,6 +328,13 @@ class SolanaJsonRpc(
         return response["result"] ?: throw RpcProtocolException("no result")
     }
 
+    private fun parseKeyedAccount(entry: JsonElement): KeyedAccount {
+        val o = entry.obj("keyed account")
+        val pubkey = Pubkey(decodeBase58(o.field("pubkey").string("pubkey"), 32, "pubkey"))
+        val account = parseAccount(o.field("account")) ?: throw RpcProtocolException("null account")
+        return KeyedAccount(pubkey, account)
+    }
+
     private fun parseAccount(value: JsonElement): AccountInfo? {
         if (value is JsonNull) return null
         val o = value.obj("account")
@@ -281,6 +370,11 @@ class SolanaJsonRpc(
         const val MAX_MULTIPLE_ACCOUNTS = 100
         const val MAX_SIGNATURE_STATUSES = 256
         const val MAX_FILTERS = 4
+        const val MAX_SIMULATION_ACCOUNTS = 16
+        const val MAX_TOKEN_ACCOUNTS = 2_000
+        const val MAX_ACCOUNT_DATA = 10 * 1024 * 1024
+        private const val MAX_SIMULATION_LOGS = 256
+        private const val MAX_LOG_CHARS = 400
         private const val MAX_ERROR_DETAIL = 200
         private const val MAX_BASE58_CHARS = 90
     }
