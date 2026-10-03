@@ -254,7 +254,13 @@ fn held_squares_shrink_k_and_waive_the_fee() {
     // The Miner already deployed on 3 split squares this round (another executor's deploy).
     let held: Vec<(usize, u64)> = split[..3].iter().map(|&i| (i, 1_000)).collect();
     w.miners.insert(acc.miner, ore_acct(miner_bytes(&auth, ROUND, ROUND - 1, &held)));
-    let d = w.run().digs[0];
+    // No fee from ORE means no reimbursement from the program (INTERFACE §12.13): by default
+    // the crank leaves such a rig alone, so a wallet deploying a lamport by hand every round
+    // cannot make the crank pay for its digs.
+    assert_eq!(w.skip_of(&a), Some(Skip::MinerAlreadyDeployed));
+    assert!(w.run().digs.is_empty());
+    let unpaid = Policy { dig_unpaid: true, ..Policy::default() };
+    let d = w.run_with(unpaid, &|_, _| false).digs[0];
     assert_eq!(d.tiles, 12, "k = popcount(mask): 15 split squares minus 3 held");
     assert_eq!(d.per_tile, 1_000_000 / 12);
     assert_eq!(d.fee_due, 0, "not the first deploy of the round: ORE charges no fee");
@@ -264,7 +270,7 @@ fn held_squares_shrink_k_and_waive_the_fee() {
     let mut deployed = [1_000u64; 25];
     deployed[split[0]] = 0;
     w.round = Some(Round { id: ROUND, deployed, count: [0; 25], expires_at: 0, total_miners: 0 });
-    let m = w.run().digs[0].predicted_mask.unwrap();
+    let m = w.run_with(unpaid, &|_, _| false).digs[0].predicted_mask.unwrap();
     assert_eq!(m.count_ones(), 12);
     for (i, _) in &held {
         assert_eq!(m & (1 << i), 0);
@@ -556,6 +562,55 @@ fn predicted_tiles_follow_the_round() {
 
 fn records(w: &World, policy: RecordPolicy) -> (Vec<hd_crank::planner::RecordDecision>, Vec<(Address, RecordSkip)>) {
     plan_records(&w.board, &w.treasury, w.now, &w.rigs, &w.heartbeats, &policy)
+}
+
+/// The record budget cannot always pay for every rig, so the order decides who is served. It
+/// used to be address order: a few dozen rigs with low-sorting addresses took the whole budget
+/// every round and the rest never had a dark round recorded.
+#[test]
+fn records_go_to_the_longest_waiting_rig_first_whatever_its_address() {
+    let mut w = World::new();
+    let rigs: Vec<Address> = (1..=12).map(|i| w.add(i, true)).collect();
+    for r in &rigs {
+        let rig = w.rig_mut(r);
+        rig.plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+        rig.shift_start_round = ROUND - 9;
+        // Recorded three rounds ago: due again.
+        rig.lease_from_round = ROUND - 3;
+        rig.lease_to_round = ROUND - 2;
+    }
+    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    // Two rigs have waited longer than the others (one never had a lease in this shift).
+    let mut by_address = rigs.clone();
+    by_address.sort_by_key(|a| a.to_bytes());
+    let (never, oldest) = (by_address[11], by_address[10]); // the two that address order served last
+    w.rig_mut(&never).lease_from_round = 0;
+    w.rig_mut(&never).lease_to_round = 0;
+    w.rig_mut(&oldest).lease_from_round = ROUND - 8;
+    w.rig_mut(&oldest).lease_to_round = ROUND - 7;
+    let order: Vec<Address> = records(&w, policy).0.iter().map(|d| d.rig).collect();
+    assert_eq!(order.len(), 12);
+    assert_eq!(&order[..2], &[never, oldest], "longest-waiting first");
+    // Among equals the order is not address order, and it changes from round to round, so no
+    // address is always first.
+    assert_ne!(&order[2..], &by_address[..10]);
+    let mut next = World::new();
+    for i in 1..=12 {
+        let r = next.add(i, true);
+        let rig = next.rig_mut(&r);
+        rig.plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+        rig.shift_start_round = ROUND - 9;
+        rig.lease_from_round = ROUND - 3;
+        rig.lease_to_round = ROUND - 2;
+    }
+    let a: Vec<Address> = records(&next, policy).0.iter().map(|d| d.rig).collect();
+    next.board.round_id += 1;
+    let f = HeartbeatFields { counter: 52, shift_id: 7, round_id: ROUND + 1, lease_rounds: 2 };
+    let fresh: Vec<_> = next.phones.iter().map(|(addr, phone)| (*addr, phone.verified(&hd::PROGRAM_ID, addr, f))).collect();
+    next.heartbeats.extend(fresh);
+    let b: Vec<Address> = records(&next, policy).0.iter().map(|d| d.rig).collect();
+    assert_eq!((a.len(), b.len()), (12, 12));
+    assert_ne!(a, b, "the tie-break order differs between rounds");
 }
 
 #[test]

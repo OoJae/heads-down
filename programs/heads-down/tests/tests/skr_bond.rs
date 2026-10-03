@@ -56,7 +56,7 @@ fn end_after_window(env: &mut Env, u: &User, shift_id: u64) -> TxResult {
     let slot = env.slot;
     env.set_clock(slot, end);
     let lease_to = env.rig(&u.rig).lease_to_round.get();
-    env.set_board_round(lease_to.max(env.board_round) + 1);
+    env.set_board_round(lease_to.max(env.board_round) + 1 + hd::logic::PERMISSIONLESS_END_GRACE_ROUNDS);
     let c = env.cranker.pubkey();
     env.send(&[ix_end_shift(&c, &u.rig, shift_id)], &[])
 }

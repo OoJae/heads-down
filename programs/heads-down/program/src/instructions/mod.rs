@@ -83,6 +83,9 @@ pub fn apply_heartbeat(
     if entry.counter <= rig.hb_counter.get() {
         return Err(HdError::StaleHeartbeat.code());
     }
+    if entry.counter.saturating_sub(rig.hb_counter.get()) > logic::MAX_COUNTER_STEP {
+        return Err(HdError::InvalidHeartbeat.code());
+    }
     let preimage = message::heartbeat_preimage(
         rig_address,
         entry.counter,

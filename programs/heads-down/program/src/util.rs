@@ -187,6 +187,9 @@ where
             if counter <= rig.hb_counter.get() {
                 return Err(HdError::StaleHeartbeat.into());
             }
+            if counter.saturating_sub(rig.hb_counter.get()) > crate::logic::MAX_COUNTER_STEP {
+                return Err(HdError::InvalidHeartbeat.into());
+            }
             let sysvar = instructions_sysvar.ok_or(ProgramError::NotEnoughAccountKeys)?;
             let digest = build(counter).digest();
             p256_introspect::verify_secp256r1_signature(

@@ -96,8 +96,8 @@ cat <<EOF
   crank payer   hot key on Railway (HD_CRANK_KEYPAIR_JSON). Pays dig fees and its lookup-table rent;
                 each real dig reimburses crank_fee ($HD_CRANK_FEE lamports). Keep its balance small.
   governance    signs propose_config. paused=1 pauses dig immediately; everything else waits 72 h and
-                needs apply_config. Config.governance cannot be rotated in program v1.1: moving it to a
-                Squads vault needs a program upgrade (or a Squads vault chosen before init-config).
+                needs apply_config. Since v1.3 Config.governance can be rotated: propose_governance,
+                then accept_governance by the successor after the same 72 h (scripts/mainnet/governance.sh).
   registrar     signs attestation vouchers off-chain (never pays fees). Rotate via propose_config.
 EOF
 

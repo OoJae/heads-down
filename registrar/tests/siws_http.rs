@@ -17,8 +17,8 @@ async fn nonce_endpoint_returns_fields_to_sign() {
     let h = Harness::new(Opts::default());
     let n = h.new_nonce().await;
     assert_eq!(n["nonce"].as_str().unwrap().len(), 32);
-    assert_eq!(n["domain"], "headsdown.xyz");
-    assert_eq!(n["uri"], "https://headsdown.xyz");
+    assert_eq!(n["domain"], "headsdown.example");
+    assert_eq!(n["uri"], "https://headsdown.example");
     assert_eq!(n["version"], "1");
     assert_eq!(n["chain_ids"], json!(["solana:mainnet"]));
     assert_eq!(n["issued_at"], rfc3339(T0));
@@ -104,7 +104,7 @@ async fn wrong_domain_is_rejected() {
     let w = wallet(1);
     let n = h.new_nonce().await;
     let mut msg = h.siws_message(&n, &w);
-    msg.domain = "headsdown.xyz.evil.example".into();
+    msg.domain = "headsdown.example.evil.example".into();
     let (s, b) = verify(&h, Harness::signed_body(&msg, &w)).await;
     assert_eq!((s, b["error"].as_str().unwrap()), (StatusCode::UNAUTHORIZED, "domain_mismatch"));
     let mut msg = h.siws_message(&n, &w);

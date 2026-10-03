@@ -66,7 +66,7 @@ fun interface RigAttestor {
  */
 class RigAttestationFlow(
     private val registrar: RegistrarClient,
-    /** The app's SIWS domain (HeadsDownIdentity.SIWS_DOMAIN). */
+    /** The app's SIWS domain (`BuildConfig.SIWS_DOMAIN`: the host of the app's identity site). */
     private val domain: String,
     /** This build's cluster, e.g. `solana:devnet` or `solana:localnet`. */
     private val chainId: String,

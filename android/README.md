@@ -4,7 +4,7 @@ Native Kotlin + Jetpack Compose. Package `xyz.headsdown`. minSdk 31, targetSdk 3
 Built and tested against a Redmi 14C (HyperOS / Android 14, no gyroscope, virtual proximity) and
 designed for stock Android 16 (Seeker).
 
-The on-chain contract is `programs/heads-down/INTERFACE.md` **v1.1** and its machine-checked
+The on-chain contract is `programs/heads-down/INTERFACE.md` **v1.3** and its machine-checked
 vectors in `programs/heads-down/vectors/`. The app's builders are tested byte for byte against
 those vectors (see [Contract tests](#contract-tests)). `INTERFACE-NOTES.md` here keeps only what
 the program contract does not cover (the crank and indexer contracts, the registrar flow).
@@ -31,17 +31,26 @@ kotlinx-serialization-json 1.11.0 (tree API only, no compiler plugin). Every ver
 
 ### Cluster and endpoints
 
-Devnet by default. The crank, registrar and indexer URLs default to placeholders that do not
-resolve until those services are deployed, so the uplink backs off, the rig registers as a guest
-and the reveal says "no haul yet". Override per build, never in source:
+Devnet by default. The crank, registrar and indexer have **no default host**: a default would be
+a name somebody else can register. Without them the app is local-only (heartbeats stay on the
+device, the rig registers as a guest, the reveal says "no haul yet"). A mainnet build must name
+all four endpoints and the identity site, and the build fails if one is missing. Set them per
+build, never in source:
 
 ```sh
 ./gradlew :app:assembleDebug -Pheadsdown.cluster=mainnet \
   -Pheadsdown.rpcUrl=https://rpc-proxy.example.org \
   -Pheadsdown.crankUrl=wss://crank.example.org/ws \
   -Pheadsdown.registrarUrl=https://registrar.example.org \
-  -Pheadsdown.indexerUrl=https://indexer.example.org
+  -Pheadsdown.indexerUrl=https://indexer.example.org \
+  -Pheadsdown.identityUri=https://example.org
 ```
+
+`identityUri` is the site a wallet shows next to every signing prompt (the Mobile Wallet Adapter
+identity), and its host is the Sign In With Solana domain (`-Pheadsdown.siwsDomain` overrides
+it; the registrar's `HD_SIWS_DOMAIN` must be the same). It has to be a site the team controls:
+whoever controls it can present itself to wallets as Heads Down. The default,
+`https://oojae.github.io/heads-down`, is the project's GitHub Pages address.
 
 An empty `crankUrl` builds a local-only app (no digs), an empty `registrarUrl` registers every
 rig as a guest, and an empty `indexerUrl` shows no morning haul. The build refuses a non-`https`

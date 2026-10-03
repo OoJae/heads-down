@@ -3,8 +3,15 @@
 Indexes Heads Down activity from chain data only, stores it in Postgres, and serves the public,
 verifiable traction API behind the [dashboard](../../dashboard).
 
-- **heads_down events** (`RigDug`, `RigSkipped`, `ShiftArmed`, `ShiftEnded`, `SeekerVerified`), read
-  from `Program data:` lines that the heads_down program itself wrote.
+- **heads_down events**, all 27 tags of INTERFACE v1.3, read from `Program data:` lines that the
+  heads_down program itself wrote. The v1.1 core (`RigDug`, `RigSkipped`, `ShiftArmed`,
+  `ShiftEnded` / `ShiftEndedV2`, `SeekerVerified`, `RigRegistered`, `RigClosed`,
+  `HeartbeatsRecorded`, `ShiftBroken`) has a table each. The SKR events of v1.2 (Stack, Focus Bond,
+  Gift a Rig, Bury auction) and the v1.3 events (governance rotation, `ShiftLogClosed`) share one
+  table, `ev_ext`, with their decoded fields as JSON.
+- **heads_down instructions**, all 32 tags: heartbeat leases come from `dig`,
+  `record_heartbeats` and `stack_checkin` entries (a heartbeat verified at a Stack table is
+  applied exactly as `record_heartbeats` applies it).
 - **ORE `DeployEvent`s whose signer is the Heads Down Executor PDA**
   (`By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge` = `[b"executor"]` under
   `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`, bump 249). ORE can recompute these from its own logs.
@@ -22,7 +29,7 @@ data for development and demos. That data is labelled and cannot mix with real d
 ```bash
 cd services/indexer
 pnpm install
-pnpm test            # 128 tests: golden bytes, metrics math, cohorts, store, sources, API
+pnpm test            # 347 tests: golden bytes, metrics math, cohorts, haul, store, sources, API
 pnpm typecheck
 pnpm demo            # in-memory Postgres + simulated dataset + API on http://127.0.0.1:8787
 curl -s localhost:8787/v1/summary | jq .data.rigs
@@ -120,6 +127,7 @@ strings.
 | `GET /v1/share-by-hour?tz=&days=` | Heads Down share of unique ORE miners per round, by hour, each with its peak round and its reset and dig signatures |
 | `GET /v1/digs/recent?limit=` | latest digs (RigDug paired with its DeployEvent), with explorer links |
 | `GET /v1/milestones?tz=` | ORE milestone targets (docs/ORE.md §9) against measured values |
+| `GET /v1/skr/summary` | Stack, Focus Bond, Gift a Rig and Bury auction totals: counts and sums of the program's own events, in base units |
 | `GET /v1/export/rounds.csv?days=` | per ORE round: total miners, Heads Down miners, share, lamports, reset and dig signatures |
 | `GET /v1/export/digs.csv?days=` | every dig with its signature |
 | `GET /v1/export/monthly.csv?tz=` | monthly milestone report |

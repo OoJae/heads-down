@@ -83,6 +83,7 @@ object HeadsDownInstructions {
     const val TAG_UNFREEZE_RIG = 10
     const val TAG_END_SHIFT = 11
     const val TAG_CLOSE_RIG = 14
+    const val TAG_CLOSE_SHIFT_LOG = 31
 
     /** Authorization-mode byte after the tag of dual-path instructions. */
     const val AUTH_WALLET = 0
@@ -268,6 +269,25 @@ object HeadsDownInstructions {
             AccountMeta.readonly(WellKnown.SYSTEM_PROGRAM),
         ),
         byteArrayOf(TAG_END_SHIFT.toByte()),
+    )
+
+    /**
+     * `close_shift_log` (tag 31, v1.3): `tag`. Anyone may send it from 30 days after the shift
+     * ended; the log's rent (1,781,760 lamports) goes only to [rentRecipient], which must be the
+     * address that paid it: the wallet that ended its own shift, or the crank that sealed it. For a
+     * log sealed before v1.3 it is the rig's authority. The shift's Focus Bond, if any, must be
+     * released or forfeited first.
+     *
+     * Accounts: `shift_log (w) | rent_recipient (w) | focus_bond PDA of (rig, shift_id)`.
+     */
+    fun closeShiftLog(rig: Pubkey, shiftId: ULong, rentRecipient: Pubkey): Instruction = Instruction(
+        programId,
+        listOf(
+            AccountMeta.writable(HeadsDownProgram.shiftLog(rig, shiftId).address),
+            AccountMeta.writable(rentRecipient),
+            AccountMeta.readonly(HeadsDownProgram.focusBond(rig, shiftId).address),
+        ),
+        byteArrayOf(TAG_CLOSE_SHIFT_LOG.toByte()),
     )
 
     /**

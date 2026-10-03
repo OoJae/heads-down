@@ -472,6 +472,122 @@ async fn per_ip_and_per_rig_rate_limits() {
     assert_eq!(s.metrics.heartbeats_rejected.get("rate_limited_ip"), 2);
 }
 
+/// A rig's allowance is spent only by frames that verified under its key. Before, the bucket
+/// was charged ahead of the signature check, so anyone could name a victim rig in garbage
+/// frames and silence its heartbeats, its BREAK and its FREEZE.
+#[tokio::test]
+async fn forged_frames_do_not_spend_the_rigs_allowance() {
+    let phone = Phone::new(4);
+    let thief = Phone::new(5);
+    let rig = Address::new_from_array([0x62; 32]);
+    let src = MapSource::default();
+    src.0.lock().unwrap().insert(rig, rig_for(&phone));
+    let cfg = IntakeConfig { ip_quota: Quota::new(100, 0.001), rig_quota: Quota::new(2, 0.001), ..IntakeConfig::default() };
+    let hub = SignalHubConfig { rig_quota: Quota::new(1, 0.0001), ..SignalHubConfig::default() };
+    let s = start_with(cfg, src, hub).await;
+    s.chain.send_replace(live_view(200));
+    let _rx = s.signals.take_receiver();
+    let mut ws = connect(s.addr).await;
+    for c in 1..=6 {
+        assert_eq!(ask(&mut ws, heartbeat_json(&thief, &rig, c)).await, ack(c, "bad_signature"));
+        assert_eq!(ask(&mut ws, signal_json(&thief, &rig, SignalKind::Break, c, hd::reason::PICKUP)).await, ack(c, "bad_signature"));
+    }
+    // The real phone still has its whole allowance: two heartbeats and one signal.
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 1)).await, ack(1, "accepted"));
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 2)).await, ack(2, "accepted"));
+    assert_eq!(ask(&mut ws, heartbeat_json(&phone, &rig, 3)).await, ack(3, "rate_limited"));
+    assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Break, 4, hd::reason::PICKUP)).await, ack(4, "accepted"));
+    assert_eq!(ask(&mut ws, signal_json(&phone, &rig, SignalKind::Freeze, 5, hd::reason::FREEZE)).await, ack(5, "rate_limited"));
+    assert_eq!(s.metrics.heartbeats_rejected.get("rate_limited_rig"), 1);
+    assert_eq!(s.metrics.signals_rejected.get("rate_limited_rig"), 1);
+}
+
+/// A connection keeps its slot only while it sends text frames, and only once it has delivered a
+/// message that verified. Before, a Ping restarted the idle timer, so silent clients could hold
+/// every slot for ever.
+#[tokio::test]
+async fn pings_do_not_keep_a_silent_connection_and_unverified_ones_are_closed() {
+    let phone = Phone::new(6);
+    let rig = Address::new_from_array([0x63; 32]);
+    let src = MapSource::default();
+    src.0.lock().unwrap().insert(rig, rig_for(&phone));
+    let cfg = IntakeConfig {
+        idle_timeout: Duration::from_millis(400),
+        unverified_timeout: Duration::from_millis(900),
+        rig_quota: Quota::new(100, 10.0),
+        ip_quota: Quota::new(1_000, 100.0),
+        ..IntakeConfig::default()
+    };
+    let s = start(cfg, src).await;
+    s.chain.send_replace(live_view(200));
+
+    // Only pings: closed at the idle timeout although a ping arrives every 100 ms.
+    let mut silent = connect(s.addr).await;
+    let started = Instant::now();
+    let mut closed = false;
+    while started.elapsed() < Duration::from_secs(3) {
+        if silent.send(Message::Ping(Vec::new().into())).await.is_err() {
+            closed = true;
+            break;
+        }
+        match tokio::time::timeout(Duration::from_millis(100), silent.next()).await {
+            Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_)))) => {
+                closed = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(closed, "a ping-only connection is closed");
+    assert!(started.elapsed() < Duration::from_millis(1_500), "at the idle timeout, not later: {:?}", started.elapsed());
+
+    // Text frames that never verify: closed at the unverified timeout, however busy.
+    let mut garbage = connect(s.addr).await;
+    let started = Instant::now();
+    let mut closed = false;
+    while started.elapsed() < Duration::from_secs(4) {
+        if garbage.send(Message::text(json!({ "type": "status" }).to_string())).await.is_err() {
+            closed = true;
+            break;
+        }
+        match tokio::time::timeout(Duration::from_millis(150), garbage.next()).await {
+            Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_)))) => {
+                closed = true;
+                break;
+            }
+            _ => {}
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(closed, "a connection that never verified is closed");
+    assert!(started.elapsed() >= Duration::from_millis(800) && started.elapsed() < Duration::from_millis(2_500), "{:?}", started.elapsed());
+
+    // A phone that verified stays for as long as it keeps talking, well past the unverified timeout.
+    let mut real = connect(s.addr).await;
+    for c in 1..=8u64 {
+        assert_eq!(ask(&mut real, heartbeat_json(&phone, &rig, c)).await, ack(c, "accepted"));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// `/whoami` shows the address the limits are keyed on, for the deployment check.
+#[tokio::test]
+async fn whoami_reports_the_limit_key_and_ignores_client_headers_unless_trusted() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn get(addr: SocketAddr, extra: &str) -> Value {
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        s.write_all(format!("GET /whoami HTTP/1.1\r\nHost: x\r\n{extra}Connection: close\r\n\r\n").as_bytes()).await.unwrap();
+        let mut buf = String::new();
+        s.read_to_string(&mut buf).await.unwrap();
+        serde_json::from_str(buf.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+    }
+    let direct = start(IntakeConfig::default(), MapSource::default()).await;
+    assert_eq!(get(direct.addr, "").await, json!({ "ip": "127.0.0.1" }));
+    assert_eq!(get(direct.addr, "X-Real-IP: 203.0.113.9\r\nX-Forwarded-For: 203.0.113.9\r\n").await, json!({ "ip": "127.0.0.1" }), "headers are not trusted by default");
+    let edge = start(IntakeConfig { trust_real_ip: true, ..IntakeConfig::default() }, MapSource::default()).await;
+    assert_eq!(get(edge.addr, "X-Real-IP: 198.51.100.66\r\nX-Real-IP: 203.0.113.9\r\n").await, json!({ "ip": "203.0.113.9" }), "the edge's line is the last one");
+}
+
 #[tokio::test]
 async fn connection_caps() {
     let s = start(IntakeConfig { max_connections_per_ip: 2, ..IntakeConfig::default() }, MapSource::default()).await;

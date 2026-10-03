@@ -85,6 +85,10 @@ pub enum Skip {
     StrategyMismatch,
     /// `balance < per_tile·k + fee_due` (on-chain: `InsufficientAutomationBalance`).
     InsufficientBalance,
+    /// The Miner already deployed this round, so ORE charges no Automation fee and the
+    /// program pays no reimbursement (INTERFACE §6.5, §12.13): the dig would be at the
+    /// crank's own cost. Dug anyway with `Policy::dig_unpaid`.
+    MinerAlreadyDeployed,
     /// Automation's Motherlode conditions fail: ORE would return Ok without deploying.
     MotherlodeCondition,
     /// Miner missing.
@@ -122,6 +126,7 @@ impl Skip {
             Skip::AuthorityMismatch => "authority_mismatch",
             Skip::StrategyMismatch => "strategy_mismatch",
             Skip::InsufficientBalance => "insufficient_balance",
+            Skip::MinerAlreadyDeployed => "miner_already_deployed",
             Skip::MotherlodeCondition => "motherlode_condition",
             Skip::NoMiner => "no_miner",
             Skip::MinerInvalid => "miner_invalid",
@@ -141,11 +146,15 @@ pub struct Policy {
     pub start_rounds: bool,
     /// Extra lamports the Executor PDA must hold above rent + CHECKPOINT_FEE.
     pub executor_reserve: u64,
+    /// Dig a rig whose Miner already deployed this round. ORE charges such a deploy no
+    /// Automation fee, so the program reimburses nothing. Default false: a wallet that
+    /// deploys a lamport by hand every round could otherwise make the crank pay for its digs.
+    pub dig_unpaid: bool,
 }
 
 impl Default for Policy {
     fn default() -> Self {
-        Policy { clock_margin_secs: 5, start_rounds: false, executor_reserve: 0 }
+        Policy { clock_margin_secs: 5, start_rounds: false, executor_reserve: 0, dig_unpaid: false }
     }
 }
 
@@ -367,6 +376,9 @@ fn check_rig(
     let squares_lamports = per_tile.checked_mul(u64::from(k)).ok_or(Skip::MathOverflow)?;
     let sum_before = miner.deployed_in(round_id).ok_or(Skip::MathOverflow)?;
     let fee_due = if sum_before == 0 { automation.fee } else { 0 };
+    if sum_before != 0 && !policy.dig_unpaid {
+        return Err(Skip::MinerAlreadyDeployed);
+    }
     let expected_debit = squares_lamports.checked_add(fee_due).ok_or(Skip::MathOverflow)?;
     if automation.balance < expected_debit {
         return Err(Skip::InsufficientBalance);
@@ -507,15 +519,29 @@ pub fn plan_records(
     policy: &RecordPolicy,
 ) -> (Vec<RecordDecision>, Vec<(Address, RecordSkip)>) {
     let round_id = board.round_id;
-    let (mut out, mut skips) = (Vec::new(), Vec::new());
+    let (mut due, mut skips) = (Vec::new(), Vec::new());
     for (addr, rig) in rigs {
         match check_record(board, treasury, now_ts, addr, rig, heartbeats.get(addr), policy, round_id) {
-            Ok(d) => out.push(d),
+            Ok(d) => due.push((rig.lease_to_round, record_tiebreak(addr, round_id), d)),
             Err(s) => skips.push((*addr, s)),
         }
     }
-    out.sort_by_key(|d| d.rig.to_bytes());
-    (out, skips)
+    // The record budget cannot always pay for every rig. Longest-waiting first: a rig with no
+    // lease yet in its shift, then the oldest lease, so the budget goes round the rigs instead
+    // of to the same ones every round. Ties are broken by a per-round mix of the address: a
+    // wallet cannot pick an address that always sorts first (it could when this was address
+    // order, and a few dozen such rigs took the whole budget).
+    due.sort_by_key(|(lease_to, tiebreak, _)| (*lease_to, *tiebreak));
+    (due.into_iter().map(|(_, _, d)| d).collect(), skips)
+}
+
+/// A per-round order key for `rig`: stable within a round, different in the next.
+fn record_tiebreak(rig: &Address, round_id: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    round_id.hash(&mut h);
+    rig.to_bytes().hash(&mut h);
+    h.finish()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -583,6 +609,7 @@ mod tests {
             Skip::AuthorityMismatch,
             Skip::StrategyMismatch,
             Skip::InsufficientBalance,
+            Skip::MinerAlreadyDeployed,
             Skip::MotherlodeCondition,
             Skip::NoMiner,
             Skip::MinerInvalid,

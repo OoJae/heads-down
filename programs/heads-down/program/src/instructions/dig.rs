@@ -223,6 +223,13 @@ fn dig_one(
 ) -> Result<Result<Dug, u32>, ProgramError> {
     // ---- 1. accounts (fail) ---------------------------------------------
     let rig_address = *rig.address();
+    // A rig closed after the crank planned this batch (a tombstone, or nothing
+    // at all at the PDA) is skipped like any other rig that cannot be dug. As a
+    // failure it let one wallet, by closing its rig just before the batch
+    // landed, make every other rig in the batch miss the round.
+    if !rig.owned_by(&crate::ID) || rig.data_len() != core::mem::size_of::<Rig>() {
+        skip!(HdError::InvalidAccountTag);
+    }
     let mut g = state::load_mut::<Rig>(rig)?;
     if authority.address().as_array() != &g.authority {
         return Err(HdError::Unauthorized.into());
@@ -480,8 +487,15 @@ fn dig_one(
     g.lifetime_lamports_deployed.set(v);
     drop(g);
 
-    // ---- 8. reimburse the cranker (only after a real deploy) ----------------
-    reimburse(ctx, s)?;
+    // ---- 8. reimburse the cranker ------------------------------------------
+    // Only out of the fee the Executor received in THIS dig. ORE charges the
+    // Automation fee on a miner's first deploy of a round only (`deploy.rs:338-342`),
+    // so a rig whose owner already deployed by hand this round pays the Executor
+    // nothing, and a cranker must not be able to draw the shared float for it
+    // (audit: reimbursement without a fee drains the Executor).
+    if fee_received >= ctx.crank_fee {
+        reimburse(ctx, s)?;
+    }
 
     Ok(Ok(Dug {
         lamports: deployed_now,

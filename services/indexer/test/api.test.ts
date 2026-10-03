@@ -111,7 +111,7 @@ describe("OpenAPI", () => {
 });
 
 describe("JSON endpoints (simulated dataset)", () => {
-  for (const route of ["/v1/health", "/v1/summary", "/v1/cohorts", "/v1/share-by-hour", "/v1/digs/recent", "/v1/skips", "/v1/milestones"]) {
+  for (const route of ["/v1/health", "/v1/summary", "/v1/cohorts", "/v1/share-by-hour", "/v1/digs/recent", "/v1/skips", "/v1/milestones", "/v1/skr/summary"]) {
     it(`${route} matches its schema and is badged simulated`, async () => {
       const r = await fetch(`${simBase}${route}`);
       expect(r.status).toBe(200);

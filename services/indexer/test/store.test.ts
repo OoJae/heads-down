@@ -7,6 +7,8 @@ import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constant
 import { buildDigTx, buildEventTx } from "../src/sim/txbuilder.ts";
 import { migrate, openDb, type Db } from "../src/store/db.ts";
 import { DatasetMismatchError, Store } from "../src/store/store.ts";
+import { computeSkrSummary } from "../src/metrics/skr.ts";
+import { GOLDEN_VECTORS, goldenTx } from "./helpers.ts";
 
 const HD = HEADS_DOWN_PROGRAM_ID;
 const OPTS = { programId: HD, executorPda: EXECUTOR_PDA };
@@ -16,7 +18,7 @@ const sig = (n: number) => encodeBase58(Uint8Array.from({ length: 64 }, (_, i) =
 let db: Db;
 beforeAll(async () => {
   db = await openDb("pglite://memory");
-  expect(await migrate(db)).toEqual(["001_init.sql", "002_v1_1.sql"]);
+  expect(await migrate(db)).toEqual(["001_init.sql", "002_v1_1.sql", "003_v1_3.sql"]);
   expect(await migrate(db)).toEqual([]); // idempotent
 });
 afterAll(async () => {
@@ -158,5 +160,83 @@ describe("Store", () => {
     await store.setCursor("rpc", "x", "abc");
     await store.setCursor("rpc", "x", "def");
     expect(await store.getCursor("rpc", "x")).toBe("def");
+  });
+});
+
+describe("Store: SKR and v1.3 events (ev_ext)", () => {
+  it("stores every golden SKR / v1.3 event with its fields, and the summary re-adds them", async () => {
+    const store = await Store.bind(db, { name: "devnet", programId: HD, executorPda: EXECUTOR_PDA });
+    const vectors = GOLDEN_VECTORS.instructions.filter((v) => v.tag >= 15).sort((a, b) => a.step - b.step);
+    const txs = vectors.map((v) => extractTransaction(goldenTx(v.name, sig(100 + v.step), 5_000 + v.step), OPTS));
+    expect(await store.ingestTxs(txs, "test")).toBe(vectors.length);
+    expect(await store.ingestTxs(txs, "test")).toBe(0);
+
+    const golden = vectors.flatMap((v) => (v.litesvm.events ?? []).filter((e) => Number(e.fields.tag) >= 11));
+    const rows = await db.query<{ name: string; tag: number; rig: string | null; fields: string }>(
+      "SELECT name, tag, rig, fields::text AS fields FROM ev_ext WHERE dataset = 'devnet' AND slot >= 5000 ORDER BY slot, idx",
+    );
+    expect(rows.map((r) => r.name)).toEqual(golden.map((e) => e.event));
+    rows.forEach((r, i) => {
+      const want = golden[i]!.fields;
+      const got = JSON.parse(r.fields) as Record<string, string | number>;
+      for (const [k, v] of Object.entries(want)) if (k !== "tag") expect(String(got[k]), `${r.name}.${k}`).toBe(String(v));
+      expect(r.rig).toBe(typeof want.rig === "string" ? want.rig : null);
+    });
+    // The heartbeats a stack_checkin applied are stored like record_heartbeats entries.
+    const hb = await db.query<{ kind: string; applied: boolean; fresh: boolean }>(
+      "SELECT kind, applied, fresh FROM hd_heartbeats WHERE dataset = 'devnet' AND slot >= 5000 ORDER BY slot, entry_idx",
+    );
+    expect(hb.map((h) => [h.kind, h.fresh, h.applied])).toEqual([...Array(3).fill(["record", true, true]), ...Array(3).fill(["record", false, false])]);
+
+    // The summary is nothing but counts and sums of those events.
+    const total = (name: string, field: string, pick: (f: Record<string, string | number>) => boolean = () => true) =>
+      golden.filter((e) => e.event === name && pick(e.fields)).reduce((n, e) => n + BigInt(e.fields[field]!), 0n).toString();
+    const n = (name: string, pick: (f: Record<string, string | number>) => boolean = () => true) => golden.filter((e) => e.event === name && pick(e.fields)).length;
+    const sum = computeSkrSummary(await store.skrEventGroups(), await store.buryState());
+    expect(sum.stack).toMatchObject({
+      tablesOpened: 1,
+      seatsJoined: n("StackJoined"),
+      skrBonded: total("StackJoined", "bond"),
+      tablesSettled: 1,
+      skrToBury: total("StackSettled", "bury_amount"),
+      checkinsCounted: n("StackCheckin", (f) => f.result === 0),
+      checkinsRefused: n("StackCheckin", (f) => f.result !== 0),
+      payouts: n("StackClaimed", (f) => f.kind === 0),
+      skrPaidOut: total("StackClaimed", "amount", (f) => f.kind === 0),
+    });
+    expect(sum.stack.checkinsCounted).toBe(5);
+    expect(sum.stack.checkinsRefused).toBe(1);
+    expect(BigInt(sum.stack.skrToFinishers)).toBe(BigInt(total("StackSettled", "payouts_total")) - BigInt(total("StackSettled", "finisher_bonds")));
+    expect(sum.focusBond).toEqual({
+      locked: 1, skrLocked: total("FocusBondLocked", "amount"),
+      released: 1, skrReleased: total("FocusBondReleased", "amount"),
+      forfeited: 1, skrForfeited: total("FocusBondForfeited", "amount"),
+    });
+    expect(sum.gift).toEqual({
+      created: 2, lamportsCreated: total("GiftCreated", "lamports"), createdForSeeker: 1,
+      claimed: 2, lamportsClaimed: total("GiftClaimed", "lamports"), claimedBySeeker: 1,
+      refunded: 1, lamportsRefunded: total("GiftRefunded", "lamports"),
+    });
+    const sold = golden.find((e) => e.event === "BuryAuctionSold")!.fields;
+    const lastLot = [...golden].reverse().find((e) => e.event === "BuryLotAdded")!.fields;
+    expect(sum.bury).toEqual({
+      lots: 2, skrIn: total("BuryLotAdded", "amount"),
+      skrFromStack: total("BuryLotAdded", "amount", (f) => f.source_kind === 1),
+      skrFromBonds: total("BuryLotAdded", "amount", (f) => f.source_kind === 2),
+      sales: 1, skrSold: String(sold.skr_amount), orePaid: String(sold.ore_paid), oreBurned: String(sold.ore_burned), oreToStakers: String(sold.ore_shared),
+      lotSkr: String(sold.lot_remaining), lastPrice: String(sold.price),
+      startPrice: String(lastLot.start_price), startSlot: String(lastLot.start_slot),
+    });
+    // 90% burned, 10% to ORE's stake program: never "100% burned".
+    expect(BigInt(sum.bury.oreBurned) + BigInt(sum.bury.oreToStakers)).toBe(BigInt(sum.bury.orePaid));
+    // Governance and ShiftLogClosed are stored but are not SKR totals.
+    expect(rows.filter((r) => r.tag >= 24).map((r) => r.name)).toEqual(["ShiftLogClosed", "ShiftLogClosed", "GovernanceProposed", "GovernanceCancelled", "GovernanceAccepted"]);
+  });
+
+  it("is empty, not an error, before any SKR event", async () => {
+    const store = await Store.bind(db, { name: "mainnet", programId: HD, executorPda: EXECUTOR_PDA });
+    const sum = computeSkrSummary(await store.skrEventGroups(), await store.buryState());
+    expect(sum.stack.tablesOpened).toBe(0);
+    expect(sum.bury).toMatchObject({ lots: 0, skrIn: "0", lotSkr: null, lastPrice: null });
   });
 });

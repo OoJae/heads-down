@@ -83,6 +83,31 @@ impl<K: Eq + Hash + Clone> KeyedLimiter<K> {
         self.check_at(key, Instant::now())
     }
 
+    /// Whether `key` has a token at `now`, WITHOUT taking it and without creating a bucket.
+    ///
+    /// Use this before an authentication step and [`Self::check`] only after it succeeded:
+    /// a per-rig bucket must be charged by messages that verified under the rig's key, never
+    /// by frames anyone can send naming that rig (otherwise a stranger can spend the rig's
+    /// allowance and silence its heartbeats, BREAK and FREEZE).
+    pub fn has_token_at(&self, key: &K, now: Instant) -> bool {
+        let map = match self.buckets.lock() {
+            Ok(m) => m,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match map.get(key) {
+            None => true,
+            Some(b) => {
+                let elapsed = now.saturating_duration_since(b.last).as_secs_f64();
+                (b.tokens + elapsed * self.quota.per_second).min(f64::from(self.quota.burst)) >= 1.0
+            }
+        }
+    }
+
+    /// [`Self::has_token_at`] with `Instant::now()`.
+    pub fn has_token(&self, key: &K) -> bool {
+        self.has_token_at(key, Instant::now())
+    }
+
     /// Number of tracked keys.
     pub fn len(&self) -> usize {
         self.buckets.lock().map(|m| m.len()).unwrap_or(0)
@@ -132,6 +157,21 @@ mod tests {
         assert!(l.check_at(&2, t0), "keys are independent");
         assert!(!l.check_at(&1, t0 + Duration::from_millis(500)));
         assert!(l.check_at(&1, t0 + Duration::from_millis(1600)), "refilled");
+    }
+
+    #[test]
+    fn peeking_takes_nothing_and_tracks_nothing() {
+        let l = KeyedLimiter::new(Quota::new(1, 1.0), 2);
+        let t0 = Instant::now();
+        for _ in 0..10 {
+            assert!(l.has_token_at(&1, t0));
+        }
+        assert_eq!(l.len(), 0, "a peek creates no bucket");
+        assert!(l.check_at(&1, t0));
+        assert!(!l.has_token_at(&1, t0), "spent");
+        assert!(!l.has_token_at(&1, t0 + Duration::from_millis(500)));
+        assert!(l.has_token_at(&1, t0 + Duration::from_millis(1100)), "refilled");
+        assert!(l.check_at(&1, t0 + Duration::from_millis(1100)));
     }
 
     #[test]

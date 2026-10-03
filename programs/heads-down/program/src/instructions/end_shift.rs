@@ -19,7 +19,7 @@
 //!
 //! The rig's authority may end its shift at any time. Anyone else may end it
 //! only once `now > plan_window_end_ts` **and** the heartbeat lease has
-//! expired (`lease_to_round < board.round_id`).
+//! expired by the grace (`lease_to_round + 3 < board.round_id`).
 //!
 //! Break reason: the stored one for Cooling / Broken, `freeze` for Frozen;
 //! for Armed / Down, `lease_lapse` if no lease was ever granted, `manual` if
@@ -73,7 +73,12 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
         }
         let is_authority = caller.address().as_array() == &g.authority;
         let inside_window = now <= g.plan_window_end_ts.get();
-        if !is_authority && (inside_window || g.lease_to_round.get() >= end_round) {
+        let lease_live = g
+            .lease_to_round
+            .get()
+            .saturating_add(logic::PERMISSIONLESS_END_GRACE_ROUNDS)
+            >= end_round;
+        if !is_authority && (inside_window || lease_live) {
             return Err(HdError::Unauthorized.into());
         }
         let (dark, gaps) = logic::settle_shift(

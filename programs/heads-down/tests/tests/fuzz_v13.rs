@@ -131,7 +131,7 @@ fn world() -> World {
     ));
     env.set_clock(env.slot, standard_plan().window_end + 1);
     let lease_to = env.rig(&gone.rig).lease_to_round.get();
-    env.set_board_round(lease_to.max(env.board_round) + 1);
+    env.set_board_round(lease_to.max(env.board_round) + 1 + hd::logic::PERMISSIONLESS_END_GRACE_ROUNDS);
     ok(env.send(&[ix_end_shift(&cranker, &gone.rig, 1)], &[]));
     let g = gone.wallet.insecure_clone();
     ok(env.send_as(&g, &[ix_close_rig(&g.pubkey(), None)], &[]));

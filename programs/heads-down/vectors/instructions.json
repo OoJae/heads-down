@@ -480,7 +480,7 @@
     {
       "step": 31,
       "kind": "setup",
-      "action": "clock -> window_end + 1 (unix 1,790,668,801); Board.round_id -> 422701 so alice's lease [422700, 422700] has expired"
+      "action": "clock -> window_end + 1 (unix 1,790,668,801); Board.round_id -> 422704 so alice's lease [422700, 422700] has been expired for more than the 3-round grace of a permissionless end"
     },
     {
       "step": 32,
@@ -489,38 +489,38 @@
     },
     {
       "step": 33,
-      "kind": "vector",
-      "name": "freeze_rig_wallet"
+      "kind": "setup",
+      "action": "Board.round_id -> 422701 again, so every later vector keeps the bytes it had before the grace"
     },
     {
       "step": 34,
       "kind": "vector",
-      "name": "close_rig_guest"
+      "name": "freeze_rig_wallet"
     },
     {
       "step": 35,
       "kind": "vector",
-      "name": "propose_config"
+      "name": "close_rig_guest"
     },
     {
       "step": 36,
+      "kind": "vector",
+      "name": "propose_config"
+    },
+    {
+      "step": 37,
       "kind": "setup",
       "action": "clock slot += 864000 (TIMELOCK_SLOTS) and, for apply_config only, unix_timestamp += 259200 (TIMELOCK_SECS, v1.3); the wall clock is put back right after it, so every later vector keeps its v1.2 bytes"
     },
     {
-      "step": 37,
+      "step": 38,
       "kind": "vector",
       "name": "apply_config"
     },
     {
-      "step": 38,
+      "step": 39,
       "kind": "vector",
       "name": "init_bury_vault"
-    },
-    {
-      "step": 39,
-      "kind": "setup",
-      "action": "hana / ivan / judy: ORE automate + register_rig + set_caps + arm_shift (wallet; focus-only plan with one-round leases, what a Stack seat arms)"
     },
     {
       "step": 40,
@@ -535,22 +535,22 @@
     {
       "step": 42,
       "kind": "setup",
-      "action": "SKR balances by fixture surgery (the fork cannot mint SKR): 1,000 SKR in the SKR ATAs of hana, ivan, judy, kai and lena"
+      "action": "hana / ivan / judy: ORE automate + register_rig + set_caps + arm_shift (wallet; focus-only plan with one-round leases, what a Stack seat arms)"
     },
     {
       "step": 43,
-      "kind": "vector",
-      "name": "open_stack"
+      "kind": "setup",
+      "action": "SKR balances by fixture surgery (the fork cannot mint SKR): 1,000 SKR in the SKR ATAs of hana, ivan, judy, kai and lena"
     },
     {
       "step": 44,
       "kind": "vector",
-      "name": "join_stack"
+      "name": "open_stack"
     },
     {
       "step": 45,
-      "kind": "setup",
-      "action": "ivan / judy: join_stack (seats 1 and 2)"
+      "kind": "vector",
+      "name": "join_stack"
     },
     {
       "step": 46,
@@ -560,57 +560,57 @@
     {
       "step": 47,
       "kind": "setup",
-      "action": "Board.round_id -> r+1 (the table's start_round)"
+      "action": "ivan / judy: join_stack (seats 1 and 2)"
     },
     {
       "step": 48,
+      "kind": "setup",
+      "action": "Board.round_id -> r+1 (the table's start_round)"
+    },
+    {
+      "step": 49,
       "kind": "vector",
       "name": "stack_checkin_heartbeat"
     },
     {
-      "step": 49,
+      "step": 50,
       "kind": "setup",
       "action": "Board.round_id -> r+2 (the table's end_round)"
     },
     {
-      "step": 50,
+      "step": 51,
       "kind": "setup",
       "action": "judy: P-256 BREAK reason 1 (pickup): Cooling, break_reason 1 recorded in shift 1"
     },
     {
-      "step": 51,
+      "step": 52,
       "kind": "setup",
       "action": "record_heartbeats(hana, ivan) for round r+2 (lease 1): their leases now end at the live round"
     },
     {
-      "step": 52,
+      "step": 53,
       "kind": "vector",
       "name": "stack_checkin_observe"
     },
     {
-      "step": 53,
+      "step": 54,
       "kind": "setup",
       "action": "Board.round_id -> r+3 (> end_round: settle is open to anyone)"
     },
     {
-      "step": 54,
+      "step": 55,
       "kind": "vector",
       "name": "settle_stack"
     },
     {
-      "step": 55,
+      "step": 56,
       "kind": "vector",
       "name": "claim_stack"
     },
     {
-      "step": 56,
-      "kind": "setup",
-      "action": "claim_stack for ivan (280 SKR) and judy (0 SKR: forfeited; her seat closes)"
-    },
-    {
       "step": 57,
       "kind": "setup",
-      "action": "kai / lena: ORE automate + register_rig + set_caps + arm_shift (wallet, lease 3)"
+      "action": "claim_stack for ivan (280 SKR) and judy (0 SKR: forfeited; her seat closes)"
     },
     {
       "step": 58,
@@ -619,141 +619,151 @@
     },
     {
       "step": 59,
+      "kind": "setup",
+      "action": "kai / lena: ORE automate + register_rig + set_caps + arm_shift (wallet, lease 3)"
+    },
+    {
+      "step": 60,
       "kind": "vector",
       "name": "lock_focus_bond"
     },
     {
-      "step": 60,
+      "step": 61,
       "kind": "setup",
       "action": "kai: record_heartbeats (round r+3, lease 3): one dark round"
     },
     {
-      "step": 61,
+      "step": 62,
       "kind": "setup",
       "action": "lena: lock_focus_bond(shift 1, 300 SKR), then a wallet BREAK reason 6 (manual) and end_shift: ShiftLog reason 6"
     },
     {
-      "step": 62,
+      "step": 63,
       "kind": "vector",
       "name": "forfeit_focus_bond"
     },
     {
-      "step": 63,
-      "kind": "setup",
-      "action": "clock -> kai's plan window_end + 1; Board.round_id -> r+6 (kai's lease [r+3, r+5] has expired)"
-    },
-    {
       "step": 64,
       "kind": "setup",
-      "action": "end_shift(kai, shift 1) by the cranker (permissionless after the window and the lease): ShiftLog reason 0 completed"
+      "action": "clock -> kai's plan window_end + 1; Board.round_id -> r+9 (kai's lease [r+3, r+5] has been expired for more than the 3-round grace)"
     },
     {
       "step": 65,
-      "kind": "vector",
-      "name": "release_focus_bond"
+      "kind": "setup",
+      "action": "end_shift(kai, shift 1) by the cranker (permissionless after the window and the lease's grace): ShiftLog reason 0 completed"
     },
     {
       "step": 66,
-      "kind": "vector",
-      "name": "create_gift_wallet"
+      "kind": "setup",
+      "action": "Board.round_id -> r+6 again, so every later vector keeps the bytes it had before the grace"
     },
     {
       "step": 67,
       "kind": "vector",
-      "name": "claim_gift_wallet"
+      "name": "release_focus_bond"
     },
     {
       "step": 68,
-      "kind": "setup",
-      "action": "quinn holds the real mainnet SGT member #121,035 (crates/sgt-verify/fixtures): a frozen Token-2022 ATA holding it for quinn"
+      "kind": "vector",
+      "name": "create_gift_wallet"
     },
     {
       "step": 69,
       "kind": "vector",
-      "name": "create_gift_sgt"
+      "name": "claim_gift_wallet"
     },
     {
       "step": 70,
+      "kind": "setup",
+      "action": "quinn holds the real mainnet SGT member #121,035 (crates/sgt-verify/fixtures): a frozen Token-2022 ATA holding it for quinn"
+    },
+    {
+      "step": 71,
+      "kind": "vector",
+      "name": "create_gift_sgt"
+    },
+    {
+      "step": 72,
       "kind": "vector",
       "name": "claim_gift_sgt"
     },
     {
-      "step": 71,
+      "step": 73,
       "kind": "setup",
       "action": "olga: create_gift(nonce 3, 0.5 SOL for pia's wallet), never claimed"
     },
     {
-      "step": 72,
+      "step": 74,
       "kind": "setup",
       "action": "clock += 30 days (the gift's expiry_ts)"
     },
     {
-      "step": 73,
+      "step": 75,
       "kind": "vector",
       "name": "refund_gift"
     },
     {
-      "step": 74,
+      "step": 76,
       "kind": "setup",
       "action": "rhea: an ORE ATA holding 1 ORE and an empty SKR ATA (fixture surgery)"
     },
     {
-      "step": 75,
+      "step": 77,
       "kind": "setup",
       "action": "slot += 54,000 (a quarter of the auction window since lena's lot restarted it)"
     },
     {
-      "step": 76,
+      "step": 78,
       "kind": "vector",
       "name": "bury_auction_buy"
     },
     {
-      "step": 77,
+      "step": 79,
       "kind": "vector",
       "name": "register_rig_resumed"
     },
     {
-      "step": 78,
+      "step": 80,
       "kind": "setup",
       "action": "alice: set_caps (expiry now + 7 days) + arm_shift (wallet): ShiftArmed shift_id 3, continuing from the tombstone"
     },
     {
-      "step": 79,
+      "step": 81,
       "kind": "vector",
       "name": "close_shift_log"
     },
     {
-      "step": 80,
+      "step": 82,
       "kind": "vector",
       "name": "close_shift_log_crank_paid"
     },
     {
-      "step": 81,
+      "step": 83,
       "kind": "setup",
       "action": "new governance key [0x07; 32] funded with 1 SOL (it pays for its own accept_governance)"
     },
     {
-      "step": 82,
+      "step": 84,
       "kind": "vector",
       "name": "propose_governance"
     },
     {
-      "step": 83,
+      "step": 85,
       "kind": "vector",
       "name": "cancel_governance"
     },
     {
-      "step": 84,
+      "step": 86,
       "kind": "setup",
       "action": "governance: propose_governance(new governance) again; the clock restarts"
     },
     {
-      "step": 85,
+      "step": 87,
       "kind": "setup",
       "action": "clock slot += 864000 (TIMELOCK_SLOTS) and unix_timestamp += 259200 (TIMELOCK_SECS): both halves of the timelock"
     },
     {
-      "step": 86,
+      "step": 88,
       "kind": "vector",
       "name": "accept_governance"
     }
@@ -4090,7 +4100,7 @@
       "name": "end_shift_permissionless",
       "tag": 11,
       "instruction": "end_shift",
-      "auth": "anyone, after plan_window_end_ts and lease_to_round < Board.round_id",
+      "auth": "anyone, after plan_window_end_ts and lease_to_round + 3 < Board.round_id",
       "description": "The cranker seals alice's shift 2 (Broken, stored reason 3 freeze) and pays the ShiftLog rent. Emits ShiftEnded then ShiftEndedV2.",
       "step": 32,
       "args": {
@@ -4210,7 +4220,7 @@
           {
             "tag": 10,
             "event": "ShiftEndedV2",
-            "hex": "0a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e0200000000000000010000000000000000000000000000000000000000000000032c730600000000002d7306000000000000",
+            "hex": "0a6c6972274e53f5d086e6f7ad445eb888236a2c1ff204c55be3cfc6a48b5c8e4e0200000000000000010000000000000000000000000000000000000000000000032c73060000000000307306000000000000",
             "fields": {
               "tag": 10,
               "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
@@ -4220,7 +4230,7 @@
               "lamports": "0",
               "reason": 3,
               "start_round": "422700",
-              "end_round": "422701",
+              "end_round": "422704",
               "mode": 0
             }
           }
@@ -4233,7 +4243,7 @@
       "instruction": "freeze_rig",
       "auth": "wallet (mode 0)",
       "description": "Wallet FREEZE of an Idle rig: -> Frozen; no shift is open, so no event.",
-      "step": 33,
+      "step": 34,
       "args": {
         "mode": 0,
         "reason": 3
@@ -4316,7 +4326,7 @@
       "instruction": "close_rig",
       "auth": "wallet",
       "description": "Close a guest rig (state Idle or Frozen; here Frozen); rent to the authority. Emits RigClosed.",
-      "step": 34,
+      "step": 35,
       "args": {
         "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp"
       },
@@ -4394,7 +4404,7 @@
       "instruction": "propose_config",
       "auth": "governance",
       "description": "Propose crank_fee 4500 (<= executor_fee), bury_bps 250, paused 0: pending_* with pending_eta_slot = slot + 864000 and (v1.3) pending_eta_ts = unix_timestamp + 259200. (paused = 1 would also pause immediately.)",
-      "step": 35,
+      "step": 36,
       "args": {
         "registrar": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
         "crank_fee": "4500",
@@ -4489,7 +4499,7 @@
       "instruction": "apply_config",
       "auth": "anyone, once slot >= pending_eta_slot and (v1.3) unix_timestamp >= pending_eta_ts",
       "description": "Apply the pending proposal after the timelock.",
-      "step": 37,
+      "step": 38,
       "args": {},
       "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
       "data_len": 1,
@@ -4544,7 +4554,7 @@
       "instruction": "init_bury_vault",
       "auth": "anyone (pays the rent); init-only, no admin",
       "description": "Create the singleton BuryVault [\"bury\"] with the auction constants (initial start 100,000,000 ORE atoms per SKR, floor 10,000, window 216,000 slots) and the addresses of its two vault ATAs, which the companions create with the ATA program.",
-      "step": 38,
+      "step": 39,
       "args": {},
       "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
       "data_len": 1,
@@ -4627,7 +4637,7 @@
       "instruction": "open_stack",
       "auth": "host wallet",
       "description": "Open an in-person table (flags 0: 80/20 split, guests allowed up to 500 SKR) bonding 200 SKR per seat for ORE rounds [r+1, r+2], grace 0, up to 4 seats. The table's SKR vault is its canonical SPL Token ATA, created by the companion. Emits StackOpened.",
-      "step": 43,
+      "step": 44,
       "args": {
         "table_id": "1",
         "bond": "200000000",
@@ -4818,7 +4828,7 @@
       "instruction": "join_stack",
       "auth": "rig wallet (signs the SKR bond transfer)",
       "description": "hana takes seat 0: the seat PDA is keyed by the rig (in-person table), and 200 SKR move from her SKR ATA to the table vault through an SPL Token Transfer CPI. No SGT accounts: the bond is within the guest cap. Emits StackJoined.",
-      "step": 44,
+      "step": 45,
       "args": {
         "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
         "seat_key": "FW62TeLxaGg9XXUejmYcRKQ28vQ8NtGXFafUYkiHmr8x"
@@ -5023,7 +5033,7 @@
       "instruction": "stack_checkin",
       "auth": "anyone + P-256 HEARTBEATs (hb_ix = 0, lease 1)",
       "description": "Round r+1: three HEARTBEATs (lease 1, round = Board.round_id) verified by one secp256r1 instruction at index 0 and applied to the rigs exactly as record_heartbeats does; each seat binds to shift 1 and counts the round. Emits HeartbeatsRecorded then StackCheckin (result 0) per seat.",
-      "step": 48,
+      "step": 49,
       "args": {
         "n": 3,
         "entries": [
@@ -5476,7 +5486,7 @@
       "instruction": "stack_checkin",
       "auth": "anyone, observe mode (hb_ix = 0xFF), no precompile",
       "description": "Round r+2: hana and ivan count the round because their rigs' one-round leases end at Board.round_id (a heartbeat for this round landed in this round); judy's bound shift recorded a BREAK, so her seat is broken for good (result 42 StackSeatBroken). Emits StackCheckin per seat.",
-      "step": 52,
+      "step": 53,
       "args": {
         "n": 3,
         "entries": [
@@ -5889,7 +5899,7 @@
       "instruction": "settle_stack",
       "auth": "anyone, once Board.round_id > end_round",
       "description": "hana and ivan finish (2/2 rounds, end round checked, no break); judy forfeits. B = 600 SKR, W = 400, F = 200: each finisher's payout is 200 + 80 SKR (80% of F pro rata); 40 SKR (20%) moves to the BuryVault's SKR ATA as a new lot, restarting the auction. Every seat passed once. Emits BuryLotAdded then StackSettled.",
-      "step": 54,
+      "step": 55,
       "args": {
         "seats": [
           "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z",
@@ -6144,7 +6154,7 @@
       "instruction": "claim_stack",
       "auth": "anyone (pays only the stored seat authority)",
       "description": "Pay hana's settled payout (280 SKR) from the table vault to her SKR ATA, close her seat (rent to her wallet). Emits StackClaimed (kind 0 payout).",
-      "step": 55,
+      "step": 56,
       "args": {
         "table": "4C5pURWdgjZUt4fVomjqR6Lfc53EU9hckByMjQhfiiHR",
         "seat": "7YA8W4xWe2Gzc8kwRGHTtQgaLG6GUkBF2YoxieW2Kr4z"
@@ -6313,7 +6323,7 @@
       "instruction": "lock_focus_bond",
       "auth": "rig wallet (signs the SKR transfer)",
       "description": "Lock 500 SKR on kai's open, clean shift 1 (armed, no BREAK yet). The ShiftLog [\"shift\", rig, 1] must not exist yet; the bond records the shift's start round and time so only that shift's log can resolve it. The vault is the bond's SPL Token ATA (companion). Emits FocusBondLocked.",
-      "step": 59,
+      "step": 60,
       "args": {
         "shift_id": "1",
         "amount": "500000000"
@@ -6531,7 +6541,7 @@
       "instruction": "forfeit_focus_bond",
       "auth": "anyone, once the bonded shift sealed with a reason other than completed",
       "description": "lena's shift 1 sealed with reason 6 (manual): the 300 SKR move from the bond vault to the BuryVault's SKR ATA (a new lot: the auction restarts), the vault ATA and the bond close (both rents to lena's wallet). Emits BuryLotAdded then FocusBondForfeited (reason 6).",
-      "step": 62,
+      "step": 63,
       "args": {
         "authority": "25dqU2BT7tC3xVFTC6P69phkMyuJoYXSsFT26xuYnexA",
         "shift_id": "1"
@@ -6752,7 +6762,7 @@
       "instruction": "release_focus_bond",
       "auth": "anyone, once the bonded shift sealed completed (pays only the stored owner)",
       "description": "kai's ShiftLog (same rig, shift id, start round and start time as the bond) says completed: the 500 SKR return to kai's SKR ATA; the vault ATA and the bond close (both rents to kai's wallet). Emits FocusBondReleased.",
-      "step": 65,
+      "step": 67,
       "args": {
         "authority": "5Ci9BcZ4bY95RuKW77t6naLDU7r1vhcLn4mNAbgXg2Pa",
         "shift_id": "1"
@@ -6920,7 +6930,7 @@
       "instruction": "create_gift",
       "auth": "sender wallet",
       "description": "Escrow 0.5 SOL for pia's wallet in GiftEscrow [\"gift\", olga, 1]: the lamports sit on top of the escrow's rent; expiry = now + 30 days. (A sender paying in SKR adds a Jupiter SKR->SOL swap as a separate instruction before this one; the program only escrows SOL.) Emits GiftCreated.",
-      "step": 66,
+      "step": 68,
       "args": {
         "nonce": "1",
         "recipient_kind": 0,
@@ -7045,7 +7055,7 @@
       "instruction": "claim_gift",
       "auth": "the recipient wallet (signs)",
       "description": "pia claims: 0.5 SOL move to her wallet and the escrow closes (rent back to olga). In the app the same transaction continues with ORE automate (executor = Executor PDA) and register_rig, so the gift arrives as a funded rig. Emits GiftClaimed.",
-      "step": 67,
+      "step": 69,
       "args": {
         "gift": "BPGqGSFLPyEbVJ1FhRyRgVJxETXuJQ2YnUkVg8DuQpi1"
       },
@@ -7137,7 +7147,7 @@
       "instruction": "create_gift",
       "auth": "sender wallet",
       "description": "Escrow 0.5 SOL for whoever holds SGT mint 5pWbRnGU... (member #121,035) at claim time. Emits GiftCreated (recipient_kind 1).",
-      "step": 69,
+      "step": 71,
       "args": {
         "nonce": "2",
         "recipient_kind": 1,
@@ -7262,7 +7272,7 @@
       "instruction": "claim_gift",
       "auth": "the current SGT holder (signs; SGT re-verified in-program with sgt-verify, mainnet anchors)",
       "description": "quinn proves he holds the gift's SGT right now (Token-2022 account owned by him, amount 1, real mint, group and authority anchors): 0.5 SOL to his wallet, escrow closed (rent to olga). Emits GiftClaimed (recipient_kind 1).",
-      "step": 70,
+      "step": 72,
       "args": {
         "gift": "HanFioNNhgJwPxAKTh93Ykqk9Tq3UMUgykdTCSkeLXcC",
         "sgt_mint": "5pWbRnGUS84m3mP1XBMryXjKBTn9EdMUi4a5dPZLVfnp",
@@ -7388,7 +7398,7 @@
       "instruction": "refund_gift",
       "auth": "anyone, from expiry_ts (pays only the stored sender)",
       "description": "Day 30: the unclaimed escrow closes and every lamport (gift and rent) returns to olga. Emits GiftRefunded.",
-      "step": 73,
+      "step": 75,
       "args": {
         "gift": "E2nT26PYbqJaG6NnpKB7Toq1pun5VGjHWE1WnGrBPSTG"
       },
@@ -7472,7 +7482,7 @@
       "instruction": "bury_auction_buy",
       "auth": "buyer wallet (signs the ORE payment)",
       "description": "A quarter of the way through the window the price is 75,002,500 ORE atoms per SKR. rhea buys 10 SKR for 750,025,000 atoms (0.0075 ORE, max_ore = exactly that): the ORE moves into the BuryVault's ORE ATA, the program CPIs ORE bury (tag 24) signed by the BuryVault PDA (live ORE: 90% burned, 10% to ORE's stake program through the live ORE stake program), checks the vault lost exactly the payment and the ORE supply fell by 675,022,500 atoms, then sends the 10 SKR to rhea. Emits BuryAuctionSold.",
-      "step": 76,
+      "step": 78,
       "args": {
         "skr_amount": "10000000",
         "max_ore": "750025000",
@@ -7793,15 +7803,16 @@
       "tag": 1,
       "instruction": "register_rig",
       "auth": "wallet, no attestation; the Rig PDA holds a RigTombstone",
-      "description": "v1.3. The same bytes and accounts as register_rig_guest, sent after close_rig_guest left a 32-byte RigTombstone (account tag 10) at the Rig PDA. The tombstone grows back into a 384-byte Rig that resumes at shift_id 2 and hb_counter 5 (what the closed rig had); every other field starts fresh, and the wallet pays only the rent difference. The next arm_shift is shift 3, so no ShiftLog, Focus Bond or signed message of the earlier rig can collide with or be replayed on this one. Emits RigRegistered.",
-      "step": 77,
+      "description": "v1.3. The same bytes and accounts as register_rig_guest, sent after close_rig_guest left a 32-byte RigTombstone (account tag 10) at the Rig PDA. The tombstone grows back into a 384-byte Rig that resumes at shift_id 2, hb_counter 5 and the closed rig's last_dug_round; every other field starts fresh, and the wallet pays only the rent difference. The next arm_shift is shift 3, so no ShiftLog, Focus Bond or signed message of the earlier rig can collide with or be replayed on this one. Emits RigRegistered.",
+      "step": 79,
       "args": {
         "authority": "DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp",
         "p256_pubkey_hex": "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
         "has_attestation": 0,
         "tombstone": {
           "shift_id": "2",
-          "hb_counter": "5"
+          "hb_counter": "5",
+          "last_dug_round": "422700"
         }
       },
       "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
@@ -7919,7 +7930,7 @@
       "instruction": "close_shift_log",
       "auth": "anyone, from end_ts + 30 days (pays only the address the log names)",
       "description": "v1.3. alice's ShiftLog of shift 1 (sealed by her own wallet, so its payer_prefix is the first 16 bytes of her address) is closed 30 days later and its rent returns to her wallet. The FocusBond PDA of that shift is passed and holds no bond. The cranker only pays the transaction fee. Emits ShiftLogClosed.",
-      "step": 79,
+      "step": 81,
       "args": {
         "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
         "shift_id": "1",
@@ -8031,7 +8042,7 @@
       "instruction": "close_shift_log",
       "auth": "anyone, from end_ts + 30 days (pays only the address the log names)",
       "description": "v1.3. alice's ShiftLog of shift 2 was sealed by the cranker (end_shift_permissionless), which paid its rent: the log's payer_prefix names the cranker, so the rent returns to the cranker and not to the rig's wallet.",
-      "step": 80,
+      "step": 82,
       "args": {
         "rig": "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9",
         "shift_id": "2",
@@ -8143,7 +8154,7 @@
       "instruction": "propose_governance",
       "auth": "governance (the current one)",
       "description": "v1.3. The current governance names its successor: Config.pending_governance (offset 192), pending_governance_eta_slot (offset 224) = slot + 864000 and pending_governance_eta_ts (offset 232) = unix_timestamp + 259200. Nothing else changes; the current governance keeps every power, including the immediate pause. Emits GovernanceProposed.",
-      "step": 82,
+      "step": 84,
       "args": {
         "new_governance": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB"
       },
@@ -8227,7 +8238,7 @@
       "instruction": "cancel_governance",
       "auth": "governance (the current one)",
       "description": "v1.3. The current governance drops the pending rotation: pending_governance and both etas return to zero. Emits GovernanceCancelled.",
-      "step": 83,
+      "step": 85,
       "args": {},
       "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
       "data_len": 1,
@@ -8300,7 +8311,7 @@
       "instruction": "accept_governance",
       "auth": "the pending governance itself, once slot >= pending_governance_eta_slot and unix_timestamp >= pending_governance_eta_ts",
       "description": "v1.3. The successor signs: it becomes Config.governance (offset 8), the rotation fields return to zero, and any pending config proposal of the outgoing governance is voided (paused is kept). Only the named successor can do this, so a mistyped address can never take governance. Emits GovernanceAccepted.",
-      "step": 86,
+      "step": 88,
       "args": {},
       "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
       "data_len": 1,

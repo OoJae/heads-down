@@ -53,7 +53,7 @@ class HeadsDownLinkTest {
             "headsdown://stacks/$a", // an unknown host
             "headsdown://bond/$a",
             "https://stack/$a",
-            "https://headsdown.xyz/stack/$a",
+            "https://headsdown.example/stack/$a",
             " headsdown://stack/$a", // no trimming of an intent's data
             "headsdown://stack/$a ",
             "headsdown://stack/$a\n",

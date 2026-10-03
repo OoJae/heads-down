@@ -23,13 +23,13 @@ fn record(env: &mut Env, u: &mut User) {
     ));
 }
 
-/// After the plan window and the lease, the cranker seals the shift (and
-/// pays the log's rent).
+/// After the plan window, and once the lease has been expired for the grace,
+/// the cranker seals the shift (and pays the log's rent).
 fn crank_ends(env: &mut Env, u: &User, shift_id: u64) {
     let end = standard_plan().window_end + 1;
     env.set_clock(env.slot, end);
     let lease_to = env.rig(&u.rig).lease_to_round.get();
-    env.set_board_round(lease_to.max(env.board_round) + 1);
+    env.set_board_round(lease_to.max(env.board_round) + 1 + hd::logic::PERMISSIONLESS_END_GRACE_ROUNDS);
     let c = env.cranker.pubkey();
     ok(env.send(&[ix_end_shift(&c, &u.rig, shift_id)], &[]));
 }

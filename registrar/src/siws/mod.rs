@@ -16,9 +16,9 @@ pub use message::{ParseError, SiwsMessage};
 
 #[derive(Clone, Debug)]
 pub struct SiwsPolicy {
-    /// The only accepted `domain` (the app's SIWS domain, e.g. `headsdown.xyz`).
+    /// The only accepted `domain` (the app's SIWS domain, e.g. `headsdown.example`).
     pub domain: String,
-    /// The only accepted `URI` value, e.g. `https://headsdown.xyz`.
+    /// The only accepted `URI` value, e.g. `https://headsdown.example`.
     pub uri: String,
     /// Accepted CAIP-2 chain ids, e.g. `["solana:mainnet"]`.
     pub chains: Vec<String>,
@@ -218,7 +218,7 @@ mod tests {
     const NONCE: &str = "0123456789abcdef0123456789abcdef";
 
     fn policy() -> SiwsPolicy {
-        SiwsPolicy::new("headsdown.xyz", vec!["solana:mainnet".into()])
+        SiwsPolicy::new("headsdown.example", vec!["solana:mainnet".into()])
     }
 
     fn signer() -> SigningKey {
@@ -227,10 +227,10 @@ mod tests {
 
     fn message(key: &SigningKey) -> SiwsMessage {
         SiwsMessage {
-            domain: "headsdown.xyz".into(),
+            domain: "headsdown.example".into(),
             address: bs58::encode(key.verifying_key().as_bytes()).into_string(),
             statement: Some("Clock in to Heads Down.".into()),
-            uri: Some("https://headsdown.xyz".into()),
+            uri: Some("https://headsdown.example".into()),
             version: Some("1".into()),
             chain_id: Some("solana:mainnet".into()),
             nonce: Some(NONCE.into()),
@@ -270,7 +270,7 @@ mod tests {
         };
         let cases: Vec<(SiwsMessage, SiwsError)> = vec![
             (with(&|m| m.domain = "evil.xyz".into()), SiwsError::DomainMismatch),
-            (with(&|m| m.domain = "headsdown.xyz.evil.xyz".into()), SiwsError::DomainMismatch),
+            (with(&|m| m.domain = "headsdown.example.evil.xyz".into()), SiwsError::DomainMismatch),
             (with(&|m| m.uri = Some("https://evil.xyz".into())), SiwsError::UriMismatch),
             (with(&|m| m.uri = None), SiwsError::UriMismatch),
             (with(&|m| m.version = Some("2".into())), SiwsError::UnsupportedVersion),

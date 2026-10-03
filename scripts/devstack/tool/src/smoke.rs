@@ -177,7 +177,8 @@ pub async fn run(o: SmokeOpts) -> Result<()> {
                         "sig64": base64::engine::general_purpose::STANDARD.encode(sig) }),
             )
             .await?;
-            if ack["status"] == "accepted" {
+            // Contract A: {"type":"ack","counter":N,"ok":true|false,"reason":"accepted"|...}.
+            if ack["ok"] == true {
                 counter = f.counter;
                 sent_for = Some(b.round_id);
                 last = Some(Signed { fields: f, digest, sig });

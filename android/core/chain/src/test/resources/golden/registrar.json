@@ -1,6 +1,6 @@
 {
   "format": "heads-down/golden-registrar",
-  "interface_version": "1.2",
+  "interface_version": "1.3",
   "generated_by": "programs/heads-down/tests/src/vectors.rs",
   "notes": [
     "The registrar signs the raw 111-byte HDreg preimage with Ed25519 (not SHA-256 first). This matches registrar/INTERFACE-NOTES.md N2 byte for byte.",

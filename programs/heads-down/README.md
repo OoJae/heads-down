@@ -25,12 +25,20 @@ Rig, and a no-oracle Bury auction that sells SKR forfeits for ORE that ORE's own
 - Pinocchio 0.11, `no_std`, no allocator. There is **one** `unsafe` block, the
   `sol_log_data` syscall in `events.rs`. The build is about 180 KB (SBPF v0, the
   default) or 177 KB with `--arch v3` (see "SBPFv3" below).
-- Contract: [`INTERFACE.md`](INTERFACE.md) **v1.2**: the v1.1 core (§0 to §10),
+- Contract: [`INTERFACE.md`](INTERFACE.md) **v1.3**: the v1.1 core (§0 to §10),
   frozen from this code (every instruction's data and account list, every event,
   errors 0..31, the Rig field usage, the dig budget, pause and state-machine
   semantics, measured transaction limits), plus §11, the **additive** SKR section
-  (tags 15..27, accounts 5..9, events 11..23, errors 32..48). No v1.1 layout,
-  event byte or error code changed. `INTERFACE-NOTES.md` is superseded.
+  (tags 15..27, accounts 5..9, events 11..23, errors 32..48), and §12, the
+  **additive** hardening section (governance rotation, the Rig tombstone,
+  `close_shift_log`, attestation re-checked at every Stack check-in; tags 28..31,
+  events 24..27, errors 49 and 50). No v1.1 layout, event byte or error code
+  changed. `INTERFACE-NOTES.md` is superseded.
+- **Reviewed before deployment.** §12.13 lists the seven rules a security review
+  tightened (reimbursement only out of a fee received, a bound on counter jumps and
+  on voucher lifetime, a grace before anyone else may end a shift, Bury auction
+  anchoring, the tombstone's `last_dug_round`, a closed rig skipping itself in a
+  batch). The record is [`docs/SECURITY_REVIEW.md`](../../docs/SECURITY_REVIEW.md).
 - Machine-checked contract: [`vectors/`](vectors/) (golden instructions, messages,
   events and registrar voucher, all generated from LiteSVM runs; see "Golden
   vectors" below). Where each consumer disagrees: [`vectors/CROSSCHECK.md`](vectors/CROSSCHECK.md).
@@ -145,8 +153,13 @@ schedule is pinned to the suite's clock). heads_down is loaded at its real progr
 id through the upgradeable loader, with a test upgrade authority written into its
 ProgramData. SKR and ORE balances are account surgery: the fork cannot mint either.
 
-Last run, `bash scripts/test.sh` (2026-10-01): **137 passed, 0 failed, 1 ignored**
-(30 unit + 107 fork; the ignored one is `crosscheck`). `cargo +1.97.1 clippy
+Last run, `bash scripts/test.sh` (2026-10-03): **170 passed, 0 failed, 1 ignored**
+(33 unit + 137 fork; the ignored one is `crosscheck`). The table below was written for
+v1.2: v1.3 added `tombstone`, `governance`, `shift_log`, `fuzz_v13` and `v13_capacity`,
+and the review added one regression test per fix. The fork reads the live ORE
+bytecode and accounts as fetched, except the two inputs of the cost gate
+(`Board.production_cost_ema` and `Treasury.motherlode`), which are pinned: with the
+live values the suite passed or failed with the day's ORE cost. `cargo +1.97.1 clippy
 --workspace --all-targets -- -D warnings` is clean. `bash scripts/test-v3.sh` runs the
 same 107 fork tests against the SBPFv3 builds: all pass.
 
@@ -183,9 +196,9 @@ Round pinned to round 422,700, EMA 918,782,720 and a 344 ORE pot.
 
 | File | Contents |
 |---|---|
-| `instructions.json` | All 28 tags, both auth paths (41 vectors: the 25 v1.1 vectors, byte-identical, then 16 v1.2 SKR vectors). Each has data hex with a per-field layout, the ordered account metas (role, signer, writable, PDA seeds and bump), the full transaction including precompile, ATA and compute-budget companions, and the executed LiteSVM result with its raw events. Every vector must succeed. The SKR scenario: `init_bury_vault`; a three-seat Stack with verify-mode and observe-mode check-ins, settle (80/20, a Bury lot) and a claim; Focus Bond lock, forfeit and release; wallet and SGT-mint gifts with claims and a refund; a Bury auction buy through the live ORE `bury` |
+| `instructions.json` | All 32 tags, both auth paths (47 vectors: the 25 v1.1 vectors, then 16 v1.2 SKR vectors, then 6 v1.3 vectors; `end_shift_permissionless` moved to round 422,704 for the 3-round grace). Each has data hex with a per-field layout, the ordered account metas (role, signer, writable, PDA seeds and bump), the full transaction including precompile, ATA and compute-budget companions, and the executed LiteSVM result with its raw events. Every vector must succeed. The SKR scenario: `init_bury_vault`; a three-seat Stack with verify-mode and observe-mode check-ins, settle (80/20, a Bury lot) and a claim; Focus Bond lock, forfeit and release; wallet and SGT-mint gifts with claims and a refund; a Bury auction buy through the live ORE `bury` |
 | `messages.json` | HEARTBEAT (94 B), BREAK and FREEZE (86 B) and PLAN (113 B) preimages, SHA-256 digests, RFC 6979 and low-S signatures from the RFC 6979 A.2.5 test key, and the 145-byte Secp256r1SigVerify data. Each was verified by the real precompile, and a tampered copy was rejected. (Stack check-ins reuse HEARTBEAT: no new message kind.) |
-| `events.json` | Tags 1..23 with layouts and bytes captured from runs, plus `RigSkipped` captured for 20 skip codes, including every ORE pre-flight code 25..31 |
+| `events.json` | Tags 1..27 with layouts and bytes captured from runs, plus `RigSkipped` captured for 20 skip codes, including every ORE pre-flight code 25..31 |
 | `registrar.json` | The 111-byte HDreg preimage and the 223-byte Ed25519SigVerify instruction in `registrar/src/voucher.rs` format, accepted by `register_rig` (level 2). Level 0 and expired vouchers are rejected |
 
 These tests guard the vectors:
@@ -367,12 +380,11 @@ constants are compile-time constants; SKR fuel is a client-side swap). Also:
 - Stack is fail-closed on liveness: a round in which nobody lands the seat's
   `stack_checkin` is a gap, so the crank must check in every seated rig every round
   (4 verified seats or 8 observed seats per packet).
-- No consumer implements the v1.2 instructions or events yet
-  (`vectors/CROSSCHECK.md` §8).
-- The consumers do not yet all match v1.1. The Android instruction layouts, the
-  crank's `RigDug.lamports` and skip-code assumptions, and the indexer's names for
-  the new codes and events are listed with exact bytes in `vectors/CROSSCHECK.md`.
-  Android's signed messages are byte-exact; it now uses the 94-byte `HDv1`
-  digest.
+- The consumers follow v1.3: the crank (its builders and decoders against these
+  vectors; it keeps the v1.3 governance events raw), the indexer (all 27 events and
+  32 instructions) and the Android chain layer (every instruction a phone sends,
+  byte for byte). `vectors/CROSSCHECK.md` records the disagreements found while they
+  were still on v1.1; they are resolved. The app has no screens yet for Stack, Gift,
+  Revoke, Unfreeze or Claim.
 - No physical device was available. Keystore signatures are simulated with p256 in
   Keystore's format (DER, then low-S raw).

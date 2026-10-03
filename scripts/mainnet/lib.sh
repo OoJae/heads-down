@@ -38,8 +38,10 @@ HD_EXPECTED_DEPLOYER="${HD_EXPECTED_DEPLOYER:-9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYg
 HD_STATE="${HD_STATE:-$HOME/.local/share/heads-down/deploy}"
 
 # ---- parameters (docs/DEPLOY.md, "Parameters and why") -------------------------------------------
-# --max-len: 192 KiB = 1.76x the 111,600-byte v1.1 build (76% headroom for the SKR additions),
-# 0.9996 SOL of ProgramData rent at mainnet's current rent. Larger programs can extend later.
+# --max-len: 192 KiB, 0.9996 SOL of ProgramData rent at mainnet's current rent. The v1.3 build
+# (SKR, hardening and the audit fixes) is 189,664 bytes, so about 6.9 KB of headroom is left:
+# an upgrade that grows the program past it needs `solana program extend` first (5,080 lamports
+# per extra byte).
 HD_MAX_LEN="${HD_MAX_LEN:-196608}"
 # Config.executor_fee (immutable) and crank_fee (<= executor_fee, timelocked): crank/README.md
 # measures 5,500-7,550 lamports of crank cost per fresh-heartbeat dig (6,723 end to end).

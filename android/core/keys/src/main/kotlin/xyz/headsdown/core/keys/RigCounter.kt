@@ -19,6 +19,13 @@ interface CounterStore {
  * **Floor from chain.** [raiseFloor] lifts the local value to the on-chain `Rig.hb_counter`
  * (e.g. after app data was cleared, or a second install signed with the same key), so the next
  * message is strictly above what the program last accepted.
+ *
+ * **The floor is read from an RPC, so it is bounded.** One raise moves the local value by at most
+ * [MAX_FLOOR_STEP]. The program refuses a message whose counter is more than 2^32 above its own
+ * (INTERFACE §4.1), so a forged `hb_counter` that lifted the local value past that could leave the
+ * phone signing messages the program never accepts again, and `u64::MAX` would end the sequence
+ * for good. A million per raise is far more than a rig uses in years (one message per ORE round),
+ * and a real gap larger than that closes over the next raises.
  */
 class RigCounter(private val store: CounterStore) {
 
@@ -34,10 +41,25 @@ class RigCounter(private val store: CounterStore) {
         return next
     }
 
-    /** After this returns, [next] yields a value strictly greater than [onChainHbCounter]. */
+    /**
+     * Lifts the local value towards [onChainHbCounter], by at most [MAX_FLOOR_STEP].
+     *
+     * @return true when [next] now yields a value strictly greater than [onChainHbCounter]; false
+     *   when the gap was larger than one step (the value moved one step closer).
+     */
     @Synchronized
-    fun raiseFloor(onChainHbCounter: ULong) {
-        if (store.load() < onChainHbCounter) check(store.store(onChainHbCounter)) { "counter floor not persisted" }
+    fun raiseFloor(onChainHbCounter: ULong): Boolean {
+        val local = store.load()
+        if (onChainHbCounter <= local) return true
+        val reached = onChainHbCounter - local <= MAX_FLOOR_STEP
+        val target = if (reached) onChainHbCounter else local + MAX_FLOOR_STEP
+        check(store.store(target)) { "counter floor not persisted" }
+        return reached
+    }
+
+    companion object {
+        /** The furthest one chain read may move the counter: 2^20, well inside the program's 2^32 step bound. */
+        const val MAX_FLOOR_STEP: ULong = 1_048_576uL
     }
 }
 

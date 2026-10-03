@@ -23,6 +23,12 @@ class IndexerHaulClientTest {
     private val client = IndexerHaulClient(OkHttpJsonHttp(tls.url(), tls.client))
     private val rig = HeadsDownProgram.rig(Pubkey.fromBase58("DgmxzQX61DxkAMkAubrgHVJb637fYYTdh7ouVqZGnJrp")).address
 
+    private companion object {
+        /** An account address and a transaction signature, as an explorer link carries them. */
+        const val LOG = "8JCHihWaDyRgVdC82ayAPXFRYPqLZTnjJe85i6iJ1fC9"
+        const val SIG = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+    }
+
     @After
     fun close() = tls.close()
 
@@ -36,13 +42,14 @@ class IndexerHaulClientTest {
         ore: String = "\"582000000\"",
         effective: String = "\"680000000.25\"",
         market: String = "null",
-        explorer: String = """{"shift_log":"https://explorer.solana.com/address/x","sample_digs":["https://explorer.solana.com/tx/1","http://insecure.example/tx/2"]}""",
+        explorer: String = """{"shift_log":"https://explorer.solana.com/address/$LOG","sample_digs":["https://solscan.io/tx/$SIG","http://solscan.io/tx/$SIG"]}""",
+        marketSource: String = "null",
     ) = """{
         "rig":"$rigAddress","shift_id":"7","mode":"night","start_ts":1790636400,"end_ts":1790664000,
         "start_round":422700,"end_round":422702,"rounds":$rounds,
         "dark_rounds":2,"rounds_dug":1,"sol_placed_lamports":"1000000","fees_lamports":5000,
         "ore_mined_atoms":$ore,"effective_lamports_per_ore":$effective,"market_lamports_per_ore":$market,
-        "market_source":null,"streak_before":22,"streak_after":23,"break_reason":0,"first_pickup_ts":null,
+        "market_source":$marketSource,"streak_before":22,"streak_after":23,"break_reason":0,"first_pickup_ts":null,
         "simulated":false,"explorer":$explorer,"unknown_future_field":{"x":1}
     }"""
 
@@ -76,9 +83,43 @@ class IndexerHaulClientTest {
         assertEquals(0, h.breakReason)
         assertNull(h.firstPickupTs)
         assertFalse(h.simulated)
-        assertEquals("https://explorer.solana.com/address/x", h.explorerShiftLog)
+        assertEquals("https://explorer.solana.com/address/$LOG", h.explorerShiftLog)
         // Only https links survive.
-        assertEquals(listOf("https://explorer.solana.com/tx/1"), h.explorerSampleDigs)
+        assertEquals(listOf("https://solscan.io/tx/$SIG"), h.explorerSampleDigs)
+    }
+
+    @Test
+    fun `a link the indexer supplies can only be a page of a known explorer`() = runBlocking {
+        // "See this shift on-chain" opens the link with ACTION_VIEW: an https URL can also be a
+        // wallet's universal link, so anything but an explorer's tx / account page is dropped.
+        val refused = listOf(
+            "https://phantom.app/ul/browse/https%3A%2F%2Fevil.example%2Fclaim?ref=x",
+            "https://evil.example/tx/$SIG",
+            "https://solscan.io.evil.example/tx/$SIG",
+            "https://solscan.io/token/$SIG",
+            "https://solscan.io/tx/$SIG/extra",
+            "https://solscan.io/tx/not-base58!",
+            "https://user:pw@solscan.io/tx/$SIG",
+            "https://solscan.io:8443/tx/$SIG",
+            "http://solscan.io/tx/$SIG",
+        )
+        for (url in refused) {
+            respond(200, summary(explorer = """{"shift_log":"$url","sample_digs":["$url"]}"""))
+            val h = client.latest(rig)!!
+            assertNull(url, h.explorerShiftLog)
+            assertEquals(url, emptyList<String>(), h.explorerSampleDigs)
+        }
+        // Devnet and localnet links keep their cluster query: it only picks the explorer's view.
+        val devnet = "https://solscan.io/account/$LOG?cluster=devnet"
+        respond(200, summary(explorer = """{"shift_log":"$devnet","sample_digs":[]}"""))
+        assertEquals(devnet, client.latest(rig)!!.explorerShiftLog)
+        // The price source is a short plain label or nothing: it is shown next to the price.
+        respond(200, summary(marketSource = "\"jupiter-price-v3\""))
+        assertEquals("jupiter-price-v3", client.latest(rig)!!.marketSource)
+        respond(200, summary(marketSource = "\"api.ore.com/market\""))
+        assertEquals("api.ore.com/market", client.latest(rig)!!.marketSource)
+        respond(200, summary(marketSource = "\"FREE ORE: tap 'See this shift on-chain' to claim\""))
+        assertNull(client.latest(rig)!!.marketSource)
     }
 
     @Test

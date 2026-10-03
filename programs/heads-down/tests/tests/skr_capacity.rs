@@ -266,7 +266,8 @@ fn every_other_skr_instruction_is_cheap() {
     let hb = u.heartbeat(2, r, 3);
     ok(env.send(&[secp_ix_for(&[hb]), ix_record(&[(u.rig, entry_for(&hb, 0, 0))])], &[]));
     env.set_clock(env.slot, plan.window_end + 1);
-    env.set_board_round(r + 3);
+    // Lease r..=r+2, then the 3-round grace of a permissionless end.
+    env.set_board_round(r + 6);
     ok(env.send(&[ix_end_shift(&c, &u.rig, 2)], &[]));
     let meta = ok(env.send(&[ix_release_focus_bond(&u.pubkey(), 2)], &[]));
     println!("release_focus_bond: {} CU", meta.compute_units_consumed);

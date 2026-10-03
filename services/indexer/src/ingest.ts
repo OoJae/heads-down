@@ -2,7 +2,7 @@
  * Ingestion pipeline shared by every source (RPC polling, Helius webhooks, simulator):
  * raw transaction JSON -> extractTransaction -> Store. Account snapshots and ORE rounds too.
  */
-import { decodeHdAccount, verifyAccount, type ConfigAccount, type RigAccount, type SeekerSeatAccount, type ShiftLogAccount } from "./codec/accounts.ts";
+import { UNINDEXED_ACCOUNT_TAGS, decodeHdAccount, verifyAccount, type ConfigAccount, type RigAccount, type SeekerSeatAccount, type ShiftLogAccount } from "./codec/accounts.ts";
 import { encodeBase58 } from "./codec/base58.ts";
 import { DecodeError } from "./codec/errors.ts";
 import { TxShapeError, extractTransaction, type ExtractedTx, type RawTransaction } from "./codec/tx.ts";
@@ -40,6 +40,8 @@ export async function ingestAccountSnapshot(ctx: IngestContext, accounts: RawAcc
   };
   let problems = 0;
   for (const a of accounts) {
+    // SKR accounts and tombstones are owned by the program but not part of the snapshot.
+    if (a.data.length > 0 && UNINDEXED_ACCOUNT_TAGS.has(a.data[0]!)) continue;
     try {
       const acc = decodeHdAccount(a.data);
       const bad = verifyAccount(acc, a.address, a.owner, ctx.programId);

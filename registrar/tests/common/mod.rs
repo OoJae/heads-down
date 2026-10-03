@@ -78,6 +78,7 @@ impl Harness {
         let log_path = dir.path().join("attestations.jsonl");
         let mut env: HashMap<&str, String> = HashMap::from([
             ("HD_APP_RELEASE_CERT_SHA256", hex::encode(RELEASE_DIGEST)),
+            ("HD_SIWS_DOMAIN", "headsdown.example".into()),
             ("HD_TRANSPARENCY_LOG", log_path.display().to_string()),
             ("HD_RATE_LIMIT_PER_MIN", "100000".into()),
             ("HD_RATE_LIMIT_BURST", "100000".into()),

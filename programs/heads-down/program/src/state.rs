@@ -380,9 +380,10 @@ pub struct ShiftLog {
 /// has armed a shift or accepted a P-256 message (v1.3), 32 bytes.
 ///
 /// `register_rig` on a tombstone grows it back into a Rig that resumes from
-/// these two counters, so a rig address never reuses a `shift_id` (the seed
-/// of its ShiftLogs and Focus Bonds, and what a Stack seat binds to) and
-/// never accepts a P-256 message twice, however often it is closed.
+/// these counters, so a rig address never reuses a `shift_id` (the seed of
+/// its ShiftLogs and Focus Bonds, and what a Stack seat binds to), never
+/// accepts a P-256 message twice and never digs twice in one ORE round,
+/// however often it is closed.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable, Debug)]
 pub struct RigTombstone {
@@ -392,8 +393,10 @@ pub struct RigTombstone {
     pub shift_id: U64,
     /// `Rig::hb_counter` at close.
     pub hb_counter: U64,
-    /// Reserved, zero.
-    pub reserved: [u8; 8],
+    /// `Rig::last_dug_round` at close, so closing and re-registering inside one
+    /// ORE round cannot reset the once-per-round dig rule (these bytes were
+    /// reserved and zero before; zero reads as "never dug").
+    pub last_dug_round: U64,
 }
 
 // ---- v1.2 (SKR): additive accounts ------------------------------------------
@@ -739,7 +742,7 @@ const _: () = {
     assert!(size_of::<RigTombstone>() == 32);
     assert!(offset_of!(RigTombstone, shift_id) == 8);
     assert!(offset_of!(RigTombstone, hb_counter) == 16);
-    assert!(offset_of!(RigTombstone, reserved) == 24);
+    assert!(offset_of!(RigTombstone, last_dug_round) == 24);
 
     // v1.2 (SKR), additive.
     assert!(core::mem::align_of::<StackTable>() == 1);

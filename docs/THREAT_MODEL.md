@@ -1,8 +1,45 @@
 # Heads Down threat model
 
-> **Status.** This document states the security requirements and the bound on each key. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.1](../programs/heads-down/INTERFACE.md); 88 tests on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
+> **Status.** This document states the security requirements and the bound on each key; the section "As built" below says which of its mitigations exist today. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.3](../programs/heads-down/INTERFACE.md); 170 tests on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
 >
 > ORE facts are cited as `file:line` at ORE commit `b92c5043`, which verify.osec.io reports as the deployed program ([ORE.md](ORE.md), section 1).
+
+
+## As built (3 October 2026)
+
+This document was written as the list of requirements, before the code. Most of it is now built
+and tested; some of the mitigations it names are not. This table is the truth about today's
+code, and the rest of the document should be read with it. The review that produced it is in
+[SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+
+| Named below | Today |
+|---|---|
+| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 170 tests on a fork of live mainnet ORE) |
+| Crank, registrar, indexer, dashboard | **Built** |
+| Freeze from the phone | **Built** |
+| Revoke, Unfreeze, Close rig and Claim ORE in the app | **Not built.** The instruction builders exist and are tested; the screens do not. Use the ORE app for the Automation and the claim until they do |
+| Competing cranks | **Possible, not present.** The crank is open source and permissionless; the team's is the only one running |
+| Heartbeats mirrored to a public Nostr relay | **Not built** (a hook only) |
+| Phones posting their own heartbeats to the chain | **Not built.** The phone sends them to one crank |
+| Kora fee relayer (K4b) | **Not built** |
+| Push and presence (FCM), rooms | **Not built** |
+| Jupiter quote proxy and the buy leg | **Not built** |
+| Upgrade authority: Squads multisig behind a 72 h timelock | **Not so.** One keypair held by the founder, no delay on program upgrades. Config changes and governance rotation are behind a 72 h on-chain timelock (INTERFACE §12.3); pausing is immediate |
+| In-app banner for a pending upgrade or config change | **Not built** |
+| Published attestation transcripts | **Partly.** The registrar keeps an append-only log file; nothing yet lets a third party check it against the chain |
+| API domain pinned to its CA | **Not built.** TLS with the system trust store |
+| App identity on a site the team controls | **Built.** Build configuration, no default service host, mainnet builds fail without explicit values |
+| Simulation of every transaction on the device before the wallet opens | **Not built.** Amounts built from RPC data are bounded instead (a fee ceiling), and stated on screen before the wallet opens |
+
+**What that changes in the worst cases below.**
+
+- **K3, crank and relayer.** With one crank and no other path, "liveness only" is true for mining
+  (nothing is spent when no heartbeat lands) and **not** for SKR at stake: a Stack seat records
+  gaps and a Focus Bond's shift seals without dark rounds when a rig's heartbeats are not landed,
+  whoever's fault that is.
+- **K5, upgrade authority.** The worst case in the table applies **at once**, not after 72 hours,
+  to whoever holds the one upgrade key. It is still limited to what the program's own accounts
+  hold; it cannot withdraw from an ORE Automation or claim anyone's ORE.
 
 ---
 
@@ -12,9 +49,9 @@
 |---|---|---|
 | **User wallet** (Seed Vault or MWA wallet) | Everything the wallet controls. This key is the root of authority, and Heads Down cannot bound it. | The wallet's own security; on-device transaction building and simulation |
 | **Rig P-256 key** (Android Keystore) | The armed weekly budget is deployed into ORE, but only in rounds where ORE's production-cost EMA is at or below the ceiling the wallet signed. Most of each deployed lamport comes back to the user, and none goes to the attacker. It can also forfeit this rig's own SKR bonds, or cheat at Stack. | Wallet-signed caps and expiry; the on-chain cost gate; ORE's per-square cap; Freeze (device key) and Revoke (wallet) |
-| **Crank or relayer** (anyone) | Liveness only: nothing mines, nothing is lost. A relayer that withholds heartbeats or a seat's `stack_checkin` can make a Stack seat record gaps. | Competing permissionless cranks; the Nostr mirror; phones posting their own heartbeats; `stack_checkin` is permissionless, so any seat or phone can land it; grace gaps |
+| **Crank or relayer** (anyone) | For mining, liveness only: nothing mines, nothing is lost. For SKR at stake it is more: a relayer that withholds heartbeats or a seat's `stack_checkin` makes a Stack seat record gaps and a Focus Bond's shift seal without dark rounds (see "As built"). | Competing permissionless cranks; the Nostr mirror; phones posting their own heartbeats; `stack_checkin` is permissionless, so any seat or phone can land it; grace gaps |
 | **Registrar** (Ed25519 key) | Software keys get attestation level 1 or higher, so a cheater can win remote "honor-plus" Stack tables, up to the bond cap per seat. It has no custody and no mining authority. | Bond caps; in-person tables are the primary mode; voucher expiry; published transcripts; timelocked rotation |
-| **Upgrade authority** (beta) | After a **public 72 h delay**: take the SKR and SOL held in Heads Down vaults, and force deploys of armed Automations, which ORE limits to `25 x automation.amount` plus one fee per round. It cannot withdraw from Automations or claim anyone's ORE. | 72 h timelock with an in-app banner; one-approval Revoke; small vault caps; then revoked (immutable v1) |
+| **Upgrade authority** (beta) | **At once today** (one key, no delay; the 72 h multisig below is the plan, see "As built"): take the SKR and SOL held in Heads Down vaults, and force deploys of armed Automations, which ORE limits to `25 x automation.amount` plus one fee per round. It cannot withdraw from Automations or claim anyone's ORE. | 72 h timelock with an in-app banner; one-approval Revoke; small vault caps; then revoked (immutable v1) |
 | **Team servers** | Liveness, privacy exposure, and phishing-shaped notifications. None of them holds authority over funds. | No signing from push; every transaction is built on-device from chain state and simulated |
 | **ORE upstream** | ORE owns every Automation and Miner, so a malicious or broken ORE can move user funds regardless of Heads Down. | ORE's own governance. Heads Down inherits this trust in full and adds layout and version pins against *accidental* breakage |
 
@@ -167,17 +204,18 @@
   - Choose the amount or the squares: the program computes both.
   - Dig without a fresh heartbeat for the current ORE round.
   - Touch bonds.
-  - Be reimbursed without an ORE deploy for that rig in that CPI. Reimbursement is paid only when ORE credited that rig's fee in the same CPI (`deploy.rs:338-347`), so the pool stays neutral.
+  - Be reimbursed without an ORE deploy for that rig in that CPI. Reimbursement is paid only when ORE credited that rig's fee in the same CPI (`deploy.rs:338-347`), so the pool stays neutral. (As first built this was not checked: any deploy was reimbursed. Fixed before deployment, INTERFACE §12.13.)
 - **Worst case.**
   - Withhold every dig: nothing mines and nothing is lost.
   - Deploy early instead of late, so more SOL piles onto the chosen squares after the dig and the realized cost rises. This stays inside the gate and caps.
   - Crowd the rig's squares with its own SOL in the same transaction before the dig. That costs the crank about 10.5% of what it deploys and gains it nothing, because ORE has no parimutuel payout.
   - Withhold a Stack seat's heartbeats, or its `stack_checkin` in a round, so the seat records gaps. A check-in only counts a heartbeat that landed in that same round, so it cannot be landed late.
 - **Mitigations.**
-  - Competing cranks, funded by the fixed reimbursement.
-  - Heartbeats mirrored to a public Nostr relay.
-  - Phones post their own heartbeats whenever they are online.
-  - Grace gaps; at in-person tables every phone relays for every seat.
+  - Competing cranks, funded by the fixed reimbursement. *(Possible; only the team's runs today.)*
+  - Heartbeats mirrored to a public Nostr relay. *(Not built.)*
+  - Phones post their own heartbeats whenever they are online. *(Not built.)*
+  - Grace gaps; at in-person tables every phone relays for every seat. *(Grace gaps are built; phone-to-phone relay is not.)*
+  - A caller other than the rig's owner can end a shift only once its lease has been expired for 3 rounds, so a seated rig cannot be ended between two heartbeats.
 - **Kora fee payer (K4b).**
   - A compromise loses only its fee float.
   - Kora's policy allowlists `heads_down`, the precompiles and ComputeBudget, and allows at most one sponsored transaction per rig per round.
@@ -205,7 +243,8 @@
 
 ### K5: the program upgrade authority
 
-- **Beta.** A Squads multisig behind a 72 h timelock. After the audit it is revoked and v1 is immutable.
+- **Beta, as planned.** A Squads multisig behind a 72 h timelock. After the audit it is revoked and v1 is immutable.
+- **Beta, as built.** One keypair, no delay on program upgrades. The rest of this section describes the plan; until it is carried out, read "after a public 72 h wait" as "at once".
 - **Worst case (multisig compromised, timelock intact).** After a public 72 h wait, a malicious program could:
   - take everything Heads Down PDAs hold: Stack and Focus SKR vaults, gift escrows, Bury lots, and the Executor float;
   - as the executor, deploy armed users' Automations at any time and on any squares. ORE limits this to `25 x automation.amount` per round and charges the user's own fixed fee once per round (`deploy.rs:201-207`, `338-342`). The value is destroyed into ORE fees, not stolen;
@@ -349,7 +388,7 @@ The posture below is the manifest and code policy the Android workstream must im
 | Token storage | n/a | theft of MWA and SIWS tokens | AES-256-GCM, with the key in Android Keystore (not exportable), stored in DataStore. The MWA auth token is used only in the foreground; the SIWS session token must be usable by the night service, so it has no user-auth requirement |
 | Rig key | n/a | misuse | Keystore EC P-256, `PURPOSE_SIGN`, SHA-256, StrongBox when available (else TEE), with attestation requested. It cannot require the device to be unlocked or the user to authenticate, because it signs at night (see K2) |
 | Backups | n/a | token exfiltration | `allowBackup=false`, with data-extraction rules excluding everything |
-| Network | n/a | man-in-the-middle | TLS only; `cleartextTrafficPermitted=false`; our API domain pinned to its CA; no RPC key in the APK |
+| Network | n/a | man-in-the-middle | TLS only; `cleartextTrafficPermitted=false`; no RPC key in the APK. *(Pinning our API domain to its CA is planned, not built.)* |
 | Transaction UX | n/a | "success shown after an on-chain failure" | Success only after `getSignatureStatuses` reports confirmed with `err == null`; blockheight expiry and timeouts handled; the transaction version comes from MWA `get_capabilities` |
 | Signing screens | n/a | tapjacking | `filterTouchesWhenObscured` on our review screens; the signature itself happens in the wallet app |
 | PendingIntents | n/a | mutable-intent hijack | `FLAG_IMMUTABLE` and explicit components everywhere |
@@ -392,7 +431,7 @@ The posture below is the manifest and code policy the Android workstream must im
 5. **Liveness.** HyperOS kills and network drops mean missed rounds. That is safe for mining, but costly for Stack players, because Stack is fail-closed.
 6. **Lease window.** Up to 3 rounds of digs after an offline pickup on solo shifts.
 7. **The gate metric** is a trailing, board-wide EMA, while a rig's realized price per ORE is lumpy ([ECONOMICS.md](ECONOMICS.md)).
-8. **Beta upgrade authority.** 72 h to react for anyone with custodied bonds or gifts (K5).
+8. **Beta upgrade authority.** One key and no delay today (see "As built"); under the planned multisig, 72 h to react for anyone with custodied bonds or gifts (K5).
 9. **Legal.** Stack forfeits that pay finishers may count as wagering in some jurisdictions. Bury-only tables (all forfeits to Bury) are offered, bonds are capped, and the app is 18+ ([SKR.md](SKR.md)).
 10. **Public timing metadata.** Rig activity reveals idle and sleep windows ([PRIVACY.md](PRIVACY.md)).
 11. **Wallet activity footprint.** `authority` must be writable in `deploy` and `checkpoint` (`deploy.rs:23`, `checkpoint.rs:16`), so about one transaction per dug round references the user's wallet as a writable non-signer. It is disclosed, and a secondary wallet account can be the rig authority.

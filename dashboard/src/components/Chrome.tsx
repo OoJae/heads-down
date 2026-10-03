@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/digs/", label: "Recent digs" },
   { href: "/skips/", label: "Skips" },
   { href: "/haul/", label: "Morning haul" },
+  { href: "/skr/", label: "SKR" },
   { href: "/milestones/", label: "ORE milestones" },
   { href: "/method/", label: "Method" },
 ];

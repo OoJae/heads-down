@@ -13,11 +13,12 @@
 //! never armed a shift and never accepted a P-256 message.
 //!
 //! **v1.3: the tombstone.** Any other rig is zeroed and shrunk to a 32-byte
-//! [`RigTombstone`] that keeps only its `shift_id` and `hb_counter`; the
-//! authority receives every lamport above that tombstone's rent. A later
-//! `register_rig` for the same wallet grows it back into a Rig that resumes
-//! from those two counters. Without it a re-registered rig would restart at
-//! `shift_id` 1 and `hb_counter` 0, so that:
+//! [`RigTombstone`] that keeps only its `shift_id`, `hb_counter` and
+//! `last_dug_round`; the authority receives every lamport above that
+//! tombstone's rent. A later `register_rig` for the same wallet grows it back
+//! into a Rig that resumes from those counters. Without it a re-registered rig
+//! would restart at `shift_id` 1, `hb_counter` 0 and `last_dug_round` 0, so
+//! that:
 //!
 //! * `end_shift` would fail on the ShiftLog its earlier life left at
 //!   `["shift", rig, 1]`;
@@ -25,7 +26,9 @@
 //!   would verify again: a replayed BREAK or FREEZE would break the new
 //!   shift and forfeit its Focus Bond;
 //! * a Stack seat bound to shift `k` would accept a brand-new shift `k`,
-//!   forgetting a BREAK the old one recorded.
+//!   forgetting a BREAK the old one recorded;
+//! * a rig closed and re-registered inside one ORE round could be dug a second
+//!   time in that round, past the wallet-signed per-round cap.
 //!
 //! Emits `RigClosed{rig}` either way.
 
@@ -47,7 +50,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     crate::util::Reader::new(data).finish()?;
-    let (tier, sgt_mint, bump, shift_id, hb_counter) = {
+    let (tier, sgt_mint, bump, shift_id, hb_counter, last_dug_round) = {
         let g = state::load::<Rig>(rig)?;
         require_rig_authority(&g, authority)?;
         if g.state != rig_state::IDLE && g.state != rig_state::FROZEN {
@@ -59,6 +62,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             g.header.bump,
             g.shift_id.get(),
             g.hb_counter.get(),
+            g.last_dug_round.get(),
         )
     };
     if !authority.is_writable() || !rig.is_writable() {
@@ -96,6 +100,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             t.header = Header::new(state::tag::RIG_TOMBSTONE, bump);
             t.shift_id = U64::new(shift_id);
             t.hb_counter = U64::new(hb_counter);
+            t.last_dug_round = U64::new(last_dug_round);
         }
         pda::shrink_account(rig, authority, size_of::<RigTombstone>())?;
     }

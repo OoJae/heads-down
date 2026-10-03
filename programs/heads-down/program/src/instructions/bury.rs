@@ -20,7 +20,7 @@ use crate::{
     error::HdError,
     events::{self, log_data},
     ore, pda,
-    skr::{self, auction_price, bury_split, purchase_cost, restart_price},
+    skr::{self, auction_price, bury_split, lot_restarts, next_start_price, purchase_cost},
     state::{self, BuryVault, Header, U64},
     token::{self, SKR_MINT},
     util::{clock, require_signer, Reader},
@@ -44,7 +44,9 @@ pub fn check_accounts(
 }
 
 /// Record `amount` SKR that just arrived in the lot from `source` (a table
-/// or a bond) and restart the auction. Emits `BuryLotAdded`.
+/// or a bond), and restart the auction if the lot was empty or the arrival at
+/// least doubles it. Emits `BuryLotAdded` with the auction's start price and
+/// start slot after the deposit (unchanged when it joined a running auction).
 pub fn add_lot(
     bury_vault: &mut AccountView,
     amount: u64,
@@ -52,11 +54,10 @@ pub fn add_lot(
     source_kind: u8,
 ) -> ProgramResult {
     let slot = clock()?.slot;
-    let (lot, start_price) = {
+    let (lot, start_price, start_slot) = {
         let mut v = state::load_mut::<BuryVault>(bury_vault)?;
-        let lot = v
-            .lot_skr
-            .get()
+        let lot_before = v.lot_skr.get();
+        let lot = lot_before
             .checked_add(amount)
             .ok_or(HdError::MathOverflow)?;
         v.lot_skr.set(lot);
@@ -68,17 +69,24 @@ pub fn add_lot(
         v.total_skr_in.set(total);
         let lots = v.lots.get().checked_add(1).ok_or(HdError::MathOverflow)?;
         v.lots.set(lots);
-        let start_price = restart_price(v.last_clear_price.get());
-        v.start_price.set(start_price);
-        v.auction_start_slot.set(slot);
-        (lot, start_price)
+        // Restart only for an empty auction or an arrival that at least
+        // doubles the lot; smaller arrivals join the running auction.
+        let start_price = if lot_restarts(lot_before, amount) {
+            let p = next_start_price(v.last_clear_price.get(), v.start_price.get());
+            v.start_price.set(p);
+            v.auction_start_slot.set(slot);
+            p
+        } else {
+            v.start_price.get()
+        };
+        (lot, start_price, v.auction_start_slot.get())
     };
     log_data(&events::bury_lot_added_bytes(
         source,
         amount,
         lot,
         start_price,
-        slot,
+        start_slot,
         source_kind,
     ));
     Ok(())
@@ -266,7 +274,10 @@ pub fn process_buy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             .checked_sub(skr_amount)
             .ok_or(HdError::MathOverflow)?;
         v.lot_skr.set(lot);
-        v.last_clear_price.set(price);
+        // Only a meaningful sale moves the anchor the next lot restarts from.
+        if skr_amount >= skr::MIN_ANCHOR_SKR {
+            v.last_clear_price.set(price);
+        }
         let add = |a: U64, b: u64| a.get().checked_add(b).ok_or(HdError::MathOverflow);
         let x = add(v.total_skr_sold, skr_amount)?;
         v.total_skr_sold.set(x);

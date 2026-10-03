@@ -95,7 +95,7 @@ not guess. The program decides what an expired `attestation_expiry_slot` means a
 `HeadsDownWallet.signIn` currently passes `uri = null`, `issuedAt = null`,
 `expirationTime = null`. The registrar **requires** all three (domain and URI binding, time
 window), so today's payload would fail with `uri_mismatch` / `timestamps_missing`. Copy these
-verbatim from the `POST /siws/nonce` response: `nonce`, `uri` (`https://headsdown.xyz`),
+verbatim from the `POST /siws/nonce` response: `nonce`, `uri` (`https://headsdown.example`),
 `issued_at`, `expiration_time`, `statement`, `chain_ids[0]`, and `version = "1"`.
 
 Chain id: `HeadsDownWallet` defaults to `Solana.Devnet` (`solana:devnet`), while the registrar

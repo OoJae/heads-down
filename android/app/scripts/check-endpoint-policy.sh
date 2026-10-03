@@ -18,7 +18,15 @@ expect() {
   if [ "$got" = "$want" ]; then echo "ok    $got  $label$reason"; else echo "FAIL  $got (wanted $want)  $label$reason"; failures=$((failures + 1)); fi
 }
 
-expect ACCEPTED "default endpoints"
+expect ACCEPTED "default endpoints (devnet, no service URL: a local-only app)"
+# Mainnet names every endpoint and the identity site itself: no default host that somebody else could register.
+expect REFUSED  "cluster=mainnet with nothing else" -Pheadsdown.cluster=mainnet
+expect REFUSED  "cluster=mainnet without identityUri" -Pheadsdown.cluster=mainnet -Pheadsdown.rpcUrl=https://rpc.example.org -Pheadsdown.crankUrl=wss://crank.example.org/ws -Pheadsdown.registrarUrl=https://registrar.example.org -Pheadsdown.indexerUrl=https://indexer.example.org
+expect ACCEPTED "cluster=mainnet with all five" -Pheadsdown.cluster=mainnet -Pheadsdown.rpcUrl=https://rpc.example.org -Pheadsdown.crankUrl=wss://crank.example.org/ws -Pheadsdown.registrarUrl=https://registrar.example.org -Pheadsdown.indexerUrl=https://indexer.example.org -Pheadsdown.identityUri=https://example.org
+expect ACCEPTED "cluster=mainnet, services deliberately off" -Pheadsdown.cluster=mainnet -Pheadsdown.rpcUrl=https://rpc.example.org -Pheadsdown.crankUrl= -Pheadsdown.registrarUrl= -Pheadsdown.indexerUrl= -Pheadsdown.identityUri=https://example.org
+expect REFUSED  "identityUri=http://example.org" -Pheadsdown.identityUri=http://example.org
+expect REFUSED  "identityUri with a query string" "-Pheadsdown.identityUri=https://example.org/?x=1"
+expect REFUSED  "siwsDomain with a path" -Pheadsdown.siwsDomain=example.org/app
 expect REFUSED  "rpcUrl=http://127.0.0.1:8899 (debug and release)" -Pheadsdown.rpcUrl=http://127.0.0.1:8899
 expect REFUSED  "crankUrl=ws://127.0.0.1:8787/ws (debug and release)" -Pheadsdown.crankUrl=ws://127.0.0.1:8787/ws
 expect REFUSED  "rpcUrl with ?api-key=" "-Pheadsdown.rpcUrl=https://rpc.example.org/?api-key=x"

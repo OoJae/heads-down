@@ -1,10 +1,12 @@
-//! The crank against the frozen contract: `programs/heads-down/vectors/*.json` (INTERFACE v1.2:
-//! the v1.1 core plus the additive SKR section), generated from real LiteSVM runs of the
+//! The crank against the frozen contract: `programs/heads-down/vectors/*.json` (INTERFACE v1.3:
+//! the v1.1 core plus the additive SKR and hardening sections), generated from real LiteSVM runs of the
 //! program on a mainnet-ORE fork. Every builder the crank sends with (`dig`,
 //! `record_heartbeats`, `break_shift` / `freeze_rig` on the P-256 path, `end_shift`,
 //! `stack_checkin` in both modes, `settle_stack`, `forfeit_focus_bond`, `refund_gift`,
 //! `init_bury_vault`, the Secp256r1SigVerify data), every preimage, every event decoder
-//! (tags 1..=23) and every skip-code name must match those bytes exactly.
+//! (tags 1..=23) and every skip-code name must match those bytes exactly. The v1.3 events
+//! (tags 24..=27: governance rotation and `close_shift_log`) are kept raw (`HdEvent::Other`):
+//! the crank acts on none of them.
 
 mod common;
 
@@ -101,9 +103,17 @@ fn assert_precompiles_rebuild(v: &Value) {
 }
 
 /// The events LiteSVM captured decode with the crank's decoder, field for field.
+/// The last event tag the crank decodes field by field (INTERFACE v1.2).
+const LAST_DECODED_TAG: u8 = 23;
+
 fn assert_events_decode(v: &Value) {
     for e in v["litesvm"]["events"].as_array().unwrap() {
-        let ev = hd::parse_event(&hexb(&e["hex"])).unwrap_or_else(|| panic!("{}: {}", v["name"], e["event"]));
+        let bytes = hexb(&e["hex"]);
+        let ev = hd::parse_event(&bytes).unwrap_or_else(|| panic!("{}: {}", v["name"], e["event"]));
+        if bytes[0] > LAST_DECODED_TAG {
+            assert!(matches!(ev, HdEvent::Other { tag, .. } if tag == bytes[0]), "{}: {} is kept raw", v["name"], e["event"]);
+            continue;
+        }
         check_event(&ev, e);
     }
 }
@@ -429,11 +439,17 @@ fn messages_match_preimages_digests_and_precompile_data() {
 #[test]
 fn every_event_sample_and_skip_code_decodes() {
     let e = load("events");
-    assert_eq!(e["interface_version"], "1.2");
+    assert_eq!(e["interface_version"], "1.3");
     let mut tags = Vec::new();
     for ev in e["events"].as_array().unwrap() {
         let tag = ev["tag"].as_u64().unwrap() as usize;
         tags.push(tag);
+        if tag > usize::from(LAST_DECODED_TAG) {
+            // v1.3 (governance rotation, close_shift_log): kept raw, never acted on.
+            let bytes = hexb(&ev["sample"]["hex"]);
+            assert!(matches!(hd::parse_event(&bytes), Some(HdEvent::Other { tag: t, .. }) if usize::from(t) == tag), "tag {tag}");
+            continue;
+        }
         // Every tag of INTERFACE v1.2 (the v1.1 core 1..=10 and the SKR events 11..=23) decodes
         // by its exact length, field for field.
         assert_eq!(hd::EVENT_LEN[tag] as u64, ev["length"].as_u64().unwrap(), "tag {tag} length");
@@ -453,7 +469,7 @@ fn every_event_sample_and_skip_code_decodes() {
         assert_eq!(hd::parse_event(&longer), None, "tag {tag} + 1 byte");
         assert_eq!(hd::parse_event(&bytes[..bytes.len() - 1]), None, "tag {tag} - 1 byte");
     }
-    assert_eq!(tags, (1..=23).collect::<Vec<_>>(), "the golden file holds tags 1..=23, each once");
+    assert_eq!(tags, (1..=27).collect::<Vec<_>>(), "the golden file holds tags 1..=27, each once");
     assert_eq!(hd::EVENT_LEN.len(), 24);
     for sc in e["skip_codes"].as_array().unwrap() {
         let code = sc["error"].as_u64().unwrap() as u32;
@@ -478,7 +494,7 @@ fn every_event_sample_and_skip_code_decodes() {
 #[test]
 fn stack_checkin_vectors_match_in_verify_and_observe_mode() {
     let all = load("instructions");
-    assert_eq!(all["interface_version"], "1.2");
+    assert_eq!(all["interface_version"], "1.3");
     let host = account(vector(&all, "open_stack"), "host");
     for name in ["stack_checkin_heartbeat", "stack_checkin_observe"] {
         let v = vector(&all, name);
@@ -794,13 +810,14 @@ fn wallet_signed_skr_vectors_match_the_test_builders() {
         assert_matches(v, &ix);
         assert_events_decode(v);
     }
-    // Every event of every vector in the file decodes: 41 vectors over 28 tags.
+    // Every event of every vector in the file decodes: 47 vectors over 32 tags (v1.3 added
+    // 28..=31: governance rotation and close_shift_log, none of which the crank sends).
     let vectors = all["instructions"].as_array().unwrap();
-    assert_eq!(vectors.len(), 41);
+    assert_eq!(vectors.len(), 47);
     let mut tags: Vec<u64> = vectors.iter().map(|v| v["tag"].as_u64().unwrap()).collect();
     tags.sort_unstable();
     tags.dedup();
-    assert_eq!(tags, (0..=27).collect::<Vec<_>>());
+    assert_eq!(tags, (0..=31).collect::<Vec<_>>());
     for v in vectors {
         assert_events_decode(v);
     }

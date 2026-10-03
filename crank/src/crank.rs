@@ -1147,8 +1147,9 @@ impl Crank {
         rent
     }
 
-    /// Seal shifts whose window has passed and whose lease has expired (INTERFACE §5 `end_shift`:
-    /// anyone may, and pays the ShiftLog rent). At most `max_per_pass` per pass, within the
+    /// Seal shifts whose window has passed and whose lease has been expired for more than the
+    /// program's 3-round grace (INTERFACE §5 `end_shift`, §12.13: anyone may then, and pays
+    /// the ShiftLog rent). At most `max_per_pass` per pass, within the
     /// daily lamport budget, oldest window first; a failing (rig, shift) is left alone for 10 min.
     pub async fn end_shift_sweep(&self) -> anyhow::Result<usize> {
         let c = &self.cfg.end_shift;
@@ -1160,7 +1161,11 @@ impl Crank {
             .await?
             .into_iter()
             .filter_map(|(a, acc)| Rig::decode(&self.program_id, &acc.owner, &acc.data).ok().map(|r| (a, r)))
-            .filter(|(_, r)| r.shift_open && now > r.plan_window_end_ts.saturating_add(c.grace_secs) && r.lease_to_round < board.round_id)
+            .filter(|(_, r)| {
+                r.shift_open
+                    && now > r.plan_window_end_ts.saturating_add(c.grace_secs)
+                    && r.lease_to_round.saturating_add(hd::PERMISSIONLESS_END_GRACE_ROUNDS) < board.round_id
+            })
             .collect();
         {
             let mut tried = lock(&self.end_shift_tried);

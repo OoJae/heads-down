@@ -17,7 +17,7 @@ fn failing_rigs_are_skipped_and_the_rest_deploy() {
 
     env.onboard_standard(&good);
     env.onboard_standard(&good2);
-    // Gate closed: the rig's plan threshold is below the live ema_ev (~0.63 SOL/ORE).
+    // Gate closed: the rig's plan threshold is below the pinned ema_ev (~0.65 SOL/ORE).
     let mut tight = standard_plan();
     tight.max_ev_cost = env.ema_ev() - 1;
     ok(env.onboard(&gated, SOL / 20, Caps::standard(), &tight));
@@ -181,4 +181,64 @@ fn a_rig_revoking_its_executor_mid_flight_only_skips_itself() {
         skipped_code(&events(&meta.logs), &c.rig),
         Some(HdError::InvalidExecutor.code())
     );
+}
+
+/// A rig closed after the crank planned its batch (a tombstone, or nothing at
+/// the PDA any more) only skips itself. As a failure it let one wallet, by
+/// closing its rig just before the batch landed, make every other rig in it
+/// miss the round.
+#[test]
+fn a_rig_closed_mid_flight_only_skips_itself() {
+    let mut env = Env::new();
+    let mut honest = User::new(&mut env, 11);
+    let mut closed = User::new(&mut env, 12); // armed a shift: closing leaves a tombstone
+    let mut gone = User::new(&mut env, 13); // never armed nor signed: closing leaves nothing
+    env.onboard_standard(&honest);
+    env.onboard_standard(&closed);
+    let wg = gone.wallet.insecure_clone();
+    ok(env.send_as(
+        &wg,
+        &[ix_register_rig(&wg.pubkey(), &gone.p256(), None)],
+        &[],
+    ));
+
+    // The crank planned all three and holds their heartbeats; then two wallets
+    // close their rigs before the batch lands.
+    let r = env.board_round;
+    let hbs = [
+        honest.heartbeat(1, r, 3),
+        closed.heartbeat(1, r, 3),
+        gone.heartbeat(0, r, 3),
+    ];
+    let wc = closed.wallet.insecure_clone();
+    ok(env.send_as(
+        &wc,
+        &[
+            ix_end_shift(&wc.pubkey(), &closed.rig, 1),
+            ix_close_rig(&wc.pubkey(), None),
+        ],
+        &[],
+    ));
+    ok(env.send_as(&wg, &[ix_close_rig(&wg.pubkey(), None)], &[]));
+    assert_eq!(env.rig_slot(&closed.rig), RigSlot::Tombstone);
+    assert_eq!(env.rig_slot(&gone.rig), RigSlot::Empty);
+
+    let rigs = vec![
+        DigRig::new(&closed, entry_for(&hbs[1], 1, 1)),
+        DigRig::new(&honest, entry_for(&hbs[0], 1, 0)),
+        DigRig::new(&gone, entry_for(&hbs[2], 1, 2)),
+    ];
+    let meta = ok(env.dig_with(&hbs, &rigs));
+    let evs = events(&meta.logs);
+    assert!(dug(&evs, &honest.rig).is_some(), "the honest rig still digs");
+    for u in [&closed, &gone] {
+        assert_eq!(
+            skipped_code(&evs, &u.rig),
+            Some(HdError::InvalidAccountTag.code())
+        );
+    }
+    assert_eq!(evs.len(), 3, "one event per rig");
+    // A skip changes nothing: the tombstone is as the close left it.
+    assert_eq!(env.rig_slot(&closed.rig), RigSlot::Tombstone);
+    assert_eq!(env.tombstone(&closed.rig).shift_id.get(), 1);
 }

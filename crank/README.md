@@ -240,8 +240,10 @@ focus-only rig that is due with `record_heartbeats` (tag 7, no CPI), so its dark
 ## Permissionless end_shift
 
 Every `end_shift.poll_secs` the crank lists Rigs with `shift_open = 1` (memcmp at offset 336) and seals those
-whose window ended more than `grace_secs` ago and whose lease has expired (`lease_to_round < Board.round_id`),
-exactly the program's condition for a caller that is not the authority. The crank pays the ShiftLog rent
+whose window ended more than `grace_secs` ago and whose lease has been expired for more than three rounds
+(`lease_to_round + 3 < Board.round_id`), exactly the program's condition for a caller that is not the
+authority. The three rounds are the program's grace: a rig whose next heartbeat is still on its way cannot have
+its shift ended by someone else between two heartbeats. The crank pays the ShiftLog rent
 (1,781,760 lamports for 128 bytes) plus the fee, so it is capped: at most `max_per_pass` per pass and
 `max_lamports_per_day` (default 0.05 SOL, about 27 shifts). Oldest window first; a (rig, shift) that fails is
 left alone for 10 minutes. The program emits `ShiftEnded` (tag 4) and then `ShiftEndedV2` (tag 10); the crank's
@@ -317,8 +319,11 @@ program, CU limit sized by simulation (+15% + 1,000), 1,000 micro-lamports/CU, `
 | v0 + table, lease reuse (`hb_ix = 0xFF`) | 12 | 453-455 | 7,000 | **+6,545 to +6,546** |
 | legacy, fresh heartbeat | 2 | 7,538-7,541 | 7,000 | −538 to −541 |
 
-- **Reimbursement** is `Config.crank_fee`, paid by the program from the Executor PDA only after a real deploy,
-  and only while the Executor keeps `rent(0) + 100,000 + crank_fee`. A `crank_fee` around 6,100 covers
+- **Reimbursement** is `Config.crank_fee`, paid by the program from the Executor PDA only after a real deploy
+  that brought the Executor at least `crank_fee` in the same dig, and only while the Executor keeps
+  `rent(0) + 100,000 + crank_fee`. ORE charges the Automation fee on a Miner's first deploy of a round only, so
+  a rig whose Miner already deployed this round (its owner deployed by hand) would be dug at the crank's own
+  cost: the planner skips it (`miner_already_deployed`) unless `dig_unpaid = true`. A `crank_fee` around 6,100 covers
   fresh-heartbeat digs at normal priority; the devstack uses 7,000 (ORE's own executor charges 7,000).
 - **The user's side** (not the crank's): the Automation pays `per_tile·k` on squares plus `executor_fee` on the
   rig's first deploy of each round, all inside the wallet-signed caps.
@@ -359,11 +364,25 @@ until its lease, at most 3 rounds, runs out: the lease was the phone's own promi
 binary), the Nostr mirror hook, phones posting their own messages.
 
 **The crank's own attack surface:**
-- *Intake DoS:* global and per-IP connection caps (IPv6 per /64) before the upgrade; 2 KiB frame cap; per-IP and
-  per-rig token buckets before any RPC read or ECDSA verify; bounded verification pool; idle and send timeouts;
-  bounded key tables; unknown rigs cost at most one RPC read per rig per 30 s.
+- *Intake DoS:* global and per-IP connection caps (IPv6 per /64) before the upgrade; 2 KiB frame cap; a per-IP
+  token bucket before any RPC read or ECDSA verify; bounded verification pool; send timeout; bounded key tables;
+  unknown rigs cost at most one RPC read per rig per 30 s.
+  - *A rig's own allowance is spent only by messages that verified under its key.* The per-rig bucket is looked
+    at before the signature check and charged after it, so frames that merely name a rig cannot silence it.
+  - *A connection must talk, and must prove itself.* The idle timeout counts text frames only (a Ping does not
+    extend it), and a connection that has not delivered a verified message within `unverified_timeout_secs`
+    (180) is closed. A host with many addresses can still open connections as fast as they are closed; the caps
+    bound how many at once.
+  - *The client address is one the client cannot choose:* the socket peer, or, behind a proxy, the last line of
+    the header that proxy writes (`trust_real_ip` for `X-Real-IP`, which Railway documents as the client's
+    address; `trust_forwarded_for` for the last `X-Forwarded-For` hop). `GET /whoami` returns the address the
+    limits are keyed on, to check after a deploy that a header sent by the caller does not change it.
 - *Fee draining:* BREAK / FREEZE, records and end_shift are paid by the crank, so each has a per-rig limit and a
-  lamport budget; a signal is simulated before it is paid for.
+  lamport budget; a signal is simulated before it is paid for. Records are served longest-waiting rig first, so
+  a budget that cannot pay for everyone goes round the rigs. What a budget does not prevent: rigs that each stay
+  inside their own limit can together use up the hourly BREAK / FREEZE budget, and then the team crank lands no
+  more signals that hour. A rig whose signal is not landed stops being dug when its lease runs out (at most 3
+  rounds), and FREEZE can always be sent by the wallet itself.
 - *Batch griefing:* one bad signature fails a whole transaction in the precompile, so every message is verified
   off-chain first; simulation bisects any batch that still fails.
 - *Secrets:* the fee-payer key is loaded from a mode-600 path and never logged; the RPC/WebSocket URL is a secret

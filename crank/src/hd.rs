@@ -66,6 +66,9 @@ pub const DIG_ACCOUNTS_PER_RIG: usize = 4;
 pub const MAX_RIGS_PER_IX: usize = 32;
 /// Largest lease a heartbeat may request (`plan_lease_rounds` is 1..=3).
 pub const MAX_LEASE_ROUNDS: u8 = 3;
+/// Rounds a lease must have been expired before anyone but the rig's owner may end its
+/// shift (INTERFACE §5 `end_shift`, §12.13): `lease_to_round + 3 < Board.round_id`.
+pub const PERMISSIONLESS_END_GRACE_ROUNDS: u64 = 3;
 
 /// Domain tag at the start of every signed message.
 pub const DOMAIN: [u8; 4] = *b"HDv1";

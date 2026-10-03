@@ -8,8 +8,8 @@ import org.junit.Test
 class SiwsRequestTest {
 
     private fun build(
-        domain: String = "headsdown.xyz",
-        uri: String = "https://headsdown.xyz",
+        domain: String = "headsdown.example",
+        uri: String = "https://headsdown.example",
         version: String = "1",
         chainIds: List<String> = listOf("solana:devnet"),
         statement: String = "Sign in to Heads Down.",
@@ -17,15 +17,15 @@ class SiwsRequestTest {
         issuedAt: String = "2026-10-01T12:00:00Z",
         expirationTime: String = "2026-10-01T12:10:00Z",
         buildChainId: String = "solana:devnet",
-    ) = SiwsRequest.fromRegistrar("headsdown.xyz", buildChainId, domain, uri, version, chainIds, statement, nonce, issuedAt, expirationTime)
+    ) = SiwsRequest.fromRegistrar("headsdown.example", buildChainId, domain, uri, version, chainIds, statement, nonce, issuedAt, expirationTime)
 
     @Test
     fun `the registrar's fields are copied verbatim with the build's chain id`() {
         val r = build(chainIds = listOf("solana:mainnet", "solana:devnet"))
         assertEquals(
             SiwsRequest(
-                domain = "headsdown.xyz",
-                uri = "https://headsdown.xyz",
+                domain = "headsdown.example",
+                uri = "https://headsdown.example",
                 statement = "Sign in to Heads Down.",
                 version = "1",
                 chainId = "solana:devnet",
@@ -36,7 +36,7 @@ class SiwsRequestTest {
             r,
         )
         assertEquals("solana:localnet", build(chainIds = listOf("solana:localnet"), buildChainId = "solana:localnet").chainId)
-        assertEquals("https://app.headsdown.xyz", build(uri = "https://app.headsdown.xyz").uri)
+        assertEquals("https://app.headsdown.example", build(uri = "https://app.headsdown.example").uri)
     }
 
     @Test
@@ -57,9 +57,9 @@ class SiwsRequestTest {
         listOf(
             { build(domain = "evil.example") },
             { build(uri = "https://evil.example") },
-            { build(uri = "http://headsdown.xyz") },
-            { build(uri = "https://headsdown.xyz.evil.example") },
-            { build(uri = "https://headsdown.xyz/?next=evil") },
+            { build(uri = "http://headsdown.example") },
+            { build(uri = "https://headsdown.example.evil.example") },
+            { build(uri = "https://headsdown.example/?next=evil") },
             { build(uri = "not a uri at all") },
             { build(version = "2") },
             { build(chainIds = listOf("solana:mainnet")) },

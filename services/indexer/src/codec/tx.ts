@@ -13,7 +13,11 @@
  *  - heads_down instructions (top level or CPI) are decoded from the message. Each is matched to
  *    the events its own invocation logged (the k-th heads_down `invoke` frame is the k-th
  *    heads_down instruction in execution order), which tells whether each heartbeat entry of a
- *    `dig` / `record_heartbeats` was applied (its lease granted) or refused.
+ *    `dig` / `record_heartbeats` was applied (its lease granted) or refused. A `stack_checkin`
+ *    entry in verify mode applies its heartbeat exactly as `record_heartbeats` does (the program
+ *    logs HeartbeatsRecorded for it), so it is recorded as a `record` heartbeat too.
+ *  - v1.2 / v1.3 events (Stack, Focus Bond, Gift, Bury, governance, ShiftLogClosed) are kept
+ *    apart in `hdExtEvents`: nothing in the haul or the v1.1 metrics reads them.
  *  - ORE events are accepted only from inner instructions whose program is ORE, whose data
  *    starts with the Log tag and whose single account is the ORE Board. ORE's Log handler
  *    requires the Board to sign, and only ORE can sign for its Board PDA.
@@ -21,7 +25,7 @@
  */
 import { decodeBase58, isAddress, isSignature } from "./base58.ts";
 import { DecodeError } from "./errors.ts";
-import { SKIPS_AFTER_HEARTBEAT, decodeHdEvent, type HdEvent } from "./events.ts";
+import { SKIPS_AFTER_HEARTBEAT, decodeHdEvent, type HdEvent, type HdExtEvent } from "./events.ts";
 import { NO_HEARTBEAT, decodeHdInstruction, rigAccountIndex, type ArmPlan, type DecodedHdIx } from "./ix.ts";
 import { parseProgramData } from "./logs.ts";
 import { decodeOreLogInstruction, type OreDeployEvent, type OreResetEvent } from "./ore.ts";
@@ -77,10 +81,11 @@ export interface HdInstruction {
   events: HdEvent[] | null;
 }
 
-/** One `dig` / `record_heartbeats` heartbeat entry, attributed to its rig. */
+/** One `dig` / `record_heartbeats` / `stack_checkin` heartbeat entry, attributed to its rig. */
 export interface HeartbeatUse {
   ixIndex: number;
   entryIndex: number;
+  /** `stack_checkin` entries are `record`: the program applies them exactly as record_heartbeats does. */
   kind: "dig" | "record";
   rig: string;
   /** dig only: the authority passed for the rig. */
@@ -115,6 +120,8 @@ export interface ExtractedTx {
   failed: boolean;
   logsTruncated: boolean;
   hdEvents: Located<HdEvent>[];
+  /** v1.2 (SKR) and v1.3 events, in log order (`index` continues the same ordinal as `hdEvents`). */
+  hdExtEvents: Located<HdExtEvent>[];
   hdInstructions: HdInstruction[];
   heartbeats: HeartbeatUse[];
   armPlans: ArmPlanUse[];
@@ -192,6 +199,7 @@ export function extractTransaction(tx: RawTransaction, opts: ExtractOptions): Ex
     failed: meta.err !== null && meta.err !== undefined,
     logsTruncated: false,
     hdEvents: [],
+    hdExtEvents: [],
     hdInstructions: [],
     heartbeats: [],
     armPlans: [],
@@ -214,6 +222,7 @@ export function extractTransaction(tx: RawTransaction, opts: ExtractOptions): Ex
   // ---- heads_down events from the logs --------------------------------------------------
   const hdFrames: number[] = [];
   const eventsByFrame = new Map<number, HdEvent[]>();
+  const extByFrame = new Map<number, HdExtEvent[]>();
   const logs = meta.logMessages;
   let logsUsable = false;
   if (Array.isArray(logs)) {
@@ -235,7 +244,12 @@ export function extractTransaction(tx: RawTransaction, opts: ExtractOptions): Ex
       try {
         const ev = decodeHdEvent(entry.data);
         if (ev.kind === "Unknown") out.unknownHdEventTags.push(ev.tag);
-        else decoded.push({ located: { index, event: ev, raw: entry.data }, frame: entry.frame });
+        else if (ev.kind === "Ext") {
+          out.hdExtEvents.push({ index, event: ev, raw: entry.data });
+          const l = extByFrame.get(entry.frame);
+          if (l) l.push(ev);
+          else extByFrame.set(entry.frame, [ev]);
+        } else decoded.push({ located: { index, event: ev, raw: entry.data }, frame: entry.frame });
       } catch (e) {
         if (!(e instanceof DecodeError)) throw e;
         out.problems.push({ location: `hd event ${index}`, code: e.code, message: e.message });
@@ -328,6 +342,34 @@ export function extractTransaction(tx: RawTransaction, opts: ExtractOptions): Ex
           leaseRounds: entry.leaseRounds,
           boardRound: outcome.boardRound,
           applied: outcome.applied,
+        });
+      });
+    } else if (ix.name === "stack_checkin") {
+      const ext = framesMatch ? (extByFrame.get(hdFrames[index]!) ?? []) : null;
+      ix.entries.forEach((entry, entryIndex) => {
+        const rig = accounts[rigAccountIndex(ix, entryIndex)!];
+        if (rig === undefined) return; // the program would have failed: exactly 3 + 2n accounts
+        const fresh = entry.hbIx !== NO_HEARTBEAT;
+        // One StackCheckin per seat carries Board.round_id; a heartbeat verified here also logged
+        // HeartbeatsRecorded for the rig. No HeartbeatsRecorded: observe mode, or the seat rule
+        // stopped before the heartbeat (it was not consumed).
+        const checkin = ext?.find((e) => e.name === "StackCheckin" && e.fields.rig === rig);
+        const recorded = events?.some((e) => e.kind === "HeartbeatsRecorded" && e.rig === rig) ?? false;
+        if (events && ext && checkin === undefined) {
+          out.problems.push({ location: `hd ix ${path} entry ${entryIndex}`, code: "HEARTBEAT_UNMATCHED", message: `no StackCheckin event for rig ${rig}` });
+        }
+        out.heartbeats.push({
+          ixIndex: index,
+          entryIndex,
+          kind: "record",
+          rig,
+          authority: null,
+          fresh,
+          counter: entry.counter,
+          hbRound: entry.roundId,
+          leaseRounds: entry.leaseRounds,
+          boardRound: checkin ? (checkin.fields.round_id as bigint) : null,
+          applied: checkin ? fresh && recorded : null,
         });
       });
     } else if (ix.name === "arm_shift" && ix.plan && accounts[0] !== undefined) {

@@ -263,7 +263,8 @@ impl RecordConfig {
     }
 }
 
-/// Permissionless `end_shift` for shifts past their window whose lease has expired. The
+/// Permissionless `end_shift` for shifts past their window whose lease has been expired for
+/// more than the program's 3-round grace. The
 /// caller pays the ShiftLog rent (128 bytes: 1,781,760 lamports at the default rent) plus the
 /// fee, and nothing reimburses it, so it is capped.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -517,6 +518,8 @@ pub struct DigConfig {
     pub start_rounds: bool,
     /// Extra lamports the Executor PDA must keep.
     pub executor_reserve_lamports: u64,
+    /// Dig rigs whose Miner already deployed this round (no fee, so no reimbursement).
+    pub dig_unpaid: bool,
     /// Checkpoint idle miners before their unsettled round expires.
     pub checkpoint_sweep: bool,
     /// Sweep miners whose unsettled round is this many rounds old.
@@ -553,6 +556,7 @@ impl Default for DigConfig {
             clock_margin_secs: 5,
             start_rounds: false,
             executor_reserve_lamports: 0,
+            dig_unpaid: false,
             checkpoint_sweep: true,
             checkpoint_sweep_after_rounds: 400,
             checkpoint_sweep_interval_rounds: 20,
@@ -570,6 +574,7 @@ impl DigConfig {
             clock_margin_secs: self.clock_margin_secs,
             start_rounds: self.start_rounds,
             executor_reserve: self.executor_reserve_lamports,
+            dig_unpaid: self.dig_unpaid,
         }
     }
 }
@@ -588,7 +593,9 @@ pub struct IntakeToml {
     pub rig_per_second: f64,
     pub max_concurrent_verifications: usize,
     pub idle_timeout_secs: u64,
+    pub unverified_timeout_secs: u64,
     pub trust_forwarded_for: bool,
+    pub trust_real_ip: bool,
     pub max_heartbeat_rigs: usize,
     pub rig_cache_ttl_secs: u64,
     pub rig_fetches_per_second: f64,
@@ -607,7 +614,9 @@ impl Default for IntakeToml {
             rig_per_second: d.rig_quota.per_second,
             max_concurrent_verifications: d.max_concurrent_verifications,
             idle_timeout_secs: d.idle_timeout.as_secs(),
+            unverified_timeout_secs: d.unverified_timeout.as_secs(),
             trust_forwarded_for: d.trust_forwarded_for,
+            trust_real_ip: d.trust_real_ip,
             max_heartbeat_rigs: 100_000,
             rig_cache_ttl_secs: 60,
             rig_fetches_per_second: 50.0,
@@ -627,8 +636,10 @@ impl IntakeToml {
             max_tracked_keys: IntakeConfig::default().max_tracked_keys,
             max_concurrent_verifications: self.max_concurrent_verifications,
             idle_timeout: Duration::from_secs(self.idle_timeout_secs),
+            unverified_timeout: Duration::from_secs(self.unverified_timeout_secs),
             send_timeout: IntakeConfig::default().send_timeout,
             trust_forwarded_for: self.trust_forwarded_for,
+            trust_real_ip: self.trust_real_ip,
             stale_chain_after: IntakeConfig::default().stale_chain_after,
             window_rule: IntakeConfig::default().window_rule,
         }
@@ -910,6 +921,12 @@ impl Config {
         }
         if self.intake.max_message_bytes < 256 || self.intake.max_message_bytes > 64 * 1024 {
             return bad("intake.max_message_bytes must be 256..=65536");
+        }
+        if self.intake.trust_real_ip && self.intake.trust_forwarded_for {
+            return bad("intake.trust_real_ip and intake.trust_forwarded_for name two different headers: set one");
+        }
+        if self.intake.idle_timeout_secs == 0 || self.intake.unverified_timeout_secs == 0 {
+            return bad("intake.idle_timeout_secs and intake.unverified_timeout_secs must be >= 1");
         }
         if self.sender.helius_sender_url.is_some() && (self.sender.tip_accounts.is_empty() || self.sender.tip_lamports == 0) {
             return bad("sender.helius_sender_url needs sender.tip_accounts and sender.tip_lamports");
@@ -1301,7 +1318,8 @@ mod tests {
         };
         let c = Config::from_toml(&text).unwrap().finalize(&env).unwrap();
         assert_eq!(c.listen, "[::]:8787");
-        assert!(c.log_json && c.intake.trust_forwarded_for);
+        // Railway documents X-Real-IP as the client's address; X-Forwarded-For is not trusted there.
+        assert!(c.log_json && c.intake.trust_real_ip && !c.intake.trust_forwarded_for);
         assert_eq!(c.stack.max_lamports_per_hour, 5_000_000);
         assert!(c.stack.enabled && c.cleanup.enabled, "the new duties are on by default on Railway");
         assert!(!format!("{c:?}").contains("railway-key"));

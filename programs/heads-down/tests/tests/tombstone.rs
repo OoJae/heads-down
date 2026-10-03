@@ -61,7 +61,7 @@ fn close_re_register_arm_end_shift_never_reuses_a_shift_id() {
     let t = env.tombstone(&u.rig);
     assert_eq!((t.header.tag, t.header.version, t.header.bump), (10, 1, bump));
     assert_eq!((t.shift_id.get(), t.hb_counter.get()), (1, 1));
-    assert_eq!(t.reserved, [0; 8]);
+    assert_eq!(t.last_dug_round.get(), 0, "this rig never dug");
     assert_eq!(
         env.lamports(&w.pubkey()),
         before + RIG_RENT - TOMBSTONE_RENT - meta.fee
@@ -148,6 +148,38 @@ fn close_re_register_arm_end_shift_never_reuses_a_shift_id() {
     assert_eq!((t.shift_id.get(), t.hb_counter.get()), (2, 2));
     ok(re_register(&mut env, &u, &standard_plan()));
     assert_eq!(env.rig(&u.rig).shift_id.get(), 3);
+}
+
+/// The tombstone also keeps `last_dug_round`. Without it, ending a shift,
+/// closing and re-registering inside one ORE round reset the once-per-round
+/// rule, so one wallet's Automation could be dug twice in a round (past the
+/// wallet-signed per-round cap, and paying the executor fee twice).
+#[test]
+fn closing_and_re_registering_inside_a_round_cannot_dig_twice() {
+    let mut env = Env::new();
+    let mut u = User::new(&mut env, 7);
+    env.onboard_standard(&u);
+    let w = u.wallet.insecure_clone();
+    let meta = ok(env.dig_fresh(&mut [&mut u]));
+    assert!(dug(&events(&meta.logs), &u.rig).is_some());
+    let round = env.board_round;
+    assert_eq!(env.rig(&u.rig).last_dug_round.get(), round);
+
+    ok(env.send_as(&w, &[ix_end_shift(&w.pubkey(), &u.rig, 1)], &[]));
+    ok(env.send_as(&w, &[ix_close_rig(&w.pubkey(), None)], &[]));
+    assert_eq!(env.tombstone(&u.rig).last_dug_round.get(), round);
+    ok(re_register(&mut env, &u, &standard_plan()));
+    let rig = env.rig(&u.rig);
+    assert_eq!((rig.shift_id.get(), rig.last_dug_round.get()), (2, round));
+
+    // Same round, new life: the dig is skipped, not paid for a second time.
+    let meta = ok(env.dig_fresh(&mut [&mut u]));
+    let evs = events(&meta.logs);
+    assert_eq!(
+        skipped_code(&evs, &u.rig),
+        Some(HdError::AlreadyDugRound.code())
+    );
+    assert!(dug(&evs, &u.rig).is_none());
 }
 
 #[test]
@@ -456,17 +488,28 @@ fn a_tombstone_is_not_a_rig_and_only_register_rig_can_use_it() {
     ] {
         assert_hd(&env.send_as(&w, &[ix], &[]), 0, HdError::InvalidAccountTag);
     }
+    // The two batched, permissionless instructions skip it instead of failing:
+    // a rig closed after a batch was planned must not sink the other rigs.
     let hb = u.heartbeat(1, env.board_round, 1);
-    let res = env.send(
+    let meta = ok(env.send(
         &[
             secp_ix_for(&[hb]),
             ix_record(&[(u.rig, entry_for(&hb, 0, 0))]),
         ],
         &[],
+    ));
+    assert_eq!(
+        skipped_code(&events(&meta.logs), &u.rig),
+        Some(HdError::InvalidAccountTag.code())
     );
-    assert_hd(&res, 1, HdError::InvalidAccountTag);
-    let res = env.dig_with(&[hb], &[DigRig::new(&u, entry_for(&hb, 1, 0))]);
-    assert_hd(&res, 2, HdError::InvalidAccountTag);
+    let meta = ok(env.dig_with(&[hb], &[DigRig::new(&u, entry_for(&hb, 1, 0))]));
+    let evs = events(&meta.logs);
+    assert_eq!(
+        skipped_code(&evs, &u.rig),
+        Some(HdError::InvalidAccountTag.code())
+    );
+    assert!(dug(&evs, &u.rig).is_none());
+    assert_eq!(env.rig_slot(&u.rig), RigSlot::Tombstone, "a skip changes nothing");
     env.fund_skr(&w.pubkey(), 10 * ONE_SKR);
     let res = env.send_as(
         &w,
