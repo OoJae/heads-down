@@ -200,6 +200,13 @@ on-chain, so the phone fills it from its own shift journal. A real haul updates 
 `simulated` one is labelled and never does. With no haul the reveal says so and offers the
 labelled sample night only on request.
 
+**What a wallet's addresses can hold.** Anyone can send lamports to an address before its program
+creates the account there, so a Rig, Focus Bond, ShiftLog, Automation, Miner or token address
+that holds only lamports reads as "not created" (`ifCreated`), never as a broken account. The Rig
+address can also hold the 32-byte tombstone `close_rig` leaves (INTERFACE §12.2): it reads as no
+rig, and a clock-in over it registers again and resumes the tombstone's `shift_id` and
+`hb_counter`, so the shift it arms and the message counter continue where the closed rig stopped.
+
 ## Clock-out (one wallet approval)
 
 Home → "Clock out", or the morning reveal's "Clock out" button (after unlocking), opens a

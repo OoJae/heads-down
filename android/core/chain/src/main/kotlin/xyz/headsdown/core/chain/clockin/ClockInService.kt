@@ -10,6 +10,7 @@ import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.accounts.RigAccount
 import xyz.headsdown.core.chain.accounts.ShiftLogAccount
 import xyz.headsdown.core.chain.accounts.SplTokenAccounts
+import xyz.headsdown.core.chain.accounts.ifCreated
 import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
 import xyz.headsdown.core.chain.tx.TransactionBuilder
@@ -63,7 +64,8 @@ class ClockInService(
         val skrAddress = Skr.account(authority)
         val read = rpc.getMultipleAccounts(listOf(configAddress, rigAddress, automationAddress, Ore.BOARD, skrAddress))
         val configInfo = read[0] ?: return null
-        val rig = read[1]?.let { HeadsDownAccounts.rig(rigAddress, it) }
+        val slot = HeadsDownAccounts.rigSlot(rigAddress, read[1])
+        val rig = slot.rigOrNull
 
         // A Focus Bond lives on the rig's current (or last) shift: release it here if it is due.
         var previousBond: FocusBondAccount? = null
@@ -72,8 +74,8 @@ class ClockInService(
             val bondAddress = HeadsDownProgram.focusBond(rigAddress, rig.shiftId).address
             val logAddress = HeadsDownProgram.shiftLog(rigAddress, rig.shiftId).address
             val (bondInfo, logInfo) = rpc.getMultipleAccounts(listOf(bondAddress, logAddress))
-            previousBond = bondInfo?.let { HeadsDownAccounts.focusBond(bondAddress, it) }
-            if (previousBond != null) previousLog = logInfo?.let { HeadsDownAccounts.shiftLog(logAddress, it) }
+            previousBond = bondInfo.ifCreated()?.let { HeadsDownAccounts.focusBond(bondAddress, it) }
+            if (previousBond != null) previousLog = logInfo.ifCreated()?.let { HeadsDownAccounts.shiftLog(logAddress, it) }
         }
 
         // The blockhash's context slot dates the voucher expiry check (expiry_slot > Clock.slot).
@@ -81,13 +83,14 @@ class ClockInService(
         val state = ClockInChainState(
             config = HeadsDownAccounts.config(configAddress, configInfo),
             rig = rig,
-            automation = read[2]?.let { OreAccounts.automation(automationAddress, it) },
+            automation = read[2].ifCreated()?.let { OreAccounts.automation(automationAddress, it) },
             slot = blockhash.contextSlot.takeIf { it >= 0 }?.toULong(),
             boardRoundId = read[3]?.let { OreAccounts.board(Ore.BOARD, it).roundId },
-            skrBalance = SplTokenAccounts.userBalance(read[4], Skr.MINT, authority),
-            skrAccountExists = read[4] != null,
+            skrBalance = SplTokenAccounts.userBalance(read[4].ifCreated(), Skr.MINT, authority),
+            skrAccountExists = read[4].ifCreated() != null,
             previousBond = previousBond,
             previousShiftLog = previousLog,
+            tombstone = slot.tombstoneOrNull,
         )
         val version = if (capabilities.supportsV0) TxVersion.V0 else TxVersion.LEGACY
         val now = nowUnix()
@@ -103,9 +106,9 @@ class ClockInService(
         return PreparedClockIn(TransactionBuilder.unsignedTransaction(message), blockhash.lastValidBlockHeight, authority, plan, version, bondDeferred)
     }
 
-    /** The authority's Rig (checked decode), or null if it does not exist. */
+    /** The authority's Rig (checked decode), or null if it does not exist (never registered, or closed). */
     suspend fun readRig(authority: Pubkey): RigAccount? {
         val address = HeadsDownProgram.rig(authority).address
-        return rpc.getAccountInfo(address)?.let { HeadsDownAccounts.rig(address, it) }
+        return HeadsDownAccounts.rigOrNull(address, rpc.getAccountInfo(address))
     }
 }

@@ -42,10 +42,21 @@ class CounterResyncTest {
         return """{"data":["${Base64.getEncoder().encodeToString(data)}","base64"],"executable":false,"lamports":1,"owner":"${HeadsDownProgram.ID}","rentEpoch":0,"space":384}"""
     }
 
-    private fun rpc(hbCounter: Long) = SolanaJsonRpc(JsonRpcTransport { body ->
+    /** What `close_rig` leaves at the Rig PDA: 32 bytes, tag 10, the counters it resumes from. */
+    private fun tombstoneJson(hbCounter: Long): String {
+        val data = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put(0, 10); put(1, 1); put(2, rig.bump.toByte())
+            putLong(8, 7); putLong(16, hbCounter)
+        }.array()
+        return """{"data":["${Base64.getEncoder().encodeToString(data)}","base64"],"executable":false,"lamports":1113600,"owner":"${HeadsDownProgram.ID}","rentEpoch":0,"space":32}"""
+    }
+
+    private fun rpc(hbCounter: Long) = rpcAnswering(rigAccountJson(hbCounter))
+
+    private fun rpcAnswering(account: String) = SolanaJsonRpc(JsonRpcTransport { body ->
         reads++
         val id = Json.parseToJsonElement(body).jsonObject["id"]
-        """{"jsonrpc":"2.0","id":$id,"result":{"context":{"slot":1},"value":${rigAccountJson(hbCounter)}}}"""
+        """{"jsonrpc":"2.0","id":$id,"result":{"context":{"slot":1},"value":$account}}"""
     })
 
     private fun resync(scope: TestScope, hbCounter: Long, now: () -> Long = { 0L }) =
@@ -59,6 +70,17 @@ class CounterResyncTest {
         // A lower on-chain value never lowers the local counter.
         resync(this, 7).resync()
         assertEquals(501uL, counter.current())
+    }
+
+    @Test
+    fun `a closed rig's tombstone still raises the counter, and an address with only lamports reads as no rig`() = runTest {
+        val bound = { RigBinding(HeadsDownProgram.ID.bytes, rig.address.bytes) }
+        assertEquals(260uL, CounterResync(rpcAnswering(tombstoneJson(260)), bound, counter, this, { 0L }).resync())
+        assertEquals(260uL, counter.current())
+        val lamportsOnly = """{"data":["","base64"],"executable":false,"lamports":890880,"owner":"11111111111111111111111111111111","rentEpoch":0,"space":0}"""
+        assertNull(CounterResync(rpcAnswering(lamportsOnly), bound, counter, this, { 0L }).resync())
+        assertNull(CounterResync(rpcAnswering("null"), bound, counter, this, { 0L }).resync())
+        assertEquals(260uL, counter.current())
     }
 
     @Test
