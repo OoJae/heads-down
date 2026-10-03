@@ -419,7 +419,16 @@ cd android
 `identityUri` is what a wallet shows next to every signing prompt and, through its host, the
 Sign In With Solana domain; the registrar's `HD_SIWS_DOMAIN` / `HD_SIWS_URI` must match it. The
 default is the project's GitHub Pages address, which only the repository owner's GitHub account
-can publish to. Publish at least a `favicon.ico` there (wallets fetch it for the prompt). The
+can publish to. The page and its `favicon.ico` (wallets fetch it for the prompt) are in `site/`.
+To publish them, once:
+
+```bash
+git subtree push --prefix site origin gh-pages     # the site becomes the root of the gh-pages branch
+# GitHub → Settings → Pages → Build and deployment → Deploy from a branch → gh-pages, / (root)
+curl -sI https://oojae.github.io/heads-down/favicon.ico | head -1     # HTTP/2 200 a minute later
+```
+
+The
 RPC URL must not carry an API key: the public `https://api.mainnet-beta.solana.com` works for a
 demo build; a keyed provider needs a proxy that adds the key server-side.
 
