@@ -25,17 +25,18 @@ In order. Until step 5 no transaction is signed by these keys.
 2. **Back up the keys.** `~/.config/heads-down/` holds the only copies (no seed phrases were
    ever shown). Make an encrypted backup (for example an encrypted disk image or
    `age`/`gpg`) of `heads_down-program-keypair.json` and `mainnet/` and store it offline.
-3. **Fund the keys** (section 3; amounts read from mainnet's rent on 2026-10-01):
+3. **Fund the keys** (section 3; amounts read from mainnet's rent on 2026-10-03):
 
    | Key | Public key | Send |
    |---|---|---|
-   | deployer | `9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW` | **1.01 SOL** (needs 1.008981560) |
+   | deployer | `9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW` | **1.04 SOL** (needs 1.036316560) |
    | crank fee payer | `5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk` | **0.05 SOL** |
    | governance | `37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN` | **0.01 SOL** |
    | registrar | `9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo` | 0 (never pays fees) |
 
-   Total **1.07 SOL** of the ~2 SOL budget; keep the rest for the first upgrade's temporary
-   buffer (section 14) and top-ups.
+   Total **1.10 SOL** of the ~2 SOL budget; keep the rest for the first upgrade's temporary
+   buffer (section 14) and top-ups. About 0.03 SOL of the deployer's share is never spent: the
+   Solana CLI only has to see it there (section 3), and it is still in the deployer afterwards.
 4. **Preflight**: `scripts/mainnet/preflight.sh` must end with `GO`.
 5. **Deploy**: `scripts/mainnet/deploy.sh` (type the confirmation), then commit the receipt it
    writes under `deploy/receipts/mainnet/`.
@@ -109,27 +110,40 @@ in the first program upgrade (section 15).
 
 ## 3. Funding
 
-From `keys.sh` / `hd-devstack funding` against mainnet on 2026-10-01 (mainnet's rent is
+From `keys.sh` / `hd-devstack funding` against mainnet on 2026-10-03 (mainnet's rent is
 **5,080 lamports per byte** today, so `getMinimumBalanceForRentExemption(0)` = 650,240; the
 scripts always read it from the cluster):
 
 | Key | Needs (lamports) | SOL | For |
 |---|---|---|---|
-| deployer | 1,008,981,560 | **1.008981560** | ProgramData for max-len 196,608 (0.999647480) + Program account (0.000833120) + Config (0.001950720) + Executor float (0.001450240) + deploy and init fees budget (0.005100000) |
+| deployer | 1,036,316,560 | **1.036316560** | ProgramData for max-len 196,608 (0.999647480) + Program account (0.000833120) + Config (0.001950720) + Executor float (0.001450240) + fee budget (0.032435000, see below) |
 | crank fee payer | 50,000,000 | **0.050000000** | lookup-table rent (0.0026 SOL + 0.00065 per rig) and fee float; digs refund `crank_fee` |
 | governance | 10,000,000 | **0.010000000** | `propose_config` fees: a pause must never fail for lack of SOL |
 | registrar | 0 | 0 | signs off-chain only |
-| **Total** | 1,068,981,560 | **1.068981560** | |
+| **Total** | 1,096,316,560 | **1.096316560** | |
+
+**The fee budget is what the Solana CLI wants to see, not what a deploy costs.**
+`solana program deploy` refuses to start unless the payer holds the rent plus the CLI's own fee
+estimate, and with a priority fee it prices each of its roughly 200 transactions at the 1.4M
+compute-unit maximum (it simulates the real limit only afterwards). For today's build that
+estimate is 0.02901 SOL. The scripts budget the same sum for a program of `--max-len`:
+`(ceil(196,608 / 900) + 4) x (5,000 + 1,400,000 x 0.1)` = 0.032335 SOL, plus 0.0001 SOL for
+`init-config`. A deploy and init actually spend about **0.0011 SOL** in fees (1,075,916 lamports
+in the dry run, section 12), so about **0.031 SOL is still in the deployer afterwards**. An
+earlier version of this page budgeted 0.005 SOL and asked for 1.01 SOL: with exactly that, the
+CLI stopped before sending anything ("insufficient funds for spend + fee"). `dry-run.sh --tight`
+now funds every key with exactly the amounts above, and it has to pass.
 
 The deploy also needs the program **buffer** (0.966282040 SOL for today's 190,048-byte build)
 for a few minutes: `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
 for the ProgramData, so the peak is the larger of the two, not their sum. `preflight.sh`
 checks the deployer's balance against exactly this. What stays out of the deployer for good:
 ProgramData rent (recoverable only by closing the program), the Program account, the Config,
-and the Executor float.
+the Executor float and the fees.
 
 Later, not at launch: each upgrade needs a temporary buffer of `(37 + 128 + build size) x 5,080`
-lamports (0.97 SOL for today's build), refunded to the spill account when the upgrade executes.
+lamports (0.97 SOL for today's build) plus the same fee budget, and the buffer's rent is
+refunded to the spill account when the upgrade executes.
 Today's build fills 97% of the 196,608-byte `--max-len`: an upgrade that grows the program by
 more than about 6.5 KB needs `solana program extend` first (5,080 lamports per added byte).
 
@@ -202,11 +216,11 @@ scripts/mainnet/preflight.sh            # read-only; exit 0 = GO
 
 Warnings (crank or governance key underfunded, no Automation sampled) do not block.
 
-Real run against mainnet on 2026-10-01 (before `helius.env` existed and before funding, so
+Real run against mainnet on 2026-10-03 (before `helius.env` existed and before funding, so
 the chain checks used the public RPC and the verdict is NO-GO for exactly those two reasons):
 
 ```text
-heads_down preflight: mainnet, mode fresh, 2026-10-01T00:30:49Z
+heads_down preflight: mainnet, mode fresh, 2026-10-03T22:13:47Z
 FAIL  helius.env             missing: ~/.config/heads-down/mainnet/helius.env (one line HELIUS_API_KEY=...; chmod 600)
 PASS  key dir                ~/.config/heads-down/mainnet (700)
 PASS  deployer.json          9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW (600)
@@ -216,24 +230,24 @@ PASS  registrar.json         9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo (600)
 PASS  session secret         present (600; value not shown)
 PASS  program keypair        HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p (~/.config/heads-down/heads_down-program-keypair.json, 600)
 PASS  deployer               9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW
-PASS  git                    commit d228f506395643757b7df64107f01e58cf6b753f, clean tree
-PASS  program .so            111600 bytes, sha256 96cfa8359c6e784b6f8bff11c91e95bd1a05a4e6175276e01356369536671acb (programs/heads-down/target/deploy/heads_down.so)
+PASS  git                    commit 710d661c7ce06336edc045cda6e62c97065cc0b5, clean tree
+PASS  program .so            190048 bytes, sha256 07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d (programs/heads-down/target/deploy/heads_down.so)
 
 chain checks via https://api.mainnet-beta.solana.com (public; helius.env missing or invalid)
 PASS  cluster                mainnet via https://api.mainnet-beta.solana.com (genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d)
 PASS  program id             HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p (keypair = program crate = crank)
-PASS  program .so            111600 bytes, sha256 96cfa835…71acb, program hash a81a83a5ab8fafb61dd77873ad18d607ab74d4518bcdca3bb2c254cc17a49ed0, SBPF v0
-PASS  max-len                196608 bytes: 85008 bytes (76%) of headroom over this build
-PASS  SIMD-0500              inactive: SBPF v0 deployments are still accepted
+PASS  program .so            190048 bytes, sha256 07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58, SBPF v3
+PASS  max-len                196608 bytes: 6560 bytes (3%) of headroom over this build
+PASS  SIMD-0500              inactive ; build is SBPF v3 and SBPFv3 deployment is active since slot 428976000
 PASS  program account        nothing deployed yet: fresh deploy
-INFO  rent                   ProgramData(196653) 0.999647480 SOL, Program 0.000833120 SOL, buffer(111637) 0.567766200 SOL, Config 0.001950720 SOL, Executor rent-exempt(0) 0.000650240 SOL
-INFO  deploy cost            1.005480600 SOL: ProgramData 0.999647480 + Program 0.000833120 + fees 0.005000000 (the 0.567766200 SOL buffer is refunded into the ProgramData payment)
+INFO  rent                   ProgramData(196653) 0.999647480 SOL, Program 0.000833120 SOL, buffer(190085) 0.966282040 SOL, Config 0.001950720 SOL, Executor rent-exempt(0) 0.000650240 SOL
+INFO  deploy cost            1.032815600 SOL: ProgramData 0.999647480 + Program 0.000833120 + fees 0.032335000 (the 0.966282040 SOL buffer is refunded into the ProgramData payment)
 INFO  init cost              0.003500960 SOL: Config 0.001950720 + Executor float 0.001450240 (target 1450240 = rent 650240 + reserve 100000 + 100 x crank_fee 7000; holds 0) + fees 0.000100000
-FAIL  deployer balance       9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW holds 0.000000000 SOL < 1.008981560 SOL needed: send at least 1.008981560 SOL
-PASS  ORE upgrade slot       450496378 = pin 450496378
-PASS  ORE program hash       d9601d4e8b0e7f6db2fbf0984dced7eba23029e1e29e8d6c9c7809cb5ea238a3 = verify.osec.io b92c5043
-PASS  ORE singletons         Board 40/105, Treasury 48/104, Config 232/101, Round 952/109 (round 424054)
-PASS  ORE user accounts      7 Automations (160/100) and 17 Miners (752/103) from recent ORE transactions match
+FAIL  deployer balance       9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW holds 0.000000000 SOL < 1.036316560 SOL needed: send at least 1.036316560 SOL
+PASS  ORE upgrade slot       452682055 = pin 452682055
+PASS  ORE program hash       9dbd2e0d232563f0e2b3eae89bf7d6f55d483c464863adb4f46d117f427ca695 = verify.osec.io 48c203bd
+PASS  ORE singletons         Board 40/105, Treasury 48/104, Config 232/101, Round 952/109 (round 427295)
+PASS  ORE user accounts      1 Automations (160/100) and 3 Miners (752/103) from recent ORE transactions match
 PASS  init params            executor_fee 10000 (immutable), crank_fee 7000 (<= executor_fee; +3000 per dig accrues to the Executor)
 INFO  ore_layout_hash        cc9b3521eaa022a05fd9c38f745b8844a740ca9e3243a91f1bbda66a3448aa91 = sha256(heads_down::ore::LAYOUT_PREIMAGE)
 INFO  heads_down Config      not initialized (init-config.sh creates it)
@@ -246,7 +260,9 @@ NO-GO: 1 local failure(s), chain checks FAILED (see FAIL lines above). Nothing w
 ```
 
 With `helius.env` in place and the deployer funded, those two lines turn PASS and the
-verdict is GO. Everything ORE-related already passes against mainnet today.
+verdict is GO. Everything ORE-related passes against mainnet today, with the pin moved to the
+build ORE deployed on 2026-10-02. Earlier the same day this run answered NO-GO on the two ORE
+lines, which is how we learned of that upgrade ([ORE.md](ORE.md), section 1).
 
 ## 7. Deploy
 
@@ -476,67 +492,74 @@ set, but no `heads_down`, so `deploy.sh` runs its real fresh path with the real 
 result, the program is upgraded in place (`--mode upgrade`), a buffer is written and handed to
 a stand-in vault (`--mode buffer`), a pause is drilled, and the stack is stopped.
 
-Real output of `scripts/mainnet/dry-run.sh` on 2026-10-01 at commit `6d30c668f502` (the
-preflight tables, the key table and the service logs are cut; paths shortened):
+Real output of `scripts/mainnet/dry-run.sh --tight` on 2026-10-03 at commit `14b0c3b06110`
+(the preflight tables, the key table, the deploy plans and the service logs are cut; paths
+shortened). The fork carries the ORE build deployed on 2026-10-02, and `--tight` gives every key
+exactly what section 3 asks for at the local validator's rent, then tops the deployer up before
+each later drill with what that drill needs (the temporary buffer's rent and the fee budget):
 
 ```text
 == 0. local stack without heads_down (up.sh --no-deploy, RPC :38899, home ~/.local/share/heads-down/dryrun) ==
-[devstack] fixtures: ORE round 424040, 13 files (sha256_ore.so=57503f435dac3888571c1b21330994a821d5f891790bde5af93888b7ba9eb3a7)
+[devstack] dumping mainnet ORE state into ~/.local/share/heads-down/dryrun/fixtures (RPC host: api.mainnet-beta.solana.com)
+[devstack] fixtures: ORE round 427290, 14 files (sha256_ore.so=b16a10029a35e709956cfe42c4dc51cf2c59522f477eba10816a40bcaa7dd5bd)
 [devstack] --no-deploy: heads_down is NOT deployed; next: scripts/mainnet/deploy.sh --cluster localnet, then init-config.sh
 [devstack] stack is up (test-validator)
 
+== 1. keys.sh (throwaway deploy keys in ~/.config/heads-down/dryrun/keys) ==
+funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.40753572 SOL
+funded 8c3KKqwEPRDKpjqqpi9k4rrSnPu2LbVFn1cPudBHqJMp: balance 0.05 SOL
+funded HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R: balance 0.01 SOL
+
 == 2. preflight.sh --cluster localnet (read-only) ==
-GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261001T004403Z.json)
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.407535720 SOL >= 1.407535720 SOL needed
+PASS  ORE program hash       9dbd2e0d232563f0e2b3eae89bf7d6f55d483c464863adb4f46d117f427ca695: the fork runs mainnet's ORE bytes
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261003T220816Z.json)
 
 == 3. deploy.sh --cluster localnet (build, preflight, deploy, verify, receipt) ==
-[deploy] built 111600 bytes, sha256 96cfa8359c6e784b6f8bff11c91e95bd1a05a4e6175276e01356369536671acb (cargo-build-sbf 4.1.0 platform-tools v1.54 rustc 1.89.0)
+[deploy] built 190048 bytes, sha256 07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d (cargo-build-sbf 4.1.0 platform-tools v1.54 rustc 1.89.0)
 deploy plan (localnet, mode fresh)
   program id         HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p
   max-len            196608 bytes
-{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"2BE4B3vUaW7ZGD9HAGH7tTxyUtg8mKuS9K8BdLCwtJC7W9p6QGVtn2PV1QQSvwMeWBvxRQKfjGJRJTBgbp3PJ99M"}
-verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly programs/heads-down/target/deploy/heads_down.so (111600 bytes, program hash a81a83a5ab8fafb61dd77873ad18d607ab74d4518bcdca3bb2c254cc17a49ed0)
-verify: receipt deploy/receipts/localnet/20261001T004404Z-fresh-6d30c668f502.json
+{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"Dhwss7UfWotYTXnXfUTym6MKsVoQi9FxWYePnEpqZpUhhCkiXNTY1APffAD7h5pHDnfdkTUDSJXLeegmNbgcNy1"}
+verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
+verify: receipt deploy/receipts/localnet/20261003T220816Z-fresh-14b0c3b06110.json
 
 == 4. init-config.sh --cluster localnet (initialize_config + Executor float) ==
-init: initialize_config tx 4KYSrzsdEemUWjJPPLxAJx57r7DKqWM6MwuA1ZFjMtVYPACdYuTdEzH2KAy5t4PpQqyhg6u4xjENaBndyxijyQA9 -> Config inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW (executor_fee 10000, crank_fee 7000, governance HuTaKR8u…, registrar YyyL6FBu…); read back and verified
-init: funded the Executor PDA By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge with 1690880 lamports to 1690880 (tx 4uBAMVtwWNiceWUHayTC5AKy3rW14nnAu2CCCZ6u7W6hzSB6og7M5gZPJSbh4P1TnFCiM1hifqKpe9QitqTG6seg)
+init: initialize_config tx ETQaEAGrHjjSLUbz1NVi1pF8KbXq3A8qjUimd8XZbEvSNvaN5p44wfVjF28Q9uJ16SdtDWqngWQ5NU6qRj8RbDV -> Config inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW (executor_fee 10000, crank_fee 7000, governance HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R, registrar YyyL6FBuH816aWaKoWzWZ8VmecgvmwbMHG1J8zwwZS3); read back and verified
+init: funded the Executor PDA By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge with 1690880 lamports to 1690880 (tx rBgwWDeiec6hKUNHVH3mtPGSSwshv8v1vpdwjGKsbZcnqgsMm8gPt2hX1cpRZHZrS3Le9jtRmbLdWqNC8M14Si2)
 
 == 5. scripts/devstack/smoke.sh against the deployed + initialized program ==
-[smoke +   0s] stack up: crank healthy, indexer healthy; heads_down Config executor_fee 10000 crank_fee 7000; ORE round 424040 (ema 647236053 lamports/ORE)
-[smoke +   0s] clock-in (automate + register_rig + set_caps + arm_shift, 1 tx 4MaVMPBd3B4YCUT7fYXYL4g55w9PGSnPMhwsG1gmTSoo28t7hZCJb8ua9rgWxtYzWcpSFEpuV4HyPEpRmhY91A9F): rig F4VgkErKZCnhUN5W4CNGBSDywmBpqV5sqwDuU5sQaq2a Armed, shift 1, 0.001 SOL digs on 10 split tiles
-[smoke +   0s] phone face-down: heartbeat #1 for round 424040 accepted by the crank (202 slots left)
-[smoke +  90s] CRANK DUG round 424040: tx Rt1zVyShri7jESEpHSnQJvgoD9DS7W7kV2uEWTPSb2CtfgpHrt4vk4mnTGQef7ufzMamizzZ3ZTcF3up8869Wu3; RigDug 1000000 lamports on 10 squares (mask 0x004a54f); rig Down, hb_counter 1, lease [424040, 424040]; Automation balance 48990000 (fee 10000)
-[smoke +  90s] PHONE LIFTED after round 424040: no more heartbeats
-[smoke + 126s] hostile crank REPLAYS heartbeat #1 in round 424041: tx 269LMVkSevWTH3Dx1vVF3h7pmtGamwSqxC1dzbda7xTLVe7DKk9uQShkWLvYbmfPVLps34SsBLYgUS1h6EfJvt11 -> RigSkipped(StaleHeartbeat)
-[smoke + 126s] hostile crank REUSES the old lease in round 424041: tx uNN8fi86Lpdx7AZJYFXUWVTtTGAHq7ST1RGnnaDDbUmqZbrYCJHrmrY3scwiLgd5PiGEsWutqtN5aCyvkLu4SH5 -> RigSkipped(LeaseExpired)
-[smoke + 262s] round 424041 closed (board at 424041): crank did NOT dig the lifted rig (last_dug_round 424040, lease_to 424040); hd_crank_digs_landed_total 1
-[smoke + 262s] INDEXER recorded RigDug: rig "F4VgkErKZCnhUN5W4CNGBSDywmBpqV5sqwDuU5sQaq2a" round "424040" lamports "1000000" squares 10 (dataset localnet)
-[smoke + 262s] indexer health: 7 txs ingested through slot 296, 1 decode problem kinds
-Error: indexer reports decode problems: [{"code":"UNKNOWN_EVENT_TAG","count":1}]
-[devstack] SMOKE FAILED (exit 1).
+[smoke +   0s] stack up: crank healthy, indexer healthy; heads_down Config executor_fee 10000 crank_fee 7000; ORE round 427290 (ema 715235766 lamports/ORE)
+[smoke +   1s] clock-in (automate + register_rig + set_caps + arm_shift, 1 tx XLniLNGQrfff1w257buNS7e4qQJ4S85V3xoHTTBw5fLnyv2AkVQfgGZ1YAUJRM6jQWSKsbA5Ho2fcWdR9VkCUL7): rig 9i3Tdf7iPvxmPa7VsoF66LJ6KNS26hZr8peLup291JF3 Armed, shift 1, 0.001 SOL digs on 10 split tiles
+[smoke +   1s] phone face-down: heartbeat #1 for round 427290 accepted by the crank (207 slots left)
+[smoke + 106s] CRANK DUG round 427290: tx 3iHEV11s7n3cVMop4xsCQdNkRUNFMKnHPnm5Q9Djw3xgB996ntWgDZrQjxSXyFGdR6XdpmJ6Lw6qwZfkYHhzTE5d; RigDug 1000000 lamports on 10 squares (mask 0x00386ae); rig Down, hb_counter 1, lease [427290, 427290]; Automation balance 48990000 (fee 10000)
+[smoke + 106s] PHONE LIFTED after round 427290: no more heartbeats
+[smoke + 151s] ORE round 427291 is now current (reset by the round driver)
+[smoke + 152s] hostile crank REPLAYS heartbeat #1 in round 427291: tx 3k75Rf4hsGrqiPgpp7RNmwcaz5h6TssWDrVHVt45Q5Rz524pAtBvATFNVmKY2eUCLipYm7SUgsJkwfMo37qjTDzw -> RigSkipped(StaleHeartbeat)
+[smoke + 152s] hostile crank REUSES the old lease in round 427291: tx oABFi6ck3oMGZkb6b1NP9haSi8MLPJaY3zv3dE8r4hmHovMtNJzLsMjVc6JWjXKNvLTgi8nxxmQuvCxSAm3zwYi -> RigSkipped(LeaseExpired)
+[smoke + 284s] round 427291 closed (board at 427291): crank did NOT dig the lifted rig (last_dug_round 427290, lease_to 427290); hd_crank_digs_landed_total 1
+[smoke + 284s] INDEXER recorded RigDug: rig "9i3Tdf7iPvxmPa7VsoF66LJ6KNS26hZr8peLup291JF3" round "427290" lamports "1000000" squares 10 (dataset localnet)
+[smoke + 284s] indexer health: 7 txs ingested through slot 296, 0 decode problem kinds
+SMOKE PASSED: face-down -> dug (round 427290); lifted -> no dig, replay and lease reuse refused on-chain (round 427291).
 
 == 6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show ==
-{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"5WdMHWPQfR3HqMUueNV5wcEu3nLaCABK87vqTvzN1zqdNqL28mTP1AiGuHv4hBgSqpwf3j521wUJ2jsq6giCC5KM"}
-verify: receipt deploy/receipts/localnet/20261001T004839Z-upgrade-6d30c668f502.json
-Program Id: HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p
-Authority: k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt
-Last Deployed In Slot: 550
-Data Length: 196608 (0x30000) bytes
-Balance: 1.36959576 SOL
+funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.387576564 SOL
+{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"2riradqjeXqTSgYkg91qtnbCF9qhP7KCgm2fjeiZthfMnKSHFEvDbr9QJyiUGgXuNTVz3jxHar8vnE7DjgQXS7rt"}
+verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
+verify: receipt deploy/receipts/localnet/20261003T221313Z-upgrade-14b0c3b06110.json
+Last Deployed In Slot: 558
 
 == 7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault ==
-{"buffer":"6PG8jd9YZUWT2idk3B7pWZEikfZ1trpaZwNjud8nHJdM"}
+funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.418853149 SOL
+{"buffer":"6Rj23VBAvb7htNxVa6UWbeQHfSz6VLHwXHXPSUGTkBAt"}
 [deploy] handing the buffer to HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R
-Account Type: Buffer
-Authority: HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R
-verify: buffer 6PG8jd9YZUWT2idk3B7pWZEikfZ1trpaZwNjud8nHJdM holds exactly programs/heads-down/target/deploy/heads_down.so (111600 bytes, program hash a81a83a5ab8fafb61dd77873ad18d607ab74d4518bcdca3bb2c254cc17a49ed0)
+verify: buffer 6Rj23VBAvb7htNxVa6UWbeQHfSz6VLHwXHXPSUGTkBAt holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
+verify: receipt deploy/receipts/localnet/20261003T221324Z-buffer-14b0c3b06110.json
 
 == 8. rollback drill: governance.sh pause (immediate), then show ==
-  paused     0 -> 1  (takes effect IMMEDIATELY: dig fails with Paused)
-  eta        slot 864562 (~96 h at 400 ms; at least 72 h): then anyone may apply_config
-propose_config tx 41fiQVTVi75ejtYam9hRRwV2DRunwsVeH7bjLEJt4qUbqwvRuuzCwbvtujNTikiZSKLaZXMDc1FMKEhbJndaKjus: pending until slot 864563 (paused now true, pending paused 1)
+propose_config tx H4TScjVLtARnojyqLW1tFDUCFX1uY4qJkKw8waf6JApXjmerm3cqEBMwwnDnurVnECQNLMbtXx534fSm3Q78Wxk: pending until slot 864578 (paused now true, pending paused 1)
 heads_down      Config inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW executor_fee 10000 crank_fee 7000 paused true
-pending         registrar YyyL6FBu… crank_fee 7000 bury_bps 0 paused 1; apply_config from slot 864563 (864000 slots to go)
+pending         registrar YyyL6FBuH816aWaKoWzWZ8VmecgvmwbMHG1J8zwwZS3 crank_fee 7000 bury_bps 0 paused 1; apply_config from slot 864578 (864000 slots to go)
 Executor PDA    By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge 1693880 lamports
 
 == stop the stack ==
@@ -547,37 +570,26 @@ Executor PDA    By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge 1693880 lamports
 
 summary
   PASS  0 up.sh --no-deploy: fork, driver, crank, indexer up; no heads_down
-  PASS  1 keys.sh: keys created (600 in a 700 dir), public keys and funding printed
+  PASS  1 keys.sh: keys created (600 in a 700 dir), every key holds exactly what the funding table asks for (deployer 1407535720 lamports)
   PASS  2 preflight.sh: GO
   PASS  3 deploy.sh: fresh deploy of HDn4vg… with max-len 196608, bytes verified, receipt written
   PASS  4 init-config.sh: Config created and read back, Executor float funded, receipt written
-  FAIL  5 smoke.sh exited 1 (its output is above)
+  PASS  5 smoke.sh: SMOKE PASSED
   PASS  6 deploy.sh --mode upgrade: upgraded in place from a fresh buffer, bytes verified, receipt written
   PASS  7 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written
   PASS  8 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock
-
-DRY RUN FAILED (exit 1) (log ~/.local/share/heads-down/dryrun/dry-run.log)
+DRY RUN PASSED (log ~/.local/share/heads-down/dryrun/dry-run.log)
 ```
 
-**What the one failure is.** Every on-chain assertion of the smoke passed against the program
-deployed and initialized by these scripts: the crank dug through the Executor PDA, the replayed
-heartbeat was refused with `StaleHeartbeat`, the reused lease with `LeaseExpired`, the lifted rig
-was not dug, and the indexer recorded the `RigDug`. The smoke's last assertion, "the indexer
-reports zero decode problems", fails because the indexer at this commit decodes event tags 1..5
-only, and program v1.1 emits `RigRegistered` (tag 6) in the clock-in transaction: its database
-holds exactly one problem, `UNKNOWN_EVENT_TAG` "heads_down event tag 6" on that transaction.
-That gap is listed in `programs/heads-down/vectors/CROSSCHECK.md` §5 ("Tags 6..10: MISSING")
-and belongs to the indexer; the stock `up.sh` + `smoke.sh` path fails the same assertion. The
-dry run goes green as soon as the indexer decodes tags 6..10.
-
-The Executor PDA ended at 1,693,880 lamports: the 1,690,880 float, +10,000 fee in, −7,000
-reimbursed to the crank. The fresh deploy cost the deployer 1,371,374,018 lamports locally
-(ProgramData 1,369,595,760 + Program 1,141,440 + 636,818 of fees): the buffer's rent came back,
-as section 3 says. The upgrade cost 631,788 lamports of fees.
+**What it cost.** The deployer started with 1,407,535,720 lamports and had 31,359,084 left after
+the fresh deploy and `init-config`: ProgramData 1,369,595,760 + Program 1,141,440 + Config
+2,672,640 + Executor float 1,690,880 + **1,075,916 of fees**. The buffer's rent came back, as
+section 3 says. The upgrade cost 1,058,415 lamports of fees. The Executor PDA ended at 1,693,880
+lamports: the 1,690,880 float, +10,000 fee in, -7,000 reimbursed to the crank.
 
 Note the local validator's rent is the historical 6,960 lamports per byte (mainnet's is now
-5,080), which is why the funding numbers differ from section 3: every amount is read from the
-cluster it applies to.
+5,080), which is why the amounts differ from section 3: every amount is read from the cluster it
+applies to. The fees and what is left over are the same on both.
 
 ### Docker-free checks of the Railway images (2026-10-01)
 
@@ -594,7 +606,7 @@ Docker is not available on the build machine, so every image was checked another
 | dashboard `server.mjs` on that export | `/healthz` 200, `/` 200, `/cohorts` 308 → `/cohorts/` 200, unknown page 404 (export's page), `/%2e%2e/%2e%2e/etc/passwd` 404, `/.env` 404, `POST /` 405, `HEAD /` 200, hashed assets `immutable`, HTML `must-revalidate`, `nosniff`/`DENY`/HSTS headers, listening on `::` |
 | crank entrypoint (macOS, non-root branch, paths redirected to scratch) | no key → exit 1; malformed key → exit 1 and the value is not echoed; real key → hd-crank started, key file gone once it listened, `/healthz` answered, no key bytes in the log; SIGTERM → hd-crank shut down on SIGINT, exit 0 |
 | registrar entrypoint (same) | both key forms set → refused; real key → `/registrar` reports the test key, key file gone, `/healthz` 200; SIGTERM → `hd-registrar stopped` |
-| `deploy/railway/crank/crank.toml` under hd-crank's strict loader, `hd-crank check` against mainnet (read-only) | parsed; ORE upgrade slot 450,496,378 = pin, breaker closed |
+| `deploy/railway/crank/crank.toml` under hd-crank's strict loader, `hd-crank check` against mainnet (read-only) | parsed; ORE upgrade slot = pin (450,496,378 at the time), breaker closed |
 
 `setpriv` and a tmpfs `/dev/shm` exist only on Linux, so the root branch of the entrypoints
 (dropping to uid 10001) runs for the first time on Railway: check the first deploy's log for
@@ -611,6 +623,7 @@ Docker is not available on the build machine, so every image was checked another
 | Registrar key compromised | stop the registrar; rename `registrar.json` aside and run `keys.sh` for a new one; `governance.sh propose --registrar <new>`; after 72 h `apply`, then start the registrar with the new key. Until `apply` the chain still trusts the old key (rigs can register unattested meanwhile). For a routine rotation, run old and new side by side until `apply` | attestation levels only (THREAT_MODEL K4) |
 | Helius key leaked | rotate in Helius, update `helius.env` and the shared variable, redeploy | |
 | Deploy failed part way | re-run `deploy.sh` (resumes), or close the buffer (section 7) | |
+| ORE upgraded its program (it did on 2026-09-25 and 2026-10-02) | Nothing to do at once: the crank's breaker has already stopped digs, and `preflight.sh` answers NO-GO. Then: read the diff between the commits verify.osec.io names; refresh the fixtures (`programs/heads-down/tests/fixtures/fetch-fixtures.sh`, `scripts/devstack/up.sh --refresh-fixtures`); run the program's and the crank's fork suites and `dry-run.sh --tight`; move the pin (`crank/src/ore.rs`, both `crank.toml`, `ORE_PROGRAM_HASH` in `scripts/devstack/tool/src/ops.rs`, `docs/ORE.md`); redeploy the crank | no digs, so nothing is mined and nothing is spent, until the pin is moved |
 
 ## 14. Upgrades with a fresh buffer
 
@@ -684,8 +697,10 @@ vault holds the authority.
 | Domain (optional) | | ~$1 (not needed: the app identifies itself with the project's GitHub Pages address) |
 | **Total** | | **about $8-15/month** on the free Helius plan, about $60 with the Developer plan, plus small SOL top-ups |
 
-One-time: the deploy and initialization, **1.07 SOL** (section 3), of which the 0.9996 SOL of
-ProgramData rent stays locked while the program exists.
+One-time: the deploy and initialization, **1.10 SOL** across the three keys (section 3). Of it,
+0.9996 SOL of ProgramData rent stays locked while the program exists, about 0.005 SOL goes into
+the Program account, the Config, the Executor float and fees for good, and the rest stays in the
+keys it was sent to.
 
 ## 17. Files and secrets
 
