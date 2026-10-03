@@ -48,6 +48,15 @@ max_connections_per_ip = 64
 ip_burst = 60
 ip_per_second = 4.0
 
+[record]
+# A night when the cost gate never opens places no SOL, so no dig carries the phone's heartbeats
+# on-chain. Without this the shift would seal with no dark round: no streak day, and a Focus Bond
+# would go to the Bury lot although the phone was down all night. The crank pays for these
+# records itself (about 6,300 lamports per rig, every `every_rounds` rounds), and this budget
+# is the most it can spend on them in an hour (0.024 SOL a day).
+gate_closed_rigs = true
+max_lamports_per_hour = 1000000
+
 [alt]
 enabled = true
 auto_create = true

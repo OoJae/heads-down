@@ -19,7 +19,7 @@ Contents: [Founder checklist](#founder-checklist) ·
 
 In order. Until step 5 no transaction is signed by these keys.
 
-1. **Helius key.** Create a Helius account (Developer plan, section 5). Put one line in
+1. **Helius key.** Create a Helius account (the free plan is enough to start, section 5). Put one line in
    `~/.config/heads-down/mainnet/helius.env`: `HELIUS_API_KEY=<key>`, then
    `chmod 600 ~/.config/heads-down/mainnet/helius.env`. Never paste the key anywhere else.
 2. **Back up the keys.** `~/.config/heads-down/` holds the only copies (no seed phrases were
@@ -121,7 +121,7 @@ scripts always read it from the cluster):
 | registrar | 0 | 0 | signs off-chain only |
 | **Total** | 1,068,981,560 | **1.068981560** | |
 
-The deploy also needs the program **buffer** (0.567766200 SOL for today's 111,600-byte build)
+The deploy also needs the program **buffer** (0.964331320 SOL for today's 189,664-byte build)
 for a few minutes: `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
 for the ProgramData, so the peak is the larger of the two, not their sum. `preflight.sh`
 checks the deployer's balance against exactly this. What stays out of the deployer for good:
@@ -129,8 +129,9 @@ ProgramData rent (recoverable only by closing the program), the Program account,
 and the Executor float.
 
 Later, not at launch: each upgrade needs a temporary buffer of `(37 + 128 + build size) x 5,080`
-lamports (0.57 SOL today, about 1 SOL for a 192 KiB build), refunded to the spill account when
-the upgrade executes. The ~0.93 SOL left of a 2 SOL budget covers the first one.
+lamports (0.96 SOL for today's build), refunded to the spill account when the upgrade executes.
+Today's build fills 96% of the 196,608-byte `--max-len`: an upgrade that grows the program by
+more than about 6.9 KB needs `solana program extend` first (5,080 lamports per added byte).
 
 ## 4. Parameters and why
 
@@ -153,10 +154,14 @@ whose feature is active on mainnet since slot 428,976,000).
 
 ## 5. Helius
 
-- **Plan.** The free plan's 1M credits a month will not last: the crank's watcher and dig loop
-  and the indexer's 30 s polling use roughly 3-8M standard calls a month at launch volume. The
-  **Developer plan ($49/month, 10M credits, 50 requests/s, staked sends)** is the working size.
-  WebSocket `accountSubscribe` (the crank's watcher) works on it.
+- **Plan.** Start on the **free plan ($0)**. Its 1M credits a month cover the deploy, the
+  first rigs and the demo, not steady use: the crank's watcher and dig loop and the indexer's
+  30 s polling use roughly 3-8M standard calls a month at launch volume, which is the
+  **Developer plan ($49/month, 10M credits, 50 requests/s, staked sends)**. Nothing breaks when
+  the free credits run out except that RPC calls start failing: the crank stops digging (rigs
+  go cold, nothing is spent) until the month rolls over or the plan is raised. Watch the credit
+  meter in the Helius dashboard; the indexer's poll interval is the biggest lever.
+  WebSocket `accountSubscribe` (the crank's watcher) works on both plans.
 - **One key, one place on disk:** `~/.config/heads-down/mainnet/helius.env`, mode 600, one line
   `HELIUS_API_KEY=<key>`. The scripts parse it (it is never executed), keep it in a
   non-exported variable, and hand it to child processes through a prefix assignment (the
@@ -364,7 +369,7 @@ runs without a Config but has nothing to dig).
 | `HD_SESSION_SECRET` | | S | | | contents of `registrar-session-secret` |
 | `HD_RPC_URL` | | S/R | | | `https://mainnet.helius-rpc.com/?api-key=${{shared.HELIUS_API_KEY}}` |
 | `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing cert (`apksigner verify --print-certs`) |
-| `HD_SIWS_DOMAIN` / `HD_SIWS_URI` | | - | | | the domain the app signs in to (must match the app build) |
+| `HD_SIWS_DOMAIN` / `HD_SIWS_URI` | | - | | | **required, no default.** The host and URL of the site the app identifies itself with: the app build's `-Pheadsdown.identityUri` (default `https://oojae.github.io/heads-down`, so `oojae.github.io` and that URL). It must be a site the team controls |
 | `HD_TRUSTED_PROXY_HOPS` | | `1` | | | Railway's edge appends the client to X-Forwarded-For |
 | `HD_NONCE_STORE` / `HD_TRANSPARENCY_LOG` | | image defaults | | | `/data/nonces.db`, `/data/attestations.jsonl` |
 | `DATABASE_URL` | | | R | | `${{Postgres.DATABASE_URL}}` |
@@ -376,6 +381,47 @@ runs without a Config but has nothing to dig).
 | `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | `https://${{indexer.RAILWAY_PUBLIC_DOMAIN}}` |
 
 The full lists, with every optional knob and its default, are the four `.env.example` files.
+
+**The crank's client address.** `deploy/railway/crank/crank.toml` sets `trust_real_ip = true`:
+Railway's edge writes the client's address in `X-Real-IP`, and every per-address limit of the
+intake is keyed on it. Check it after the first deploy, from any machine:
+
+```bash
+curl https://<crank domain>/whoami                                # {"ip":"<your own address>"}
+curl -H 'X-Real-IP: 203.0.113.9' https://<crank domain>/whoami    # must still be your own address
+```
+
+If the second call answers `203.0.113.9`, the edge is not overwriting the header: set
+`trust_real_ip = false` (the limits then key on the edge's address, which is coarse but cannot
+be chosen by a client) and report it.
+
+**Gate-closed nights.** The same file sets `[record] gate_closed_rigs = true`: on a night when
+ORE's cost never drops under a rig's ceiling nothing is dug, and without a record the shift would
+seal with no dark round (no streak day; a Focus Bond would go to the Bury lot). The crank pays for
+those records itself, at most 1,000,000 lamports an hour.
+
+### 10.7 The app build that talks to this deployment
+
+A mainnet build must name every endpoint and the site it identifies itself with; the Gradle
+configuration fails otherwise (there is no default service host, because a default would be a
+name somebody else can register):
+
+```bash
+cd android
+./gradlew :app:assembleDebug -Pheadsdown.cluster=mainnet \
+  -Pheadsdown.rpcUrl=https://<rpc proxy, no key in the URL> \
+  -Pheadsdown.crankUrl=wss://<crank domain>/ws \
+  -Pheadsdown.registrarUrl=https://<registrar domain> \
+  -Pheadsdown.indexerUrl=https://<indexer domain> \
+  -Pheadsdown.identityUri=https://oojae.github.io/heads-down
+```
+
+`identityUri` is what a wallet shows next to every signing prompt and, through its host, the
+Sign In With Solana domain; the registrar's `HD_SIWS_DOMAIN` / `HD_SIWS_URI` must match it. The
+default is the project's GitHub Pages address, which only the repository owner's GitHub account
+can publish to. Publish at least a `favicon.ico` there (wallets fetch it for the prompt). The
+RPC URL must not carry an API key: the public `https://api.mainnet-beta.solana.com` works for a
+demo build; a keyed provider needs a proxy that adds the key server-side.
 
 ### 10.5 How the keys reach the processes
 
@@ -600,30 +646,34 @@ match first.
 5. After the audit: revoke through the vault (`set-upgrade-authority --final`) for an
    immutable v1. docs/ORE.md §8 explains why v1 then relies on the layout pins alone.
 
-**Governance.** `Config.governance` cannot change in v1.1, and the multisig's 72 h time lock
-would also delay the pause, which must be immediate. The plan:
+**Governance.** The multisig's 72 h time lock would also delay the pause, which must be
+immediate, so governance does not move to the same vault as the upgrade authority:
 
 - Launch with `governance.json` (a single key the founder keeps offline except for an
   emergency): the pause is one command, and every other governance change already waits 72 h
   on-chain, which users can watch.
-- Add `propose_governance` (behind the same on-chain timelock) to the first program upgrade
-  (the SKR release), then move governance to a **second** Squads multisig **without** a time
-  lock (2-of-3), so a pause takes two signatures but no waiting, and the program's own 72 h
-  timelock still covers every other change.
-- If the SKR upgrade is far off, the alternative is to create that no-time-lock multisig before
-  `init-config.sh` and pass its vault as `--governance`.
+- Since v1.3 `Config.governance` can be rotated (`propose_governance`, then `accept_governance`
+  by the successor after the same 72 h; `scripts/mainnet/governance.sh`). When there are
+  co-signers, move it to a **second** Squads multisig **without** a time lock (2-of-3): a pause
+  then takes two signatures but no waiting, and the program's own 72 h timelock still covers
+  every other change.
+
+**Until the steps above are done, say so.** At launch the upgrade authority is one keypair and
+program upgrades have no delay. [THREAT_MODEL.md](THREAT_MODEL.md) ("As built") and
+[SECURITY_REVIEW.md](SECURITY_REVIEW.md) state this, and they must keep doing so until the
+vault holds the authority.
 
 ## 16. Costs per month
 
 | Item | Plan | Monthly |
 |---|---|---|
 | Railway | Hobby ($5 including $5 of usage) | about **$8-15**: crank ~0.1 GB RAM, registrar ~0.05 GB, indexer ~0.2 GB, dashboard ~0.05 GB, Postgres ~0.25 GB at $10/GB-month, light CPU at $20/vCPU-month, volumes ~3 GB at $0.15/GB |
-| Helius | Developer | **$49** (free plan only for a quiet first week) |
+| Helius | Free to start | **$0**, and **$49** (Developer) once steady use outgrows 1M credits a month |
 | SOL: crank fees | | ~0: each real dig reimburses 7,000 against ~6,050-6,723 spent; failed attempts and congestion are the cost (budget 0.01-0.05 SOL a month) |
 | SOL: lookup tables | one-time | 0.0026 SOL + 0.00065 SOL per rig, recoverable by closing the tables |
 | SOL: Executor | | grows by 3,000 lamports per dig; top-ups only after late third-party checkpoints |
-| Domain (optional) | | ~$1 |
-| **Total** | | **about $60/month**, plus small SOL top-ups |
+| Domain (optional) | | ~$1 (not needed: the app identifies itself with the project's GitHub Pages address) |
+| **Total** | | **about $8-15/month** on the free Helius plan, about $60 with the Developer plan, plus small SOL top-ups |
 
 One-time: the deploy and initialization, **1.07 SOL** (section 3), of which the 0.9996 SOL of
 ProgramData rent stays locked while the program exists.
