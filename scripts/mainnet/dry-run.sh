@@ -4,7 +4,12 @@
 #   keys.sh -> preflight.sh -> deploy.sh -> init-config.sh -> scripts/devstack/smoke.sh
 #   -> deploy.sh --mode upgrade -> deploy.sh --mode buffer (Squads) -> governance pause
 #
-#   scripts/mainnet/dry-run.sh [--keep] [--no-build] [--skip-smoke] [--allow-dirty]
+#   scripts/mainnet/dry-run.sh [--keep] [--no-build] [--skip-smoke] [--allow-dirty] [--tight]
+#
+# --tight funds every key with exactly the lamports the funding table asks for (the amounts the
+# founder is told to send on mainnet), not a lamport more, so a passing run proves those amounts
+# cover the fresh deploy and init-config. Each later drill is then topped up with what the runbook
+# says it needs: the temporary buffer rent plus the fee budget.
 #
 # Isolation: its own dev-stack home, key directories and ports (RPC 38899, crank 38787, indexer
 # 38788, faucet 39900, gossip 38001+; override with HD_DRYRUN_*_PORT), so it never touches a dev
@@ -16,14 +21,15 @@
 HD_SCRIPT=dry-run
 source "$(dirname "$0")/lib.sh"
 
-KEEP=0 UP_ARGS=() SMOKE=1 DEPLOY_ARGS=()
+KEEP=0 UP_ARGS=() SMOKE=1 DEPLOY_ARGS=() TIGHT=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep) KEEP=1; shift ;;
     --no-build) UP_ARGS+=(--no-build); shift ;;
     --skip-smoke) SMOKE=0; shift ;;
     --allow-dirty) DEPLOY_ARGS+=(--allow-dirty); shift ;;
-    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+    --tight) TIGHT=1; shift ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -70,13 +76,49 @@ STARTED=1
 run "$DEVSTACK/up.sh" --no-deploy ${UP_ARGS[@]+"${UP_ARGS[@]}"}
 ok "0 up.sh --no-deploy: fork, driver, crank, indexer up; no heads_down"
 
+# --tight: the funding table as JSON, for a build of $1 bytes (the same call keys.sh prints from).
+FUNDING_JSON="$HD_DEVSTACK_HOME/funding.json"
+funding_json() {
+  HD_DEVSTACK_RPC="http://127.0.0.1:$HD_RPC_PORT" HD_CLUSTER=localnet "$TOOL_BIN" funding \
+    --deployer "$(pubkey_of "$DRY_KEYS/deployer.json")" --so-len "$1" --max-len "$HD_MAX_LEN" \
+    --crank-fee "$HD_CRANK_FEE" --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" --fee-budget "$HD_DEPLOY_FEE_BUDGET" \
+    --key "crank-payer=$(pubkey_of "$DRY_KEYS/crank-payer.json"):$HD_CRANK_PAYER_LAMPORTS" \
+    --key "governance=$(pubkey_of "$DRY_KEYS/governance.json"):$HD_GOVERNANCE_LAMPORTS" \
+    --json "$FUNDING_JSON" >/dev/null
+}
+# Lamports a key needs (deployer, crank-payer, governance), or a rent figure with "rent.<name>".
+funding_of() {
+  python3 - "$FUNDING_JSON" "$1" <<'PYEOF'
+import json, sys
+table, what = json.load(open(sys.argv[1])), sys.argv[2]
+if what.startswith("rent."):
+    print(table["rent"][what[5:]])
+else:
+    print(next(row["need"] for row in table["rows"] if row["key"] == what))
+PYEOF
+}
+# fund.sh takes SOL and truncates to lamports: half a lamport more makes the amount exact.
+fund_lamports() {
+  run "$DEVSTACK/fund.sh" "$1" "$(python3 -c 'import sys; print(f"{(int(sys.argv[1]) + 0.5) / 1e9:.10f}")' "$2")"
+}
+
 step "1. keys.sh (throwaway deploy keys in $DRY_KEYS)"
 run "$MAINNET_SCRIPTS/keys.sh" --cluster localnet --keys-dir "$DRY_KEYS" --no-funding
-run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/deployer.json")" 5
-run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/governance.json")" 1
-run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/crank-payer.json")" 1
+if [[ $TIGHT == 1 ]]; then
+  # The deployer's need does not depend on the build's size (only the buffer line does).
+  funding_json 0
+  for key in deployer crank-payer governance; do
+    fund_lamports "$(pubkey_of "$DRY_KEYS/$key.json")" "$(funding_of "$key")"
+  done
+  FUNDED="every key holds exactly what the funding table asks for (deployer $(funding_of deployer) lamports)"
+else
+  run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/deployer.json")" 5
+  run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/governance.json")" 1
+  run "$DEVSTACK/fund.sh" "$(pubkey_of "$DRY_KEYS/crank-payer.json")" 1
+  FUNDED="public keys and funding printed"
+fi
 run "$MAINNET_SCRIPTS/keys.sh" --cluster localnet --keys-dir "$DRY_KEYS"
-ok "1 keys.sh: keys created (600 in a 700 dir), public keys and funding printed"
+ok "1 keys.sh: keys created (600 in a 700 dir), $FUNDED"
 
 step "2. preflight.sh --cluster localnet (read-only)"
 run "$MAINNET_SCRIPTS/preflight.sh" --cluster localnet --keys-dir "$DRY_KEYS"
@@ -101,11 +143,18 @@ if [[ $SMOKE == 1 ]]; then
   fi
 fi
 
+if [[ $TIGHT == 1 ]]; then
+  # What the runbook says an upgrade needs: the temporary buffer's rent and the fee budget.
+  funding_json "$(wc -c <"$HD_SO" | tr -d ' ')"
+  fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(( $(funding_of rent.buffer) + HD_DEPLOY_FEE_BUDGET ))"
+fi
 step "6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode upgrade --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
 run "$MAINNET_SCRIPTS/solana.sh" --cluster localnet --keys-dir "$DRY_KEYS" -- program show "$HD_PROGRAM_ID"
 ok "6 deploy.sh --mode upgrade: upgraded in place from a fresh buffer, bytes verified, receipt written"
 
+# The upgrade's buffer rent came back to the deployer; this drill's stays in the handed-over buffer.
+[[ $TIGHT == 0 ]] || fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$HD_DEPLOY_FEE_BUDGET"
 step "7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
 run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode buffer \
   --buffer-authority "$(pubkey_of "$DRY_KEYS/governance.json")" --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"}
