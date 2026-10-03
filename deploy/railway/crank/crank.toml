@@ -37,8 +37,11 @@ ore_programdata_slot = 450496378   # ORE upgrade pin (docs/ORE.md): a mismatch t
 config_poll_secs = 30
 
 [intake]
-# Railway's edge appends the client address as the last X-Forwarded-For hop.
-trust_forwarded_for = true
+# Railway's edge sets X-Real-IP to the client's remote address (Railway docs, Networking >
+# Specs & Limits). Every per-address limit is keyed on it. After a deploy, check it:
+#   curl https://<crank host>/whoami                       -> your own address
+#   curl -H 'X-Real-IP: 203.0.113.9' https://<crank host>/whoami   -> still your own address
+trust_real_ip = true
 # Phones on mobile networks share addresses (carrier NAT), and Railway's CDN path can fold many
 # clients into one edge address: allow more than the default 16 connections per address.
 max_connections_per_ip = 64

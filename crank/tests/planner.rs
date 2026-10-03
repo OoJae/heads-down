@@ -564,6 +564,55 @@ fn records(w: &World, policy: RecordPolicy) -> (Vec<hd_crank::planner::RecordDec
     plan_records(&w.board, &w.treasury, w.now, &w.rigs, &w.heartbeats, &policy)
 }
 
+/// The record budget cannot always pay for every rig, so the order decides who is served. It
+/// used to be address order: a few dozen rigs with low-sorting addresses took the whole budget
+/// every round and the rest never had a dark round recorded.
+#[test]
+fn records_go_to_the_longest_waiting_rig_first_whatever_its_address() {
+    let mut w = World::new();
+    let rigs: Vec<Address> = (1..=12).map(|i| w.add(i, true)).collect();
+    for r in &rigs {
+        let rig = w.rig_mut(r);
+        rig.plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+        rig.shift_start_round = ROUND - 9;
+        // Recorded three rounds ago: due again.
+        rig.lease_from_round = ROUND - 3;
+        rig.lease_to_round = ROUND - 2;
+    }
+    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    // Two rigs have waited longer than the others (one never had a lease in this shift).
+    let mut by_address = rigs.clone();
+    by_address.sort_by_key(|a| a.to_bytes());
+    let (never, oldest) = (by_address[11], by_address[10]); // the two that address order served last
+    w.rig_mut(&never).lease_from_round = 0;
+    w.rig_mut(&never).lease_to_round = 0;
+    w.rig_mut(&oldest).lease_from_round = ROUND - 8;
+    w.rig_mut(&oldest).lease_to_round = ROUND - 7;
+    let order: Vec<Address> = records(&w, policy).0.iter().map(|d| d.rig).collect();
+    assert_eq!(order.len(), 12);
+    assert_eq!(&order[..2], &[never, oldest], "longest-waiting first");
+    // Among equals the order is not address order, and it changes from round to round, so no
+    // address is always first.
+    assert_ne!(&order[2..], &by_address[..10]);
+    let mut next = World::new();
+    for i in 1..=12 {
+        let r = next.add(i, true);
+        let rig = next.rig_mut(&r);
+        rig.plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
+        rig.shift_start_round = ROUND - 9;
+        rig.lease_from_round = ROUND - 3;
+        rig.lease_to_round = ROUND - 2;
+    }
+    let a: Vec<Address> = records(&next, policy).0.iter().map(|d| d.rig).collect();
+    next.board.round_id += 1;
+    let f = HeartbeatFields { counter: 52, shift_id: 7, round_id: ROUND + 1, lease_rounds: 2 };
+    let fresh: Vec<_> = next.phones.iter().map(|(addr, phone)| (*addr, phone.verified(&hd::PROGRAM_ID, addr, f))).collect();
+    next.heartbeats.extend(fresh);
+    let b: Vec<Address> = records(&next, policy).0.iter().map(|d| d.rig).collect();
+    assert_eq!((a.len(), b.len()), (12, 12));
+    assert_ne!(a, b, "the tie-break order differs between rounds");
+}
+
 #[test]
 fn focus_only_rigs_get_their_heartbeats_recorded_every_n_rounds() {
     let mut w = World::new();

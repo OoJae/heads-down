@@ -66,12 +66,19 @@ pub struct IntakeConfig {
     pub max_tracked_keys: usize,
     /// Signature verifications in flight.
     pub max_concurrent_verifications: usize,
-    /// Close a connection silent for this long.
+    /// Close a connection that has sent no text frame for this long. Control frames (Ping,
+    /// Pong) do not count: a silent client cannot keep its slot by pinging.
     pub idle_timeout: Duration,
+    /// Close a connection that has not delivered a message that verified under a rig's key
+    /// within this long of connecting. A phone signs within one ORE round (about 78 s).
+    pub unverified_timeout: Duration,
     /// Close a connection that does not read its acks within this long.
     pub send_timeout: Duration,
     /// Take the client IP from the last `X-Forwarded-For` hop (only behind a trusted proxy).
     pub trust_forwarded_for: bool,
+    /// Take the client IP from `X-Real-IP` (only behind a proxy that sets it on every request;
+    /// Railway documents it as the client's remote address). Wins over `trust_forwarded_for`.
+    pub trust_real_ip: bool,
     /// `/healthz` reports degraded when the slot has not advanced for this long.
     pub stale_chain_after: Duration,
     /// Streak protection: a BREAK is accepted only while its rig's plan window is open.
@@ -89,8 +96,10 @@ impl Default for IntakeConfig {
             max_tracked_keys: 200_000,
             max_concurrent_verifications: 64,
             idle_timeout: Duration::from_secs(300),
+            unverified_timeout: Duration::from_secs(180),
             send_timeout: Duration::from_secs(5),
             trust_forwarded_for: false,
+            trust_real_ip: false,
             stale_chain_after: Duration::from_secs(30),
             window_rule: WindowRule::default(),
         }
@@ -189,28 +198,41 @@ impl<S: RigSource> Intake<S> {
 
     /// Handle one text frame from `ip`; returns the JSON reply.
     pub async fn handle_text(&self, ip: IpAddr, text: &str) -> String {
+        self.handle_frame(ip, text).await.0
+    }
+
+    /// [`Self::handle_text`], also telling whether the frame carried a message that verified
+    /// under a rig's key and was accepted (the connection has then proven it speaks for a rig).
+    pub async fn handle_frame(&self, ip: IpAddr, text: &str) -> (String, bool) {
         if text.len() > self.cfg.max_message_bytes {
-            return ack_json(0, Err(self.reject(Reject::TooLarge)));
+            return (ack_json(0, Err(self.reject(Reject::TooLarge))), false);
         }
         let v: Value = match serde_json::from_str(text) {
             Ok(v @ Value::Object(_)) => v,
-            _ => return ack_json(0, Err(self.reject(Reject::Malformed))),
+            _ => return (ack_json(0, Err(self.reject(Reject::Malformed))), false),
         };
         let counter = counter_hint(&v);
         if self.is_draining() {
-            return ack_json(counter, Err(self.reject(Reject::Busy)));
+            return (ack_json(counter, Err(self.reject(Reject::Busy))), false);
         }
         if !self.ip_limiter.check(&ip_key(ip)) {
-            return ack_json(counter, Err(self.reject(Reject::RateLimitedIp)));
+            return (ack_json(counter, Err(self.reject(Reject::RateLimitedIp))), false);
         }
         let ty = v.get("type").or_else(|| v.get("kind")).map(|t| t.as_str().unwrap_or("?"));
-        match ty {
-            Some("status") => self.status_json(),
-            Some("heartbeat") | None => ack_json(counter, self.heartbeat(v).await),
-            Some("break") => ack_json(counter, self.signal(SignalKind::Break, v).await),
-            Some("freeze") => ack_json(counter, self.signal(SignalKind::Freeze, v).await),
-            Some(_) => ack_json(counter, Err(self.reject(Reject::Malformed))),
-        }
+        let result = match ty {
+            Some("status") => return (self.status_json(), false),
+            Some("heartbeat") | None => self.heartbeat(v).await,
+            Some("break") => self.signal(SignalKind::Break, v).await,
+            Some("freeze") => self.signal(SignalKind::Freeze, v).await,
+            Some(_) => Err(self.reject(Reject::Malformed)),
+        };
+        let verified = result.is_ok();
+        (ack_json(counter, result), verified)
+    }
+
+    /// Where this intake takes a client's address from.
+    pub fn client_ip_source(&self) -> ClientIpSource {
+        self.cfg.client_ip_source()
     }
 
     async fn heartbeat(&self, v: Value) -> Result<(), Reject> {
@@ -324,19 +346,50 @@ impl<S: RigSource> Drop for ConnGuard<S> {
     }
 }
 
-/// Client IP: the socket peer, or the last `X-Forwarded-For` hop when configured.
-pub fn client_ip(peer: SocketAddr, headers: &HeaderMap, trust_forwarded_for: bool) -> IpAddr {
-    if trust_forwarded_for {
-        if let Some(ip) = headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.rsplit(',').next())
-            .and_then(|s| s.trim().parse::<IpAddr>().ok())
-        {
-            return ip;
+/// Where a client's address is read from. Every per-IP limit is keyed on it, and those limits
+/// are the intake's only protection before a signature has been verified, so it must be a value
+/// the client cannot choose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClientIpSource {
+    /// The socket peer: right when clients connect directly.
+    Peer,
+    /// `X-Real-IP`: right behind an edge that sets it on every request (Railway documents it
+    /// as the client's remote address).
+    RealIp,
+    /// The last hop of `X-Forwarded-For`: right behind a proxy that appends the address it saw.
+    ForwardedFor,
+}
+
+impl IntakeConfig {
+    /// `X-Real-IP` when trusted, else `X-Forwarded-For` when trusted, else the socket peer.
+    pub fn client_ip_source(&self) -> ClientIpSource {
+        if self.trust_real_ip {
+            ClientIpSource::RealIp
+        } else if self.trust_forwarded_for {
+            ClientIpSource::ForwardedFor
+        } else {
+            ClientIpSource::Peer
         }
     }
-    peer.ip()
+}
+
+/// Client IP: the socket peer, or the value the trusted proxy wrote.
+///
+/// A header can arrive as several lines. The proxy's own line is the **last** one (a client can
+/// only add lines before it), and within `X-Forwarded-For` its hop is the last element. Reading
+/// the first line, as an earlier version did, let a client that sent its own `X-Forwarded-For`
+/// choose the address its limits were keyed on. A missing or malformed header falls back to the
+/// socket peer.
+pub fn client_ip(peer: SocketAddr, headers: &HeaderMap, source: ClientIpSource) -> IpAddr {
+    let last_line = |name: &str| headers.get_all(name).iter().next_back().and_then(|v| v.to_str().ok());
+    let parsed = match source {
+        ClientIpSource::Peer => None,
+        ClientIpSource::RealIp => last_line("x-real-ip").and_then(|s| s.trim().parse::<IpAddr>().ok()),
+        ClientIpSource::ForwardedFor => {
+            last_line("x-forwarded-for").and_then(|v| v.rsplit(',').next()).and_then(|s| s.trim().parse::<IpAddr>().ok())
+        }
+    };
+    parsed.unwrap_or_else(|| peer.ip())
 }
 
 async fn ws_handler<S: RigSource>(
@@ -345,7 +398,7 @@ async fn ws_handler<S: RigSource>(
     headers: HeaderMap,
     State(st): State<Arc<Intake<S>>>,
 ) -> Response {
-    let ip = client_ip(peer, &headers, st.cfg.trust_forwarded_for);
+    let ip = client_ip(peer, &headers, st.cfg.client_ip_source());
     let guard = match st.try_open(ip) {
         Ok(g) => g,
         Err(code) => return (code, "connection limit").into_response(),
@@ -360,13 +413,25 @@ async fn ws_handler<S: RigSource>(
 }
 
 async fn serve_socket<S: RigSource>(st: Arc<Intake<S>>, mut socket: WebSocket, ip: IpAddr) {
+    let opened = tokio::time::Instant::now();
+    // Moved only by a text frame: a client that only pings is idle.
+    let mut last_text = opened;
+    // Set by the first message that verified under a rig's key.
+    let mut verified = false;
     loop {
-        let msg = match tokio::time::timeout(st.cfg.idle_timeout, socket.recv()).await {
+        let idle_at = last_text + st.cfg.idle_timeout;
+        let deadline = if verified { idle_at } else { idle_at.min(opened + st.cfg.unverified_timeout) };
+        let msg = match tokio::time::timeout_at(deadline, socket.recv()).await {
             Ok(Some(Ok(m))) => m,
-            _ => break, // idle, closed, oversize frame, or protocol error
+            _ => break, // idle, never verified, closed, oversize frame, or protocol error
         };
         let reply = match msg {
-            Message::Text(t) => st.handle_text(ip, t.as_str()).await,
+            Message::Text(t) => {
+                last_text = tokio::time::Instant::now();
+                let (reply, ok) = st.handle_frame(ip, t.as_str()).await;
+                verified |= ok;
+                reply
+            }
             Message::Binary(_) => ack_json(0, Err(st.reject(Reject::Malformed))),
             Message::Ping(_) | Message::Pong(_) => continue,
             Message::Close(_) => break,
@@ -410,16 +475,25 @@ async fn healthz<S: RigSource>(State(st): State<Arc<Intake<S>>>) -> (StatusCode,
     (if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE }, Json(body))
 }
 
+/// The address the intake keys this caller's limits on. For the deployment check: behind the
+/// right proxy setting it is the caller's own address and does not change when the caller sends
+/// `X-Real-IP` or `X-Forwarded-For` headers of its own (docs/DEPLOY.md).
+async fn whoami<S: RigSource>(ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, State(st): State<Arc<Intake<S>>>) -> Json<Value> {
+    let ip = ip_key(client_ip(peer, &headers, st.cfg.client_ip_source()));
+    Json(json!({ "ip": ip.to_string() }))
+}
+
 async fn metrics<S: RigSource>(State(st): State<Arc<Intake<S>>>) -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], st.metrics.render())
 }
 
-/// `/ws` (and its alias `/v1/heartbeats`), `/healthz`, `/metrics`.
+/// `/ws` (and its alias `/v1/heartbeats`), `/healthz`, `/metrics`, `/whoami`.
 pub fn router<S: RigSource>(intake: Arc<Intake<S>>) -> Router {
     Router::new()
         .route("/ws", get(ws_handler::<S>))
         .route("/v1/heartbeats", get(ws_handler::<S>))
         .route("/healthz", get(healthz::<S>))
+        .route("/whoami", get(whoami::<S>))
         .route("/metrics", get(metrics::<S>))
         .with_state(intake)
 }
@@ -432,6 +506,32 @@ pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_client_address_is_the_proxys_line_never_the_clients() {
+        let peer: SocketAddr = "10.0.0.7:5000".parse().unwrap();
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let mut h = HeaderMap::new();
+        // The client sent its own lines; the proxy's are the last ones.
+        h.append("x-forwarded-for", "198.51.100.66".parse().unwrap());
+        h.append("x-forwarded-for", "198.51.100.67, 203.0.113.9".parse().unwrap());
+        h.append("x-real-ip", "198.51.100.66".parse().unwrap());
+        h.append("x-real-ip", "203.0.113.9".parse().unwrap());
+        assert_eq!(client_ip(peer, &h, ClientIpSource::Peer), ip("10.0.0.7"), "no proxy trusted: the socket peer");
+        assert_eq!(client_ip(peer, &h, ClientIpSource::RealIp), ip("203.0.113.9"));
+        assert_eq!(client_ip(peer, &h, ClientIpSource::ForwardedFor), ip("203.0.113.9"), "last hop of the last line");
+        // A missing or malformed header falls back to the peer; it never yields a client-chosen key.
+        let mut bad = HeaderMap::new();
+        bad.append("x-real-ip", "not-an-address".parse().unwrap());
+        bad.append("x-forwarded-for", "203.0.113.9, garbage".parse().unwrap());
+        assert_eq!(client_ip(peer, &bad, ClientIpSource::RealIp), ip("10.0.0.7"));
+        assert_eq!(client_ip(peer, &bad, ClientIpSource::ForwardedFor), ip("10.0.0.7"));
+        assert_eq!(client_ip(peer, &HeaderMap::new(), ClientIpSource::RealIp), ip("10.0.0.7"));
+        // X-Real-IP wins when both are trusted (the config refuses that combination anyway).
+        let both = IntakeConfig { trust_real_ip: true, trust_forwarded_for: true, ..IntakeConfig::default() };
+        assert_eq!(both.client_ip_source(), ClientIpSource::RealIp);
+        assert_eq!(IntakeConfig::default().client_ip_source(), ClientIpSource::Peer);
+    }
 
     #[test]
     fn acks_have_exactly_the_contract_fields() {

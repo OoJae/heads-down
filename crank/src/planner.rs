@@ -519,15 +519,29 @@ pub fn plan_records(
     policy: &RecordPolicy,
 ) -> (Vec<RecordDecision>, Vec<(Address, RecordSkip)>) {
     let round_id = board.round_id;
-    let (mut out, mut skips) = (Vec::new(), Vec::new());
+    let (mut due, mut skips) = (Vec::new(), Vec::new());
     for (addr, rig) in rigs {
         match check_record(board, treasury, now_ts, addr, rig, heartbeats.get(addr), policy, round_id) {
-            Ok(d) => out.push(d),
+            Ok(d) => due.push((rig.lease_to_round, record_tiebreak(addr, round_id), d)),
             Err(s) => skips.push((*addr, s)),
         }
     }
-    out.sort_by_key(|d| d.rig.to_bytes());
-    (out, skips)
+    // The record budget cannot always pay for every rig. Longest-waiting first: a rig with no
+    // lease yet in its shift, then the oldest lease, so the budget goes round the rigs instead
+    // of to the same ones every round. Ties are broken by a per-round mix of the address: a
+    // wallet cannot pick an address that always sorts first (it could when this was address
+    // order, and a few dozen such rigs took the whole budget).
+    due.sort_by_key(|(lease_to, tiebreak, _)| (*lease_to, *tiebreak));
+    (due.into_iter().map(|(_, _, d)| d).collect(), skips)
+}
+
+/// A per-round order key for `rig`: stable within a round, different in the next.
+fn record_tiebreak(rig: &Address, round_id: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    round_id.hash(&mut h);
+    rig.to_bytes().hash(&mut h);
+    h.finish()
 }
 
 #[allow(clippy::too_many_arguments)]

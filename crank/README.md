@@ -364,11 +364,25 @@ until its lease, at most 3 rounds, runs out: the lease was the phone's own promi
 binary), the Nostr mirror hook, phones posting their own messages.
 
 **The crank's own attack surface:**
-- *Intake DoS:* global and per-IP connection caps (IPv6 per /64) before the upgrade; 2 KiB frame cap; per-IP and
-  per-rig token buckets before any RPC read or ECDSA verify; bounded verification pool; idle and send timeouts;
-  bounded key tables; unknown rigs cost at most one RPC read per rig per 30 s.
+- *Intake DoS:* global and per-IP connection caps (IPv6 per /64) before the upgrade; 2 KiB frame cap; a per-IP
+  token bucket before any RPC read or ECDSA verify; bounded verification pool; send timeout; bounded key tables;
+  unknown rigs cost at most one RPC read per rig per 30 s.
+  - *A rig's own allowance is spent only by messages that verified under its key.* The per-rig bucket is looked
+    at before the signature check and charged after it, so frames that merely name a rig cannot silence it.
+  - *A connection must talk, and must prove itself.* The idle timeout counts text frames only (a Ping does not
+    extend it), and a connection that has not delivered a verified message within `unverified_timeout_secs`
+    (180) is closed. A host with many addresses can still open connections as fast as they are closed; the caps
+    bound how many at once.
+  - *The client address is one the client cannot choose:* the socket peer, or, behind a proxy, the last line of
+    the header that proxy writes (`trust_real_ip` for `X-Real-IP`, which Railway documents as the client's
+    address; `trust_forwarded_for` for the last `X-Forwarded-For` hop). `GET /whoami` returns the address the
+    limits are keyed on, to check after a deploy that a header sent by the caller does not change it.
 - *Fee draining:* BREAK / FREEZE, records and end_shift are paid by the crank, so each has a per-rig limit and a
-  lamport budget; a signal is simulated before it is paid for.
+  lamport budget; a signal is simulated before it is paid for. Records are served longest-waiting rig first, so
+  a budget that cannot pay for everyone goes round the rigs. What a budget does not prevent: rigs that each stay
+  inside their own limit can together use up the hourly BREAK / FREEZE budget, and then the team crank lands no
+  more signals that hour. A rig whose signal is not landed stops being dug when its lease runs out (at most 3
+  rounds), and FREEZE can always be sent by the wallet itself.
 - *Batch griefing:* one bad signature fails a whole transaction in the precompile, so every message is verified
   off-chain first; simulation bisects any batch that still fails.
 - *Secrets:* the fee-payer key is loaded from a mode-600 path and never logged; the RPC/WebSocket URL is a secret
