@@ -9,6 +9,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -21,6 +22,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.FileProvider
 import androidx.core.graphics.toColorInt
+import xyz.headsdown.feature.shift.foreman.ForemanDiagnostics
+import xyz.headsdown.feature.shift.foreman.ForemanSettings
+import xyz.headsdown.ml.ForemanModels
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,6 +46,13 @@ class SensorLabActivity : Activity() {
     private lateinit var sessionsBox: LinearLayout
     private var chosen = SensorLabLabel.PICKUP
     private var renderedSessions: String? = null
+
+    // The pickup classifier's debug hooks: time it on this phone, and take it out of the shift.
+    private val foremanSettings by lazy { ForemanSettings(applicationContext) }
+    private lateinit var classifierStatus: TextView
+    private lateinit var breaksSwitch: Button
+    private var benchmarking = false
+    private var benchmarkLine = "Not benchmarked yet."
 
     private val poll = object : Runnable {
         override fun run() {
@@ -119,12 +130,66 @@ class SensorLabActivity : Activity() {
                 }
             },
         )
+        column.addView(text("Pickup classifier", 18f, bold = true, top = 24))
+        column.addView(
+            text(
+                "The model the shift service runs (trained on synthetic data only). The benchmark times one motion " +
+                    "window from raw samples to a verdict, on a background-priority thread like the service's. " +
+                    "The switch takes the classifier out of a shift: tilt, screen-on, unlock and unplugging still break it.",
+                14f, color = ASH_MUTED,
+            ),
+        )
+        classifierStatus = text("", 13f, mono = true)
+        column.addView(classifierStatus)
+        column.addView(Button(this).apply { text = "Benchmark the classifier on this phone"; setOnClickListener { benchmark() } })
+        breaksSwitch = Button(this).apply {
+            setOnClickListener {
+                foremanSettings.pickupBreaksEnabled = !foremanSettings.pickupBreaksEnabled
+                renderClassifier()
+            }
+        }
+        column.addView(breaksSwitch)
+        renderClassifier()
         setContentView(ScrollView(this).apply { setBackgroundColor(CHARCOAL); addView(column) })
+    }
+
+    private fun renderClassifier() {
+        val on = foremanSettings.pickupBreaksEnabled
+        breaksSwitch.text = if (on) "Pickup breaks: ON (tap to switch off)" else "Pickup breaks: OFF (tap to switch on)"
+        // What the shift service's pickup watch saw the last time it ran in this process: the
+        // delivered sample rate and how many windows were judged. Counts only.
+        val lastShift = ForemanDiagnostics.lastRun?.let { "Last shift: ${it.summary()}" }
+            ?: "No shift has run since the app started."
+        classifierStatus.text = (if (benchmarking) "Benchmarking…" else benchmarkLine) + "\n" + lastShift
+    }
+
+    /** Debug hook: per-window inference time on this device, off the main thread. */
+    private fun benchmark() {
+        if (benchmarking) return
+        benchmarking = true
+        renderClassifier()
+        Thread(
+            {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                val line = try {
+                    PickupBenchmark.run(ForemanModels.pickupClassifier(assets), PickupBenchmark.syntheticWindows()).summary()
+                } catch (e: RuntimeException) {
+                    "Benchmark failed: ${e.javaClass.simpleName}"
+                }
+                main.post {
+                    benchmarking = false
+                    benchmarkLine = line
+                    if (!isDestroyed) renderClassifier()
+                }
+            },
+            "hd-pickup-benchmark",
+        ).start()
     }
 
     override fun onStart() {
         super.onStart()
         main.post(poll)
+        if (::classifierStatus.isInitialized) renderClassifier() // a shift may have ended meanwhile
     }
 
     override fun onStop() {

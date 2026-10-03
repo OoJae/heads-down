@@ -29,6 +29,7 @@ import androidx.core.content.getSystemService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import xyz.headsdown.ml.pickup.MotionTrigger
 import java.io.BufferedWriter
 import java.io.File
 import java.text.SimpleDateFormat
@@ -62,7 +63,10 @@ class SensorLabService : Service() {
     private var handler: Handler? = null
     @Volatile private var writer: BufferedWriter? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    @Volatile private var trigger = MotionTrigger()
+    // The app's one motion trigger, as the shift service runs it: recorded windows start on the
+    // sample an on-device window would, and the trigger comes back to rest after the phone is
+    // laid down (the plain trigger would re-fire every 3 s for the rest of the session).
+    @Volatile private var trigger = MotionTrigger.live()
     @Volatile private var recorder: WindowRecorder? = null
     private var receiverRegistered = false
 
@@ -70,7 +74,7 @@ class SensorLabService : Service() {
         override fun onSensorChanged(event: SensorEvent) {
             if (event.sensor.type != Sensor.TYPE_ACCELEROMETER || event.values.size < 3) return
             val s = AccelSample(event.timestamp, SystemClock.elapsedRealtimeNanos(), event.values[0], event.values[1], event.values[2])
-            recorder?.onSample(s, trigger.onSample(s))
+            recorder?.onSample(s, trigger.onSample(s.tNanos, s.x, s.y, s.z))
             _status.value = _status.value.let { it.copy(samples = it.samples + 1) }
         }
 
@@ -131,7 +135,7 @@ class SensorLabService : Service() {
             intendedLabel = label,
         )
         write(SensorLogCsv.header(meta) + SensorLogCsv.event(GroundTruth.SESSION_START, SystemClock.elapsedRealtimeNanos()))
-        trigger = MotionTrigger()
+        trigger = MotionTrigger.live()
         recorder = WindowRecorder { window ->
             write(SensorLogCsv.window(window))
             _status.value = _status.value.copy(windows = window.id)

@@ -16,10 +16,10 @@ class SensorLabReleaseTest {
     }
 
     @Test
-    fun `no recorder, service, screen or provider class is compiled into release`() {
+    fun `no recorder, service, screen, provider or benchmark class is compiled into release`() {
         listOf(
             "SensorLabService", "SensorLabActivity", "SensorLabExportProvider", "SensorLabStore",
-            "MotionTrigger", "WindowRecorder", "SensorLogCsv",
+            "MotionTrigger", "WindowRecorder", "SensorLogCsv", "PickupBenchmark",
         ).forEach { name ->
             try {
                 Class.forName("xyz.headsdown.feature.shift.devlog.$name")
