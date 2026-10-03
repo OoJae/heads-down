@@ -68,6 +68,7 @@ class HomeAndIntroTest {
         onOpenSensorLab: (() -> Unit)? = null,
         onHowItWorks: () -> Unit = {},
         onClockOut: (() -> Unit)? = null,
+        onWithdraw: (() -> Unit)? = null,
     ) = rule.setContent {
         HeadsDownTheme {
             HomeScreen(
@@ -81,6 +82,7 @@ class HomeAndIntroTest {
                 onHowItWorks = onHowItWorks,
                 onPreviewReveal = onPreviewReveal,
                 onClockOut = onClockOut,
+                onWithdraw = onWithdraw,
                 onAddWidget = onAddWidget,
                 onOpenSensorLab = onOpenSensorLab,
             )
@@ -99,6 +101,15 @@ class HomeAndIntroTest {
     fun `without a clock-out screen the entry is not shown`() {
         home()
         rule.onAllNodesWithTag(HomeTags.CLOCK_OUT).assertCountEquals(0)
+        rule.onAllNodesWithTag(HomeTags.WITHDRAW).assertCountEquals(0)
+    }
+
+    @Test
+    fun `the way out is on the home screen`() {
+        var opened = 0
+        home(onWithdraw = { opened++ })
+        rule.onNodeWithTag(HomeTags.WITHDRAW).performScrollTo().assertTextEquals("Take SOL back or close the rig").performClick()
+        assertEquals(1, opened)
     }
 
     @Test

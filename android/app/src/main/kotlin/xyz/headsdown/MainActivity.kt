@@ -34,6 +34,7 @@ import xyz.headsdown.ui.NightShiftIntro
 import xyz.headsdown.ui.OnboardingScreen
 import xyz.headsdown.ui.launch
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import xyz.headsdown.withdraw.WithdrawActivity
 import javax.inject.Inject
 
 /** The only exported Activity (launcher). Clock-in goes through the trampoline. */
@@ -60,6 +61,7 @@ class MainActivity : ComponentActivity() {
                         // The reveal shows the latest real haul, or says there is none yet.
                         onPreviewReveal = { launch(Intent(this, RevealActivity::class.java)) },
                         onClockOut = { launch(Intent(this, ClockOutActivity::class.java)) },
+                        onWithdraw = { launch(Intent(this, WithdrawActivity::class.java)) },
                         // Debug and localdev builds only: release has no sensor lab at all.
                         onOpenSensorLab = SensorLab.intent(this)?.let { intent -> { launch(intent) } },
                         // Debug and localdev builds only: release has no rig debug screen at all.
@@ -86,6 +88,7 @@ private fun HeadsDownRoot(
     onClockIn: () -> Unit,
     onPreviewReveal: () -> Unit,
     onClockOut: () -> Unit,
+    onWithdraw: () -> Unit,
     onOpenSensorLab: (() -> Unit)?,
     onOpenRigDebug: (() -> Unit)?,
     onCreateRigKey: () -> Unit,
@@ -121,6 +124,7 @@ private fun HeadsDownRoot(
             onHowItWorks = { rereadIntro = true },
             onPreviewReveal = onPreviewReveal,
             onClockOut = onClockOut,
+            onWithdraw = onWithdraw,
             onAddWidget = if (vm.widgetPinSupported) vm::requestRigWidget else null,
             onOpenSensorLab = onOpenSensorLab,
             onOpenRigDebug = onOpenRigDebug,

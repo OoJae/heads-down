@@ -18,7 +18,7 @@ code, and the rest of the document should be read with it. The review that produ
 | Crank, registrar, indexer, dashboard | **Built** |
 | Freeze from the phone, Unfreeze with the wallet | **Built.** A frozen rig's next clock-in carries `unfreeze_rig`, signed by the wallet |
 | Claim ORE in the app | **Built.** The clock-out screen sends ORE's `claim_ore` to the wallet, or leaves the ORE in the user's Miner |
-| Revoke and Close rig in the app | **Not built.** The instruction builders exist and are tested; the screens do not. Use the ORE app for the Automation until they do |
+| Revoke and Close rig in the app | **Built.** "Take SOL back" sends ORE's `automate` with no executor, which closes the Automation and returns every lamport; it is never refused and needs no rig bound to the phone. Close rig is offered only with no open shift and no Focus Bond still locked |
 | Competing cranks | **Possible, not present.** The crank is open source and permissionless; the team's is the only one running |
 | Heartbeats mirrored to a public Nostr relay | **Not built** (a hook only) |
 | Phones posting their own heartbeats to the chain | **Not built.** The phone sends them to one crank |

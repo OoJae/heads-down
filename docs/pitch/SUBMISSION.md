@@ -200,7 +200,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - The demo shows a replayed heartbeat skipped with `StaleHeartbeat` and a fresh one digging, on a
   block explorer. `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 168, registrar 105, `p256-introspect` 30, `sgt-verify` host 69,
-  indexer 347, dashboard 48, Android 805. `docs/pitch/DECK.md` slide 14
+  indexer 347, dashboard 48, Android 845. `docs/pitch/DECK.md` slide 14
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
   with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 
