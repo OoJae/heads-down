@@ -93,6 +93,35 @@ fn register_rig_and_rotate_key_accept_registrar_vouchers() {
     assert_eq!(rig.attestation_level, 1);
 }
 
+/// A voucher may run at most `MAX_ATTESTATION_TTL_SLOTS` past the current
+/// slot, so a registrar key that leaks cannot mint attestations that outlive
+/// its rotation.
+#[test]
+fn a_voucher_lives_at_most_the_ttl_cap() {
+    let mut env = Env::golden(Build::Mainnet);
+    let u = User::with_keys(&mut env, [0xC6; 32], [0x38; 32]);
+    let registrar = env.registrar.insecure_clone();
+    let w = u.wallet.insecure_clone();
+    let cap = env.slot + hd::logic::MAX_ATTESTATION_TTL_SLOTS;
+    let (_, _, ed) = registrar_voucher(&registrar, &u.pubkey(), &u.p256(), 2, cap + 1);
+    assert_hd(
+        &env.send_as(
+            &w,
+            &[ed, ix_register_rig(&u.pubkey(), &u.p256(), att(2, cap + 1))],
+            &[],
+        ),
+        1,
+        HdError::InvalidAttestation,
+    );
+    let (_, _, ed) = registrar_voucher(&registrar, &u.pubkey(), &u.p256(), 2, cap);
+    ok(env.send_as(
+        &w,
+        &[ed, ix_register_rig(&u.pubkey(), &u.p256(), att(2, cap))],
+        &[],
+    ));
+    assert_eq!(env.rig(&u.rig).attestation_expiry_slot.get(), cap);
+}
+
 #[test]
 fn vouchers_the_program_refuses() {
     let mut env = Env::golden(Build::Mainnet);

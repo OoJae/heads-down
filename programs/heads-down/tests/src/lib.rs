@@ -893,21 +893,34 @@ pub mod golden {
         std::array::from_fn(|i| 370_000_000 + ((i as u64 * 11) % 25) * 1_000_000)
     }
 
-    /// Rewrite the fixture Board, Treasury and Round to the pinned values and
-    /// move the Round to the PDA of [`ROUND_ID`]. Returns the Round address.
-    pub fn pin(svm: &mut LiteSVM, fixture_round: &Address) -> Address {
-        let poke = |d: &mut Vec<u8>, off: usize, v: u64| {
-            d[off..off + 8].copy_from_slice(&v.to_le_bytes());
-        };
+    fn poke(d: &mut [u8], off: usize, v: u64) {
+        d[off..off + 8].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// Pin only the two inputs of the cost gate, `Board.production_cost_ema`
+    /// and `Treasury.motherlode`, to [`EMA`] and [`MOTHERLODE`]. Every fork
+    /// gets this: a live production cost above [`standard_plan`]'s threshold
+    /// (as on 2026-10-03, 0.68 SOL/ORE before the motherlode term) would
+    /// otherwise close the gate for every test rig, so the suite passed or
+    /// failed with the day the fixtures were fetched.
+    pub fn pin_gate(svm: &mut LiteSVM) {
         let mut board = svm.get_account(&BOARD).unwrap();
-        poke(&mut board.data, 8, ROUND_ID);
-        poke(&mut board.data, 16, START_SLOT);
-        poke(&mut board.data, 24, END_SLOT);
         poke(&mut board.data, 32, EMA);
         svm.set_account(BOARD, board).unwrap();
         let mut treasury = svm.get_account(&TREASURY).unwrap();
         poke(&mut treasury.data, 8, MOTHERLODE);
         svm.set_account(TREASURY, treasury).unwrap();
+    }
+
+    /// Rewrite the fixture Board, Treasury and Round to the pinned values and
+    /// move the Round to the PDA of [`ROUND_ID`]. Returns the Round address.
+    pub fn pin(svm: &mut LiteSVM, fixture_round: &Address) -> Address {
+        pin_gate(svm);
+        let mut board = svm.get_account(&BOARD).unwrap();
+        poke(&mut board.data, 8, ROUND_ID);
+        poke(&mut board.data, 16, START_SLOT);
+        poke(&mut board.data, 24, END_SLOT);
+        svm.set_account(BOARD, board).unwrap();
         let mut round = svm.get_account(fixture_round).unwrap();
         poke(&mut round.data, 8, ROUND_ID);
         for (i, v) in round_deployed().iter().enumerate() {
@@ -956,7 +969,8 @@ impl Env {
         Self::build(Build::Mainnet, true, true)
     }
 
-    /// Full control (random keys, the live fixture as fetched).
+    /// Full control (random keys, the live fixture as fetched except for the
+    /// two cost-gate inputs, see [`golden::pin_gate`]).
     pub fn build(build: Build, sigverify: bool, init: bool) -> Self {
         Self::build_with(build, sigverify, init, EnvKeys::random(), false)
     }
@@ -1003,6 +1017,8 @@ impl Env {
         }
         if pinned {
             round = golden::pin(&mut svm, &round);
+        } else {
+            golden::pin_gate(&mut svm);
         }
         let board = svm.get_account(&BOARD).unwrap().data;
         let treasury = svm.get_account(&TREASURY).unwrap().data;
@@ -1558,7 +1574,7 @@ impl Caps {
     }
 }
 
-/// A plan the gate opens for (fixture ema_ev ≈ 0.63 SOL/ORE): 0.001 SOL on
+/// A plan the gate opens for (pinned ema_ev ≈ 0.65 SOL/ORE): 0.001 SOL on
 /// the 10 least-crowded split tiles, lease 3, window around T0.
 pub fn standard_plan() -> Plan {
     Plan {

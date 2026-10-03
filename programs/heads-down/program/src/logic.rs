@@ -3,6 +3,24 @@
 
 use crate::{error::HdError, ore::SQUARES};
 
+/// The furthest a signed P-256 message may move a rig's counter in one step.
+/// Counters only need to increase; without a bound, one signed message with
+/// `counter = u64::MAX` (for example from an app that trusted a hostile RPC's
+/// `hb_counter`) would leave no larger value and brick the rig's phone-key path
+/// for good. 2^32 leaves the app unlimited practical room and makes exhausting
+/// the space cost 2^32 landed transactions.
+pub const MAX_COUNTER_STEP: u64 = 1 << 32;
+
+/// Longest a registrar voucher may live, in slots: four times the registrar's
+/// default (6,480,000), roughly 75-90 days at 250-300 ms slots.
+pub const MAX_ATTESTATION_TTL_SLOTS: u64 = 25_920_000;
+
+/// Rounds a heartbeat lease must have been expired before anyone but the
+/// rig's owner may end its shift. Without the grace, the moment between one
+/// round opening and the next heartbeat landing was enough for an opponent
+/// to end a seated rig's shift and break its Stack seat (audit).
+pub const PERMISSIONLESS_END_GRACE_ROUNDS: u64 = 3;
+
 /// Motherlode odds denominator (`state/round.rs:107-109`: `% 500`).
 pub const MOTHERLODE_ODDS: u128 = 500;
 

@@ -3,7 +3,7 @@
 //! precompile and introspected through the checked instructions sysvar.
 //! Every attack here must deploy nothing.
 
-use hd::error::HdError;
+use hd::{error::HdError, message::kind, state::break_reason};
 use heads_down_tests::*;
 use p256_introspect::IntrospectError;
 
@@ -58,6 +58,45 @@ fn stale_counter_is_rejected() {
         );
     }
     assert_nothing_spent(&env, &user);
+}
+
+/// One signed message may move a rig's counter by at most 2^32. Without the
+/// bound, a single message with counter u64::MAX (an app that trusted a hostile
+/// RPC's `hb_counter`) left no larger value, and the phone key could never sign
+/// for that rig again.
+#[test]
+fn a_counter_cannot_jump_past_the_step_bound() {
+    let (mut env, user) = setup(9);
+    let r = env.board_round;
+    let step = hd::logic::MAX_COUNTER_STEP;
+    for c in [step + 1, u64::MAX] {
+        // HEARTBEAT: `dig` and `record_heartbeats` share `apply_heartbeat`.
+        let hb = user.heartbeat_with(c, 1, r, 3);
+        assert_eq!(
+            skip_of(&mut env, &user, &[hb], entry_for(&hb, 1, 0)),
+            HdError::InvalidHeartbeat.code()
+        );
+        // BREAK, FREEZE and PLAN share `authorize_signal`.
+        let (d, s) = signal_signature(&user, kind::FREEZE, c, 1, break_reason::FREEZE);
+        assert_hd(
+            &env.send(
+                &[
+                    secp_ix(&[(s, user.p256(), d.to_vec())]),
+                    ix_freeze_p256(&user.pubkey(), break_reason::FREEZE, c, 0, 0),
+                ],
+                &[],
+            ),
+            1,
+            HdError::InvalidHeartbeat,
+        );
+    }
+    assert_eq!(env.rig(&user.rig).hb_counter.get(), 0);
+    assert_nothing_spent(&env, &user);
+    // Exactly the bound is accepted.
+    let hb = user.heartbeat_with(step, 1, r, 3);
+    let meta = ok(env.dig_with(&[hb], &[DigRig::new(&user, entry_for(&hb, 1, 0))]));
+    assert!(dug(&events(&meta.logs), &user.rig).is_some());
+    assert_eq!(env.rig(&user.rig).hb_counter.get(), step);
 }
 
 #[test]

@@ -53,6 +53,46 @@ fn real_ore_closing_the_automation_mid_cpi_is_accounted() {
     );
 }
 
+/// Live ORE charges the Automation fee on a miner's FIRST deploy of a round
+/// only (`deploy.rs:338-342`). A rig whose Miner already holds a same-round
+/// deployment (its owner deployed by hand; here by fixture surgery) pays the
+/// Executor nothing, so the cranker is paid nothing: a reimbursement comes
+/// only out of the fee received in the same dig, and the shared float cannot
+/// be drawn down by fee-less digs.
+#[test]
+fn a_dig_that_brought_no_fee_is_not_reimbursed() {
+    let mut env = Env::new();
+    let mut paying = User::new(&mut env, 8);
+    let mut feeless = User::new(&mut env, 9);
+    env.onboard_standard(&paying);
+    env.onboard_standard(&feeless);
+    let m = feeless.miner();
+    env.poke_u64(&m, 664, env.board_round); // miner.round_id
+    env.poke_u64(&m, 64 + 8 * 24, 1_000); // miner.deployed[24]
+    let cranker = env.cranker.pubkey();
+
+    // Control: a first deploy brings executor_fee in, and crank_fee goes out.
+    let (exec, crank) = (env.lamports(&EXECUTOR), env.lamports(&cranker));
+    let meta = ok(env.dig_fresh(&mut [&mut paying]));
+    assert!(dug(&events(&meta.logs), &paying.rig).is_some());
+    assert_eq!(env.lamports(&EXECUTOR), exec + EXECUTOR_FEE - CRANK_FEE);
+    assert_eq!(env.lamports(&cranker), crank + CRANK_FEE - meta.fee);
+
+    // No fee in: the rig is still dug, and nothing leaves the float.
+    let (exec, crank) = (env.lamports(&EXECUTOR), env.lamports(&cranker));
+    let balance = env.automation(&feeless.automation()).unwrap().balance;
+    let meta = ok(env.dig_fresh(&mut [&mut feeless]));
+    let (lamports, _) = dug(&events(&meta.logs), &feeless.rig).expect("dug");
+    assert_eq!(
+        env.automation(&feeless.automation()).unwrap().balance,
+        balance - lamports,
+        "tiles only: ORE charged no Automation fee"
+    );
+    assert_eq!(env.rig(&feeless.rig).spent_shift.get(), lamports);
+    assert_eq!(env.lamports(&EXECUTOR), exec, "nothing in, nothing out");
+    assert_eq!(env.lamports(&cranker), crank - meta.fee, "no reimbursement");
+}
+
 #[test]
 fn ore_draining_the_executor_float_reverts_the_dig() {
     let (mut env, mut u) = mock_ore(DRAIN);

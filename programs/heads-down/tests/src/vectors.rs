@@ -1573,17 +1573,21 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
     );
 
     // ---- alice: permissionless end_shift, wallet freeze, close ----------------
-    rec.setup("clock -> window_end + 1 (unix 1,790,668,801); Board.round_id -> 422701 so alice's lease [422700, 422700] has expired");
+    rec.setup("clock -> window_end + 1 (unix 1,790,668,801); Board.round_id -> 422704 so alice's lease [422700, 422700] has been expired for more than the 3-round grace of a permissionless end");
     let end = plan.window_end + 1;
     let slot_now = rec.env.slot;
     rec.env.set_clock(slot_now, end);
-    rec.env.poke_u64(&BOARD, 8, round + 1);
+    rec.env.poke_u64(
+        &BOARD,
+        8,
+        round + 1 + hd::logic::PERMISSIONLESS_END_GRACE_ROUNDS,
+    );
     let h = ix_end_shift(&cranker.pubkey(), &alice.rig, 2);
     rec.vector(
         Spec {
             name: "end_shift_permissionless",
             instruction: "end_shift",
-            auth: "anyone, after plan_window_end_ts and lease_to_round < Board.round_id",
+            auth: "anyone, after plan_window_end_ts and lease_to_round + 3 < Board.round_id",
             description: "The cranker seals alice's shift 2 (Broken, stored reason 3 freeze) and pays the ShiftLog rent. Emits ShiftEnded then ShiftEndedV2.",
             args: json!({"caller": s(cranker.pubkey()), "rig": s(alice.rig), "shift_id": "2"}),
             fields: Fields::new(hd::tag::END_SHIFT),
@@ -1601,6 +1605,8 @@ fn instructions_and_samples() -> (Value, BTreeMap<u8, (String, Vec<u8>)>) {
         &cranker,
         &[],
     );
+    rec.setup("Board.round_id -> 422701 again, so every later vector keeps the bytes it had before the grace");
+    rec.env.poke_u64(&BOARD, 8, round + 1);
     let f = Fields::new(hd::tag::FREEZE_RIG)
         .u8("mode", 0)
         .u8("reason", break_reason::FREEZE);
@@ -2197,15 +2203,18 @@ fn skr_vectors(rec: &mut Recorder, cranker: &Keypair) -> Vec<Value> {
         cranker,
         &[],
     );
-    rec.setup("clock -> kai's plan window_end + 1; Board.round_id -> r+6 (kai's lease [r+3, r+5] has expired)");
+    rec.setup("clock -> kai's plan window_end + 1; Board.round_id -> r+9 (kai's lease [r+3, r+5] has been expired for more than the 3-round grace)");
     let slot_now = rec.env.slot;
     rec.env.set_clock(slot_now, bond_plan.window_end + 1);
-    rec.env.set_board_round(round + 6);
+    rec.env
+        .set_board_round(round + 6 + hd::logic::PERMISSIONLESS_END_GRACE_ROUNDS);
     rec.send_setup(
-        "end_shift(kai, shift 1) by the cranker (permissionless after the window and the lease): ShiftLog reason 0 completed",
+        "end_shift(kai, shift 1) by the cranker (permissionless after the window and the lease's grace): ShiftLog reason 0 completed",
         cranker,
         &[ix_end_shift(&c, &kai.rig, 1)],
     );
+    rec.setup("Board.round_id -> r+6 again, so every later vector keeps the bytes it had before the grace");
+    rec.env.set_board_round(round + 6);
     let h = ix_release_focus_bond(&kai.pubkey(), 1);
     rec.vector(
         Spec {

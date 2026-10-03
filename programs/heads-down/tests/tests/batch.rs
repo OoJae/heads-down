@@ -17,7 +17,7 @@ fn failing_rigs_are_skipped_and_the_rest_deploy() {
 
     env.onboard_standard(&good);
     env.onboard_standard(&good2);
-    // Gate closed: the rig's plan threshold is below the live ema_ev (~0.63 SOL/ORE).
+    // Gate closed: the rig's plan threshold is below the pinned ema_ev (~0.65 SOL/ORE).
     let mut tight = standard_plan();
     tight.max_ev_cost = env.ema_ev() - 1;
     ok(env.onboard(&gated, SOL / 20, Caps::standard(), &tight));

@@ -347,7 +347,10 @@ The signed message is the 32-byte **`SHA-256(preimage)`**.
   precompile rejects high-S, and the crank or client normalizes. Public keys
   are 33 bytes, compressed.
 * **Counter.** It **strictly increases per rig across all kinds**. Every
-  accepted message consumes it: `rig.hb_counter := counter`.
+  accepted message consumes it: `rig.hb_counter := counter`. One message may
+  raise it by at most 2^32 (`MAX_COUNTER_STEP`); a larger jump is
+  `InvalidHeartbeat` (6), whatever the signature (§12.13). Clients count up by
+  one from the Rig's `hb_counter`.
 
 | Kind | Length | Layout (offset: field) |
 |---|---|---|
@@ -405,7 +408,9 @@ The program requires:
   authority**, the p256 key in the instruction data, `level`, `expiry_slot`);
 * `level` is 1 or 2 (**level 0 is refused**; register without an attestation
   instead);
-* `expiry_slot > Clock.slot`.
+* `expiry_slot > Clock.slot`;
+* `expiry_slot - Clock.slot <= 25,920,000` (`MAX_ATTESTATION_TTL_SLOTS`, four
+  times the registrar's default lifetime; §12.13).
 
 Every failure is `InvalidAttestation` (21).
 
@@ -724,8 +729,9 @@ Data: `0 tag`.
 
 * It requires `shift_open == 1`, otherwise `InvalidRigState`.
 * The authority may end the shift at any time. Anyone else needs
-  `now > plan_window_end_ts` **and** `lease_to_round < Board.round_id`,
-  otherwise `Unauthorized`.
+  `now > plan_window_end_ts` **and** `lease_to_round + 3 < Board.round_id`
+  (the lease expired more than `PERMISSIONLESS_END_GRACE_ROUNDS` = 3 rounds
+  ago; §12.13), otherwise `Unauthorized`.
 * A wrong ShiftLog address → `InvalidSeeds`.
 * The handler writes the ShiftLog (§6.8), does the streak accounting, sets
   `shift_open = 0`, and sets the state to Idle (a Frozen rig stays Frozen).
@@ -917,12 +923,16 @@ Two rules apply across these steps:
     reserve.
   * The Executor stays System-owned and data-less.
 * **The reimbursement** (`config.crank_fee` to the cranker) is paid only
-  after a real deploy, only when `crank_fee > 0` and the cranker is not the
-  Executor, and only if the Executor holds at least
+  after a real deploy **that brought the Executor at least `crank_fee` in this
+  same dig** (`fee_received >= crank_fee`, §12.13), only when `crank_fee > 0`
+  and the cranker is not the Executor, and only if the Executor holds at least
   `rent_exempt(0) + EXECUTOR_RESERVE (100,000) + crank_fee` before the
   transfer. It therefore keeps at least `rent_exempt(0) + 100,000` for later
   `CHECKPOINT_FEE` top-ups. Otherwise it is silently skipped and the dig still
   counts.
+* ORE charges the Automation fee on a Miner's first deploy of a round only. A
+  rig whose Miner already deployed this round (its owner deployed by hand) is
+  dug without a fee and without a reimbursement; a crank may skip it.
 * An ORE no-op (29) has no reimbursement and moves no dig counters, but its
   debit, if any, is counted.
 
@@ -1740,18 +1750,24 @@ design.
 ### 11.8 Bury auction (no oracle)
 
 * **One pooled lot.** Stack and Focus Bond forfeits are deposited into the
-  Bury SKR vault. Each deposit adds to `lot_skr` and **restarts** the
-  auction: `auction_start_slot = now`, and `start_price = 4 ×
-  last_clear_price` clamped to `[10,000, 10,000,000,000]`, or 100,000,000
-  before the first sale.
+  Bury SKR vault. Each deposit adds to `lot_skr`.
+* **Restart.** A deposit **restarts** the auction when the lot was empty or
+  the deposit is at least as large as what was on offer (`amount >=
+  lot_before`); a smaller deposit joins the running auction at its current
+  price and clock (and its `BuryLotAdded` repeats the running auction's
+  `start_price` and `start_slot`). A restart sets `auction_start_slot = now` and
+  `start_price = max(4 × last_clear_price, previous start_price / 2)` clamped
+  to `[10,000, 10,000,000,000]`; before the first sale that is 100,000,000
+  (§12.13).
 * **Price** (ORE atoms per whole SKR) at slot `t`, in u128:
   `start − (start − floor) · min(t − start_slot, window) / window`, with
   `floor = 10,000` (1e-7 ORE per SKR) and `window = 216,000` slots. It never
   rises between deposits and reaches the floor, so lots always sell.
 * **Cost** of `skr_amount` base units: `ceil(skr_amount · price / 10⁶)` ORE
   atoms, rounded in the lot's favour (at least 1 atom).
-* **Partial buys** are allowed. The price schedule carries on, and the last
-  sale's price becomes `last_clear_price`.
+* **Partial buys** are allowed. The price schedule carries on, and the price
+  of the last sale of at least 10 SKR (`MIN_ANCHOR_SKR`) becomes
+  `last_clear_price`; a smaller sale leaves it unchanged.
 * **What happens to the ORE.** ORE `bury` moves it to ORE's Treasury, sends
   `cost / 10` to ORE's stake program through the stake program's `distribute`, and
   burns the rest (`bury.rs:35-74`). heads_down checks the burn against the
@@ -1852,7 +1868,8 @@ data and pay a recipient fixed by state).
 |---|---|---|
 | Governance rotation | `Config.governance` can move, behind the 72 h timelock, and only when the successor itself accepts | §12.3 |
 | Timelock | every timelock waits for 72 hours of cluster time as well as for 864,000 slots | §12.3 |
-| Rig tombstone | `close_rig` keeps `shift_id` and `hb_counter` in a 32-byte account; `register_rig` resumes from it | §12.4 |
+| Rig tombstone | `close_rig` keeps `shift_id`, `hb_counter` and `last_dug_round` in a 32-byte account; `register_rig` resumes from it | §12.4 |
+| Audit fixes | six rules tightened in existing instructions, no new tag, event or error | §12.13 |
 | ShiftLog rent | `close_shift_log` returns a log's rent to whoever paid it, 30 days after the shift ended | §12.5 |
 | Attestation | an attested-only table counts a round only while the rig's attestation is live | §12.6 |
 | P-256 key uniqueness | evaluated, not built: the reasons | §12.7 |
@@ -1864,7 +1881,7 @@ something a client can observe differently:
 | Instruction | Before | v1.3 |
 |---|---|---|
 | `close_rig` (14) | the Rig PDA returns to System; every lamport goes to the authority | a rig that armed a shift or accepted a P-256 message becomes a 32-byte RigTombstone that keeps its own rent (1,113,600 lamports at today's rent); the authority gets the rest. Any other rig closes as before |
-| `register_rig` (1) | the Rig PDA must be System-owned and empty; `shift_id` and `hb_counter` start at 0 | it also accepts a RigTombstone, and then the new Rig starts at the tombstone's `shift_id` and `hb_counter` |
+| `register_rig` (1) | the Rig PDA must be System-owned and empty; `shift_id` and `hb_counter` start at 0 | it also accepts a RigTombstone, and then the new Rig starts at the tombstone's `shift_id`, `hb_counter` and `last_dug_round` |
 | `end_shift` (11) | ShiftLog bytes 112..128 are zero | they hold the first 16 bytes of the caller's address |
 | `stack_checkin` (17) | attestation is checked at `join_stack` only | at an attested-only table the seat's result is 36 while the rig's attestation is not live |
 | `propose_config` (12) | sets `pending_eta_slot` | also sets `pending_eta_ts = unix_timestamp + 259,200` (Config offset 240) |
@@ -1892,7 +1909,7 @@ something a client can observe differently:
 | 0 | header | tag 10, version 1, bump | the Rig PDA's canonical bump |
 | 8 | shift_id | u64 | `Rig.shift_id` at close |
 | 16 | hb_counter | u64 | `Rig.hb_counter` at close |
-| 24 | reserved | [u8;8] | zero |
+| 24 | last_dug_round | u64 | `Rig.last_dug_round` at close (0 = never dug) |
 
 **ShiftLog (128 bytes):** `112 payer_prefix [u8;16]`, the first 16 bytes of
 the address that paid the log's rent. All-zero in a log sealed before v1.3.
@@ -2015,17 +2032,20 @@ registered again for the same wallet started with `shift_id` 0 and
   and the seat counted on as if nothing had happened.
 
 **The fix.** `close_rig` zeroes the rig and, unless `shift_id == 0` and
-`hb_counter == 0`, shrinks it to a RigTombstone holding those two counters.
-`register_rig` on a tombstone tops its lamports up to a Rig's rent from the
-authority, grows it back to 384 bytes, and initializes a fresh Rig whose
-`shift_id` and `hb_counter` are the tombstone's. Everything else starts as in
+`hb_counter == 0`, shrinks it to a RigTombstone holding those two counters and
+`last_dug_round`. `register_rig` on a tombstone tops its lamports up to a
+Rig's rent from the authority, grows it back to 384 bytes, and initializes a
+fresh Rig whose `shift_id`, `hb_counter` and `last_dug_round` are the
+tombstone's. Everything else starts as in
 a first registration (state Idle, tier 0, no caps, no streak; the key and the
 attestation are the ones in this `register_rig`). So for a given rig address:
 
 * `shift_id` only grows, so `["shift", rig, id]` and `["bond", rig, id]` are
   never reused and a seat's bound shift can never be armed again;
 * `hb_counter` only grows, so no P-256 message is accepted twice, whichever
-  key the rig carries.
+  key the rig carries;
+* `last_dug_round` survives, so closing and registering again inside one ORE
+  round cannot dig that round a second time (past the per-round cap).
 
 A tombstone is not a Rig: every instruction that takes a Rig refuses it
 (`InvalidAccountTag`), `stack_checkin` treats its seat as a closed rig (rule
@@ -2197,6 +2217,19 @@ safely): `dig` with one rig 39,385 → 39,414, with two rigs 67,385 → 67,421.
 
 ### 12.12 Not implemented or open in v1.3
 
+* The Stack and Focus Bond outcomes of a night depend on its heartbeats being
+  landed: a crank (anyone's) that lands none for a rig costs that rig its
+  rounds. The program cannot tell a phone that was up from a relay that was
+  down. A rig's owner can run a crank, and `record_heartbeats` and
+  `stack_checkin` are permissionless.
+* An in-person Stack table is open to any rig that can pay the bond: the
+  program does not check that the players are in one room. The app only
+  offers such tables over Nearby; a table id shared wider than that can be
+  joined by a scripted guest rig.
+* A shift that never landed a heartbeat is sealed `lease_lapse` by whoever
+  ends it first once its window is over (the 3-round grace of §12.13 needs a
+  lease to count from).
+
 * A tombstone's rent stays at the Rig PDA until the wallet registers again;
   there is no instruction to delete a tombstone.
 * A voucher that expires inside a Stack window stops the seat counting
@@ -2206,3 +2239,54 @@ safely): `dig` with one rig 39,385 → 39,414, with two rigs 67,385 → 67,421.
   governance key is lost before a rotation is accepted, only the pending
   governance (after the timelock) or a program upgrade can act.
 * `propose_config` and `apply_config` emit no events.
+
+
+### 12.13 Audit fixes (2026-10-03, before the first deployment)
+
+A security review of v1.3 ran before anything was deployed. Six rules were
+tightened. None adds a tag, an event or an error, no instruction changed its
+bytes or its account list, and no account changed its size. They are part of
+v1.3: no build without them was ever deployed.
+
+| # | Rule | Before | Now | Error when refused |
+|---|---|---|---|---|
+| 1 | Crank reimbursement (§6.5) | paid after any real deploy | paid only if the Executor received at least `crank_fee` in the same dig | none: the dig counts, the transfer is skipped |
+| 2 | P-256 counter (§4.1) | any value above `hb_counter` | above `hb_counter` by at most 2^32 | 6 `InvalidHeartbeat` (a skip code in `dig`, `record_heartbeats` and `stack_checkin`) |
+| 3 | Voucher lifetime (§4.2) | any `expiry_slot` in the future | at most 25,920,000 slots ahead | 21 `InvalidAttestation` |
+| 4 | Permissionless `end_shift` (§5, tag 11) | window over and `lease_to_round < Board.round_id` | window over and `lease_to_round + 3 < Board.round_id` | 5 `Unauthorized` |
+| 5 | Bury auction (§11.8) | every deposit restarted price and clock at `4 × last_clear_price`; every sale set `last_clear_price` | a deposit restarts only an empty lot or one it at least doubles, never below half the previous start; only a sale of 10 SKR or more sets `last_clear_price` | none |
+| 6 | Rig tombstone (§12.4) | kept `shift_id` and `hb_counter` | also keeps `last_dug_round` (the 8 bytes that were reserved) | none |
+
+**Why, one line each.**
+
+1. ORE charges the Automation fee on a Miner's first deploy of a round only.
+   A rig whose owner had already deployed by hand paid the Executor nothing,
+   and the cranker was still paid from the shared float: a wallet cranking its
+   own rig could draw the float down to its floor.
+2. One signed message with `counter = u64::MAX` left no larger value, so the
+   phone key could never sign for that rig again. An app that read
+   `hb_counter` from a dishonest RPC could be made to sign one.
+3. A registrar key that leaked could sign vouchers valid for ever, and they
+   would have outlived its rotation.
+4. A Stack seat uses one-round leases, so at every round boundary its lease
+   was behind the Board until the next heartbeat landed. In that gap, once the
+   plan window was over, an opponent could end the rig's shift and the seat
+   could never count again.
+5. A purchase of one base unit at the floor set the price every later lot
+   started from, and a dust forfeit put a running auction back to its start
+   price for the cost of a signature.
+6. Ending a shift, closing the rig and registering it again inside one ORE
+   round reset the once-per-round rule.
+
+**What a client must do.**
+
+* A crank waits for the 3-round grace before it seals a shift, and does not
+  expect a reimbursement for a rig whose Miner already deployed this round.
+* The app counts up by one from the Rig's `hb_counter`, and refuses an
+  `hb_counter` that is implausibly far from the last one it used.
+* The registrar issues vouchers of at most 25,920,000 slots (its default,
+  6,480,000, is a quarter of that).
+* An indexer that shows the Bury auction takes `start_price` and `start_slot`
+  from `BuryLotAdded` as before: they are the auction's values after the
+  deposit, and they are the old ones when the deposit joined a running
+  auction. It must not assume that every deposit restarts the clock.

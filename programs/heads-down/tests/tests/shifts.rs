@@ -356,8 +356,19 @@ fn anyone_may_end_a_shift_only_after_the_window_and_the_lease() {
         0,
         HdError::Unauthorized,
     );
-    // Lease expired too: the crank may seal it (and pays the rent).
-    set_board_round(&mut env, r + 4);
+    // Lease expired, but not yet by the grace (3 rounds): the next heartbeat
+    // may still be on its way, so an opponent at the same Stack table cannot
+    // end the shift between two heartbeats.
+    for round in [r + 3, r + 5] {
+        set_board_round(&mut env, round);
+        assert_hd(
+            &env.send(&[ix_end_shift(&cranker, &u.rig, 1)], &[]),
+            0,
+            HdError::Unauthorized,
+        );
+    }
+    // Expired by more than the grace: the crank may seal it (and pays the rent).
+    set_board_round(&mut env, r + 6);
     // Wrong ShiftLog address is refused.
     let mut ix = ix_end_shift(&cranker, &u.rig, 1);
     ix.accounts[2] = AccountMeta::new(shift_log_pda(&u.rig, 2), false);
@@ -366,10 +377,10 @@ fn anyone_may_end_a_shift_only_after_the_window_and_the_lease() {
     let log = env.shift_log(&shift_log_pda(&u.rig, 1));
     assert_eq!(log.break_reason, break_reason::COMPLETED);
     assert_eq!(log.start_round.get(), r);
-    assert_eq!(log.end_round.get(), r + 4);
+    assert_eq!(log.end_round.get(), r + 6);
     assert_eq!(log.dark_rounds.get(), 3); // r, r+1, r+2
     let rig = env.rig(&u.rig);
-    assert_eq!(rig.gap_count.get(), 2); // r+3, r+4
+    assert_eq!(rig.gap_count.get(), 4); // r+3 ..= r+6
     assert_eq!(rig.streak.get(), 1);
     assert_eq!(rig.state, rig_state::IDLE);
     assert!(matches!(

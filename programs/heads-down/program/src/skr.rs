@@ -181,6 +181,30 @@ pub fn restart_price(last_clear: u64) -> u64 {
         .clamp(FLOOR_PRICE, MAX_START_PRICE)
 }
 
+/// Smallest sale that moves the restart anchor (`last_clear_price`): 10 SKR.
+/// A dust purchase at the floor must not set the price the next lot starts
+/// from (audit: a one-base-unit sale anchored every later lot near the floor).
+pub const MIN_ANCHOR_SKR: u64 = 10 * ONE_SKR;
+
+/// Start price when a lot restarts the auction. It follows the last
+/// meaningful clearing price ([`restart_price`]) but never drops below half
+/// the previous start: a single cheap sale, however it was arranged, cannot
+/// collapse the price the next lot is offered at.
+pub fn next_start_price(last_clear: u64, prev_start: u64) -> u64 {
+    restart_price(last_clear)
+        .max(prev_start / 2)
+        .clamp(FLOOR_PRICE, MAX_START_PRICE)
+}
+
+/// Whether SKR arriving in the lot restarts the auction clock and price.
+/// It does when the auction was empty, or when the arrival at least doubles
+/// what is on offer. A smaller arrival joins the running auction at its
+/// current price, so a stream of dust forfeits cannot hold the price up and
+/// stall every sale (audit: restart griefing for one signature fee).
+pub fn lot_restarts(lot_before: u64, amount: u64) -> bool {
+    lot_before == 0 || amount >= lot_before
+}
+
 /// Linear decay from `start` (at `start_slot`) to `floor` (at `start_slot +
 /// window` and after), computed in u128. A start below the floor, or a zero
 /// window, is the floor.
@@ -392,6 +416,24 @@ mod tests {
             auction_price(MAX_START_PRICE, FLOOR_PRICE, 0, WINDOW_SLOTS, WINDOW_SLOTS / 2),
             MAX_START_PRICE - (MAX_START_PRICE - FLOOR_PRICE) / 2
         );
+    }
+
+    #[test]
+    fn a_cheap_sale_cannot_collapse_the_next_start_and_dust_does_not_restart() {
+        // After a market-ish clear the start is 4x it, as before.
+        assert_eq!(next_start_price(21_000_000, INITIAL_START_PRICE), 84_000_000);
+        // A clear at the floor only halves the previous start, it does not reset it.
+        assert_eq!(next_start_price(FLOOR_PRICE, 84_000_000), 42_000_000);
+        // It still cannot leave the allowed band.
+        assert_eq!(next_start_price(u64::MAX, u64::MAX), MAX_START_PRICE);
+        assert_eq!(next_start_price(1, 1), FLOOR_PRICE);
+        // First lot ever: the initial price.
+        assert_eq!(next_start_price(0, INITIAL_START_PRICE), INITIAL_START_PRICE);
+        // Restart rule: empty auction or an arrival that at least doubles the lot.
+        assert!(lot_restarts(0, 1));
+        assert!(lot_restarts(100, 100));
+        assert!(!lot_restarts(100, 99));
+        assert!(!lot_restarts(1_000_000, 1));
     }
 
     #[test]

@@ -480,8 +480,15 @@ fn dig_one(
     g.lifetime_lamports_deployed.set(v);
     drop(g);
 
-    // ---- 8. reimburse the cranker (only after a real deploy) ----------------
-    reimburse(ctx, s)?;
+    // ---- 8. reimburse the cranker ------------------------------------------
+    // Only out of the fee the Executor received in THIS dig. ORE charges the
+    // Automation fee on a miner's first deploy of a round only (`deploy.rs:338-342`),
+    // so a rig whose owner already deployed by hand this round pays the Executor
+    // nothing, and a cranker must not be able to draw the shared float for it
+    // (audit: reimbursement without a fee drains the Executor).
+    if fee_received >= ctx.crank_fee {
+        reimburse(ctx, s)?;
+    }
 
     Ok(Ok(Dug {
         lamports: deployed_now,

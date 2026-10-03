@@ -79,7 +79,13 @@ pub fn check_attestation(
     if att.level != 1 && att.level != 2 {
         return Err(HdError::InvalidAttestation.into());
     }
-    if att.expiry_slot <= clock()?.slot {
+    let slot = clock()?.slot;
+    if att.expiry_slot <= slot {
+        return Err(HdError::InvalidAttestation.into());
+    }
+    // Bound how long any voucher can live, so a compromised registrar key
+    // cannot mint attestations that outlast its rotation (audit).
+    if att.expiry_slot.saturating_sub(slot) > crate::logic::MAX_ATTESTATION_TTL_SLOTS {
         return Err(HdError::InvalidAttestation.into());
     }
     let sysvar = instructions_sysvar.ok_or(HdError::InvalidAttestation)?;
@@ -120,7 +126,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     // What an earlier rig at this address left behind (v1.3), if anything.
     let resumed = if rig.owned_by(&ID) && rig.data_len() == size_of::<RigTombstone>() {
         let t = state::load::<RigTombstone>(rig)?;
-        Some((t.shift_id.get(), t.hb_counter.get()))
+        Some((t.shift_id.get(), t.hb_counter.get(), t.last_dug_round.get()))
     } else {
         None
     };
@@ -163,9 +169,10 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     g.state = rig_state::IDLE;
     g.freezes_left = crate::logic::FREEZES_PER_PERIOD;
     g.week_start_ts.set(now);
-    if let Some((shift_id, hb_counter)) = resumed {
+    if let Some((shift_id, hb_counter, last_dug_round)) = resumed {
         g.shift_id.set(shift_id);
         g.hb_counter.set(hb_counter);
+        g.last_dug_round.set(last_dug_round);
     }
     drop(g);
     events::rig_registered(&rig_address, authority.address(), 0, level);

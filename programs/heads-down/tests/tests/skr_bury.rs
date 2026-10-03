@@ -10,6 +10,11 @@ use heads_down_tests::*;
 /// A real lot: a Focus Bond of `amount` SKR locked, broken (wallet BREAK
 /// manual), sealed and forfeited. Returns the bond address.
 fn forfeit_lot(env: &mut Env, seed: u8, amount: u64) -> Address {
+    forfeit_lot_events(env, seed, amount).0
+}
+
+/// [`forfeit_lot`], also returning the events of the forfeit.
+fn forfeit_lot_events(env: &mut Env, seed: u8, amount: u64) -> (Address, Vec<Event>) {
     let u = User::new(env, seed);
     env.onboard_standard(&u);
     env.fund_skr(&u.pubkey(), amount);
@@ -31,8 +36,8 @@ fn forfeit_lot(env: &mut Env, seed: u8, amount: u64) -> Address {
         ],
         &[],
     ));
-    ok(env.send(&[ix_forfeit_focus_bond(&w.pubkey(), 1)], &[]));
-    bond
+    let meta = ok(env.send(&[ix_forfeit_focus_bond(&w.pubkey(), 1)], &[]));
+    (bond, events(&meta.logs))
 }
 
 fn buyer(env: &mut Env, ore: u64) -> Keypair {
@@ -152,6 +157,67 @@ fn a_forfeit_becomes_a_lot_that_sells_for_ore_that_ore_buries() {
     assert_eq!(v.lot_skr.get(), 50 * ONE_SKR);
     assert_eq!(v.lots.get(), 2);
     let _ = (bond, ev::LOT_FROM_BOND);
+}
+
+/// Three rules that keep the no-oracle auction from being steered for the
+/// price of dust: a sale below `MIN_ANCHOR_SKR` does not move the price the
+/// next lot starts from; a lot never restarts below half the previous start;
+/// and an arrival smaller than what is on offer joins the running auction
+/// instead of putting its price and clock back to the start.
+#[test]
+fn dust_cannot_anchor_the_next_lot_or_restart_a_running_auction() {
+    let mut env = Env::new();
+    env.init_bury_vault();
+    forfeit_lot(&mut env, 1, 100 * ONE_SKR);
+    let s0 = env.slot;
+    // The price has reached the floor. Dust sales there set no anchor.
+    set_slot(&mut env, s0 + 2 * skr::WINDOW_SLOTS);
+    let b = buyer(&mut env, ONE_ORE);
+    ok(buy(&mut env, &b, 1, 1));
+    assert_eq!(env.bury_vault().last_clear_price.get(), 0);
+    ok(buy(&mut env, &b, skr::MIN_ANCHOR_SKR - 1, u64::MAX));
+    assert_eq!(env.bury_vault().last_clear_price.get(), 0);
+
+    // 5 SKR arriving while 90 SKR is on offer joins the running auction.
+    let before = env.bury_vault();
+    assert_eq!(before.lot_skr.get(), 90 * ONE_SKR);
+    let (bond, evs) = forfeit_lot_events(&mut env, 2, 5 * ONE_SKR);
+    let v = env.bury_vault();
+    assert_eq!(v.lot_skr.get(), 95 * ONE_SKR);
+    assert_eq!(v.lots.get(), 2);
+    assert_eq!(
+        (v.start_price.get(), v.auction_start_slot.get()),
+        (skr::INITIAL_START_PRICE, s0),
+        "neither the price nor the clock restarted"
+    );
+    // The event repeats the running auction's start, not this slot.
+    assert!(env.slot > s0);
+    assert!(evs.contains(&Event::BuryLotAdded {
+        source: bond,
+        amount: 5 * ONE_SKR,
+        lot_skr: 95 * ONE_SKR,
+        start_price: skr::INITIAL_START_PRICE,
+        start_slot: s0,
+        source_kind: ev::LOT_FROM_BOND,
+    }));
+
+    // The rest clears at the floor. That is a real sale, so it is the anchor...
+    ok(buy(&mut env, &b, 95 * ONE_SKR, u64::MAX));
+    assert_eq!(env.bury_vault().last_clear_price.get(), skr::FLOOR_PRICE);
+    // ...yet the next lot starts at half the previous start, not at 4 x floor.
+    forfeit_lot(&mut env, 3, 50 * ONE_SKR);
+    let v = env.bury_vault();
+    assert_eq!(v.start_price.get(), skr::INITIAL_START_PRICE / 2);
+    assert_eq!(v.auction_start_slot.get(), env.slot);
+
+    // An arrival that at least doubles the lot does restart it.
+    let later = env.slot + 1_000;
+    set_slot(&mut env, later);
+    forfeit_lot(&mut env, 4, 50 * ONE_SKR);
+    let v = env.bury_vault();
+    assert_eq!(v.lot_skr.get(), 100 * ONE_SKR);
+    assert_eq!(v.auction_start_slot.get(), later);
+    assert_eq!(v.start_price.get(), skr::INITIAL_START_PRICE / 4);
 }
 
 #[test]
