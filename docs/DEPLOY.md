@@ -121,7 +121,7 @@ scripts always read it from the cluster):
 | registrar | 0 | 0 | signs off-chain only |
 | **Total** | 1,068,981,560 | **1.068981560** | |
 
-The deploy also needs the program **buffer** (0.964331320 SOL for today's 189,664-byte build)
+The deploy also needs the program **buffer** (0.966282040 SOL for today's 190,048-byte build)
 for a few minutes: `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
 for the ProgramData, so the peak is the larger of the two, not their sum. `preflight.sh`
 checks the deployer's balance against exactly this. What stays out of the deployer for good:
@@ -129,9 +129,9 @@ ProgramData rent (recoverable only by closing the program), the Program account,
 and the Executor float.
 
 Later, not at launch: each upgrade needs a temporary buffer of `(37 + 128 + build size) x 5,080`
-lamports (0.96 SOL for today's build), refunded to the spill account when the upgrade executes.
-Today's build fills 96% of the 196,608-byte `--max-len`: an upgrade that grows the program by
-more than about 6.9 KB needs `solana program extend` first (5,080 lamports per added byte).
+lamports (0.97 SOL for today's build), refunded to the spill account when the upgrade executes.
+Today's build fills 97% of the 196,608-byte `--max-len`: an upgrade that grows the program by
+more than about 6.5 KB needs `solana program extend` first (5,080 lamports per added byte).
 
 ## 4. Parameters and why
 

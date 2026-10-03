@@ -39,7 +39,7 @@ HD_STATE="${HD_STATE:-$HOME/.local/share/heads-down/deploy}"
 
 # ---- parameters (docs/DEPLOY.md, "Parameters and why") -------------------------------------------
 # --max-len: 192 KiB, 0.9996 SOL of ProgramData rent at mainnet's current rent. The v1.3 build
-# (SKR, hardening and the audit fixes) is 189,664 bytes, so about 6.9 KB of headroom is left:
+# (SKR, hardening and the audit fixes) is 190,048 bytes, so about 6.5 KB of headroom is left:
 # an upgrade that grows the program past it needs `solana program extend` first (5,080 lamports
 # per extra byte).
 HD_MAX_LEN="${HD_MAX_LEN:-196608}"
