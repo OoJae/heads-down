@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heads Down: your phone's night shift, powered by ORE</title>
+<meta name="description" content="Put your phone face-down and it mines ORE from your own ORE Automation. Pick it up and the rig goes cold. Open source.">
+<link rel="icon" href="favicon.ico">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #14110f; color: #e9e2d8; font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+  h1 { font-size: 1.7rem; line-height: 1.2; margin: 1.2rem 0 0.4rem; }
+  .tag { color: #ff6a2b; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.8rem; }
+  p { margin: 0.9rem 0; }
+  a { color: #e8b84a; }
+  ul { padding-left: 1.2rem; }
+  .small { color: #a79d90; font-size: 0.9rem; }
+  img { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon.png" width="64" height="64" alt="">
+  <div class="tag">Powered by ORE</div>
+  <h1>Heads Down: your phone's night shift</h1>
+  <p>Put your phone face-down and it mines <a href="https://ore.com">ORE</a> from your own ORE Automation account. Pick it up and the rig goes cold. Nothing but your phone's own hardware key can switch it on: not a server, not us.</p>
+  <p>If a wallet shows this address next to a signing prompt, the request comes from the Heads Down Android app. The app asks for one approval when you clock in. It never asks for your seed phrase, and nothing here will ever ask you to connect a wallet on a web page.</p>
+  <ul>
+    <li><a href="https://github.com/OoJae/heads-down">Source code</a>, open and tested</li>
+    <li><a href="https://github.com/OoJae/heads-down/blob/main/docs/THREAT_MODEL.md">What each key can do in the worst case</a></li>
+    <li><a href="https://github.com/OoJae/heads-down/blob/main/docs/SECURITY_REVIEW.md">What our own security pass found and fixed</a></li>
+  </ul>
+  <p class="small">An entry for Clock In, the third Solana Mobile hackathon. Not deployed on mainnet yet.</p>
+</main>
+</body>
+</html>
