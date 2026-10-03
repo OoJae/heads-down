@@ -55,8 +55,8 @@ Container: `docker build -t hd-registrar .` (see the header of `Dockerfile`). Al
 `SignInWithSolana.Payload`**:
 
 ```json
-{ "nonce": "52abd86bf70689cd6894b60a38a4b2b6", "domain": "headsdown.xyz",
-  "uri": "https://headsdown.xyz", "version": "1", "chain_ids": ["solana:mainnet"],
+{ "nonce": "52abd86bf70689cd6894b60a38a4b2b6", "domain": "headsdown.example",
+  "uri": "https://headsdown.example", "version": "1", "chain_ids": ["solana:mainnet"],
   "statement": "Sign in to Heads Down.", "issued_at": "2026-09-29T19:50:28Z",
   "expiration_time": "2026-09-29T20:00:28Z" }
 ```
@@ -66,12 +66,12 @@ The wallet signs the CAIP-122 text produced by wallet-standard's `createSignInMe
 clientlib 2.0.3):
 
 ```
-headsdown.xyz wants you to sign in with your Solana account:
+headsdown.example wants you to sign in with your Solana account:
 <base58 address>
 
 Sign in to Heads Down.
 
-URI: https://headsdown.xyz
+URI: https://headsdown.example
 Version: 1
 Chain ID: solana:mainnet
 Nonce: 52abd86bf70689cd6894b60a38a4b2b6

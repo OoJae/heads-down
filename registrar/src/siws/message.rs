@@ -211,10 +211,10 @@ mod tests {
 
     fn full() -> SiwsMessage {
         SiwsMessage {
-            domain: "headsdown.xyz".into(),
+            domain: "headsdown.example".into(),
             address: "9aE476sH92Vz7DMPyq5WLPkrKWivxeuTKEFKd2sZZcde".into(),
             statement: Some("Clock in to Heads Down.".into()),
-            uri: Some("https://headsdown.xyz".into()),
+            uri: Some("https://headsdown.example".into()),
             version: Some("1".into()),
             chain_id: Some("solana:mainnet".into()),
             nonce: Some("0123456789abcdef0123456789abcdef".into()),
@@ -228,12 +228,12 @@ mod tests {
 
     #[test]
     fn golden_text_matches_wallet_standard() {
-        let expected = "headsdown.xyz wants you to sign in with your Solana account:\n\
+        let expected = "headsdown.example wants you to sign in with your Solana account:\n\
 9aE476sH92Vz7DMPyq5WLPkrKWivxeuTKEFKd2sZZcde\n\
 \n\
 Clock in to Heads Down.\n\
 \n\
-URI: https://headsdown.xyz\n\
+URI: https://headsdown.example\n\
 Version: 1\n\
 Chain ID: solana:mainnet\n\
 Nonce: 0123456789abcdef0123456789abcdef\n\
@@ -248,7 +248,7 @@ Expiration Time: 2026-09-29T12:10:00Z";
         let mut m = full();
         m.not_before = Some("2026-09-29T12:00:00Z".into());
         m.request_id = Some("req-1".into());
-        m.resources = Some(vec!["https://headsdown.xyz/tos".into(), "ipfs://x".into()]);
+        m.resources = Some(vec!["https://headsdown.example/tos".into(), "ipfs://x".into()]);
         assert_eq!(SiwsMessage::parse(&m.to_text()).unwrap(), m);
 
         let mut no_statement = full();
@@ -274,12 +274,12 @@ Expiration Time: 2026-09-29T12:10:00Z";
             (format!("{good}\u{0}"), ParseError::ForbiddenCharacter),
             (good.replace("Nonce: ", "Nonce:\u{1b}[8m "), ParseError::ForbiddenCharacter),
             (
-                good.replace("headsdown.xyz wants", "evil.xyz\u{2028}headsdown.xyz wants"),
+                good.replace("headsdown.example wants", "evil.xyz\u{2028}headsdown.example wants"),
                 ParseError::ForbiddenCharacter,
             ),
             (good.replace(" wants you to sign in", " wants to sign in"), ParseError::BadHeader),
-            (good.replace("headsdown.xyz wants", " wants"), ParseError::BadHeader),
-            (good.replace("headsdown.xyz wants", "heads down.xyz wants"), ParseError::BadHeader),
+            (good.replace("headsdown.example wants", " wants"), ParseError::BadHeader),
+            (good.replace("headsdown.example wants", "heads down.xyz wants"), ParseError::BadHeader),
             // Swap two fields.
             (
                 good.replace("Version: 1\nChain ID: solana:mainnet", "Chain ID: solana:mainnet\nVersion: 1"),
@@ -303,11 +303,11 @@ Expiration Time: 2026-09-29T12:10:00Z";
         }
         assert_eq!(SiwsMessage::parse(""), Err(ParseError::BadHeader));
         assert_eq!(
-            SiwsMessage::parse("headsdown.xyz wants you to sign in with your Solana account:"),
+            SiwsMessage::parse("headsdown.example wants you to sign in with your Solana account:"),
             Err(ParseError::MissingAddress)
         );
         assert_eq!(
-            SiwsMessage::parse("headsdown.xyz wants you to sign in with your Solana account:\n"),
+            SiwsMessage::parse("headsdown.example wants you to sign in with your Solana account:\n"),
             Err(ParseError::MissingAddress)
         );
         let bad_resource = format!("{good}\nResources:\n* nope");

@@ -14,6 +14,9 @@ use crate::voucher::{RegistrarKey, HEADS_DOWN_PROGRAM_ID};
 pub const DEFAULT_STATUS_URL: &str = crate::attest::revocation::GOOGLE_STATUS_URL;
 /// ~30 days at 400 ms per slot.
 pub const DEFAULT_VOUCHER_TTL_SLOTS: u64 = 6_480_000;
+/// The longest voucher the program accepts (`MAX_ATTESTATION_TTL_SLOTS`, INTERFACE §4.2): a
+/// longer one would be signed here and refused on-chain.
+pub const MAX_VOUCHER_TTL_SLOTS: u64 = 25_920_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NonceStoreConfig {
@@ -125,7 +128,9 @@ impl Config {
     }
 
     pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-        let siws_domain = get("HD_SIWS_DOMAIN").unwrap_or_else(|| "headsdown.xyz".into());
+        // No default: the SIWS domain is the host of the site the app identifies itself with, and
+        // a default would be a name somebody else can register.
+        let siws_domain = get("HD_SIWS_DOMAIN").ok_or(ConfigError::Missing("HD_SIWS_DOMAIN"))?;
         if siws_domain.is_empty() || siws_domain.chars().any(|c| c.is_whitespace() || c == '/') {
             return Err(ConfigError::Invalid("HD_SIWS_DOMAIN"));
         }
@@ -216,7 +221,7 @@ impl Config {
             ((60..=crate::session::MAX_TTL_SECS).contains(&self.session_ttl_secs), "HD_SESSION_TTL_SECS"),
             ((60..=3600).contains(&self.nonce_ttl_secs), "HD_NONCE_TTL_SECS"),
             (self.max_outstanding_nonces > 0, "HD_MAX_OUTSTANDING_NONCES"),
-            ((1..=400_000_000).contains(&self.voucher_ttl_slots), "HD_VOUCHER_TTL_SLOTS"),
+            ((1..=MAX_VOUCHER_TTL_SLOTS).contains(&self.voucher_ttl_slots), "HD_VOUCHER_TTL_SLOTS"),
             (
                 self.status_ttl_secs > 0 && self.status_max_stale_secs >= self.status_ttl_secs,
                 "HD_STATUS_MAX_STALE_SECS",
@@ -268,11 +273,19 @@ mod tests {
 
     const DIGEST: &str = "1039388ee545377e59a8ee7292f6545053eb846f8ac6b4d0bbc4417fc339fcfc";
 
+    /// The two settings without a default.
+    const REQUIRED: [(&str, &str); 2] = [("HD_APP_RELEASE_CERT_SHA256", DIGEST), ("HD_SIWS_DOMAIN", "headsdown.example")];
+
+    fn with(extra: &[(&'static str, &'static str)]) -> Result<Config, ConfigError> {
+        let pairs: Vec<(&str, &str)> = REQUIRED.iter().copied().chain(extra.iter().copied()).collect();
+        Config::from_lookup(&lookup(&pairs))
+    }
+
     #[test]
     fn defaults() {
-        let c = Config::from_lookup(&lookup(&[("HD_APP_RELEASE_CERT_SHA256", DIGEST)])).unwrap();
-        assert_eq!(c.siws_domain, "headsdown.xyz");
-        assert_eq!(c.siws_uri, "https://headsdown.xyz");
+        let c = with(&[]).unwrap();
+        assert_eq!(c.siws_domain, "headsdown.example");
+        assert_eq!(c.siws_uri, "https://headsdown.example");
         assert_eq!(c.siws_chains, vec!["solana:mainnet".to_string()]);
         assert_eq!(c.app_package, "xyz.headsdown");
         assert_eq!(c.software_keys, DowngradePolicy::Reject);
@@ -286,10 +299,20 @@ mod tests {
     #[test]
     fn release_digest_required_and_parsed() {
         assert!(matches!(Config::from_lookup(&lookup(&[])), Err(ConfigError::Missing(_))));
+        // The SIWS domain has no default either: it must be a site the team controls.
+        assert!(matches!(
+            Config::from_lookup(&lookup(&[("HD_APP_RELEASE_CERT_SHA256", DIGEST)])),
+            Err(ConfigError::Missing("HD_SIWS_DOMAIN"))
+        ));
+        assert!(matches!(
+            Config::from_lookup(&lookup(&[("HD_SIWS_DOMAIN", "headsdown.example")])),
+            Err(ConfigError::Missing(_))
+        ));
         let colon = DIGEST.as_bytes().chunks(2).map(|c| std::str::from_utf8(c).unwrap()).collect::<Vec<_>>().join(":");
-        let c = Config::from_lookup(&lookup(&[("HD_APP_RELEASE_CERT_SHA256", &format!("{colon}, {DIGEST}"))])).unwrap();
+        let both = format!("{colon}, {DIGEST}");
+        let c = Config::from_lookup(&lookup(&[("HD_SIWS_DOMAIN", "headsdown.example"), ("HD_APP_RELEASE_CERT_SHA256", &both)])).unwrap();
         assert_eq!(c.release_digests.len(), 2);
-        assert!(Config::from_lookup(&lookup(&[("HD_APP_RELEASE_CERT_SHA256", "abcd")])).is_err());
+        assert!(Config::from_lookup(&lookup(&[("HD_SIWS_DOMAIN", "headsdown.example"), ("HD_APP_RELEASE_CERT_SHA256", "abcd")])).is_err());
     }
 
     #[test]
@@ -301,18 +324,14 @@ mod tests {
             ("HD_NONCE_TTL_SECS", "86400"),
             ("HD_MAX_BODY_BYTES", "10"),
             ("HD_PROGRAM_ID", "nope"),
-            ("HD_SIWS_DOMAIN", "a b"),
+            // Longer than the program accepts (INTERFACE §4.2): signed here, refused on-chain.
+            ("HD_VOUCHER_TTL_SLOTS", "25920001"),
         ] {
-            let r = Config::from_lookup(&lookup(&[("HD_APP_RELEASE_CERT_SHA256", DIGEST), (k, v)]));
-            assert!(r.is_err(), "{k}={v}");
+            assert!(with(&[(k, v)]).is_err(), "{k}={v}");
         }
-        let c = Config::from_lookup(&lookup(&[
-            ("HD_APP_RELEASE_CERT_SHA256", DIGEST),
-            ("HD_NONCE_STORE", "sqlite:/data/n.db"),
-            ("HD_SOFTWARE_KEY_POLICY", "level0"),
-            ("HD_FIXED_SLOT", "7"),
-        ]))
-        .unwrap();
+        assert!(Config::from_lookup(&lookup(&[("HD_APP_RELEASE_CERT_SHA256", DIGEST), ("HD_SIWS_DOMAIN", "a b")])).is_err());
+        assert_eq!(with(&[("HD_VOUCHER_TTL_SLOTS", "25920000")]).unwrap().voucher_ttl_slots, MAX_VOUCHER_TTL_SLOTS);
+        let c = with(&[("HD_NONCE_STORE", "sqlite:/data/n.db"), ("HD_SOFTWARE_KEY_POLICY", "level0"), ("HD_FIXED_SLOT", "7")]).unwrap();
         assert_eq!(c.nonce_store, NonceStoreConfig::Sqlite("/data/n.db".into()));
         assert_eq!(c.software_keys, DowngradePolicy::Level0);
         assert_eq!(c.slot, SlotConfig::Fixed(7));
