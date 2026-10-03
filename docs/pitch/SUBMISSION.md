@@ -141,7 +141,8 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 
 ### UX (Align 15, public 25)
 
-- **Built, not on a device:** clock-in is one Quick Settings tile tap and one wallet approval. The
+- **On an emulator:** clock-in is one Quick Settings tile tap and one wallet approval (run with
+  Solana Mobile's test wallet; no production wallet yet). The
   one transaction bundles ORE `automate`, rig registration, caps and arming (677 bytes as legacy).
   `android/INTERFACE-NOTES.md` §3
 - **On an emulator:** heartbeats need no wallet prompt. The rig key signs with the screen
@@ -201,7 +202,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - The demo shows a replayed heartbeat skipped with `StaleHeartbeat` and a fresh one digging, on a
   block explorer. `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 168, registrar 105, `p256-introspect` 30, `sgt-verify` host 69,
-  indexer 347, dashboard 48, Android 853. `docs/pitch/DECK.md` slide 14
+  indexer 347, dashboard 48, Android 854. `docs/pitch/DECK.md` slide 14
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
   with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 

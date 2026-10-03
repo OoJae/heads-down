@@ -18,7 +18,10 @@ import javax.crypto.spec.GCMParameterSpec
  * (randomized encryption is enforced), so IV reuse is impossible by construction.
  *
  * The key requires an unlocked device: MWA only runs from a foreground Activity anyway, and
- * this keeps the token undecryptable while the phone sits locked on the nightstand.
+ * this keeps the token undecryptable while the phone sits locked on the nightstand. A phone
+ * with no secure lock screen cannot hold such a key (the Keystore refuses to generate it:
+ * "User ECDH key missing"), and has no locked state to protect either, so there the key is made
+ * without that requirement. It is still non-exportable and usable by this app only.
  */
 class KeystoreAesGcmCipher(
     private val alias: String = DEFAULT_ALIAS,
@@ -57,12 +60,21 @@ class KeystoreAesGcmCipher(
     @Synchronized
     private fun key(): SecretKey {
         existingKey()?.let { return it }
+        return try {
+            generate(unlockedDeviceRequired = true)
+        } catch (_: java.security.ProviderException) {
+            // No secure lock screen: the Keystore has no user key to bind an unlocked-only key to.
+            generate(unlockedDeviceRequired = false)
+        }
+    }
+
+    private fun generate(unlockedDeviceRequired: Boolean): SecretKey {
         val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
             .setRandomizedEncryptionRequired(true)
-            .setUnlockedDeviceRequired(true)
+            .setUnlockedDeviceRequired(unlockedDeviceRequired)
             .build()
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE).run {
             init(spec)

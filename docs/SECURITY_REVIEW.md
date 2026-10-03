@@ -58,8 +58,10 @@ has a regression test, named in the tables.
 
 | Finding | Severity | Status | Where |
 |---|---|---|---|
+| On a phone with no secure lock screen the app crashed right after the wallet had signed. The vault that keeps the wallet's session token asked the Keystore for a key that needs a lock screen, and nothing caught the refusal. On mainnet the clock-in would already have been sent: SOL in the user's Automation and the rig armed on-chain, with the app dead and no shift running on the phone | high (no funds lost: the SOL stays in the user's own Automation and nothing digs without heartbeats; but the app was unusable on such a phone, at the moment money moved) | **Fixed.** Not being able to keep the token can no longer fail a session; on a phone with no lock screen the key is made without the unlocked-device requirement | `core/wallet`: `AuthTokenVault.save`, `KeystoreAesGcmCipher`; test `a Keystore that cannot seal the token loses the token, never the session`; `emulator-smoke.sh --wallet` |
 | A Night Shift's plan window was a fixed 8 hours from clock-in. Inside the window a pickup is a BREAK, so anyone whose alarm rang earlier had a full night sealed as ended early: no streak, and a Focus Bond on it forfeit | medium (a user's bonded SKR, on an ordinary night) | **Fixed.** The window ends two minutes before the user's own next alarm when there is one for the morning; the home screen says until when a shift started now would run and that a pickup before then ends it early | `android/app`: `ShiftWindow.kt`; test `ShiftWindowTest` |
 | Sealing a shift makes the wallet pay the rent of its log (about 0.0013 SOL, reclaimable after 30 days), and no screen said so | low (disclosure) | **Fixed.** The clock-out screen states the amount; the clock-in disclosure says it in words | `ClockOutCopy.rent`; test `sealing a shift states the log's rent` |
+| The morning reveal said "the price gate stayed closed all night" for any shift with no dig, including one in which the phone never went dark | low (a false statement on screen) | **Fixed.** A shift with no dark round says so; a dark shift with no dig says nothing was dug and that a closed gate is the usual reason | `HaulMath.verdict`; test in `RevealCopyTest` |
 | The fourth Focus Bond choice did not fit its row and was drawn one letter per line | cosmetic | **Fixed.** The choices wrap; a test measures real text | `HomeScreen.kt`; test `every Focus Bond choice stays on one line on a narrow phone` |
 
 ## 3. Open, and stated plainly
@@ -99,10 +101,11 @@ stay in the user's own ORE Automation and Miner accounts.
 - A third-party audit. There has been none.
 - Behaviour on real hardware. The app has run on an Android 14 emulator against a local fork of
   mainnet (`scripts/devstack/emulator-smoke.sh`): setup, a Keystore key, heartbeats, an on-chain
-  dig, a pickup and its BREAK. An emulator has a software Keystore and stock Android, so three
-  things are still untested: hardware Keystore attestation, the foreground service surviving a
-  HyperOS night, and every flow that needs a wallet app to sign (clock-in, clock-out, taking SOL
-  back, closing the rig).
+  dig, a pickup and its BREAK, and with Solana Mobile's test wallet the clock-in, the clock-out,
+  taking SOL back, closing the rig and clocking in again, each signed in the wallet. An emulator
+  has a software Keystore and stock Android, and the test wallet is not a production wallet, so
+  these are still untested: hardware Keystore attestation, the foreground service surviving a
+  HyperOS night, Solflare, Phantom or Seed Vault signing and sending, and anything on mainnet.
 - ORE itself. Heads Down inherits ORE's custody of every Automation and Miner.
 
 ## 5. Tests after the fixes
@@ -113,7 +116,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 168, and 14 against the real program on the fork |
 | `registrar` | 105 |
 | `services/indexer` | 347 |
-| `android` (JVM unit tests, all modules) | 857, of which 4 are skipped (they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 858, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

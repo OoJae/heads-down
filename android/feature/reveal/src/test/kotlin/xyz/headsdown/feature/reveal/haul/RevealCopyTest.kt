@@ -44,7 +44,15 @@ class RevealCopyTest {
     @Test
     fun `gate closed night says nothing was placed`() {
         val c = RevealCopyBuilder.build(FakeHaulRepository.sampleGateClosed(now, zone), zone)
-        assertEquals("The price gate stayed closed all night, so nothing was placed. Buying was the cheaper route.", c.verdict)
+        assertEquals(
+            "No round was dug in this shift, so nothing was placed. Most often that is the price gate staying closed: " +
+                "on those nights buying is the cheaper route.",
+            c.verdict,
+        )
+        // A shift in which the phone never went dark is not blamed on the gate (seen on the emulator:
+        // a shift armed and ended a minute later read "the price gate stayed closed all night").
+        val neverDark = FakeHaulRepository.sampleGateClosed(now, zone).copy(rounds = emptyList(), darkRoundsTotal = 0, digsTotal = 0)
+        assertEquals("The phone never lay face-down and dark in this shift, so nothing was placed.", RevealCopyBuilder.build(neverDark, zone).verdict)
         assertEquals("0 SOL", c.stats[2].value)
         assertNull(c.effectivePrice)
         assertEquals("Buy the rest at market · 0.0200 ORE", c.buyButton)

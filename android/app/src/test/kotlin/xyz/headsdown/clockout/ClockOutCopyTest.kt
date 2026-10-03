@@ -110,9 +110,18 @@ class ClockOutCopyTest {
             line,
         )
         assertEquals("until 09:00", Regex("until \\d\\d:\\d\\d").find(ClockOutCopy.shift(open, ZoneId.of("Africa/Lagos")))!!.value)
-        // A shift that is cooling or has no dark round yet is not promised a completed seal.
+        // A shift that cooled is not promised a completed seal: it says what will happen to it instead.
+        assertEquals(
+            "Your shift cooled (the screen stayed on) and is still inside its window (until 08:00), so clocking out leaves it open. " +
+                "It will be sealed as ended early: by \"End the shift now\", or by your next clock-in.",
+            ClockOutCopy.shift(ShiftOutcome.LeftOpen(ShiftEndReason.SCREEN_ON, WINDOW_END), utc),
+        )
         assertFalse(ClockOutCopy.shift(ShiftOutcome.LeftOpen(ShiftEndReason.PICKUP, WINDOW_END), utc).contains("completed"))
-        assertFalse(ClockOutCopy.shift(ShiftOutcome.LeftOpen(ShiftEndReason.LEASE_LAPSE, WINDOW_END), utc).contains("completed"))
+        // Nor is one that has no dark round yet.
+        assertEquals(
+            "Your shift has no dark round on-chain yet and is still inside its window (until 08:00), so clocking out leaves it open.",
+            ClockOutCopy.shift(ShiftOutcome.LeftOpen(ShiftEndReason.LEASE_LAPSE, WINDOW_END), utc),
+        )
     }
 
     @Test

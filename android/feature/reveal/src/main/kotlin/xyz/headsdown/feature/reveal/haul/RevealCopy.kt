@@ -90,11 +90,10 @@ object RevealCopyBuilder {
         is RouteVerdict.MiningCheaper -> "Mining was the cheaper route last night: ${v.percent}% below market."
         is RouteVerdict.BuyingCheaper -> "Buying was the cheaper route last night: mining cost ${v.percent}% more than market."
         is RouteVerdict.AboutMarket -> "Mining came out at about the market price."
-        is RouteVerdict.GateClosed -> if (v.market != null) {
-            "The price gate stayed closed all night, so nothing was placed. Buying was the cheaper route."
-        } else {
-            "The price gate stayed closed all night, so nothing was placed."
-        }
+        is RouteVerdict.GateClosed ->
+            "No round was dug in this shift, so nothing was placed. Most often that is the price gate staying closed: " +
+                "on those nights buying is the cheaper route."
+        RouteVerdict.NeverDark -> "The phone never lay face-down and dark in this shift, so nothing was placed."
         is RouteVerdict.NothingMined -> "None of the rig's tiles came up last night, so there is no price per ORE yet."
         RouteVerdict.FocusOnly -> "Focus-only shift: no SOL placed. It still counts for your streak."
         is RouteVerdict.NoMarket -> "No market quote right now, so there is nothing to compare against."

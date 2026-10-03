@@ -258,11 +258,16 @@ class HeadsDownWallet(
     }
 
     private fun restoreToken() {
-        adapter.authToken = vault.load(chain.fullName)?.value
+        adapter.authToken = runCatching { vault.load(chain.fullName)?.value }.getOrNull()
     }
 
+    /**
+     * Called right after a wallet session, when its transactions are already signed (and, on
+     * mainnet, sent). Nothing here may throw: an unkept token costs one more approval next time,
+     * a crash here would cost the user the session they just approved.
+     */
     private fun persistToken(auth: AuthorizationResult) {
-        auth.authToken.takeIf { it.isNotEmpty() }?.let { vault.save(chain.fullName, AuthToken(it)) }
+        runCatching { auth.authToken.takeIf { it.isNotEmpty() }?.let { vault.save(chain.fullName, AuthToken(it)) } }
     }
 
     private fun onAuthorized(auth: AuthorizationResult): WalletResult<WalletAccount> {

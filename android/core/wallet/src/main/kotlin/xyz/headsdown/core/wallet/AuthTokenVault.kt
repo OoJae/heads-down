@@ -35,15 +35,25 @@ interface SecretStore {
  *   Keystore key) is deleted and null returned: the user simply re-authorizes.
  * - A transient failure (e.g. the Keystore refuses while the device is locked) returns null
  *   but keeps the blob, so a valid session is not thrown away.
+ * - Not being able to keep a token is never an error. [save] runs right after the wallet has
+ *   signed, so a Keystore that cannot seal the token (it happens: no secure lock screen, a
+ *   locked device, a broken Keystore) must not take the session down with it. The token is
+ *   simply not kept, and the wallet asks to authorize again next time.
  * - Never logs. [AuthToken.toString] is redacted.
  */
 class AuthTokenVault(
     private val cipher: AeadCipher,
     private val store: SecretStore,
 ) {
-    fun save(chain: String, token: AuthToken) {
+    /** @return false when the token could not be sealed or stored: it is then not kept at all. */
+    fun save(chain: String, token: AuthToken): Boolean = try {
         val blob = cipher.encrypt(token.value.toByteArray(Charsets.UTF_8), aad(chain))
         store.put(storageKey(chain), Base64.getEncoder().encodeToString(blob))
+        true
+    } catch (_: Exception) {
+        // Whatever was stored before belongs to an older session: do not leave it behind.
+        runCatching { store.remove(storageKey(chain)) }
+        false
     }
 
     fun load(chain: String): AuthToken? {
