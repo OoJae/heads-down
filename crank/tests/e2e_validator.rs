@@ -471,7 +471,8 @@ enabled = {REAL}
         let log = rpc.get_account(&log_addr).await.unwrap().expect("ShiftLog created by the crank");
         let sl = hd::ShiftLog::decode(&hd::PROGRAM_ID, &log.owner, &log.data).unwrap();
         println!("stale shift sealed: ShiftLog {log_addr} reason {} dark {} rounds {}..{}", hd::reason_name(sl.break_reason), sl.dark_rounds, sl.start_round, sl.end_round);
-        assert_eq!((sl.shift_id, sl.dark_rounds, sl.break_reason, sl.start_round, sl.end_round), (1, 2, 0, round_id - 5, round_id));
+        // start_round is the rig's shift_start_round as set up above.
+        assert_eq!((sl.shift_id, sl.dark_rounds, sl.break_reason, sl.start_round, sl.end_round), (1, 2, 0, round_id - 8, round_id));
         assert_eq!(log.lamports, 1_781_760, "the crank paid the ShiftLog rent");
     }
 

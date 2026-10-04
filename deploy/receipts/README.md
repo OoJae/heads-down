@@ -27,7 +27,11 @@ Local dry runs write to `localnet/`, which is git-ignored.
 | `onchain.matches_local_so` | the ProgramData bytes equal the local build byte for byte, and the rest of max-len is zero |
 | `build.git_commit`, `build.git_dirty` | the commit the build came from (mainnet refuses a dirty tree) |
 | `build.solana_cli`, `build.cargo_build_sbf` | the toolchain, for reproducing the build |
-| `fee_payer_spent_lamports` | what the deploy cost the deployer, rent included |
+| `build.buffer_written_by` | `hd-devstack-write-buffer` (the default) or `solana-cli` (`deploy.sh --cli-only`) |
+| `build.programdata_extended_bytes` | only for an upgrade that outgrew the ProgramData: the bytes `deploy.sh` added with `solana program extend` before the upgrade |
+| `buffer_write` | what the paced writer did in this run: `created` (false when it continued a buffer), `buffer_lamports`, `chunks_total`, `chunks_already_written` (chunks that needed no write: already in the buffer, or all zero in a new one), `transactions_sent` (sends an RPC took and sends that got no answer), `transactions_landed`, `signed_again`, `slow_downs`, `compute_unit_limit`, `fees_lamports`, `verified` (the buffer was read back and equals the build) |
+| `cli_phase` | the transactions the fee payer paid for after the writer finished: `transactions` (1 for a deploy or an upgrade, 2 when the ProgramData was extended first), `failed`, `fees_lamports`. Missing if the count could not be read |
+| `fee_payer_spent_lamports` | what this run of `deploy.sh` took out of the deployer, rent included. When the run continued a buffer (`buffer_write.created` is false), the buffer's rent left the deployer in the earlier run and is not in this figure |
 
 ## Check one yourself
 

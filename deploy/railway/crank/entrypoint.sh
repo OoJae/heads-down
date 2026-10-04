@@ -78,7 +78,7 @@ if [[ "$(id -u)" == 0 ]]; then
   as_app=(setpriv --reuid="$APP_UID" --regid="$APP_UID" --clear-groups --no-new-privs --)
 else
   mkdir -p "$STATE_DIR" 2>/dev/null || true
-  [[ -w "$STATE_DIR" ]] || say WARN "$STATE_DIR is not writable by uid $(id -u): lookup tables will be re-created after every restart"
+  [[ -w "$STATE_DIR" ]] || say WARN "$STATE_DIR is not writable by uid $(id -u): hd-crank creates no lookup table while it cannot write its state file (digs go on without one)"
   as_app=()
 fi
 
