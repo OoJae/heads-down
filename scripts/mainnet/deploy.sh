@@ -20,6 +20,11 @@
 # step and lets the CLI write the buffer itself: about 200 transactions 10 ms apart, which by
 # the CLI's source an RPC with that limit lets through a few at a time (not tried on mainnet).
 #
+# An upgrade to a build that outgrew the deployed ProgramData extends it first, with the CLI's
+# own `program extend` (the bytes preflight names), and upgrades once the cluster is some slots
+# further: the loader refuses an upgrade in the slot of an extension, and with the buffer
+# written beforehand the CLI would send the two back to back.
+#
 # The buffer keypair is kept per commit in the key dir (buffer-<commit>.json), so a deploy that
 # stopped part way continues by re-running this script at the same commit: preflight counts the
 # rent and the chunks the buffer already holds, and the CLI never prints a recovery seed phrase.
@@ -44,7 +49,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --yes) YES=1; shift ;;
-    -h | --help) sed -n '2,27p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -114,6 +119,14 @@ if [[ $CLI_ONLY == 1 ]]; then
 else
   WRITER="hd-devstack write-buffer, at most $HD_WRITE_RATE transaction(s) a second; it continues a buffer that is part written"
 fi
+# An upgrade to a build that outgrew the deployed ProgramData: the bytes preflight says the
+# loader has to add, and the rent they lock (0 and 0 when the build fits, and in the other modes).
+EXTEND="$(python3 -c 'import json, sys
+f = json.load(open(sys.argv[1]))["funding"]
+b, l = f.get("programdata_extend_bytes") or 0, f.get("programdata_growth_lamports") or 0
+print(b, "%d.%09d" % (l // 10**9, l % 10**9))' "$PREFLIGHT_JSON")"
+EXTEND_BYTES="${EXTEND%% *}" EXTEND_SOL="${EXTEND##* }"
+[[ "$EXTEND_BYTES" =~ ^[0-9]+$ ]] || die "could not read the ProgramData growth from $PREFLIGHT_JSON"
 echo
 bold "deploy plan ($CLUSTER, mode $MODE)"
 cat <<EOF
@@ -127,6 +140,9 @@ cat <<EOF
   priority fee       $HD_CU_PRICE micro-lamports/CU
   RPC                $RPC_HOST
 EOF
+if [[ "$EXTEND_BYTES" -gt 0 ]]; then
+  echo "  ProgramData        extended by $EXTEND_BYTES bytes before the upgrade (the build outgrew it): $EXTEND_SOL SOL of rent, locked like the rest"
+fi
 WHAT_SPENT="this $MODE spends real SOL from $DEPLOYER"
 if [[ "$MODE" == buffer && -n "$BUFFER_AUTHORITY" ]]; then
   # What a wrong address would lose: the lamports the buffer holds, or will be created with
@@ -198,11 +214,49 @@ fi
 
 # 5b. the Solana CLI: with the buffer written it sends its final transaction only. Its
 # transactions are counted from this slot on, into the receipt.
-CLI_SINCE="$(scli slot --commitment confirmed | awk 'NR==1{print $1}')" || true
+confirmed_slot() { scli slot --commitment confirmed | awk 'NR==1 && /^[0-9]+$/ {print $1}'; }
+CLI_SINCE="$(confirmed_slot)" || true
 if [[ "$CLI_SINCE" =~ ^[0-9]+$ ]]; then
   VERIFY_EXTRA+=(--cli-since-slot "$CLI_SINCE")
 else
   warn "could not read the current slot: the receipt will not count the CLI's transactions"
+fi
+
+# An upgrade that outgrew the ProgramData. Left to itself the CLI extends it and upgrades right
+# after, and with the buffer written beforehand no write lies between the two. It then stopped
+# with "invalid program argument" once the extension had landed, four times out of four on a
+# local validator, and a second run upgraded. By the sources, the loader refuses an upgrade in
+# the slot of an extension and the CLI simulates the upgrade at the newest confirmed slot, which
+# is still that one. So the extension goes out here, as the CLI's own `program extend`, and the
+# upgrade follows when the cluster is some slots further.
+if [[ "$EXTEND_BYTES" -gt 0 ]]; then
+  log "extending the ProgramData of $HD_PROGRAM_ID by $EXTEND_BYTES bytes ($EXTEND_SOL SOL of rent)"
+  EXTEND_OUT="$HD_STATE/extend-$CLUSTER-$TS.out"
+  set +e
+  # (program extend takes no priority-fee flag; it is one small transaction.)
+  scli program extend "$HD_PROGRAM_ID" "$EXTEND_BYTES" --keypair "$K_DEPLOYER" --commitment confirmed | tee "$EXTEND_OUT"
+  RC=${PIPESTATUS[0]}
+  set -e
+  if [[ $RC -ne 0 ]]; then
+    recover_hint
+    die "solana program extend failed (exit $RC); log $EXTEND_OUT"
+  fi
+  VERIFY_EXTRA+=(--meta "programdata_extended_bytes=$EXTEND_BYTES")
+  # Eight slots (about three seconds) past the slot the extension is confirmed in.
+  EXTENDED_AT="$(confirmed_slot)" || true
+  if [[ "$EXTENDED_AT" =~ ^[0-9]+$ ]]; then
+    NOW="$EXTENDED_AT"
+    for _ in $(seq 1 120); do
+      if [[ "$NOW" =~ ^[0-9]+$ && $NOW -ge $((EXTENDED_AT + 8)) ]]; then break; fi
+      sleep 0.5
+      NOW="$(confirmed_slot)" || true
+    done
+    [[ "$NOW" =~ ^[0-9]+$ && $NOW -ge $((EXTENDED_AT + 8)) ]] \
+      || warn "the cluster did not move 8 slots on in a minute; if the upgrade is refused, run this script again"
+  else
+    warn "could not read the slot after the extension; waiting 10 s before the upgrade"
+    sleep 10
+  fi
 fi
 set +e
 case "$MODE" in

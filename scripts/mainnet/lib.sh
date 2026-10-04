@@ -74,7 +74,8 @@ HD_WRITE_RATE="${HD_WRITE_RATE:-1}"
 # The paced writer, the default, has no such check and pays about 5,300 lamports per write. The
 # budget is kept so that the CLI can write the buffer itself (deploy.sh --cli-only) with the
 # same funding. A deploy that continues an existing buffer is budgeted for the chunks still to
-# write only (preflight gets deploy_fee_per_tx for that).
+# write only, and an upgrade to a build of more chunks than this budget covers for its own
+# chunks (preflight gets deploy_fee_per_tx for both).
 # HD_DEPLOY_FEE_BUDGET overrides the total. Call both after the flags are parsed (--max-len,
 # --cu-price).
 deploy_fee_per_tx() { echo $(( 5000 + 1400000 * HD_CU_PRICE / 1000000 )); }

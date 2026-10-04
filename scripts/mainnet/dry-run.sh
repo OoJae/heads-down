@@ -4,7 +4,8 @@
 #   selftest.sh -> keys.sh -> preflight.sh -> a deploy stopped part way and refunded -> a deploy
 #   stopped part way and continued by re-running deploy.sh -> init-config.sh
 #   -> scripts/devstack/smoke.sh -> deploy.sh --mode upgrade behind a rate limit -> the same
-#   upgrade with --cli-only (the fallback) -> deploy.sh --mode buffer (Squads) -> governance pause
+#   upgrade with --cli-only (the fallback) -> an upgrade to a build that outgrew --max-len
+#   -> deploy.sh --mode buffer (Squads) -> governance pause
 #
 #   scripts/mainnet/dry-run.sh [--keep] [--no-build] [--skip-smoke] [--allow-dirty] [--tight]
 #
@@ -12,7 +13,12 @@
 # founder is told to send on mainnet), not a lamport more, so a passing run proves those amounts
 # cover a fresh deploy that stops part way and is continued, and init-config, with no top-up in
 # between. Each later drill is then topped up with what the runbook says it needs: the temporary
-# buffer rent plus the fee budget.
+# buffer rent plus the fee budget. The growing upgrade is topped up to exactly what preflight
+# asks for.
+#
+# The growing upgrade deploys this same build padded with zero bytes to 101 bytes past --max-len
+# (deploy.sh --skip-build): there is no larger build yet, and to the CLI and the loader the
+# padded file is a larger program. It rehearses the path, not a larger program's code.
 #
 # The two "stopped part way" drills kill the buffer writer (SIGKILL) once the buffer holds some
 # chunks. The refund drill uses a throwaway deployer of its own, so the fees it spends do not
@@ -43,7 +49,7 @@ while [[ $# -gt 0 ]]; do
     --skip-smoke) SMOKE=0; shift ;;
     --allow-dirty) DEPLOY_ARGS+=(--allow-dirty); shift ;;
     --tight) TIGHT=1; shift ;;
-    -h | --help) sed -n '2,34p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,40p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -74,6 +80,8 @@ STOP_AFTER="${HD_DRYRUN_STOP_AFTER_CHUNKS:-20}"
 SEND_LIMIT="${HD_DRYRUN_SEND_LIMIT:-4}"
 LIMITED_RATE="${HD_DRYRUN_LIMITED_WRITE_RATE:-$RATE}"
 LIMITED_RPC="http://127.0.0.1:${HD_DRYRUN_PROXY_PORT:-38898}"
+# The size of the stand-in for a larger build in the growth drill: 101 bytes more than fit.
+GROWN_LEN=$((HD_MAX_LEN + 101))
 mkdir -p "$HD_DEVSTACK_HOME"
 LOG="$HD_DEVSTACK_HOME/dry-run.log"
 : >"$LOG"
@@ -128,6 +136,12 @@ deploy() { run "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --yes ${DEPLOY_AR
 # deploy_limited ARGS...: the same, with the rate-limit proxy as its RPC.
 deploy_limited() {
   run env HD_LOCALNET_RPC="$LIMITED_RPC" "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --yes ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"} "$@"
+}
+# deploy_build SO ARGS...: deploy the file SO as it is (deploy.sh --skip-build), not this commit's build.
+deploy_build() {
+  local so="$1"
+  shift
+  run env HD_SO="$so" "$MAINNET_SCRIPTS/deploy.sh" --cluster localnet --yes --skip-build ${DEPLOY_ARGS[@]+"${DEPLOY_ARGS[@]}"} "$@"
 }
 
 # json_of FILE PATH: one value of a JSON file (PATH like buffer_write.chunks_total); "null" if absent.
@@ -373,22 +387,57 @@ expect "the paced writer's record in a --cli-only receipt" "$(json_of "$RECEIPT"
 expect "transactions the Solana CLI sent (the buffer, $CLI_WRITES writes, the upgrade)" "$(json_of "$RECEIPT" cli_phase.transactions)" "$((CLI_WRITES + 2))"
 ok "8 deploy.sh --mode upgrade --cli-only: the CLI sent $((CLI_WRITES + 2)) transactions itself, bytes verified, receipt written"
 
-step "9. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
+step "9. growth drill: an upgrade to a build that outgrew --max-len (this build, padded with zero bytes to $GROWN_LEN bytes)"
+# No larger build exists yet, so the same program stands in for one: zero bytes behind it are
+# what the ProgramData holds there anyway, and the CLI and the loader take the file as a program
+# of $GROWN_LEN bytes. It no longer fits the ProgramData of 45 + $HD_MAX_LEN bytes.
+GROWN_SO="$HD_DEVSTACK_HOME/heads_down-grown.so"
+python3 - "$HD_SO" "$GROWN_SO" "$GROWN_LEN" <<'PYEOF'
+import sys
+build = open(sys.argv[1], "rb").read()
+open(sys.argv[2], "wb").write(build + bytes(int(sys.argv[3]) - len(build)))
+PYEOF
+GROW_JSON="$HD_DEVSTACK_HOME/preflight-grown.json"
+rm -f "$GROW_JSON"
+# (In --tight mode this preflight is NO-GO: the deployer does not hold the larger buffer's rent yet.)
+PRE="$("$MAINNET_SCRIPTS/preflight.sh" --cluster localnet --keys-dir "$DRY_KEYS" --mode upgrade --so "$GROWN_SO" --json "$GROW_JSON" 2>&1)" || true
+[[ -s "$GROW_JSON" ]] || { say "$PRE"; fail "preflight wrote no figures for the grown build"; }
+ADD="$(json_of "$GROW_JSON" funding.programdata_extend_bytes)"
+[[ "$ADD" =~ ^[0-9]+$ && $ADD -ge 10240 ]] || { say "$PRE"; fail "preflight does not say the ProgramData grows by at least 10,240 bytes (it says '$ADD')"; }
+[[ "$PRE" == *"the upgrade extends it by $ADD bytes"* ]] || { say "$PRE"; fail "preflight did not warn that the upgrade extends the ProgramData by $ADD bytes"; }
+GROW_NEED="$(json_of "$GROW_JSON" funding.deployer_need)"
+if [[ $TIGHT == 1 ]]; then
+  # Exactly what preflight asks for, not a lamport more: its figure has to cover the buffer of
+  # the larger build, the rent of the bytes the loader adds, and the fees.
+  GROW_HAVE="$(json_of "$GROW_JSON" funding.deployer_balance)"
+  [[ $GROW_NEED -gt $GROW_HAVE ]] || fail "the deployer already holds more ($GROW_HAVE) than the growing upgrade needs ($GROW_NEED): the drill cannot fund it to the lamport"
+  fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$((GROW_NEED - GROW_HAVE))"
+fi
+deploy_build "$GROWN_SO" --keys-dir "$DRY_KEYS" --mode upgrade --write-rate "$RATE"
+RECEIPT="$(last_receipt upgrade)"
+expect "the bytes the upgrade added to the ProgramData" "$(json_of "$RECEIPT" build.programdata_extended_bytes)" "$ADD"
+expect "the ProgramData's length after the upgrade" "$(json_of "$RECEIPT" programdata_len)" "$((45 + HD_MAX_LEN + ADD))"
+expect "the deployed bytes" "$(json_of "$RECEIPT" onchain.matches_local_so)" true
+expect "transactions the Solana CLI sent (the extension, then the upgrade)" "$(json_of "$RECEIPT" cli_phase.transactions)" 2
+expect "CLI transactions that failed" "$(json_of "$RECEIPT" cli_phase.failed)" 0
+ok "9 deploy.sh --mode upgrade with a build of $GROWN_LEN bytes: the ProgramData extended by $ADD bytes, then upgraded at the first try (deployer need $GROW_NEED lamports), bytes verified, receipt written"
+
+step "10. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault"
 # The upgrades' buffer rent came back to the deployer; this drill's stays in the handed-over buffer.
 [[ $TIGHT == 0 ]] || fund_lamports "$(pubkey_of "$DRY_KEYS/deployer.json")" "$(deploy_fee_budget)"
 deploy --keys-dir "$DRY_KEYS" --mode buffer --buffer-authority "$(pubkey_of "$DRY_KEYS/governance.json")" --write-rate "$RATE"
 RECEIPT="$(last_receipt buffer)"
 expect "the handed-over buffer's lamports (the rent of 37 + build bytes)" "$(json_of "$RECEIPT" buffer.lamports)" "$(funding_of rent.buffer)"
 expect "transactions the Solana CLI sent (the hand-over)" "$(json_of "$RECEIPT" cli_phase.transactions)" 1
-ok "9 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written"
+ok "10 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written"
 
-step "10. rollback drill: governance.sh pause (immediate), then show"
+step "11. rollback drill: governance.sh pause (immediate), then show"
 run "$MAINNET_SCRIPTS/governance.sh" --cluster localnet --keys-dir "$DRY_KEYS" pause
 STATUS_OUT="$(tool_local status)"
 printf '%s\n' "$STATUS_OUT" | tee -a "$LOG"
 if [[ "$STATUS_OUT" == *"paused true"* ]]; then
-  ok "10 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock"
+  ok "11 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock"
 else
-  fail "10 Config.paused did not read back as true"
+  fail "11 Config.paused did not read back as true"
 fi
 [[ $SMOKE_RC -eq 0 ]] || exit "$SMOKE_RC"
