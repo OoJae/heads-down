@@ -17,6 +17,9 @@ use crate::account::RawAccount;
 use crate::hd::{self, Rig};
 use crate::heartbeat::RigSource;
 
+/// How long the running crank waits for one RPC answer.
+pub const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// RPC failures.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -263,12 +266,21 @@ impl RpcClient {
 
     /// `getMultipleAccounts`, chunked by 100, order preserved.
     pub async fn get_multiple_accounts(&self, keys: &[Address]) -> Result<Vec<Option<RawAccount>>, RpcError> {
+        self.get_multiple_accounts_at(keys, 0).await
+    }
+
+    /// [`Self::get_multiple_accounts`] answered by a node that has processed `min_context_slot`
+    /// (0: any node). A node that is behind answers with an error instead of older state, so
+    /// an account written in that slot can never be reported as missing.
+    pub async fn get_multiple_accounts_at(&self, keys: &[Address], min_context_slot: u64) -> Result<Vec<Option<RawAccount>>, RpcError> {
         let mut out = Vec::with_capacity(keys.len());
         for chunk in keys.chunks(100) {
             let ks: Vec<String> = chunk.iter().map(ToString::to_string).collect();
-            let r = self
-                .call("getMultipleAccounts", json!([ks, { "encoding": "base64", "commitment": self.commitment }]))
-                .await?;
+            let mut cfg = json!({ "encoding": "base64", "commitment": self.commitment });
+            if min_context_slot > 0 {
+                cfg["minContextSlot"] = json!(min_context_slot);
+            }
+            let r = self.call("getMultipleAccounts", json!([ks, cfg])).await?;
             let arr = r["value"].as_array().ok_or_else(|| RpcError::Decode("value".into()))?;
             if arr.len() != chunk.len() {
                 return Err(RpcError::Decode("getMultipleAccounts length".into()));
@@ -339,6 +351,15 @@ impl RpcClient {
             .await?
             .as_u64()
             .ok_or_else(|| RpcError::Decode("slot".into()))
+    }
+
+    /// `getEpochInfo`: one node's slot and block height at the same moment.
+    pub async fn get_slot_and_block_height(&self) -> Result<(u64, u64), RpcError> {
+        let r = self.call("getEpochInfo", json!([{ "commitment": self.commitment }])).await?;
+        match (r["absoluteSlot"].as_u64(), r["blockHeight"].as_u64()) {
+            (Some(slot), Some(height)) => Ok((slot, height)),
+            _ => Err(RpcError::Decode("epoch info".into())),
+        }
     }
 
     /// `getBlockHeight`.

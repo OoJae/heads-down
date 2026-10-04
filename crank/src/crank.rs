@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! chain view ──► (new round) maintenance: prune, lookup-table sync, checkpoint sweep
-//!            ├─► (slots_left <= deploy_margin) dig pass:
+//!            ├─► (slots_left <= deploy_margin) dig pass, unless the crank is idle (`crate::idle`):
 //!            │     getProgramAccounts(Armed, Down, Cooling) → keep rigs with a lease or a held heartbeat
 //!            │     → getMultipleAccounts(Automations, Miners, Executor) → planner
 //!            │     → pack → [simulate → size CU | bisect on failure] → sign → send
@@ -12,8 +12,15 @@
 //! intake ──► SignalHub ──► signal lander: phone-signed BREAK / FREEZE → break_shift / freeze_rig
 //! ```
 //!
-//! Every pass re-reads the chain, so a retry never reuses stale instructions (the fork
-//! suite shows a stale checkpoint aborting a whole batch).
+//! Every pass that plans re-reads the chain, so a retry never reuses stale instructions (the
+//! fork suite shows a stale checkpoint aborting a whole batch). A pass reads nothing only
+//! while no heartbeat is held, no known rig holds a lease and nothing happened in the last few
+//! rounds; one pass in every `dig.idle_full_read_rounds` rounds still reads.
+//!
+//! Lookup tables lock rent, so their maintenance never guesses: nothing is created before
+//! the tables were read, a create is sent only when the fee payer can pay for it and after
+//! its address is in the state file, a transaction that did not land is retried after a
+//! growing wait, and the tables are read again before the next decision.
 //!
 //! INTERFACE v1.2 adds two duties, each in its own file: the Stack loop
 //! ([`stack_loop`](self): discovery, a check-in per seat per round, settles) runs in the main
@@ -45,6 +52,7 @@ use crate::chain::{ChainView, ProgramEvents};
 use crate::config::Config;
 use crate::hd::{self, HdConfig, HdEvent, Rig, RigAccounts, RigState};
 use crate::heartbeat::{HeartbeatStore, VerifiedHeartbeat, VerifiedSignal};
+use crate::idle::{IdleTracker, Pass};
 use crate::keys::CrankKey;
 use crate::ledger::{DigStatus, Ledger, RetryPolicy};
 use crate::metrics::Metrics;
@@ -61,6 +69,11 @@ pub const LANDING_LEAD_SLOTS: u64 = 2;
 pub const MAX_SIMULATIONS_PER_PASS: usize = 16;
 /// Lookup-table extend transactions per round at most.
 pub const MAX_ALT_TXS_PER_ROUND: usize = 4;
+/// Room for the fee of one lookup-table transaction (5,000 lamports per signature plus the
+/// priority fee). Before one is sent the fee payer must hold the new rent, this margin (twice
+/// for a create: the extend that fills the table follows it), and the rent-exempt minimum of
+/// its own account, below which the chain refuses the transaction outright.
+pub const ALT_FEE_MARGIN_LAMPORTS: u64 = 50_000;
 /// Checkpoint sweep transactions per sweep at most.
 pub const MAX_SWEEP_TXS: usize = 5;
 /// Record transactions per round at most.
@@ -264,6 +277,26 @@ pub fn plan_with(
     Ok(planner::plan(&inputs, policy, submitted))
 }
 
+/// What the crank knows about its lookup tables besides the decoded accounts (behind a mutex
+/// that is never held across an await).
+#[derive(Default)]
+struct AltRuntime {
+    /// The state file was read (once per process).
+    file_read: bool,
+    /// The tables were read from the chain since the last lookup-table transaction was sent.
+    loaded: bool,
+    /// What the state file holds: the tables, the creates that may still land, how fresh a
+    /// read of them must be, the backoff.
+    saved: alt::TableState,
+    /// What the fee payer needed for the last lookup-table transaction and did not hold.
+    short_of: Option<u64>,
+    /// The state file could not be written (one error line until a write works again).
+    unsaved: bool,
+}
+
+/// Unix seconds, for the lookup-table backoff.
+pub type UnixClock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
 /// The running crank.
 pub struct Crank {
     cfg: Config,
@@ -278,9 +311,16 @@ pub struct Crank {
     chain: watch::Receiver<ChainView>,
     ledger: Mutex<Ledger>,
     alts: Mutex<Vec<LookupTable>>,
+    alt_state: Mutex<AltRuntime>,
+    fee_payer_rent: AtomicU64,
+    clock: UnixClock,
     hd_config: Mutex<Option<HdConfig>>,
     known_rigs: Mutex<Vec<(Address, Rig)>>,
     rig_seed: Box<dyn Fn(Address, Rig) + Send + Sync>,
+    /// Which dig passes may skip their chain reads.
+    idle: Mutex<IdleTracker>,
+    /// The last dig pass found the crank idle (one log line per change, not per pass).
+    idle_logged: AtomicBool,
     nonce: AtomicU64,
     alt_sync: tokio::sync::Mutex<()>,
     record_budget: FeeBudget,
@@ -316,6 +356,8 @@ pub struct CrankWiring {
     pub events: Option<mpsc::Receiver<ProgramEvents>>,
     /// Shared in-flight counter (the shutdown waits for it).
     pub in_flight: Arc<InFlight>,
+    /// The clock the lookup-table backoff reads (`None`: the system clock). Tests move it.
+    pub clock: Option<UnixClock>,
 }
 
 impl Crank {
@@ -352,9 +394,14 @@ impl Crank {
             chain,
             ledger: Mutex::new(Ledger::new()),
             alts: Mutex::new(Vec::new()),
+            alt_state: Mutex::new(AltRuntime::default()),
+            fee_payer_rent: AtomicU64::new(0),
+            clock: wiring.clock.unwrap_or_else(|| Arc::new(crate::chain::system_unix_now)),
             hd_config: Mutex::new(None),
             known_rigs: Mutex::new(Vec::new()),
             rig_seed,
+            idle: Mutex::new(IdleTracker::default()),
+            idle_logged: AtomicBool::new(false),
             nonce: AtomicU64::new(0),
             alt_sync: tokio::sync::Mutex::new(()),
             end_shift_tried: Mutex::new(HashMap::new()),
@@ -422,8 +469,10 @@ impl Crank {
 
     /// Run until the chain watcher stops.
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-        if let Err(e) = self.load_alts().await {
-            tracing::warn!(error = %e, "could not load lookup tables");
+        if self.alts_in_use() {
+            if let Err(e) = self.load_alts().await {
+                tracing::warn!(error = %e, "could not read the lookup tables; none is created or extended until they are read");
+            }
         }
         self.load_stack_spend();
         tokio::spawn(self.clone().poll_loop());
@@ -478,6 +527,9 @@ impl Crank {
                 let this = self.clone();
                 tokio::spawn(async move { this.on_new_round(board.round_id).await });
             }
+            // On every turn, so a heartbeat that a check-in or a record applies before the dig
+            // window opens still marks its round as active.
+            self.note_heartbeats(current_round);
             if self.breaker.is_tripped() {
                 continue;
             }
@@ -513,10 +565,51 @@ impl Crank {
                 continue;
             }
             last_pass_slot = Some(view.slot);
-            if let Err(e) = self.dig_pass(&view).await {
+            if let Err(e) = self.dig_tick(&view).await {
                 tracing::warn!(error = %e, round = board.round_id, "dig pass failed");
             }
         }
+    }
+
+    /// Tell the idle tracker what the heartbeat store holds during `round`.
+    fn note_heartbeats(&self, round: u64) {
+        lock(&self.idle).note_store(round, self.store.stored_total(), !self.store.is_empty());
+    }
+
+    /// What the dig pass of `round` does: read the chain, or nothing while the crank is idle
+    /// (no heartbeat held, no known rig with a lease covering the round, nothing held or
+    /// planned in the last few rounds, and the periodic full read not due; see [`crate::idle`]).
+    fn pass_for(&self, round: u64) -> Pass {
+        let held = !self.store.is_empty();
+        let lease = lock(&self.known_rigs).iter().any(|(_, r)| r.lease_covers(round));
+        let mut idle = lock(&self.idle);
+        idle.note_store(round, self.store.stored_total(), held);
+        idle.decide(round, held, lease, self.cfg.dig.idle_full_read_rounds)
+    }
+
+    /// The dig pass of this loop turn: [`Self::dig_pass`], or nothing at all while the crank
+    /// is idle. Returns what was decided (also counted in `hd_crank_dig_passes_total`).
+    pub async fn dig_tick(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<Pass> {
+        let board = view.board.ok_or_else(|| anyhow::anyhow!("no Board"))?;
+        let pass = self.pass_for(board.round_id);
+        self.metrics.dig_passes.inc(pass.label());
+        // One line when the crank goes idle and one when it wakes, not one per pass.
+        let idle_now = matches!(pass, Pass::Skip | Pass::Periodic);
+        if self.idle_logged.swap(idle_now, Ordering::Relaxed) != idle_now {
+            if idle_now {
+                tracing::info!(
+                    round = board.round_id,
+                    full_read_every_rounds = self.cfg.dig.idle_full_read_rounds,
+                    "idle: no heartbeat is held and no known rig has a lease, so dig passes stop reading the chain (one full read every few rounds stays)"
+                );
+            } else {
+                tracing::info!(round = board.round_id, why = pass.label(), "awake: dig passes read the chain again");
+            }
+        }
+        if pass.reads() {
+            self.dig_pass(view).await?;
+        }
+        Ok(pass)
     }
 
     /// Current heads_down Config (cached by the poller).
@@ -554,49 +647,67 @@ impl Crank {
     async fn poll_loop(self: Arc<Self>) {
         let every = Duration::from_secs(self.cfg.dig.config_poll_secs.max(5));
         loop {
-            self.refresh_hd_config().await;
-            match self.rpc.get_account_slice(&ore::PROGRAMDATA_ADDRESS, 0, 45).await {
-                Ok(acc) => self.breaker.observe_programdata_slot(
-                    acc.and_then(|a| ore::programdata_slot(&a.owner, &a.data)),
-                    self.cfg.dig.ore_programdata_slot,
-                ),
-                Err(e) => tracing::warn!(error = %e, "reading ORE ProgramData failed"),
-            }
-            let exec = hd::executor_pda(&self.program_id).0;
-            if let Ok(b) = self.rpc.get_balance(&exec).await {
-                self.metrics.executor_lamports.set_u64(b);
-            }
-            if let Ok(b) = self.rpc.get_balance(&self.cranker()).await {
-                self.metrics.cranker_lamports.set_u64(b);
-            }
-            let (board, slots_left) = {
-                let v = self.chain.borrow();
-                (v.board, v.slots_left())
-            };
-            if let Some(board) = board {
-                self.store.prune(board.round_id, Duration::from_secs(15 * 60));
-            }
-            self.signals.prune(Duration::from_secs(6 * 3600));
-            self.metrics.heartbeats_held.set_u64(self.store.len() as u64);
-            // Register new rigs in the lookup table as they appear, but never inside the dig
-            // window (an extend is only usable from the next slot anyway).
-            let quiet = slots_left.is_none_or(|l| l > self.cfg.dig.deploy_margin_slots.saturating_add(10));
-            if quiet && self.alts_in_use() && !self.breaker.is_tripped() {
-                match load_diggable_rigs(&self.rpc, &self.program_id).await {
-                    Ok(rigs) => {
-                        for (a, r) in &rigs {
-                            (self.rig_seed)(*a, r.clone());
-                        }
-                        *lock(&self.known_rigs) = rigs;
-                        if let Err(e) = self.sync_alts().await {
-                            tracing::warn!(error = %e, "lookup table sync failed");
-                        }
-                    }
-                    Err(e) => tracing::warn!(error = %e, "reading rigs failed"),
-                }
-            }
+            self.poll_once().await;
             tokio::time::sleep(every).await;
         }
+    }
+
+    /// One turn of the poller: the heads_down Config, ORE's upgrade pin, the Executor's and
+    /// the fee payer's balance, pruning, and the rig scan that feeds the lookup tables.
+    pub async fn poll_once(&self) {
+        self.refresh_hd_config().await;
+        match self.rpc.get_account_slice(&ore::PROGRAMDATA_ADDRESS, 0, 45).await {
+            Ok(acc) => self.breaker.observe_programdata_slot(
+                acc.and_then(|a| ore::programdata_slot(&a.owner, &a.data)),
+                self.cfg.dig.ore_programdata_slot,
+            ),
+            Err(e) => tracing::warn!(error = %e, "reading ORE ProgramData failed"),
+        }
+        let exec = hd::executor_pda(&self.program_id).0;
+        if let Ok(b) = self.rpc.get_balance(&exec).await {
+            self.metrics.executor_lamports.set_u64(b);
+        }
+        if let Ok(b) = self.rpc.get_balance(&self.cranker()).await {
+            self.note_fee_payer_balance(b);
+        }
+        let (board, slots_left) = {
+            let v = self.chain.borrow();
+            (v.board, v.slots_left())
+        };
+        if let Some(board) = board {
+            self.store.prune(board.round_id, Duration::from_secs(15 * 60));
+        }
+        self.signals.prune(Duration::from_secs(6 * 3600));
+        self.metrics.heartbeats_held.set_u64(self.store.len() as u64);
+        // Register new rigs in the lookup table as they appear, but never inside the dig
+        // window (an extend is only usable from the next slot anyway).
+        let quiet = slots_left.is_none_or(|l| l > self.cfg.dig.deploy_margin_slots.saturating_add(10));
+        if quiet && self.alts_in_use() && !self.breaker.is_tripped() && self.rig_scan_due(board.map(|b| b.round_id)) {
+            match load_diggable_rigs(&self.rpc, &self.program_id).await {
+                Ok(rigs) => {
+                    for (a, r) in &rigs {
+                        (self.rig_seed)(*a, r.clone());
+                    }
+                    *lock(&self.known_rigs) = rigs;
+                    if let Err(e) = self.sync_alts().await {
+                        tracing::warn!(error = %e, "lookup table sync failed");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "reading rigs failed"),
+            }
+        }
+    }
+
+    /// Is the poller's rig scan worth its three `getProgramAccounts`? It only feeds the
+    /// lookup-table sync, and a rig gets a slot in a table only with a held heartbeat or a
+    /// covering lease. So it is skipped while that sync can send nothing (the fee payer is
+    /// short, or the wait after a failed transaction runs) and while the crank is idle, as a
+    /// dig pass would be (see [`crate::idle`]). The sync of every new round still runs.
+    fn rig_scan_due(&self, round: Option<u64>) -> bool {
+        if self.alt_short() || !lock(&self.alt_state).saved.retry.due(self.now_unix()) {
+            return false;
+        }
+        round.is_none_or(|r| !matches!(self.pass_for(r), Pass::Skip | Pass::Periodic))
     }
 
     fn alts_in_use(&self) -> bool {
@@ -655,13 +766,24 @@ impl Crank {
         if self.breaker.is_tripped() {
             return Ok(());
         }
-        let config = fetched.config.ok_or_else(|| anyhow::anyhow!("heads_down Config unavailable"))?;
-        *lock(&self.hd_config) = Some(config);
+        // What a pass leaves behind for the others (the rig list for the lookup tables and the
+        // idle check, the intake's rig cache, the idle tracker) is kept even when the pass
+        // stops at a missing Config: with the program not initialized there is nothing to
+        // dig, and the passes after this one may then skip their reads.
         self.metrics.rigs_seen.set_u64(fetched.all_rigs.len() as u64);
         for (a, r) in &fetched.all_rigs {
             (self.rig_seed)(*a, r.clone());
         }
         *lock(&self.known_rigs) = fetched.all_rigs.clone();
+        {
+            let mut idle = lock(&self.idle);
+            idle.note_full_read(board.round_id);
+            if !fetched.rigs.is_empty() {
+                idle.note_active(board.round_id);
+            }
+        }
+        let config = fetched.config.ok_or_else(|| anyhow::anyhow!("heads_down Config unavailable"))?;
+        *lock(&self.hd_config) = Some(config);
         let block_height = self.rpc.get_block_height().await?;
         let retry = self.retry_policy();
         let mut plan = {
@@ -1230,8 +1352,9 @@ impl Crank {
 
     // ---- maintenance ---------------------------------------------------------------------
 
-    /// Send a small legacy transaction (lookup-table and checkpoint maintenance).
-    async fn send_simple(&self, mut ixs: Vec<Instruction>) -> anyhow::Result<Outcome> {
+    /// Sign a small legacy transaction (lookup-table and checkpoint maintenance): its wire
+    /// bytes, its signature and the last block height it can land in.
+    async fn sign_simple(&self, mut ixs: Vec<Instruction>) -> anyhow::Result<(Vec<u8>, String, u64)> {
         ixs.insert(0, tx::set_compute_unit_price(self.cfg.dig.cu_price_micro_lamports));
         if let Some((to, l)) = self.submitter.tip_for(self.nonce.fetch_add(1, Ordering::Relaxed)) {
             ixs.push(tx::system_transfer(&self.cranker(), &to, l));
@@ -1240,59 +1363,361 @@ impl Crank {
         let t = tx::sign_legacy(&ixs, self.key.keypair(), bh)?;
         let wire = tx::serialize(&t)?;
         let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
-        self.submitter.send(&wire).await?;
+        Ok((wire, sig, lvbh))
+    }
+
+    /// Send what [`Self::sign_simple`] signed and wait for its outcome.
+    async fn send_wire(&self, wire: &[u8], sig: &str, lvbh: u64) -> anyhow::Result<Outcome> {
+        self.submitter.send(wire).await?;
         self.metrics.txs_sent.inc();
-        let out = self.submitter.confirm(&sig, &wire, lvbh, ConfirmPolicy::default()).await;
+        let out = self.submitter.confirm(sig, wire, lvbh, ConfirmPolicy::default()).await;
         if matches!(out, Outcome::Landed { err: None, .. }) {
             self.metrics.txs_confirmed.inc();
         }
         Ok(out)
     }
 
-    async fn load_alts(&self) -> anyhow::Result<()> {
-        let mut keys: Vec<Address> = self.cfg.alt.tables.iter().filter_map(|s| s.parse().ok()).collect();
-        if let Ok(text) = std::fs::read_to_string(self.state_file()) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                keys.extend(v["tables"].as_array().into_iter().flatten().filter_map(|s| s.as_str()?.parse::<Address>().ok()));
+    /// Send a small legacy transaction (lookup-table and checkpoint maintenance).
+    async fn send_simple(&self, ixs: Vec<Instruction>) -> anyhow::Result<Outcome> {
+        let (wire, sig, lvbh) = self.sign_simple(ixs).await?;
+        self.send_wire(&wire, &sig, lvbh).await
+    }
+
+    // ---- lookup tables ---------------------------------------------------------------------
+
+    /// The crank's lookup tables as it last read them.
+    pub fn lookup_tables(&self) -> Vec<LookupTable> {
+        lock(&self.alts).clone()
+    }
+
+    /// The fee payer's balance as just read (the poller reads it every `dig.config_poll_secs`).
+    /// Lookup-table work that stopped for lack of funds starts again once it is enough.
+    pub fn note_fee_payer_balance(&self, lamports: u64) {
+        self.metrics.cranker_lamports.set_u64(lamports);
+    }
+
+    fn now_unix(&self) -> i64 {
+        (self.clock)()
+    }
+
+    fn owned_tables(&self) -> usize {
+        let me = self.cranker();
+        lock(&self.alts).iter().filter(|t| t.authority == Some(me)).count()
+    }
+
+    /// Room for one more table: no create may still land, and the crank owns fewer than
+    /// `alt.max_tables`.
+    fn table_slot_free(&self) -> bool {
+        lock(&self.alt_state).saved.pending.is_empty() && self.owned_tables() < self.cfg.alt.max_tables
+    }
+
+    /// Read the state file, once: the tables this crank created, the creates that may still
+    /// land, the backoff. No file is a first start. A file that is there and cannot be read
+    /// or understood is an error: read as empty, it would make the crank forget a table and
+    /// create another.
+    fn read_alt_state(&self) -> anyhow::Result<()> {
+        let mut st = lock(&self.alt_state);
+        if st.file_read {
+            return Ok(());
+        }
+        let path = self.state_file();
+        let saved = match std::fs::read_to_string(&path) {
+            Ok(text) => alt::TableState::from_json(&text).map_err(|e| {
+                anyhow::anyhow!("state file {} is {e}: fix or remove it (no lookup table is created or extended until then)", path.display())
+            })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => alt::TableState::default(),
+            Err(e) => anyhow::bail!("state file {}: {e} (no lookup table is created or extended until it can be read)", path.display()),
+        };
+        st.saved = alt::TableState { retry: saved.retry.restored(self.now_unix()), ..saved };
+        st.file_read = true;
+        Ok(())
+    }
+
+    /// Write the state file: to a temporary file first, then renamed over the old one, so a
+    /// crash cannot leave half a file.
+    fn persist_alts(&self) -> std::io::Result<()> {
+        let text = lock(&self.alt_state).saved.to_json();
+        std::fs::create_dir_all(&self.cfg.state_dir)?;
+        let path = self.state_file();
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, &path)
+    }
+
+    /// [`Self::persist_alts`], with one error line when it fails and one line when it works
+    /// again. The tables stay in use from memory either way.
+    fn save_alts(&self) -> bool {
+        let result = self.persist_alts();
+        let mut st = lock(&self.alt_state);
+        match result {
+            Ok(()) => {
+                if std::mem::take(&mut st.unsaved) {
+                    tracing::info!(file = %self.state_file().display(), "the lookup-table state file is written again");
+                }
+                true
+            }
+            Err(e) => {
+                if !std::mem::replace(&mut st.unsaved, true) {
+                    let tables: Vec<String> = st.saved.tables.iter().map(ToString::to_string).collect();
+                    self.metrics.lookup_tables.inc("state_file");
+                    tracing::error!(
+                        alert = "lookup_table_state_unsaved",
+                        file = %self.state_file().display(),
+                        error = %e,
+                        tables = %tables.join(","),
+                        "the lookup-table state file cannot be written: these tables stay in use from memory, and no table is created while it cannot be written"
+                    );
+                }
+                false
             }
         }
+    }
+
+    /// Read the crank's tables from the chain: the configured ones, those of the state file,
+    /// and any create that may have landed unseen. Nothing is created or extended before this
+    /// has worked once, nor after a lookup-table transaction until it has worked again.
+    async fn load_alts(&self) -> anyhow::Result<()> {
+        self.read_alt_state()?;
+        let (mut keys, pending, mut min_slot, settle_height) = {
+            let st = lock(&self.alt_state);
+            let mut keys: Vec<Address> = self.cfg.alt.tables.iter().filter_map(|s| s.parse().ok()).collect();
+            keys.extend(st.saved.tables.iter().copied());
+            keys.extend(st.saved.pending.iter().copied());
+            (keys, st.saved.pending.clone(), st.saved.min_slot, st.saved.settle_height)
+        };
         keys.sort_by_key(|k| k.to_bytes());
         keys.dedup();
-        let accs = self.rpc.get_multiple_accounts(&keys).await?;
+        if settle_height > 0 || !pending.is_empty() {
+            // A transaction whose outcome was not seen is judged on one node's view: its
+            // block height must be past the transaction's last valid block, and the tables
+            // are then read as of that node's slot or later.
+            let (slot, height) = self.rpc.get_slot_and_block_height().await?;
+            if !alt::settled(height, settle_height) {
+                anyhow::bail!(
+                    "a lookup-table transaction whose outcome was not seen could land until block height {settle_height}: \
+                     the tables are read again once the chain is {} blocks past it (now {height})",
+                    alt::SETTLE_MARGIN_BLOCKS
+                );
+            }
+            min_slot = min_slot.max(slot);
+        }
+        // A node that has not processed `min_slot` answers with an error, never with the
+        // state before the crank's last lookup-table transaction.
+        let accs = self
+            .rpc
+            .get_multiple_accounts_at(&keys, min_slot)
+            .await
+            .map_err(|e| anyhow::anyhow!("reading the lookup tables (as of slot {min_slot} or later): {e}"))?;
         let tables: Vec<LookupTable> = keys
             .into_iter()
             .zip(accs)
             .filter_map(|(k, a)| a.and_then(|a| LookupTable::decode(k, &a.owner, &a.data)))
             .collect();
-        *lock(&self.alts) = tables;
-        Ok(())
-    }
-
-    fn persist_alts(&self, extra: Option<Address>) -> anyhow::Result<()> {
-        let mut keys: Vec<String> = lock(&self.alts).iter().map(|t| t.key.to_string()).collect();
-        keys.extend(extra.map(|a| a.to_string()));
-        std::fs::create_dir_all(&self.cfg.state_dir)?;
-        std::fs::write(self.state_file(), serde_json::json!({ "tables": keys }).to_string())?;
-        Ok(())
-    }
-
-    async fn create_alt(&self) -> anyhow::Result<()> {
-        let recent = self.rpc.get_slot("finalized").await?;
-        let (ix, table) = alt::create_table_ix(&self.cranker(), &self.cranker(), recent);
-        match self.send_simple(vec![ix]).await? {
-            Outcome::Landed { err: None, .. } => {
-                tracing::info!(%table, "created lookup table");
-                self.persist_alts(Some(table))?;
-                self.load_alts().await
+        let changed = {
+            let mut st = lock(&self.alt_state);
+            // This read is final for every create that was in doubt: its table is there, or
+            // the create never landed.
+            for table in &pending {
+                if tables.iter().any(|t| t.key == *table) {
+                    st.saved.remember(*table);
+                    tracing::info!(%table, "a lookup table whose create was not seen to land is on chain: it is in use");
+                } else {
+                    st.saved.pending.retain(|p| p != table);
+                    tracing::info!(%table, "a lookup-table create never landed");
+                }
             }
-            other => anyhow::bail!("creating lookup table: {other:?}"),
+            st.loaded = true;
+            let was_in_doubt = std::mem::take(&mut st.saved.settle_height) != 0;
+            was_in_doubt || !pending.is_empty()
+        };
+        *lock(&self.alts) = tables;
+        if changed {
+            self.save_alts();
+        }
+        Ok(())
+    }
+
+    /// The fee payer was short for the last lookup-table transaction and, by the poller's
+    /// last balance reading, still is: nothing is asked and nothing is sent.
+    fn alt_short(&self) -> bool {
+        let known = u64::try_from(self.metrics.cranker_lamports.get()).unwrap_or(0);
+        lock(&self.alt_state).short_of.is_some_and(|need| known < need)
+    }
+
+    /// What the fee payer's own account must keep to stay rent-exempt. A transaction that
+    /// would leave it with less (and not with exactly zero) is refused by the chain before
+    /// it runs, so it would be sent and never land.
+    async fn fee_payer_rent(&self) -> anyhow::Result<u64> {
+        let cached = self.fee_payer_rent.load(Ordering::Relaxed);
+        if cached != 0 {
+            return Ok(cached);
+        }
+        let rent = self.rpc.get_minimum_balance_for_rent_exemption(0).await?;
+        self.fee_payer_rent.store(rent, Ordering::Relaxed);
+        Ok(rent)
+    }
+
+    /// Does the fee payer hold `rent` lamports of new rent, [`ALT_FEE_MARGIN_LAMPORTS`] for
+    /// each of `txs` transactions, and what its own account must keep? If not: one warning,
+    /// and the lookup tables are left alone until the poller's balance reading says it does.
+    async fn alt_funded(&self, rent: u64, txs: u64, what: &'static str) -> anyhow::Result<bool> {
+        let keep = self.fee_payer_rent().await?;
+        let need = rent.saturating_add(ALT_FEE_MARGIN_LAMPORTS.saturating_mul(txs)).saturating_add(keep);
+        let balance = self.rpc.get_balance(&self.cranker()).await?;
+        self.note_fee_payer_balance(balance);
+        let mut st = lock(&self.alt_state);
+        if balance >= need {
+            st.short_of = None;
+            return Ok(true);
+        }
+        if st.short_of.replace(need).is_none() {
+            self.metrics.lookup_tables.inc("low_balance");
+            tracing::warn!(
+                alert = "lookup_table_unfunded",
+                fee_payer = %self.cranker(),
+                balance,
+                need,
+                rent,
+                keep,
+                "the fee payer cannot pay for {what} (its rent, the fees, and what the fee payer's own account must keep): \
+                 nothing is sent, and it is looked at again once the balance is enough. \
+                 Digs go on without it (fewer rigs fit a transaction). Fund the fee payer, or set alt.enabled = false"
+            );
+        }
+        Ok(false)
+    }
+
+    /// A lookup-table transaction valid until block height `lvbh` is about to be sent. From
+    /// here until its outcome is seen, the tables are not trusted as read before the chain is
+    /// past it. Returns the settle height to go back to.
+    fn alt_tx_begins(&self, lvbh: u64) -> u64 {
+        let mut st = lock(&self.alt_state);
+        let before = st.saved.settle_height;
+        st.saved.settle_height = before.max(lvbh);
+        st.loaded = false;
+        before
+    }
+
+    /// The outcome of that transaction was seen: it landed in `slot` (and worked, or failed).
+    fn alt_tx_seen(&self, before: u64, slot: u64) {
+        let mut st = lock(&self.alt_state);
+        st.saved.settle_height = before;
+        st.saved.min_slot = st.saved.min_slot.max(slot);
+    }
+
+    /// A lookup-table transaction did not land, or could not be sent: wait before the next
+    /// one (see [`alt::Retry`]).
+    fn alt_failed(&self, event: &'static str) {
+        self.metrics.lookup_tables.inc(event);
+        let now = self.now_unix();
+        let (failures, wait) = {
+            let mut st = lock(&self.alt_state);
+            st.saved.retry.fail(now);
+            (st.saved.retry.failures, st.saved.retry.not_before_unix.saturating_sub(now))
+        };
+        tracing::warn!(failures, retry_in_secs = wait, "lookup-table maintenance backs off");
+        self.save_alts();
+    }
+
+    /// Create a lookup table. Its address goes into the state file before the transaction is
+    /// sent, so a create that lands is found again whatever happens to this process.
+    async fn create_alt(&self) -> anyhow::Result<()> {
+        let me = self.cranker();
+        let recent = self.rpc.get_slot("finalized").await?;
+        let (ix, table) = alt::create_table_ix(&me, &me, recent);
+        let (wire, sig, lvbh) = self.sign_simple(vec![ix]).await?;
+        let before = self.alt_tx_begins(lvbh);
+        lock(&self.alt_state).saved.pending.push(table);
+        if !self.save_alts() {
+            let mut st = lock(&self.alt_state);
+            st.saved.pending.retain(|p| *p != table);
+            st.saved.settle_height = before;
+            anyhow::bail!(
+                "the state file {} cannot be written: no lookup table is created, because its address would be lost at the next restart",
+                self.state_file().display()
+            );
+        }
+        match self.send_wire(&wire, &sig, lvbh).await? {
+            Outcome::Landed { err: None, slot } => {
+                tracing::info!(%table, slot, "created lookup table");
+                self.alt_tx_seen(before, slot);
+                {
+                    let mut st = lock(&self.alt_state);
+                    st.saved.remember(table);
+                    st.saved.retry.clear();
+                }
+                // In memory at once, whatever the next read says: a table is empty when created.
+                lock(&self.alts).push(LookupTable::empty(table, me));
+                self.metrics.lookup_tables.inc("created");
+                if let Err(e) = self.persist_alts() {
+                    lock(&self.alt_state).unsaved = true;
+                    self.metrics.lookup_tables.inc("state_file");
+                    tracing::error!(
+                        alert = "lookup_table_state_unsaved",
+                        %table,
+                        file = %self.state_file().display(),
+                        error = %e,
+                        "the lookup table was created but the state file could not be updated: the table stays in use from memory and no other one is created. Keep this address: it is needed to close the table"
+                    );
+                }
+                Ok(())
+            }
+            Outcome::Landed { err: Some(err), slot } => {
+                // It landed and failed: the table does not exist.
+                self.alt_tx_seen(before, slot);
+                lock(&self.alt_state).saved.pending.retain(|p| *p != table);
+                anyhow::bail!("creating lookup table {table} failed on-chain in slot {slot}: {err}")
+            }
+            other => anyhow::bail!("creating lookup table {table}: {other:?} (it stays on record until the chain is well past its blockhash)"),
         }
     }
 
-    /// Rigs worth a lookup-table slot: the operator pays the table rent (890,880 lamports
-    /// per rig), so only rigs that are actually heartbeating (a verified heartbeat is held) or
-    /// hold a covering lease qualify. Arming throwaway rigs therefore costs an attacker a Rig
-    /// account and a live P-256 key per slot, not just a registration.
+    /// Create a table if the fee payer can pay for it with its shared accounts. `Ok(false)`:
+    /// it cannot, and nothing was sent. An attempt that fails starts the backoff.
+    async fn create_alt_if_funded(&self) -> anyhow::Result<bool> {
+        let attempt = async {
+            let len = alt::table_len(alt::shared_addresses(&self.program_id).len());
+            let rent = self.rpc.get_minimum_balance_for_rent_exemption(len).await?;
+            // Two transactions: the create, and the extend that puts the shared accounts in.
+            if !self.alt_funded(rent, 2, "a lookup table").await? {
+                return Ok(false);
+            }
+            self.create_alt().await.map(|()| true)
+        };
+        let result: anyhow::Result<bool> = attempt.await;
+        if result.is_err() {
+            self.alt_failed("create_failed");
+        }
+        result
+    }
+
+    /// Add `chunk` to `table`, which holds `have` addresses. `Ok(None)`: the fee payer cannot
+    /// pay the rent of the new entries, and nothing was sent.
+    async fn extend_alt(&self, table: &Address, have: usize, chunk: &[Address]) -> anyhow::Result<Option<Outcome>> {
+        let me = self.cranker();
+        // An extend pays the rent of the bytes it adds.
+        let after = self.rpc.get_minimum_balance_for_rent_exemption(alt::table_len(have + chunk.len())).await?;
+        let current = self.rpc.get_minimum_balance_for_rent_exemption(alt::table_len(have)).await?;
+        if !self.alt_funded(after.saturating_sub(current), 1, "the rent of new lookup-table entries").await? {
+            return Ok(None);
+        }
+        let (wire, sig, lvbh) = self.sign_simple(vec![alt::extend_table_ix(table, &me, &me, chunk)]).await?;
+        let before = self.alt_tx_begins(lvbh);
+        // Best effort (unlike before a create): a crank that cannot write its state file
+        // still fills the table it holds in memory.
+        self.save_alts();
+        let outcome = self.send_wire(&wire, &sig, lvbh).await?;
+        if let Outcome::Landed { slot, .. } = &outcome {
+            self.alt_tx_seen(before, *slot);
+        }
+        Ok(Some(outcome))
+    }
+
+    /// Rigs worth a lookup-table slot: the operator pays the table rent (4 addresses of 32
+    /// bytes: 650,240 lamports per rig at mainnet's 5,080 lamports per byte), so only rigs
+    /// that are actually heartbeating (a verified heartbeat is held) or hold a covering lease
+    /// qualify. Arming throwaway rigs therefore costs an attacker a Rig account and a live
+    /// P-256 key per slot, not just a registration.
     fn rigs_for_alt(&self, rigs: &[(Address, Rig)]) -> Vec<(Address, Rig)> {
         let round = self.chain.borrow().board.map_or(0, |b| b.round_id);
         rigs.iter()
@@ -1302,17 +1727,28 @@ impl Crank {
     }
 
     /// Make sure the crank's tables hold the shared accounts and every known rig's four.
-    async fn sync_alts(&self) -> anyhow::Result<()> {
+    ///
+    /// A table locks rent that only comes back by closing it by hand, so this never guesses.
+    /// It does nothing while the wait after a failed transaction runs or while the fee payer
+    /// is known to be short. It reads the tables before deciding, at start and again after
+    /// every transaction it sent. And it creates a table only when the crank owns none, no
+    /// create may still land, `alt.max_tables` allows one and the fee payer can pay for it.
+    pub async fn sync_alts(&self) -> anyhow::Result<()> {
         // The poller and new-round maintenance both sync; never interleave (double creates).
         let _guard = self.alt_sync.lock().await;
-        let me = self.cranker();
-        if lock(&self.alts).iter().all(|t| t.authority != Some(me)) {
-            if !self.cfg.alt.auto_create {
-                return Ok(());
-            }
-            self.create_alt().await?;
+        self.read_alt_state()?;
+        if !lock(&self.alt_state).saved.retry.due(self.now_unix()) || self.alt_short() {
+            return Ok(());
         }
-        if !self.cfg.alt.auto_extend {
+        if !lock(&self.alt_state).loaded {
+            self.load_alts().await?;
+        }
+        let c = &self.cfg.alt;
+        let me = self.cranker();
+        if self.owned_tables() == 0 && (!c.auto_create || !self.table_slot_free() || !self.create_alt_if_funded().await?) {
+            return Ok(());
+        }
+        if !c.auto_extend {
             return Ok(());
         }
         let mut wanted = alt::shared_addresses(&self.program_id);
@@ -1323,23 +1759,48 @@ impl Crank {
         let tables = lock(&self.alts).clone();
         let missing = alt::missing(&tables, &wanted);
         if missing.is_empty() {
+            // Everything is in place: the count of failures in a row starts over.
+            let had_failed = std::mem::take(&mut lock(&self.alt_state).saved.retry) != alt::Retry::default();
+            if had_failed {
+                self.save_alts();
+            }
             return Ok(());
         }
         let own: Vec<LookupTable> = tables.into_iter().filter(|t| t.authority == Some(me)).collect();
+        let mut held: HashMap<Address, usize> = own.iter().map(|t| (t.key, t.addresses.len())).collect();
         let (plan, overflow) = alt::plan_extends(&own, missing);
         for (table, chunk) in plan.into_iter().take(MAX_ALT_TXS_PER_ROUND) {
-            let n = chunk.len();
-            match self.send_simple(vec![alt::extend_table_ix(&table, &me, &me, &chunk)]).await? {
-                Outcome::Landed { err: None, .. } => tracing::info!(%table, added = n, "extended lookup table"),
-                other => tracing::warn!(%table, outcome = ?other, "extend failed"),
+            let have = held.get(&table).copied().unwrap_or(0);
+            match self.extend_alt(&table, have, &chunk).await {
+                Ok(Some(Outcome::Landed { err: None, .. })) => {
+                    held.insert(table, have + chunk.len());
+                    self.metrics.lookup_tables.inc("extended");
+                    lock(&self.alt_state).saved.retry.clear();
+                    self.save_alts();
+                    tracing::info!(%table, added = chunk.len(), "extended lookup table");
+                }
+                // Not funded: nothing was sent, and what is in memory is still right.
+                Ok(None) => return Ok(()),
+                // It may or may not have landed: nothing more is sent now, and the tables are
+                // read again when the wait is over (a second extend with the same addresses
+                // would pay their rent twice).
+                Ok(Some(other)) => {
+                    tracing::warn!(%table, outcome = ?other, "extend failed");
+                    self.alt_failed("extend_failed");
+                    return Ok(());
+                }
+                Err(e) => {
+                    self.alt_failed("extend_failed");
+                    return Err(e);
+                }
             }
         }
-        let owned = lock(&self.alts).iter().filter(|t| t.authority == Some(me)).count();
-        if !overflow.is_empty() && self.cfg.alt.auto_create {
-            if owned < self.cfg.alt.max_tables {
-                self.create_alt().await?;
-            } else {
-                tracing::warn!(owned, max = self.cfg.alt.max_tables, "lookup tables full; new rigs use static keys");
+        if !overflow.is_empty() && c.auto_create {
+            let owned = self.owned_tables();
+            if owned >= c.max_tables {
+                tracing::warn!(owned, max = c.max_tables, "lookup tables full; new rigs use static keys");
+            } else if self.table_slot_free() {
+                self.create_alt_if_funded().await?;
             }
         }
         self.load_alts().await

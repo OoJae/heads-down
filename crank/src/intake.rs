@@ -49,6 +49,10 @@ use crate::mirror::HeartbeatMirror;
 use crate::ratelimit::{ip_key, KeyedLimiter, Quota};
 use crate::signal::{Offered, SignalHub};
 
+/// `/healthz` reports `degraded` when the slot has not advanced for this long. The chain
+/// watcher's HTTP poll interval is bounded by it ([`crate::config::MAX_CHAIN_POLL_SECS`]).
+pub const STALE_CHAIN_AFTER: Duration = Duration::from_secs(30);
+
 /// Intake limits.
 #[derive(Clone, Debug)]
 pub struct IntakeConfig {
@@ -100,7 +104,7 @@ impl Default for IntakeConfig {
             send_timeout: Duration::from_secs(5),
             trust_forwarded_for: false,
             trust_real_ip: false,
-            stale_chain_after: Duration::from_secs(30),
+            stale_chain_after: STALE_CHAIN_AFTER,
             window_rule: WindowRule::default(),
         }
     }
