@@ -114,8 +114,8 @@ stay in the user's own ORE Automation and Miner accounts.
 |---|---|
 | `programs/heads-down` (LiteSVM on a fork of live mainnet ORE, plus host unit tests, fuzz and golden vectors) | 171 |
 | `crank` | 168, and 14 against the real program on the fork |
-| `registrar` | 105 |
-| `services/indexer` | 347 |
+| `registrar` | 116 |
+| `services/indexer` | 385 |
 | `android` (JVM unit tests, all modules) | 859, of which 4 are skipped (they need a device or a network) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
