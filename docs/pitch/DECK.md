@@ -345,7 +345,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | Component | Tests | Where the number comes from |
   |---|---|---|
   | `heads_down` program | 171 passed (138 on a fork of live ORE) | re-run 2026-10-03; `programs/heads-down/README.md` |
-  | `hd-crank` | 168 passed, plus 14 against the real program on the fork | re-run 2026-10-03 |
+  | `hd-crank` | 213 passed, plus 14 against the real program on the fork | re-run 2026-10-04 |
   | Registrar (SIWS + Key Attestation) | 116 passed | re-run 2026-10-04 |
   | `p256-introspect` | 30 passed | re-run 2026-10-03 |
   | `sgt-verify` (host suites) | 69 passed, plus LiteSVM suites | `crates/sgt-verify/README.md` |

@@ -113,7 +113,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | Component | Tests |
 |---|---|
 | `programs/heads-down` (LiteSVM on a fork of live mainnet ORE, plus host unit tests, fuzz and golden vectors) | 171 |
-| `crank` | 168, and 14 against the real program on the fork |
+| `crank` | 213, 14 against the real program on the fork, and one end to end on a local validator |
 | `registrar` | 116 |
 | `services/indexer` | 385 |
 | `android` (JVM unit tests, all modules) | 859, of which 4 are skipped (they need a device or a network) |

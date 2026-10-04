@@ -415,4 +415,4 @@ build also submits the signed transaction itself, where a release build lets the
 
 The Rust tool (`scripts/devstack/tool`, crate `hd-devstack`) reuses the crank's library for
 RPC, layouts and events, and the program crate for the ORE layout hash. Build it with
-`cargo build --release` (Rust 1.97.1); `cargo test` covers the entropy chain.
+`cargo build --release` (Rust 1.97.1); `cargo test` covers the entropy chain, the cluster guard, the instruction builders, the deploy arithmetic, and the paced buffer writer against a mock JSON-RPC node (42 tests). `scripts/devstack/rate-limit-proxy.py` is a loopback proxy that answers HTTP 429 to `sendTransaction` beyond a set rate; `scripts/mainnet/dry-run.sh` uses it for its rate-limit drill.

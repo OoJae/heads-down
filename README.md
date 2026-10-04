@@ -47,7 +47,7 @@ built; the Stack and Gift screens are not yet.
 | [`programs/heads-down`](programs/heads-down/README.md) | The on-chain program (Pinocchio, `no_std`). 32 instructions. 171 tests, 138 of them on a fork of live mainnet ORE with the real secp256r1 precompile. Contract: [INTERFACE.md](programs/heads-down/INTERFACE.md) v1.3 with machine-checked golden vectors |
 | [`crates/sgt-verify`](crates/sgt-verify/README.md) | In-program Seeker Genesis Token verifier, tested on real mainnet SGTs and on a forgery that passes weaker checks |
 | [`crates/p256-introspect`](crates/p256-introspect/README.md) | secp256r1 precompile introspection and Android Keystore signature helpers |
-| [`crank`](crank/README.md) | The permissionless crank: takes the phones' heartbeats, lands digs, BREAK and FREEZE, Stack check-ins. 168 tests, plus 14 against the real program on the fork |
+| [`crank`](crank/README.md) | The permissionless crank: takes the phones' heartbeats, lands digs, BREAK and FREEZE, Stack check-ins. 213 tests, plus 14 against the real program on the fork and one end to end on a local validator |
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests on real attestation chains |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 385 tests |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain |
