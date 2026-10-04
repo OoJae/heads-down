@@ -320,6 +320,23 @@ class HomeAndIntroTest {
     }
 
     @Test
+    fun `the rig key is called hardware only where Android says it is`() {
+        val ready = { level: xyz.headsdown.core.keys.KeySecurityLevel -> xyz.headsdown.rig.RigKeyStatus.Ready(level, "ab", 3) }
+        val software = ready(xyz.headsdown.core.keys.KeySecurityLevel.SOFTWARE_OR_UNKNOWN)
+        for (level in listOf(xyz.headsdown.core.keys.KeySecurityLevel.TRUSTED_ENVIRONMENT, xyz.headsdown.core.keys.KeySecurityLevel.STRONGBOX)) {
+            assertTrue("secure hardware" in rigKeyLine(ready(level)))
+        }
+        assertFalse("secure hardware" in rigKeyLine(software))
+        assertTrue("not hardware-backed" in rigKeyLine(software))
+        assertFalse("hardware" in rigKeyLine(xyz.headsdown.rig.RigKeyStatus.Missing).lowercase())
+        // Before the key exists nothing is known about where it will live, and the summary of a
+        // software key must not open with the word "hardware".
+        assertFalse("hardware" in rigKeySubtitle(xyz.headsdown.rig.RigKeyStatus.Missing).lowercase())
+        assertTrue(rigKeySubtitle(software).startsWith("Rig key ready · software"))
+        assertFalse(NightShiftCopy.allText.any { "hardware" in it.lowercase() })
+    }
+
+    @Test
     fun `intro explains the ritual and continues`() {
         var continued = 0
         rule.setContent { HeadsDownTheme { NightShiftIntro(onContinue = { continued++ }) } }

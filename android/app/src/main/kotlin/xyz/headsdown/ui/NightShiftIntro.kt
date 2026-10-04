@@ -52,7 +52,7 @@ object NightShiftCopy {
         Step(
             "Heads down",
             "Lay the phone face-down on the charger. While it stays dark, it signs a heartbeat about every " +
-                "78 seconds with a key that never leaves its secure hardware.",
+                "78 seconds with a key that never leaves the phone's Android Keystore.",
         ),
         Step(
             "The rig digs, or it waits",

@@ -47,7 +47,8 @@ data class RigKeyInfo(
  *  - StrongBox when the device advertises `FEATURE_STRONGBOX_KEYSTORE`, otherwise the TEE.
  *    If StrongBox generation still fails ([StrongBoxUnavailableException]) we fall back to
  *    the TEE and report the real level via [KeyInfo], never the requested one.
- *  - Non-exportable: Keystore private keys never leave secure hardware; this class never
+ *  - Non-exportable: Keystore private keys never leave the Keystore (the TEE or StrongBox
+ *    where the phone has one; [securityLevel] reports which); this class never
  *    touches key material, only handles to it.
  *  - Key attestation: generated with the registrar's challenge, so the certificate chain
  *    proves (to the registrar) that the key is hardware-backed and bound to this app.

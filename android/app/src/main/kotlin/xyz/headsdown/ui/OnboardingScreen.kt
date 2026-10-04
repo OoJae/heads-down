@@ -131,7 +131,7 @@ fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -
 
         StepCard(5, "Create your rig key", rigKeySubtitle(state.rigKey, state.attestation), state.rigKeyReady) {
             Button(onClick = onCreateRigKey, enabled = !state.creatingKey) {
-                Text(if (state.creatingKey) "Creating in secure hardware…" else "Create rig key")
+                Text(if (state.creatingKey) "Creating the key…" else "Create rig key")
             }
         }
 
@@ -151,7 +151,7 @@ private fun keepAliveSubtitle(state: OnboardingState): String =
 
 internal fun rigKeySubtitle(status: RigKeyStatus, attestation: AttestationOutcome? = null): String = when (status) {
     RigKeyStatus.Missing ->
-        "A P-256 key that never leaves this phone's secure hardware signs every heartbeat. Your wallet may ask you to sign in, so the registrar can vouch for the key."
+        "A P-256 key that never leaves this phone's Android Keystore signs every heartbeat. Your wallet may ask you to sign in, so the registrar can vouch for the key."
     is RigKeyStatus.Ready -> {
         val where = when (status.securityLevel) {
             KeySecurityLevel.STRONGBOX -> "StrongBox"
@@ -166,9 +166,24 @@ internal fun rigKeySubtitle(status: RigKeyStatus, attestation: AttestationOutcom
             attestation == AttestationOutcome.REJECTED -> "registrar refused the attestation: guest rig"
             else -> "guest rig (registrar not reached)"
         }
-        "Hardware key ready · $where · $vouched · ${status.attestationCertificates} attestation certs · ${status.fingerprint}…"
+        "Rig key ready · $where · $vouched · ${status.attestationCertificates} attestation certs · ${status.fingerprint}…"
     }
     is RigKeyStatus.Failed -> "Key creation failed (${status.reason}). Try again."
+}
+
+/**
+ * Who signs the heartbeats, for the home screen's footnote. It names secure hardware only when
+ * Android reports the key lives there: an emulator, or a phone without a TEE, holds it in software.
+ */
+internal fun rigKeyLine(status: RigKeyStatus): String = when (status) {
+    is RigKeyStatus.Ready -> when (status.securityLevel) {
+        KeySecurityLevel.STRONGBOX,
+        KeySecurityLevel.TRUSTED_ENVIRONMENT,
+        -> "Heartbeats are signed by a key held in this phone's secure hardware."
+        KeySecurityLevel.SOFTWARE_OR_UNKNOWN ->
+            "Heartbeats are signed by a key in this phone's Android Keystore, which is not hardware-backed on this device."
+    }
+    else -> "Create your rig key to sign heartbeats."
 }
 
 @Composable

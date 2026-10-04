@@ -33,7 +33,7 @@ Foreman is three small models. Each has one narrow job, and each runs on the pho
 ## What the AI does not do
 
 * **It never moves funds, signs a transaction, decides a dig or raises a limit.** Digs need a
-  fresh heartbeat from the phone's hardware key, verified on-chain, inside wallet-signed caps.
+  fresh heartbeat from the phone's Keystore key, verified on-chain, inside wallet-signed caps.
   The program enforces the cost gate itself.
 * **It can only tighten.**
   * The classifier can add a break but never remove one.
