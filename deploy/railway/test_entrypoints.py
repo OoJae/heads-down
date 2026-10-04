@@ -38,6 +38,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -131,12 +132,23 @@ def leaks(text: str) -> list[str]:
     return found + (["the session secret"] if SESSION_SECRET in text else [])
 
 
+_handed_out: set[int] = set()
+_handed_out_lock = threading.Lock()
+
+
 def free_port() -> int:
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    """A loopback port nothing listens on, and that no other run here was given. The runs are
+    parallel and some stubs listen late or never: without the second half the system can hand
+    the same port to two of them, and one would then see the other's stub answer."""
+    with _handed_out_lock:
+        while True:
+            s = socket.socket()
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+            s.close()
+            if port not in _handed_out:
+                _handed_out.add(port)
+                return port
 
 
 def make_copy(tree: Path, work: str, service: str, fake_proc: bool) -> str:
