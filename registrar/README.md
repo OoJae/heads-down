@@ -34,7 +34,7 @@ phone (Keystore P-256)            registrar                               heads_
 
 ```sh
 cd registrar
-cargo test                                   # 114 tests; no network needed
+cargo test                                   # 116 tests; no network needed
 mkdir -p data
 cargo run -- keygen ./data/registrar-keypair.json   # prints the registrar pubkey; file is 0600
 export HD_SESSION_SECRET=$(openssl rand -hex 32)
@@ -301,7 +301,10 @@ Other adversaries:
   There is a 64 KiB body cap, a 20 s timeout, bounded verification concurrency, an
   outstanding-nonce cap, and size limits inside every parser.
 - **Dependency outage.** A revocation-list or RPC outage returns 503 **before** the nonce is spent.
-  There is no fallback slot guess.
+  There is no fallback slot guess. `/healthz` makes no network call, so it does not show an RPC
+  that gives no slot: the registrar asks once at start and logs `slot source answered`, or the
+  warning `slot source gave no slot` with the step that failed (the HTTP status, if there was
+  one).
 
 **Logging and PII.** Logs are JSON with route template, request id, status, latency and error
 code. They contain no tokens, signed messages, signatures, wallet addresses, certificate chains or
@@ -315,10 +318,13 @@ key serial can link two rigs registered from the same phone while that key lives
 warning if readable) or from an env var. It is zeroized on drop, has no printable form except its
 public key, and is created by `keygen` with mode 0600 and no overwrite. The session key must be
 >= 32 bytes and is zeroized and redacted. `HD_RPC_URL` may carry a provider's API key: a `{:?}`
-of the configuration shows only its scheme, host and port, and the service does not log it (a
-run at `RUST_LOG=trace` with a key in the path and in the query string, once with the RPC
-answering and once with it down, logged neither). No secret is committed, and `.gitignore` and
-`.dockerignore` exclude keypairs, `.env` and runtime state.
+of the configuration shows only its scheme, host and port, and the service does not log it. Two
+things check that. The tests in `src/slot.rs` put a key in the URL's userinfo, path and query
+string and capture what the service and its HTTP client write through `tracing`, down to
+TRACE, around a getSlot that answers and around ones that fail. And runs of the binary at
+`RUST_LOG=trace` with such a URL, the RPC answering and then down, logged none of the keys
+(that also covers what the HTTP client writes through the `log` crate). No secret is
+committed, and `.gitignore` and `.dockerignore` exclude keypairs, `.env` and runtime state.
 
 ## Code map
 
@@ -340,10 +346,11 @@ answering and once with it down, logged neither). No secret is committed, and `.
 
 ## Tests
 
-`cargo test` runs 114 tests offline in about a second: 63 unit, 19 real-vector, 14 SIWS HTTP and
+`cargo test` runs 116 tests offline in about a second: 65 unit, 19 real-vector, 14 SIWS HTTP and
 18 attestation HTTP. Two of the unit tests read `.env.example` and
 `deploy/railway/registrar/.env.example`: both files must name exactly the variables the code
-reads and show its defaults. Lint: `cargo +1.97.1 clippy --all-targets`. The
+reads and show its defaults. Two more start a stand-in RPC on loopback for the slot source's
+start report. Lint: `cargo +1.97.1 clippy --all-targets`. The
 library and binary deny `unwrap`, `expect`, `panic`, indexing and unchecked arithmetic outside
 tests. Format: `cargo +1.95 fmt --check`.
 
@@ -361,7 +368,12 @@ validity windows.
 - **Deploy behind a proxy:** set the one setting that names the header the proxy writes
   (`HD_TRUST_REAL_IP=true` on Railway, whose documentation says its edge sets `X-Real-IP`;
   `HD_TRUSTED_PROXY_HOPS=n` behind n proxies that append to `X-Forwarded-For`) and check it with
-  the two commands in `deploy/railway/registrar/.env.example`. Mount `/data` on a persistent
+  the command in `deploy/railway/registrar/.env.example`. Mount `/data` on a persistent
   volume, and back up `attestations.jsonl` (append-only; mirror it publicly).
+- **RPC.** After a deploy, read the log for `slot source answered`. The default `HD_RPC_URL` is
+  the public mainnet RPC, which is not to be counted on from a hosting provider
+  (`deploy/railway/registrar/.env.example` has what is known about Railway); with the warning
+  `slot source gave no slot` every attestation answers 503 `slot_unavailable`, which the app
+  takes as "registrar unavailable": it registers a guest rig.
 - **Devnet builds** sign in with `solana:devnet`: set `HD_SIWS_CHAINS=solana:devnet` on the devnet
   registrar. Keep mainnet and devnet registrars separate (different keys and program ids).

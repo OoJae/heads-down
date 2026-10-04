@@ -561,10 +561,12 @@ mod tests {
         same(&railway, &stated, "deploy/railway/registrar/.env.example");
         let c = config_shown(&railway, None);
         assert!(c.trust_real_ip && c.trusted_proxy_hops == 0, "Railway: X-Real-IP, and not X-Forwarded-For as well");
+        // The file shows no RPC URL: a keyed one must never be in it, and which other one the
+        // service relies on is the operator's choice (the file says why the default is not it).
         assert_eq!(
             c.slot,
             SlotConfig::Rpc("https://api.mainnet-beta.solana.com".into()),
-            "no keyed RPC URL on Railway"
+            "no RPC URL is shown for Railway"
         );
         assert_eq!(c.siws_uri, "https://oojae.github.io/heads-down/");
     }

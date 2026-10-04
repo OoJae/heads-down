@@ -84,6 +84,12 @@ async fn serve() -> ExitCode {
         "hd-registrar starting"
     );
     let _maintenance = spawn_maintenance(Arc::clone(&app));
+    // One getSlot now, beside the start: /healthz makes no network call, so an RPC that gives
+    // no slot would otherwise show only as 503 on the first attestation. It stops nothing.
+    let probe = Arc::clone(&app);
+    tokio::spawn(async move {
+        probe.slots.report_at_start().await;
+    });
     let listener = match tokio::net::TcpListener::bind(bind).await {
         Ok(l) => l,
         Err(e) => {

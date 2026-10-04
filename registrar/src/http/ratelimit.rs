@@ -13,7 +13,8 @@
 //! With neither (the default) both headers are ignored, so a client cannot choose its own
 //! bucket by forging one. A header can arrive as several lines, and a client can only add
 //! lines before the proxy's: `X-Real-IP` is read from its last line, and the lines of
-//! `X-Forwarded-For` are read as one list.
+//! `X-Forwarded-For` are read as one list. A missing header, an entry that is not an address
+//! or a line that cannot be read all fall back to the TCP peer.
 //!
 //! IPs are held only in the limiter's memory and are never logged.
 
@@ -92,13 +93,15 @@ impl RateLimiters {
         if self.trusted_proxy_hops == 0 {
             return peer_ip;
         }
-        let hops: Vec<&str> = headers
-            .get_all("x-forwarded-for")
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .flat_map(|line| line.split(','))
-            .map(str::trim)
-            .collect();
+        let mut hops: Vec<&str> = Vec::new();
+        for line in headers.get_all("x-forwarded-for") {
+            // A line that cannot be read is not skipped: skipping it would move the count from
+            // the right onto an entry of an earlier line, which the client may have sent.
+            let Ok(line) = line.to_str() else {
+                return peer_ip;
+            };
+            hops.extend(line.split(',').map(str::trim));
+        }
         hops.len()
             .checked_sub(self.trusted_proxy_hops)
             .and_then(|i| hops.get(i))
@@ -187,6 +190,20 @@ mod tests {
         lines.append("x-real-ip", HeaderValue::from_static("7.7.7.7"));
         assert_eq!(one_hop.client_ip(Some(peer), &lines), ip("5.5.5.5"));
         assert_eq!(untrusted.client_ip(Some(peer), &lines), ip("9.9.9.9"));
+        // A line that cannot be read (a byte outside visible ASCII) is not skipped: the count
+        // from the right would land on an earlier line, here the client's own 6.6.6.6. With
+        // such a line anywhere in the header, the peer is used.
+        for unreadable in [&b"\xff, 5.5.5.5"[..], &b"5.5.5.5, \xff"[..], &b"\xff"[..]] {
+            let unreadable = HeaderValue::from_bytes(unreadable).unwrap();
+            let client_line = HeaderValue::from_static("6.6.6.6");
+            for (first, second) in [(&client_line, &unreadable), (&unreadable, &client_line)] {
+                let mut h = HeaderMap::new();
+                h.append("x-forwarded-for", first.clone());
+                h.append("x-forwarded-for", second.clone());
+                assert_eq!(one_hop.client_ip(Some(peer), &h), ip("9.9.9.9"));
+                assert_eq!(two_hops.client_ip(Some(peer), &h), ip("9.9.9.9"));
+            }
+        }
     }
 
     #[test]
