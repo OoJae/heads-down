@@ -286,6 +286,8 @@ describe("real dataset", () => {
       expect(r.status).toBe(200);
       const body = await j(r);
       expect(check(body, responseSchema("/v1/health"))).toEqual([]);
+      // The checker passes fields the schema does not describe, so: the description names every field served, and no other.
+      expect(Object.keys(components.Health!.properties as object).sort()).toEqual(Object.keys(body.data).sort());
       return body;
     };
     // No pass has finished: lastSlot is that of the one stored transaction, the poll fields are null.

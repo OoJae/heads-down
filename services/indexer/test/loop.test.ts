@@ -229,6 +229,27 @@ describe("ingest loop: passes", () => {
     expect(await r.ctx.store.health()).toMatchObject({ txs: 1, lastPollAt: 1_800_000_002, lastPollOk: true, lastOkPollAt: 1_800_000_002 });
   });
 
+  it("reports a pass as failed when api.ore.com fails after the RPC poll went through", async () => {
+    const r = await setup("mainnet");
+    const down = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
+    await expect(ingestLoop(r.ctx, r.cfg, r.rpc, { once: true, now: r.now, oreFetch: down })).rejects.toThrow("api.ore.com /events/reset page 0: HTTP 503");
+    expect(errors(r)).toEqual(["api.ore.com /events/reset page 0: HTTP 503"]);
+    // What the RPC poll stored stays; the outcome is that of the whole pass.
+    expect(await r.ctx.store.health()).toMatchObject({ txs: 1, lastPollAt: 1_800_000_000, lastPollOk: false, lastOkPollAt: null });
+  });
+
+  it("counts a pass that waits for a transaction the RPC does not serve yet as succeeded", async () => {
+    // What /v1/health cannot show: if the RPC never served that transaction, ingestion would stand still with lastPollOk true.
+    const r = await setup("mainnet", { ORE_API_ENABLED: "0" });
+    r.chain.unavailable.add(sig(1));
+    await ingestLoop(r.ctx, r.cfg, r.rpc, { once: true, now: r.now });
+    expect(r.logs.map((l) => l.msg)).toEqual(["rpc: transaction not yet available, will retry", "rpc poll"]);
+    expect(await r.ctx.store.health()).toMatchObject({ txs: 0, lastPollOk: true });
+    r.chain.unavailable.clear();
+    await ingestLoop(r.ctx, r.cfg, r.rpc, { once: true, now: r.now });
+    expect(await r.ctx.store.health()).toMatchObject({ txs: 1, lastPollOk: true });
+  });
+
   it("refuses to loop without a pause between passes", async () => {
     const r = await setup("mainnet", { INGEST_INTERVAL_S: "0" });
     await expect(ingestLoop(r.ctx, r.cfg, r.rpc, { once: false, now: r.now, oreFetch: r.ore.fetch })).rejects.toThrow(/INGEST_INTERVAL_S=0/);

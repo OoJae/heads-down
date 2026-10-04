@@ -319,6 +319,61 @@ describe("account snapshot schedule", () => {
     chain.unavailable.clear();
     expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 1, accounts: 1 });
   });
+
+  // The two tests above start with a snapshot already owed (a first poll). These start with nothing
+  // owed, so the snapshot they end with can only come from the new signature of the poll that failed.
+  it("stays owed when a later poll's scans fail, although no poll sees that signature again", async () => {
+    const { chain, rpc } = chainWithRig();
+    const state = newSnapshotState();
+    await pollRpcOnce(ctx, rpc, opts, state);
+    expect(state.due).toBe(false);
+    chain.accounts[0] = { address: RIG_PDA.address, owner: HD, data: encodeRig(rigAccount(2n)) };
+    addTx(chain, dig(2, RIG_PDA.address), [HD, EXECUTOR_PDA]);
+    chain.broken.add("getProgramAccounts");
+    await expect(pollRpcOnce(ctx, rpc, opts, state)).rejects.toThrow(/getProgramAccounts: HTTP 500 from rpc\.example/);
+    expect((await ctx.store.loadMetricsInput()).digs).toHaveLength(2); // stored, and both cursors have moved
+    expect(await rigsDug()).toEqual([1n]);
+    chain.broken.clear();
+    chain.calls.length = 0;
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: 1 });
+    expect(chain.calls.filter((c) => c.method === "getTransaction")).toHaveLength(0);
+    expect(await rigsDug()).toEqual([2n]);
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBeNull();
+  });
+
+  it("stays owed when a later poll cannot read the second address after the first one's cursor moved", async () => {
+    const chain = fakeChain();
+    chain.slot = 9000;
+    chain.accounts.push({ address: RIG_PDA.address, owner: HD, data: encodeRig(rigAccount(1n)) });
+    addTx(chain, dig(1, RIG_PDA.address), [HD, EXECUTOR_PDA]);
+    // The program id's signatures are read first; the Executor PDA's list can be made to fail on its own.
+    let executorListDown = false;
+    const answer = fakeRpcFetch(chain);
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const req = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      if (executorListDown && req.method === "getSignaturesForAddress" && req.params[0] === EXECUTOR_PDA) return new Response("upstream error", { status: 500 });
+      return answer(url, init);
+    }) as typeof fetch;
+    const rpc = new RpcClient("https://rpc.example", { fetchImpl, sleep: noSleep });
+    const state = newSnapshotState();
+    await pollRpcOnce(ctx, rpc, opts, state);
+    expect(state.due).toBe(false);
+
+    // A transaction that names only the program id (as arm_shift does) changes the rig.
+    chain.accounts[0] = { address: RIG_PDA.address, owner: HD, data: encodeRig(rigAccount(2n)) };
+    addTx(chain, buildEventTx({ signature: sig(60), slot: 5060, blockTime: 1_790_805_000, signer: addr(11), programId: HD, events: [{ kind: "ShiftArmed", rig: RIG_PDA.address, shiftId: 2n }] }), [HD]);
+    executorListDown = true;
+    await expect(pollRpcOnce(ctx, rpc, opts, state)).rejects.toThrow(/getSignaturesForAddress: HTTP 500 from rpc\.example/);
+    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(`5060:${sig(60)}`); // stored, and this cursor has moved
+    expect(await rigsDug()).toEqual([1n]);
+    // The next poll finds no new signature at either address, and takes the snapshot it owes.
+    executorListDown = false;
+    chain.calls.length = 0;
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: 1 });
+    expect(chain.calls.filter((c) => c.method === "getTransaction")).toHaveLength(0);
+    expect(await rigsDug()).toEqual([2n]);
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBeNull();
+  });
 });
 
 describe("api.ore.com rounds", () => {
