@@ -444,6 +444,16 @@ git subtree push --prefix site origin gh-pages     # the site becomes the root o
 curl -sI https://oojae.github.io/heads-down/favicon.ico | head -1     # HTTP/2 200 a minute later
 ```
 
+**What the wallet says about the identity.** On the emulator, Solana Mobile's test wallet showed
+the name and the address and "Verification failed": the address is not published yet, and nothing
+ties it to the app. A wallet can tie the two together through Android's Digital Asset Links: a file
+at `https://<identity host>/.well-known/assetlinks.json` naming the app's package and the SHA-256
+of its signing certificate. That file is fetched from the host's root, so for `oojae.github.io` it
+belongs in the `OoJae/oojae.github.io` repository (the account's own site), not in this project's
+page under `/heads-down/`. It also needs a release signing key, which does not exist yet: release
+builds are unsigned and debug builds carry the debug key. Neither is needed to sign and send; an
+unverified identity is what most apps show.
+
 The
 RPC URL must not carry an API key: the public `https://api.mainnet-beta.solana.com` works for a
 demo build; a keyed provider needs a proxy that adds the key server-side.
