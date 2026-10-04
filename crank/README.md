@@ -619,6 +619,15 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   that silently ignores it leaves only the 150-block margin against a node that lags. Checked by hand against
   the public mainnet RPC on 2026-10-04 (it answers both as the crank expects, and refuses a slot it has not
   reached with error -32016); not checked against Helius.
+- The state file holds the slot of the crank's last lookup-table transaction, and the tables are read from a
+  node that has reached it. A `state_dir` kept across a ledger reset (a local validator started anew) therefore
+  stops the table work, with `reading the lookup tables (as of slot N or later)` in the log, until
+  `lookup_tables.json` is removed. `scripts/devstack/up.sh` removes it together with the ledger. (Not run
+  against a validator: it is the lagging-node case of `tests/lookup_tables.rs` with a node that never catches
+  up.)
+- A crank that restarts while the wait after a failed lookup-table transaction runs reads its tables once, at
+  start. If that read fails, the next one comes when the wait is over (at most 1 hour); until then digs go
+  without the table, so fewer rigs fit a transaction.
 - A round with a phone heads down still costs three full dig passes (96 Helius credits) and one record scan
   (30): the passes read every Armed, Down and Cooling rig of the program, not only the ones that heartbeat.
 - With the WebSocket stalled the crank sees the chain once per `chain_poll_secs`, and at 15 s it misses most
