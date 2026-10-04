@@ -104,11 +104,13 @@ cannot move user funds; governance can pause, change `crank_fee` (≤ `executor_
 registrar and `bury_bps` after 72 h, and nothing else; the upgrade authority is the full
 program authority, which is why it moves to a time-locked multisig (section 15).
 
-**Governance is fixed at `initialize_config` in program v1.1.** `propose_config` changes the
-registrar, `crank_fee`, `bury_bps` and `paused`, but not `governance`. Either pass the Squads
-vault as `--governance` to `init-config.sh` (then every pause needs a multisig vote), or start
-with `governance.json` (an immediate pause from one laptop) and add a governance-rotation path
-in the first program upgrade (section 15).
+**`Config.governance` is set at `initialize_config`.** `propose_config` changes the registrar,
+`crank_fee`, `bury_bps` and `paused`, but not `governance`. Since v1.3 the program can rotate it
+(`propose_governance`, then `accept_governance` by the successor after 72 h), but **no script
+sends those instructions yet**: `governance.sh` knows `show`, `pause`, `unpause`, `propose` and
+`apply`, and the deploy tool has no rotation command. So start with `governance.json` (an
+immediate pause from one laptop); a rotation needs the commands added to the tool first
+(section 15).
 
 ## 3. Funding
 
@@ -332,46 +334,111 @@ The instruction builder is tested byte for byte against the program's golden vec
   target, default 1,450,240; pass `--executor-float <lamports>` for more), or any plain
   transfer: `scripts/mainnet/solana.sh -- transfer By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge 0.01`.
   Anyone may top it up; nobody can withdraw from it.
+- **The float and every top-up are permanent.** No instruction moves lamports out of the Executor
+  except the two above, and the 3,000 lamports a dig leaves behind stay there (`Config.bury_bps`
+  is stored, but no instruction reads it). Running the crank yourself does not bring the float
+  back: the 7,000 it receives come out of the 10,000 the same dig paid in. Top up only what the
+  alert asks for.
 
 ## 10. Railway
 
-Five services in one Railway project ("heads-down"), all from the GitHub repo
-`OoJae/heads-down`, branch `main`. Every Dockerfile builds from the repository root.
+Five services in one Railway project, `heads-down` (Hobby plan). Four are built from the GitHub
+repo `OoJae/heads-down`, branch `main`, each from its own Dockerfile with the repository root as
+build context; Postgres is Railway's template. The project was created on 2026-10-04:
 
-### 10.1 Project and shared variable
+| Service | Address | Volume | Needs before it starts |
+|---|---|---|---|
+| `Postgres` | private network only: it has no public port | the template's own | nothing |
+| `indexer` | `https://indexer-production-88dc.up.railway.app` | - | Postgres. Runs without `RPC_URL` until the program is initialized |
+| `dashboard` | `https://dashboard-production-b80c.up.railway.app` | - | the indexer's address, at build time |
+| `registrar` | `https://registrar-production-71d0.up.railway.app` | `/data`, 1 GB | its key, its session secret, an app certificate digest |
+| `crank` | `https://crank-production-21c2.up.railway.app` | `/data`, 1 GB | **the deployed and initialized program, a funded fee payer, its key and the Helius key** |
 
-1. New project → **Empty project**, name it `heads-down`.
-2. Project **Settings → Shared Variables**: add `HELIUS_API_KEY` = your key, then **seal** it
-   (sealed values are never shown again and never leave Railway; they are not copied to PR
-   environments).
+### 10.1 How a service is created
 
-### 10.2 Postgres
+Railway does not read a `railway.json` for services created now (its documentation: "New services
+cannot opt into Config as Code"), and the repository root has nothing Railway could build by
+default. The four `deploy/railway/<service>/railway.json` files therefore only document the
+settings; the settings themselves are set on each service, in the dashboard or through Railway's
+API. In this order, because connecting the repository starts the first build at once:
 
-**+ New → Database → Add PostgreSQL**, keep the name `Postgres`. Details:
-[deploy/railway/postgres/README.md](../deploy/railway/postgres/README.md).
+1. Create an **empty** service with exactly the name in the table (variable references use it).
+2. **Variables**: the plain ones from the matrix below.
+3. **Settings** (Root Directory stays `/`; leave **Custom Start Command** empty, because a custom
+   one would replace the crank's and the registrar's entrypoint and their key would never reach
+   them):
 
-### 10.3 Each service
+   | Service | Dockerfile path | Healthcheck (timeout) | Draining | Watch paths |
+   |---|---|---|---|---|
+   | indexer | `deploy/railway/indexer/Dockerfile` | `/v1/health` (120 s) | 10 s | `/services/indexer/package.json`, `/services/indexer/pnpm-lock.yaml`, `/services/indexer/src/**`, `/services/indexer/migrations/**`, `/deploy/railway/indexer/**` |
+   | dashboard | `deploy/railway/dashboard/Dockerfile` | `/healthz` (60 s) | 5 s | `/dashboard/**`, `/deploy/railway/dashboard/**` |
+   | registrar | `deploy/railway/registrar/Dockerfile` | `/healthz` (60 s) | 15 s | `/registrar/Cargo.toml`, `/registrar/Cargo.lock`, `/registrar/src/**`, `/registrar/roots/**`, `/deploy/railway/registrar/**` |
+   | crank | `deploy/railway/crank/Dockerfile` | `/healthz` (120 s) | 20 s | `/crank/**`, `/crates/p256-introspect/**`, `/deploy/railway/crank/**` |
 
-For each of `indexer`, `dashboard`, `registrar`, `crank` (in that order):
+   Restart policy: on failure, 10 retries (Railway's default). The watch paths keep a push that
+   touches only other directories, a deploy receipt for example, from rebuilding the service.
+4. **Volume** (crank and registrar only): attach one at `/data`. On Railway both entrypoints refuse
+   to start without it: without the volume the crank would forget its lookup table and create a
+   new one on every deploy, and the registrar would lose its nonce database and its log.
+5. **Secrets** (section 10.3).
+6. **Connect the repository** `OoJae/heads-down`, branch `main`. This starts the first build.
+7. **Networking → Generate Domain** with the target port equal to the service's `PORT`.
 
-1. **+ New → GitHub Repo → `OoJae/heads-down`**. Rename the service (`indexer`, …).
-2. **Settings → Source**: Root Directory `/` (default). **Railway Config File:**
-   `/deploy/railway/<service>/railway.json` (an absolute path; it sets the builder, the
-   Dockerfile, the watch paths, the healthcheck and the restart policy). Leave **Custom Start
-   Command** empty: each image's ENTRYPOINT/CMD is the start command, and a custom one would
-   replace the crank's and registrar's entrypoint, so their key would never reach them.
-3. **Variables:** from `deploy/railway/<service>/.env.example` (matrix below). Add secrets as
-   **sealed**.
-4. **Volume** (crank and registrar only; `railway.json` refuses to deploy without it): right-click
-   the service → **Attach volume**, mount path `/data`, 1 GB.
-5. **Networking → Generate Domain** (target port = the service's `PORT`), or add your own domain.
-6. Deploy. The deployment turns healthy when the healthcheck answers 2xx: crank `/healthz`
-   (chain view fresh, breaker closed), registrar `/healthz`, indexer `/v1/health`, dashboard
-   `/healthz`.
+A deployment turns healthy when its healthcheck answers 2xx: crank `/healthz` (chain view fresh,
+ORE pins match, breaker closed), registrar `/healthz`, indexer `/v1/health`, dashboard `/healthz`.
 
-Order matters only because of references: the dashboard is built with the indexer's domain,
-the indexer needs Postgres, and the crank should start after the program is initialized (it
-runs without a Config but has nothing to dig).
+### 10.2 The order
+
+1. **Postgres**: Railway's PostgreSQL template, name `Postgres`
+   ([deploy/railway/postgres/README.md](../deploy/railway/postgres/README.md)). The indexer uses
+   its private address. If the template gives the database a public TCP proxy, delete the proxy
+   (the service's Networking settings): nothing needs it, and its password is an ordinary
+   variable.
+2. **indexer**, with no `RPC_URL` yet and its domain generated. Without `RPC_URL` it reads ORE's
+   rounds from api.ore.com and makes no RPC call at all.
+3. **dashboard**, after the indexer has its domain: the indexer's address is compiled into the
+   pages, so a later change needs a rebuild, not a restart. Open the site afterwards and check
+   that it shows data and not "This build has no API configured".
+4. **registrar**. It needs neither the RPC nor the program to start.
+5. Fund the keys; `preflight.sh`, `deploy.sh`, `init-config.sh` (sections 6 to 8), while nothing
+   else uses the Helius key.
+6. Set the indexer's `RPC_URL`.
+7. **crank, last.** Before the program is initialized it has nothing to dig and still polls; with
+   an empty fee payer it has nothing to pay its lookup table with. Re-run `preflight.sh` on the
+   day (the line "ORE upgrade slot"): if ORE has upgraded since the pin was set, the crank's
+   breaker trips at start and its first deployment fails the healthcheck, which is the design.
+   After its first start, compare the `cranker` in its first log line with `TEAM_CRANKERS`.
+
+### 10.3 Secrets
+
+| Variable | Service | From |
+|---|---|---|
+| `HD_REGISTRAR_KEYPAIR_JSON` | registrar | `~/.config/heads-down/mainnet/registrar.json` |
+| `HD_SESSION_SECRET` | registrar | `~/.config/heads-down/mainnet/registrar-session-secret` |
+| `HD_CRANK_KEYPAIR_JSON` | crank | `~/.config/heads-down/mainnet/crank-payer.json` |
+| `HELIUS_API_KEY` | crank | the key in `helius.env` |
+| `RPC_URL` | indexer | `https://mainnet.helius-rpc.com/?api-key=<key>` |
+
+Railway seals a variable only from its dashboard (the variable's three-dot menu → **Seal**); its
+API and its CLI cannot. A sealed value is given to builds and deployments and is never shown or
+returned again. So either paste each value in the dashboard and seal it, or send it from the file,
+so that it is never on a command line, on screen or in a chat, and seal it afterwards:
+
+```bash
+railway variable set HD_REGISTRAR_KEYPAIR_JSON --stdin --skip-deploys \
+  -p <project id> -e production -s registrar < ~/.config/heads-down/mainnet/registrar.json >/dev/null
+```
+
+Until a value is sealed, anything that lists the service's variables prints it: do not run
+`railway variable list`, `railway run`, `railway shell`, `railway ssh` or
+`railway config pull --include-variables` against these services, and do not let an agent do so.
+The indexer's `DATABASE_URL` is a reference to a variable Railway generates for Postgres and
+cannot be sealed away, so the same rule holds for the indexer and Postgres for good.
+
+Seal the variables that carry the Helius key themselves. Railway's documentation does not say
+whether a reference to a sealed shared variable is listed with its resolved value, so this
+deployment uses no shared variable: the crank gets the key, the indexer gets the full URL, and
+the registrar gets neither (it uses a keyless RPC, below).
 
 ### 10.4 Variable matrix
 
@@ -379,27 +446,31 @@ runs without a Config but has nothing to dig).
 
 | Variable | crank | registrar | indexer | dashboard | Value |
 |---|---|---|---|---|---|
-| `HELIUS_API_KEY` | R | | | | `${{shared.HELIUS_API_KEY}}` |
+| `HELIUS_API_KEY` | S | | | | the key |
 | `HD_CRANK_KEYPAIR_JSON` | S | | | | contents of `crank-payer.json` |
 | `PORT` | 8787 | 8080 | 8080 | 8080 | the domain's target port |
 | `RUST_LOG` | `info,hyper=warn,reqwest=warn` | `info` | | | |
 | `HD_REGISTRAR_KEYPAIR_JSON` | | S | | | contents of `registrar.json` |
 | `HD_SESSION_SECRET` | | S | | | contents of `registrar-session-secret` |
-| `HD_RPC_URL` | | S/R | | | `https://mainnet.helius-rpc.com/?api-key=${{shared.HELIUS_API_KEY}}` |
-| `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing cert (`apksigner verify --print-certs`) |
+| `HD_RPC_URL` | | - | | | `https://solana-rpc.publicnode.com`, a keyless public RPC: the registrar makes one cached `getSlot` per attestation, so it needs no key and does not depend on Helius credits. Do **not** leave it unset: the code's default, `api.mainnet-beta.solana.com`, refuses requests from Railway's servers. With it every attestation answered 503 `slot_unavailable` and the app registered a guest rig (found on 2026-10-04 by running the app on an emulator against the live service; `/healthz` stayed 200 throughout). A keyed Helius URL also works; it must then be sealed |
+| `HD_APP_DEBUG_CERT_SHA256` | | - | | | **today.** SHA-256 of the certificate that signs the debug build (`apksigner verify --print-certs app-debug.apk`), which is this Mac's Android debug key. The registrar then accepts that build, logs a warning and reports `debug_signers_accepted` on `/registrar`. Good for the founder's own phone only: remove it before anyone else installs the app |
+| `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing certificate, once a release key exists (none does). With both digest variables empty the registrar exits at start; with only a release digest it refuses a debug build (`wrong_signer`) and the app registers a guest rig |
 | `HD_SIWS_DOMAIN` | | - | | | **required, no default.** The host of the site the app identifies itself with: the host of the app build's `-Pheadsdown.identityUri` (default `oojae.github.io`). It must be a site the team controls |
 | `HD_SIWS_URI` | | - | | | that site's URL, `https://oojae.github.io/heads-down/`. The code's default is `https://<HD_SIWS_DOMAIN>` |
-| `HD_TRUSTED_PROXY_HOPS` | | `1` | | | Railway's edge appends the client to X-Forwarded-For |
+| `HD_TRUSTED_PROXY_HOPS` | | `0` | | | Railway's documentation lists `X-Real-IP` among the headers its edge sets, not `X-Forwarded-For`. With `0` every client shares one rate-limit bucket, which a client cannot choose; check the headers on the live service before raising it |
 | `HD_NONCE_STORE` / `HD_TRANSPARENCY_LOG` | | image defaults | | | `/data/nonces.db`, `/data/attestations.jsonl` |
 | `DATABASE_URL` | | | R | | `${{Postgres.DATABASE_URL}}` |
-| `RPC_URL` | | | S/R | | `https://mainnet.helius-rpc.com/?api-key=${{shared.HELIUS_API_KEY}}` |
+| `RPC_URL` | | | S | | unset until `initialize_config` has landed, then `https://mainnet.helius-rpc.com/?api-key=<key>` |
+| `INGEST_INTERVAL_S` | | | - | | `300` between test sessions, `30` to `60` while recording (section 5) |
 | `INDEXER_DATASET` | | | `mainnet` | | |
 | `TEAM_CRANKERS` | | | - | | `5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk` |
-| `CORS_ORIGIN` | | | - | | `https://<dashboard domain>` |
+| `CORS_ORIGIN` | | | `*` | | the API is public and read-only; or the dashboard's exact origin, with no trailing slash |
 | `HOST` | | | `0.0.0.0` | | |
-| `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | `https://${{indexer.RAILWAY_PUBLIC_DOMAIN}}` |
+| `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | the indexer's address, `https://indexer-production-88dc.up.railway.app` |
 
-The full lists, with every optional knob and its default, are the four `.env.example` files.
+The full lists, with every optional setting and its default, are the four `.env.example` files.
+`HD_FIXED_SLOT` and `HD_STATUS_LIST_FILE` are development overrides of the registrar and must
+stay unset.
 
 **The crank's client address.** `deploy/railway/crank/crank.toml` sets `trust_real_ip = true`:
 Railway's edge writes the client's address in `X-Real-IP`, and every per-address limit of the
@@ -417,7 +488,8 @@ be chosen by a client) and report it.
 **Gate-closed nights.** The same file sets `[record] gate_closed_rigs = true`: on a night when
 ORE's cost never drops under a rig's ceiling nothing is dug, and without a record the shift would
 seal with no dark round (no streak day; a Focus Bond would go to the Bury lot). The crank pays for
-those records itself, at most 1,000,000 lamports an hour.
+those records itself, at most 1,000,000 lamports an hour (about 1,240,000 lamports over an
+8-hour night for one rig).
 
 ### 10.5 How the keys reach the processes
 
@@ -675,7 +747,15 @@ match first.
 
 ## 15. Squads: upgrade authority and governance
 
-**Upgrade authority → Squads multisig with a time lock** (THREAT_MODEL K5):
+**Upgrade authority → Squads multisig with a time lock** (THREAT_MODEL K5).
+
+Two things to know before doing it. Squads charges a **0.1 SOL deployment fee** per multisig, plus
+network fees (0.0069 SOL to create the time lock): that is more SOL that never comes back than the
+whole deploy (0.0053 SOL). And while `deployer.json` is the upgrade authority, one signature can
+close the program and return its 0.9996 SOL of rent (section 3); after the move that takes the
+multisig's threshold and its 72 hours, and after `--final` it is impossible. So this step is a
+decision, not a formality: it trades the founder's cheap exit for the users' protection against a
+single key. Until it is done, the documents say plainly that one key can upgrade the program.
 
 1. Create a Squads v4 multisig at app.squads.so: members on separate devices (for example the
    founder's hardware wallet, a phone wallet, and a trusted co-signer), threshold 2-of-3, and
@@ -698,11 +778,12 @@ immediate, so governance does not move to the same vault as the upgrade authorit
 - Launch with `governance.json` (a single key the founder keeps offline except for an
   emergency): the pause is one command, and every other governance change already waits 72 h
   on-chain, which users can watch.
-- Since v1.3 `Config.governance` can be rotated (`propose_governance`, then `accept_governance`
-  by the successor after the same 72 h; `scripts/mainnet/governance.sh`). When there are
-  co-signers, move it to a **second** Squads multisig **without** a time lock (2-of-3): a pause
-  then takes two signatures but no waiting, and the program's own 72 h timelock still covers
-  every other change.
+- Since v1.3 the program can rotate `Config.governance` (`propose_governance`, then
+  `accept_governance` by the successor after the same 72 h). No script sends these yet: the two
+  commands have to be added to `hd-devstack` and `governance.sh` first. When there are
+  co-signers, move governance to a **second** Squads multisig **without** a time lock (2-of-3,
+  another 0.1 SOL): a pause then takes two signatures but no waiting, and the program's own 72 h
+  timelock still covers every other change.
 
 **Until the steps above are done, say so.** At launch the upgrade authority is one keypair and
 program upgrades have no delay. [THREAT_MODEL.md](THREAT_MODEL.md) ("As built") and
@@ -730,7 +811,7 @@ keys it was sent to.
 
 | Path | Committed | Holds |
 |---|---|---|
-| `scripts/mainnet/*.sh` | yes | the runbook's scripts (no secrets; `.gitignore` refuses `*.json`, `*.env`) |
+| `scripts/mainnet/*.sh` | yes | the runbook's scripts (no secrets; `scripts/mainnet/.gitignore` refuses `*.json` and `*.env` there, and the root `.gitignore` refuses the key file names anywhere in the repository) |
 | `deploy/railway/<service>/` | yes | Dockerfile, `railway.json`, `.env.example` (names only), entrypoints, `crank.toml` (placeholders only) |
 | `deploy/receipts/mainnet/` | **yes, after each change** | public receipts |
 | `deploy/receipts/localnet/` | no (ignored) | dry-run receipts |
