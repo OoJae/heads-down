@@ -5,12 +5,18 @@
 #
 #   scripts/mainnet/init-config.sh [--cluster mainnet|localnet] [--keys-dir DIR]
 #       [--governance PUBKEY] [--registrar PUBKEY] [--executor-fee N] [--crank-fee N] [--bury-bps N]
-#       [--executor-float LAMPORTS] [--cu-price MICRO_LAMPORTS] [--yes]
+#       [--executor-float LAMPORTS] [--cu-price MICRO_LAMPORTS] [--public-rpc] [--yes]
+#
+# --public-rpc (or HD_PUBLIC_RPC=1) sends over the public mainnet RPC although helius.env is
+# there (a Helius key with no credits left answers HTTP 429 to everything): a float top-up still
+# goes out. The RPC in use is printed first.
 #
 # Accounts: upgrade authority (deployer.json, signer, pays rent) | Config PDA inzDn4og… |
 #           ProgramData 3jjGZ8EE… (the program checks the signer against it) | System.
 # Defaults (docs/DEPLOY.md "Parameters and why"):
-#   governance      governance.json's pubkey (or a Squads vault: Config.governance is fixed for v1.1)
+#   governance      governance.json's pubkey (or a Squads vault). No script here can change it
+#                   afterwards: the program's rotation instructions exist since v1.3, a command
+#                   that sends them does not.
 #   registrar       registrar.json's pubkey (hd-registrar keygen)
 #   executor_fee    10,000 lamports, immutable: the Discretionary fee every rig's Automation must use
 #   crank_fee        7,000 lamports, <= executor_fee (timelocked changes via propose_config)
@@ -32,8 +38,9 @@ while [[ $# -gt 0 ]]; do
     --bury-bps) HD_BURY_BPS="$2"; shift 2 ;;
     --executor-float) FLOAT=(--executor-float "$2"); shift 2 ;;
     --cu-price) HD_CU_PRICE="$2"; shift 2 ;;
+    --public-rpc) PUBLIC_RPC=1; shift ;;
     --yes) YES=1; shift ;;
-    -h | --help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,25p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -55,7 +62,7 @@ bold "initialize_config on $CLUSTER via $RPC_HOST"
 if [[ "$CLUSTER" == mainnet && $YES == 0 ]]; then
   # Dry pass: the tool prints the plan and refuses to send without --yes.
   tool "${ARGS[@]}" || true
-  confirm "initialize heads_down config" "initialize_config is permanent for executor_fee and governance"
+  confirm "initialize heads_down config" "initialize_config is permanent for executor_fee, and no script here can change governance afterwards"
 fi
 tool "${ARGS[@]}" --yes --receipt "$RECEIPT"
 echo

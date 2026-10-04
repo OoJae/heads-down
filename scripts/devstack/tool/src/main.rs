@@ -8,7 +8,10 @@
 //! | `init` | heads_down `initialize_config` + Executor PDA float (idempotent) | any |
 //! | `preflight` | read-only go/no-go before a deploy | any |
 //! | `funding` | exact funding per key for the first deploy, from the cluster's rent | any |
+//! | `write-buffer` | the deploy's buffer, created and written at a set rate; resumes (`buffer.rs`) | any |
+//! | `buffer-status` | what that buffer holds and how many chunks are still to write | any |
 //! | `verify-deploy` | deployed bytes == local `.so`, then the public deploy receipt | any |
+//! | `fees` | the transactions an address paid for after a slot, and their fees | any |
 //! | `propose-config` / `apply-config` | governance (`--paused 1` pauses `dig` at once) | any |
 //! | `status` | ORE / heads_down state | any |
 //! | `driver` | the ORE round driver (background miner, entropy reveal, `reset`) | localnet |
@@ -24,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod buffer;
 mod clockin;
 mod cluster;
 mod driver;
@@ -148,6 +152,14 @@ enum Cmd {
         /// Lamports budgeted for the deploy's transaction fees.
         #[arg(long, default_value_t = 5_000_000)]
         fee_budget: u64,
+        /// Lamports one transaction is budgeted at: with it, a deploy that continues an
+        /// existing buffer is budgeted for the chunks still to write only.
+        #[arg(long)]
+        fee_per_tx: Option<u64>,
+        /// The deploy's per-commit buffer address: if the account exists it is checked, and
+        /// what it already holds is counted.
+        #[arg(long)]
+        buffer: Option<Address>,
         /// Other keys to report: label=PUBKEY[:MIN_LAMPORTS] (repeatable).
         #[arg(long = "key")]
         keys: Vec<KeyNeed>,
@@ -185,6 +197,62 @@ enum Cmd {
         #[arg(long)]
         json: Option<PathBuf>,
     },
+    /// Create the deploy's buffer if it is missing and write what differs from the build, at
+    /// a rate a rate-limited RPC accepts. Safe to kill and to run again: it resumes.
+    WriteBuffer {
+        /// The built program (.so).
+        #[arg(long)]
+        so: PathBuf,
+        /// Buffer keypair (it signs the buffer's creation only).
+        #[arg(long)]
+        buffer: PathBuf,
+        /// Deployer keypair: fee payer and buffer authority.
+        #[arg(long)]
+        authority: PathBuf,
+        /// What the buffer is for: it decides the lamports a new buffer is created with.
+        #[arg(long, value_enum, default_value_t = DeployMode::Fresh)]
+        mode: DeployMode,
+        /// --max-len of a fresh deploy (a new buffer then holds the ProgramData rent for it).
+        #[arg(long)]
+        max_len: u64,
+        /// Write transactions a second (Helius' free plan allows one sendTransaction a second).
+        #[arg(long, default_value_t = 1.0)]
+        rate: f64,
+        /// Priority fee in micro-lamports per compute unit.
+        #[arg(long, default_value_t = 0)]
+        cu_price: u64,
+        /// Mainnet: send (the default only prints the plan).
+        #[arg(long)]
+        yes: bool,
+        /// Write what was done here (JSON, public values only).
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
+    /// What a deploy's buffer holds and how many chunks are still to write (read-only).
+    BufferStatus {
+        /// The built program (.so).
+        #[arg(long)]
+        so: PathBuf,
+        /// Buffer address.
+        #[arg(long)]
+        buffer: Address,
+        /// Deployer pubkey (fee payer and buffer authority).
+        #[arg(long)]
+        deployer: Address,
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
+    /// The transactions an address paid for after a slot, and their fees (read-only).
+    Fees {
+        /// The fee payer.
+        #[arg(long)]
+        payer: Address,
+        /// Count transactions in slots after this one.
+        #[arg(long, default_value_t = 0)]
+        since_slot: u64,
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
     /// Check the deployed (or buffered) bytes against the local .so and write the receipt.
     VerifyDeploy {
         #[arg(long, value_enum, default_value_t = DeployMode::Fresh)]
@@ -210,6 +278,13 @@ enum Cmd {
         /// Fee-payer balance before the deploy (lamports).
         #[arg(long)]
         balance_before: Option<u64>,
+        /// The `--json` file of `write-buffer`, copied into the receipt.
+        #[arg(long)]
+        buffer_write: Option<PathBuf>,
+        /// Slot at which the Solana CLI was started: the fee payer's transactions after it
+        /// are counted into the receipt.
+        #[arg(long)]
+        cli_since_slot: Option<u64>,
         /// Build facts for the receipt: key=value (repeatable).
         #[arg(long = "meta", value_parser = parse_kv)]
         meta: Vec<(String, String)>,
@@ -366,6 +441,8 @@ async fn main() -> Result<()> {
             executor_float,
             crank_reserve_digs,
             fee_budget,
+            fee_per_tx,
+            buffer,
             keys,
             allow_simd0500_pending,
             sample_txs,
@@ -384,6 +461,8 @@ async fn main() -> Result<()> {
                 executor_float,
                 crank_reserve_digs,
                 fee_budget,
+                fee_per_tx,
+                buffer,
                 keys,
                 allow_simd0500_pending,
                 sample_txs,
@@ -411,7 +490,28 @@ async fn main() -> Result<()> {
             })
             .await
         }
-        Cmd::VerifyDeploy { mode, so, program_id, deployer, authority, buffer, signature, max_len, balance_before, meta, out } => {
+        Cmd::WriteBuffer { so, buffer, authority, mode, max_len, rate, cu_price, yes, json } => {
+            buffer::write_buffer(buffer::WriteBufferOpts { cluster, rpc, so, buffer, authority, mode, max_len, rate, cu_price, yes, json }).await
+        }
+        Cmd::BufferStatus { so, buffer, deployer, json } => {
+            buffer::buffer_status(buffer::BufferStatusOpts { cluster, rpc, so, buffer, deployer, json }).await
+        }
+        Cmd::Fees { payer, since_slot, json } => ops::fees(ops::FeesOpts { cluster, rpc, payer, since_slot, json }).await,
+        Cmd::VerifyDeploy {
+            mode,
+            so,
+            program_id,
+            deployer,
+            authority,
+            buffer,
+            signature,
+            max_len,
+            balance_before,
+            buffer_write,
+            cli_since_slot,
+            meta,
+            out,
+        } => {
             ops::verify_deploy(ops::VerifyOpts {
                 cluster,
                 rpc,
@@ -424,6 +524,8 @@ async fn main() -> Result<()> {
                 signature,
                 max_len,
                 balance_before,
+                buffer_write,
+                cli_since_slot,
                 meta,
                 out,
             })

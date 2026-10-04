@@ -4,18 +4,88 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use hd_crank::rpc::RpcClient;
+use hd_crank::rpc::{RpcClient, RpcError};
 use hd_crank::sender::{ConfirmPolicy, Outcome, Submitter};
 use hd_crank::tx;
 use serde_json::{json, Value};
 use solana_address::Address;
+use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_signer::Signer;
+use solana_transaction::versioned::VersionedTransaction;
 
 /// Lamports per SOL.
 pub const SOL: u64 = 1_000_000_000;
+
+/// How patient to be with an RPC that answers "slow down". The defaults are Helius' own advice
+/// (docs/billing/rate-limits, read 2026-10-04): wait about a second, double it up to 30 s, give
+/// up after five tries.
+#[derive(Clone, Copy, Debug)]
+pub struct Patience {
+    /// Pause after the first "slow down"; doubled after every further one.
+    pub first: Duration,
+    /// Longest pause.
+    pub max: Duration,
+    /// Tries before the error is returned.
+    pub tries: u32,
+    /// How often a sent transaction is looked up while it has not landed.
+    pub poll: Duration,
+}
+
+impl Default for Patience {
+    fn default() -> Self {
+        Patience { first: Duration::from_secs(1), max: Duration::from_secs(30), tries: 5, poll: Duration::from_secs(1) }
+    }
+}
+
+/// True when an RPC error means "try again later", not "this request is wrong": the transport
+/// failed (a timeout, a reset connection), the answer was not JSON-RPC (an HTTP 429 or 5xx page),
+/// or the provider said so in a JSON-RPC error. Helius documents its HTTP 429 body as code
+/// -32005 "Too many requests", the code a node that is behind also answers with. The other
+/// codes and wordings are what RPC providers are known to use; they were not seen live here.
+pub fn retry_later(e: &RpcError) -> bool {
+    match e {
+        RpcError::Http(_) | RpcError::Decode(_) => true,
+        RpcError::Rpc { code, message } => {
+            let m = message.to_ascii_lowercase();
+            matches!(*code, 429 | -32429 | -32004 | -32005 | -32016)
+                || m.contains("too many requests")
+                || m.contains("rate limit")
+                || m.contains("max usage")
+        }
+    }
+}
+
+/// True when the RPC answered and did not take the request: a JSON-RPC error object, or an HTTP
+/// 429 whose body is not JSON-RPC. Any other failure (a timeout, a dropped connection, another
+/// error page) leaves open whether a `sendTransaction` reached a node.
+pub fn refused(e: &RpcError) -> bool {
+    match e {
+        RpcError::Rpc { .. } => true,
+        RpcError::Decode(m) => m.contains("http 429"),
+        RpcError::Http(_) => false,
+    }
+}
+
+/// True for Helius' "429 max usage reached" (its FAQ): the key's monthly credits are used up,
+/// so waiting a few seconds does not help. It is recognised by those words in a JSON-RPC error;
+/// what the body looks like exactly is not documented and was not seen live.
+pub fn credits_used_up(e: &RpcError) -> bool {
+    e.to_string().to_ascii_lowercase().contains("max usage")
+}
+
+/// Sign `ixs` on `blockhash` with `signers` (the first one pays): the base58 signature and the
+/// wire bytes. Signing the same message on the same blockhash gives the same bytes.
+pub fn sign_tx(signers: &[&Keypair], ixs: &[Instruction], blockhash: &Hash) -> Result<(String, Vec<u8>)> {
+    let payer = signers.first().ok_or_else(|| anyhow!("sign: no signer"))?;
+    let msg = VersionedMessage::Legacy(solana_message::Message::new_with_blockhash(ixs, Some(&payer.pubkey()), blockhash));
+    let t = VersionedTransaction::try_new(msg, signers).map_err(|e| anyhow!("sign: {e}"))?;
+    let wire = tx::serialize(&t).map_err(|e| anyhow!("serialize: {e}"))?;
+    let sig = t.signatures.first().map(ToString::to_string).unwrap_or_default();
+    Ok((sig, wire))
+}
 
 /// A confirmed transaction.
 #[derive(Debug, Clone)]
@@ -38,8 +108,12 @@ pub struct Chain {
 impl Chain {
     /// Connect (lazily) to `url`.
     pub fn new(url: &str) -> Result<Self> {
-        let rpc = RpcClient::new(url.to_string(), "confirmed", Duration::from_secs(15))
-            .map_err(|e| anyhow!("rpc client: {e}"))?;
+        Self::with_timeout(url, Duration::from_secs(15))
+    }
+
+    /// Like [`Chain::new`] with another per-request timeout.
+    pub fn with_timeout(url: &str, timeout: Duration) -> Result<Self> {
+        let rpc = RpcClient::new(url.to_string(), "confirmed", timeout).map_err(|e| anyhow!("rpc client: {e}"))?;
         Ok(Chain { rpc })
     }
 
@@ -166,6 +240,65 @@ impl Chain {
         self.send(payer, &out).await
     }
 
+    /// One `sendTransaction` of signed bytes: no preflight simulation (the caller simulated),
+    /// and re-sending is left to the RPC node (`maxRetries` is not set), so a transaction costs
+    /// one call of a method that providers rate-limit separately.
+    pub async fn submit(&self, wire: &[u8]) -> Result<String, RpcError> {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(wire);
+        let r = self.rpc.call("sendTransaction", json!([b64, { "encoding": "base64", "skipPreflight": true }])).await?;
+        r.as_str().map(str::to_string).ok_or_else(|| RpcError::Decode("sendTransaction: no signature".into()))
+    }
+
+    /// Like [`Chain::send_budgeted`] for one or more signers (the first pays), for an RPC that
+    /// rate-limits: a "slow down" answer or a timeout is tried again after a growing pause, and
+    /// the transaction is signed again when its blockhash expired before it landed. The logs
+    /// are fetched only for a transaction that failed on-chain.
+    pub async fn send_patiently(&self, signers: &[&Keypair], ixs: &[Instruction], cu_price: u64, p: Patience) -> Result<Landed> {
+        let (bh, _) = patiently(p, "getLatestBlockhash", || self.rpc.get_latest_blockhash()).await?;
+        let mut probe = vec![tx::set_compute_unit_limit(tx::MAX_COMPUTE_UNITS)];
+        probe.extend_from_slice(ixs);
+        let (_, wire) = sign_tx(signers, &probe, &bh)?;
+        let sim = patiently(p, "simulateTransaction", || self.rpc.simulate_transaction(&wire)).await?;
+        if let Some(err) = sim.err {
+            bail!("simulation failed: {err}\n  {}", tail(&sim.logs, 25).join("\n  "));
+        }
+        let used = sim.units_consumed.unwrap_or(200_000);
+        let limit = u32::try_from(used.saturating_mul(12) / 10 + 1_000).unwrap_or(tx::MAX_COMPUTE_UNITS).min(tx::MAX_COMPUTE_UNITS);
+        let mut out = vec![tx::set_compute_unit_limit(limit)];
+        if cu_price > 0 {
+            out.push(tx::set_compute_unit_price(cu_price));
+        }
+        out.extend_from_slice(ixs);
+        for _ in 0..p.tries {
+            let (bh, last_valid) = patiently(p, "getLatestBlockhash", || self.rpc.get_latest_blockhash()).await?;
+            let (sig, wire) = sign_tx(signers, &out, &bh)?;
+            patiently(p, "sendTransaction", || self.submit(&wire)).await?;
+            let sent = std::time::Instant::now();
+            loop {
+                tokio::time::sleep(p.poll).await;
+                // The height is read before the status: a transaction that is still unknown once
+                // the height has passed its last valid block can no longer land.
+                let height = self.rpc.get_block_height().await.ok();
+                match self.rpc.get_signature_statuses(std::slice::from_ref(&sig)).await.map(|s| s.into_iter().next().flatten()) {
+                    Ok(Some(s)) if s.is_confirmed() => {
+                        if let Some(err) = s.err {
+                            let logs = self.logs(&sig).await.unwrap_or_default();
+                            bail!("tx {sig} failed on-chain: {err}\n  {}", tail(&logs, 25).join("\n  "));
+                        }
+                        return Ok(Landed { signature: sig, slot: s.slot, logs: vec![] });
+                    }
+                    Ok(None) if height.is_some_and(|h| h > last_valid) => break,
+                    _ => {}
+                }
+                if sent.elapsed() > Duration::from_secs(180) {
+                    bail!("tx {sig}: the RPC gave no status for three minutes; check it before sending anything again");
+                }
+            }
+        }
+        bail!("the transaction did not land: its blockhash expired {} times", p.tries)
+    }
+
     /// Fee and error of a landed transaction (`getTransaction`, confirmed).
     pub async fn tx_fee(&self, sig: &str) -> Result<(u64, u64, Option<Value>)> {
         for _ in 0..20 {
@@ -175,6 +308,28 @@ impl Chain {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
         bail!("getTransaction {sig}: not found")
+    }
+}
+
+/// Run an RPC call, trying it again while the answer means "slow down" ([`retry_later`]).
+/// Used-up credits are returned at once: no pause brings them back.
+pub async fn patiently<T, F, Fut>(p: Patience, what: &str, mut f: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, RpcError>>,
+{
+    let mut pause = p.first;
+    let mut tries = 1;
+    loop {
+        match f().await {
+            Ok(v) => return Ok(v),
+            Err(e) if retry_later(&e) && !credits_used_up(&e) && tries < p.tries => {
+                tries += 1;
+                tokio::time::sleep(pause).await;
+                pause = (pause * 2).min(p.max);
+            }
+            Err(e) => return Err(anyhow!("{what}: {e}")),
+        }
     }
 }
 
@@ -294,5 +449,106 @@ mod tests {
     fn rent_formula_matches_known_values() {
         assert_eq!(rent_exempt(0), 890_880);
         assert_eq!(rent_exempt(256), 2_672_640);
+    }
+
+    fn rpc_error(code: i64, message: &str) -> RpcError {
+        RpcError::Rpc { code, message: message.to_string() }
+    }
+
+    #[test]
+    fn slow_down_answers_are_told_from_refusals() {
+        // Helius' documented HTTP 429 body, the same with code 429, a node that is behind,
+        // another wording, a timeout, and an HTTP error page that is not JSON.
+        for e in [
+            rpc_error(-32005, "Too many requests"),
+            rpc_error(429, "Too many requests for a specific RPC call"),
+            rpc_error(-32005, "Node is behind by 42 slots"),
+            rpc_error(-32000, "Rate limit exceeded"),
+            RpcError::Http("operation timed out".into()),
+            RpcError::Decode("sendTransaction: http 429 Too Many Requests: expected value at line 1".into()),
+        ] {
+            assert!(retry_later(&e), "{e}");
+            assert!(!credits_used_up(&e), "{e}");
+        }
+        for e in [
+            rpc_error(-32003, "Transaction signature verification failure"),
+            rpc_error(-32602, "invalid transaction: transaction too large"),
+            rpc_error(-32002, "Transaction simulation failed: Blockhash not found"),
+        ] {
+            assert!(!retry_later(&e), "{e}");
+        }
+        let gone = rpc_error(-32005, "max usage reached");
+        assert!(retry_later(&gone) && credits_used_up(&gone));
+    }
+
+    #[test]
+    fn a_refusal_is_told_from_no_answer() {
+        // The RPC said no: a JSON-RPC error, or an HTTP 429 page that is not JSON-RPC.
+        for e in [
+            rpc_error(-32005, "Too many requests"),
+            rpc_error(-32003, "Transaction signature verification failure"),
+            RpcError::Decode("sendTransaction: http 429 Too Many Requests: expected value at line 1".into()),
+        ] {
+            assert!(refused(&e), "{e}");
+        }
+        // No answer, or one that says nothing about the request: a node may have taken it.
+        for e in [
+            RpcError::Http("operation timed out".into()),
+            RpcError::Http("connection closed before message completed".into()),
+            RpcError::Decode("sendTransaction: http 502 Bad Gateway: expected value at line 1".into()),
+            RpcError::Decode("sendTransaction: no signature".into()),
+        ] {
+            assert!(!refused(&e) && retry_later(&e), "{e}");
+        }
+    }
+
+    #[test]
+    fn signing_gives_the_same_bytes_on_the_same_blockhash() {
+        let (a, b) = (Keypair::new(), Keypair::new());
+        let transfer = tx::system_transfer(&a.pubkey(), &b.pubkey(), 1);
+        let (h1, h2) = (Hash::new_from_array([1; 32]), Hash::new_from_array([2; 32]));
+        let (sig, wire) = sign_tx(&[&a], std::slice::from_ref(&transfer), &h1).unwrap();
+        assert_eq!(sign_tx(&[&a], std::slice::from_ref(&transfer), &h1).unwrap(), (sig.clone(), wire.clone()));
+        assert_ne!(sign_tx(&[&a], std::slice::from_ref(&transfer), &h2).unwrap().0, sig);
+        assert_eq!(wire[0], 1, "one signature");
+        // Two signers: both sign, the first pays.
+        let mut both = transfer.clone();
+        both.accounts[1].is_signer = true;
+        let (_, wire) = sign_tx(&[&a, &b], std::slice::from_ref(&both), &h1).unwrap();
+        assert_eq!(wire[0], 2, "two signatures");
+        assert_eq!(wire[1 + 2 * 64 + 4..1 + 2 * 64 + 4 + 32], a.pubkey().to_bytes(), "the first signer is the fee payer");
+        assert!(sign_tx(&[&a], std::slice::from_ref(&both), &h1).is_err(), "a missing signer is an error");
+        assert!(sign_tx(&[], std::slice::from_ref(&transfer), &h1).is_err());
+    }
+
+    #[tokio::test]
+    async fn patiently_waits_out_slow_down_answers_only() {
+        let p = Patience { first: Duration::from_millis(1), max: Duration::from_millis(4), tries: 4, poll: Duration::from_millis(1) };
+        let calls = std::cell::Cell::new(0u32);
+        let answer = |until: u32, e: fn() -> RpcError| {
+            calls.set(calls.get() + 1);
+            let n = calls.get();
+            async move {
+                if n < until {
+                    Err(e())
+                } else {
+                    Ok(n)
+                }
+            }
+        };
+        // Two "slow down" answers, then the result.
+        assert_eq!(patiently(p, "x", || answer(3, || rpc_error(-32005, "Too many requests"))).await.unwrap(), 3);
+        // It gives up after `tries` calls and says what the last answer was.
+        calls.set(0);
+        let e = patiently(p, "getSlot", || answer(99, || rpc_error(-32005, "Too many requests"))).await.unwrap_err().to_string();
+        assert_eq!(calls.get(), 4);
+        assert!(e.contains("getSlot") && e.contains("Too many requests"), "{e}");
+        // A refusal and used-up credits are returned at once.
+        calls.set(0);
+        assert!(patiently(p, "x", || answer(99, || rpc_error(-32602, "invalid params"))).await.is_err());
+        assert_eq!(calls.get(), 1);
+        calls.set(0);
+        assert!(patiently(p, "x", || answer(99, || rpc_error(-32005, "max usage reached"))).await.is_err());
+        assert_eq!(calls.get(), 1);
     }
 }

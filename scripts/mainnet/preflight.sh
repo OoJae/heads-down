@@ -2,21 +2,28 @@
 # Read-only GO / NO-GO before deploying heads_down. Sends nothing, signs nothing.
 #
 #   scripts/mainnet/preflight.sh [--cluster mainnet|localnet] [--keys-dir DIR] [--mode fresh|upgrade|buffer]
-#                                [--max-len N] [--so PATH] [--json PATH] [--allow-simd0500-pending]
+#                                [--max-len N] [--so PATH] [--buffer ADDRESS] [--json PATH]
+#                                [--allow-simd0500-pending] [--public-rpc]
 #
 # Local:  helius.env present (mode 600, key well-formed, never printed); key dir 700 and key files 600;
-#         the program keypair is HDn4vg…; the deployer is the founder's key (mainnet); the .so exists,
-#         its sha256 and the git commit are recorded.
+#         the program keypair is HDn4vg…; deployer.json, crank-payer.json and governance.json derive the
+#         funded addresses (mainnet with the default key directory); the .so exists, its sha256 and the
+#         git commit are recorded.
 # Chain (hd-devstack preflight, via Helius): genesis hash is the cluster's; SIMD-0500 inactive (or an
-#         SBPF v3 build); nothing at the program id yet (fresh mode); the deployer holds ProgramData
-#         rent for max-len + Program rent + fees + Config rent + the Executor float (rent from the
-#         cluster); ORE's ProgramData upgrade slot = 450,496,378 and its bytes = the verified build;
-#         ORE Board/Treasury/Config/Round and sampled Automation/Miner sizes + discriminators = pins.
+#         SBPF v3 build); nothing at the program id yet (fresh mode); the deploy's buffer, if a deploy
+#         at this commit stopped part way: it must be the deployer's, and what it already holds is
+#         counted (--buffer, or buffer-<commit>.json in the key dir); the deployer holds what is still
+#         needed of ProgramData rent for max-len + Program rent + fees + Config rent + the Executor
+#         float (rent from the cluster); ORE's ProgramData upgrade slot = 452,682,055 and its bytes =
+#         the verified build; ORE Board/Treasury/Config/Round and sampled Automation/Miner sizes +
+#         discriminators = pins.
+# --public-rpc runs the chain checks over the public RPC although helius.env is there (a key
+# with no credits left answers HTTP 429 to everything).
 # Exit 0 = GO.
 HD_SCRIPT=preflight
 source "$(dirname "$0")/lib.sh"
 
-MODE=fresh JSON="" EXTRA=()
+MODE=fresh JSON="" EXTRA=() BUFFER=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cluster) set_cluster "$2"; shift 2 ;;
@@ -24,9 +31,11 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --max-len) HD_MAX_LEN="$2"; shift 2 ;;
     --so) HD_SO="$2"; shift 2 ;;
+    --buffer) BUFFER="$2"; shift 2 ;;
     --json) JSON="$2"; shift 2 ;;
     --allow-simd0500-pending) EXTRA+=(--allow-simd0500-pending); shift ;;
-    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
+    --public-rpc) PUBLIC_RPC=1; shift ;;
+    -h | --help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -43,7 +52,9 @@ line() { # line STATUS CHECK DETAIL
 bold "heads_down preflight: $CLUSTER, mode $MODE, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # ---- local ----------------------------------------------------------------------------------------
-if [[ "$CLUSTER" == mainnet ]]; then
+if [[ "$CLUSTER" == mainnet && "$PUBLIC_RPC" == 1 ]]; then
+  line INFO "helius.env" "not used: --public-rpc"
+elif [[ "$CLUSTER" == mainnet ]]; then
   if [[ ! -f "$HD_HELIUS_ENV" ]]; then
     line FAIL "helius.env" "missing: $HD_HELIUS_ENV (one line HELIUS_API_KEY=...; chmod 600)"
   elif ! helius_file_ok; then
@@ -76,14 +87,18 @@ else
   line FAIL "program keypair" "$HD_PROGRAM_KEYPAIR missing or not mode 600"
 fi
 
+# The funded addresses: each key file must still derive the address SOL is sent to.
 DEPLOYER=""
-if key_ok "$K_DEPLOYER"; then
-  DEPLOYER="$(pubkey_of "$K_DEPLOYER")"
-  if [[ "$CLUSTER" == mainnet && "$DEPLOYER" != "$HD_EXPECTED_DEPLOYER" ]]; then
-    line FAIL "deployer" "$DEPLOYER is not the expected $HD_EXPECTED_DEPLOYER (override HD_EXPECTED_DEPLOYER only on purpose)"
-  else
-    line PASS "deployer" "$DEPLOYER"
-  fi
+if key_ok "$K_DEPLOYER"; then DEPLOYER="$(pubkey_of "$K_DEPLOYER")"; fi
+if pins_apply; then
+  for k in "$K_DEPLOYER" "$K_CRANK" "$K_GOVERNANCE"; do
+    key_ok "$k" || continue
+    n="$(basename "$k" .json)"
+    wrong="$(pin_mismatch "$k")"
+    if [[ -z "$wrong" ]]; then line PASS "$n address" "$(pubkey_of "$k") is the funded address"; else line FAIL "$n address" "$wrong"; fi
+  done
+elif [[ "$CLUSTER" == mainnet ]]; then
+  line INFO "funded addresses" "not checked: $KEYS is not the default mainnet key directory"
 fi
 
 COMMIT="$(git_commit)"
@@ -102,6 +117,12 @@ else
   line FAIL "program .so" "$HD_SO missing: bash programs/heads-down/scripts/build.sh (deploy.sh builds it)"
 fi
 
+# The deploy's buffer: deploy.sh passes its address; run alone, look for this commit's buffer
+# keypair, which an earlier deploy.sh left in the key dir.
+if [[ -z "$BUFFER" ]] && key_ok "$(buffer_keypair "$KEYS" "$COMMIT")"; then
+  BUFFER="$(pubkey_of "$(buffer_keypair "$KEYS" "$COMMIT")")"
+fi
+
 # ---- chain (read-only) -----------------------------------------------------------------------------
 CHAIN_RC=0
 if [[ -n "$PROGRAM" && -n "$DEPLOYER" && -f "$HD_SO" ]]; then
@@ -112,11 +133,14 @@ if [[ -n "$PROGRAM" && -n "$DEPLOYER" && -f "$HD_SO" ]]; then
   if key_ok "$K_CRANK"; then KEYS_ARGS+=(--key "crank-payer=$(pubkey_of "$K_CRANK"):$HD_CRANK_PAYER_LAMPORTS"); fi
   if key_ok "$K_GOVERNANCE"; then KEYS_ARGS+=(--key "governance=$(pubkey_of "$K_GOVERNANCE"):$HD_GOVERNANCE_LAMPORTS"); fi
   if key_ok "$K_REGISTRAR"; then KEYS_ARGS+=(--key "registrar=$(pubkey_of "$K_REGISTRAR"):0"); fi
+  BUFFER_ARGS=()
+  if [[ -n "$BUFFER" ]]; then BUFFER_ARGS=(--buffer "$BUFFER"); fi
   mkdir -p "$HD_STATE"
   [[ -n "$JSON" ]] || JSON="$HD_STATE/preflight-$CLUSTER-$(timestamp).json"
   tool preflight --so "$HD_SO" --max-len "$HD_MAX_LEN" --program-id "$PROGRAM" --deployer "$DEPLOYER" --mode "$MODE" \
     --executor-fee "$HD_EXECUTOR_FEE" --crank-fee "$HD_CRANK_FEE" --crank-reserve-digs "$HD_CRANK_RESERVE_DIGS" \
-    --fee-budget "$(deploy_fee_budget)" ${KEYS_ARGS[@]+"${KEYS_ARGS[@]}"} ${EXTRA[@]+"${EXTRA[@]}"} --json "$JSON" || CHAIN_RC=$?
+    --fee-budget "$(deploy_fee_budget_for "$(wc -c <"$HD_SO" | tr -d ' ')")" --fee-per-tx "$(deploy_fee_per_tx)" ${BUFFER_ARGS[@]+"${BUFFER_ARGS[@]}"} \
+    ${KEYS_ARGS[@]+"${KEYS_ARGS[@]}"} ${EXTRA[@]+"${EXTRA[@]}"} --json "$JSON" || CHAIN_RC=$?
 else
   line FAIL "chain checks" "skipped: fix the local failures above first"
 fi
