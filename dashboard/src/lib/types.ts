@@ -195,6 +195,10 @@ export interface Health {
   lastSlot: number | null;
   lastBlockTime: number | null;
   problems: { code: string; count: number }[];
+  /** Unix seconds of the last completed ingest pass, whether it succeeded, and the last one that did. */
+  lastPollAt: number | null;
+  lastPollOk: boolean | null;
+  lastOkPollAt: number | null;
 }
 
 export type ErrorRange = "heads_down" | "p256-introspect" | "sgt-verify" | "builtin" | "unknown";

@@ -346,11 +346,11 @@ The slide text and speaker notes below contain no word from its banned list.
   |---|---|---|
   | `heads_down` program | 171 passed (138 on a fork of live ORE) | re-run 2026-10-03; `programs/heads-down/README.md` |
   | `hd-crank` | 168 passed, plus 14 against the real program on the fork | re-run 2026-10-03 |
-  | Registrar (SIWS + Key Attestation) | 105 passed | re-run 2026-10-03 |
+  | Registrar (SIWS + Key Attestation) | 116 passed | re-run 2026-10-04 |
   | `p256-introspect` | 30 passed | re-run 2026-10-03 |
   | `sgt-verify` (host suites) | 69 passed, plus LiteSVM suites | `crates/sgt-verify/README.md` |
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
-  | Indexer | 347 passed | re-run 2026-10-03 |
+  | Indexer | 385 passed | re-run 2026-10-04 |
   | Dashboard | 48 passed | re-run 2026-10-03 |
   | Android | 855 JVM unit tests | re-run 2026-10-04 |
   | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |

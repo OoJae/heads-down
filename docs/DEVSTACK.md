@@ -47,7 +47,7 @@ and runs `pnpm install --frozen-lockfile` for the indexer (a few minutes). After
 | `solana-test-validator` 4.1.2 | RPC **8899**, WebSocket **8900**, faucet 9900, gossip 18001, dynamic 18002-18040 | `validator.log` | fresh ledger at every `up.sh` (use `--resume` to keep it) |
 | `hd-devstack driver` (ore-round-driver) | n/a | `driver.log` | starts, reveals and resets ORE rounds |
 | `hd-crank run` | **8787**: `/ws` (heartbeat intake), `/healthz`, `/metrics` | `crank.log` | config generated at `run/crank.toml` |
-| indexer (`node src/main.ts serve`) | **8788**: `/v1/health`, `/v1/digs/recent`, … | `indexer.log` | `INDEXER_DATASET=localnet`, real RPC ingest every 5 s, PGlite DB in `run/indexer-pg` |
+| indexer (`node src/main.ts serve`) | **8788**: `/v1/health`, `/v1/digs/recent`, … | `indexer.log` | `INDEXER_DATASET=localnet`, real RPC ingest every 5 s (accounts are scanned again when a new transaction arrives, and otherwise every 20th poll), PGlite DB in `run/indexer-pg` |
 | registrar (optional, `up.sh --with-registrar`) | **8790** | `registrar.log` | dev key = `Config.registrar`, debug-keystore cert digest, `solana:localnet` SIWS, sample revocation list; `GET /registrar` and `POST /siws/nonce` answered locally |
 
 All ports are environment-overridable (`HD_RPC_PORT`, `HD_CRANK_PORT`, `HD_INDEXER_PORT`, …;

@@ -524,21 +524,23 @@ the registrar gets neither (it uses a keyless RPC, below).
 | `RUST_LOG` | `info,hyper=warn,reqwest=warn` | `info` | | | |
 | `HD_REGISTRAR_KEYPAIR_JSON` | | S | | | contents of `registrar.json` |
 | `HD_SESSION_SECRET` | | S | | | contents of `registrar-session-secret` |
-| `HD_RPC_URL` | | - | | | `https://solana-rpc.publicnode.com`, a keyless public RPC: the registrar makes one cached `getSlot` per attestation, so it needs no key and does not depend on Helius credits. Do **not** leave it unset: the code's default, `api.mainnet-beta.solana.com`, refuses requests from Railway's servers. With it every attestation answered 503 `slot_unavailable` and the app registered a guest rig (found on 2026-10-04 by running the app on an emulator against the live service; `/healthz` stayed 200 throughout). A keyed Helius URL also works; it must then be sealed |
+| `HD_RPC_URL` | | - | | | `https://solana-rpc.publicnode.com`, a keyless public RPC: the registrar makes one cached `getSlot` per attestation, so it needs no key and does not depend on Helius credits. Do **not** leave it unset: the code's default, `api.mainnet-beta.solana.com`, refuses requests from Railway's servers. With it every attestation answered 503 `slot_unavailable` and the app registered a guest rig (found on 2026-10-04 by running the app on an emulator against the live service; `/healthz` stayed 200 throughout). A keyed Helius URL also works; it must then be sealed. The registrar asks for the slot once at start: its deploy log then holds `slot source answered`, or the warning `slot source gave no slot` with the HTTP status |
 | `HD_APP_DEBUG_CERT_SHA256` | | - | | | **today.** SHA-256 of the certificate that signs the debug build (`apksigner verify --print-certs app-debug.apk`), which is this Mac's Android debug key. The registrar then accepts that build, logs a warning and reports `debug_signers_accepted` on `/registrar`. Good for the founder's own phone only: remove it before anyone else installs the app |
 | `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing certificate, once a release key exists (none does). With both digest variables empty the registrar exits at start; with only a release digest it refuses a debug build (`wrong_signer`) and the app registers a guest rig |
 | `HD_SIWS_DOMAIN` | | - | | | **required, no default.** The host of the site the app identifies itself with: the host of the app build's `-Pheadsdown.identityUri` (default `oojae.github.io`). It must be a site the team controls |
 | `HD_SIWS_URI` | | - | | | that site's URL, `https://oojae.github.io/heads-down/`. The code's default is `https://<HD_SIWS_DOMAIN>` |
-| `HD_TRUSTED_PROXY_HOPS` | | `0` | | | Railway's documentation lists `X-Real-IP` among the headers its edge sets, not `X-Forwarded-For`. With `0` every client shares one rate-limit bucket, which a client cannot choose; check the headers on the live service before raising it |
+| `HD_TRUSTED_PROXY_HOPS` / `HD_TRUST_REAL_IP` | | `0` / unset | | | which header names the client, for the rate limits. Railway's documentation lists `X-Real-IP` among the headers its edge sets, not `X-Forwarded-For`, so the hops stay `0`. With neither set every client shares one bucket, which a client cannot choose. `HD_TRUST_REAL_IP=true` (lower case; never together with hops above 0, the registrar exits at start) keys the limits on `X-Real-IP`: set it only after the check below shows that the edge replaces a made-up header |
 | `HD_NONCE_STORE` / `HD_TRANSPARENCY_LOG` | | image defaults | | | `/data/nonces.db`, `/data/attestations.jsonl` |
 | `DATABASE_URL` | | | R | | `${{Postgres.DATABASE_URL}}` |
 | `RPC_URL` | | | S | | unset until `initialize_config` has landed, then `https://mainnet.helius-rpc.com/?api-key=<key>` |
-| `INGEST_INTERVAL_S` | | | - | | `300` between test sessions, `30` to `60` while recording (section 5) |
+| `INGEST_INTERVAL_S` | | | - | | `300` between test sessions, `30` to `60` while recording (section 5); the code's default is 30 |
+| `SNAPSHOT_EVERY_N_POLLS` | | | - | | default `20`. The indexer scans the program's accounts when a poll finds a new transaction, and otherwise every Nth poll as a safety net (100 minutes at an interval of 300 s) |
+| `ORE_ROUNDS_SINCE` | | | - | | a unix time. Set it to about a day back on a new database: the default, 14 days, needs about 160 pages from api.ore.com in one poll, which ORE's API rate-limits (HTTP 429), and a poll that fails stores nothing (found on the live service on 2026-10-04) |
 | `INDEXER_DATASET` | | | `mainnet` | | |
 | `TEAM_CRANKERS` | | | - | | `5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk` |
 | `CORS_ORIGIN` | | | `*` | | the API is public and read-only; or the dashboard's exact origin, with no trailing slash |
 | `HOST` | | | `0.0.0.0` | | |
-| `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | the indexer's address, `https://indexer-production-88dc.up.railway.app` |
+| `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | the indexer's address, `https://indexer-production-88dc.up.railway.app`. The build fails unless the value is `https://<host>` and nothing else (a port and one trailing `/` are allowed): no path, no `?`, `@` or `api-key`, and not a bare `https://`, because the value is published in the site's JavaScript |
 
 The full lists, with every optional setting and its default, are the four `.env.example` files.
 `HD_FIXED_SLOT` and `HD_STATUS_LIST_FILE` are development overrides of the registrar and must
@@ -557,6 +559,17 @@ If the second call answers `203.0.113.9`, the edge is not overwriting the header
 `trust_real_ip = false` (the limits then key on the edge's address, which is coarse but cannot
 be chosen by a client) and report it.
 
+**The registrar's client address.** The registrar has no `/whoami`, so its check counts answers.
+With `HD_TRUST_REAL_IP=true` set, send 60 requests that each carry a different made-up address:
+
+```bash
+seq 60 | xargs -P 20 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
+  -H 'X-Real-IP: 203.0.113.{}' https://<registrar domain>/registrar | sort | uniq -c
+```
+
+About 20 answers of 200 and 40 of 429 mean the edge replaced the made-up addresses with yours, and
+the setting can stay. 60 answers of 200 mean a caller can choose its own bucket: unset it again.
+
 **Gate-closed nights.** The same file sets `[record] gate_closed_rigs = true`: on a night when
 ORE's cost never drops under a rig's ceiling nothing is dug, and without a record the shift would
 seal with no dark round (no streak day; a Focus Bond would go to the Bury lot). The crank pays for
@@ -573,10 +586,23 @@ as root). The service then starts as uid 10001 with `setpriv --no-new-privs`, an
 is deleted as soon as the service listens (both load their key before binding). Railway's
 `SIGTERM` is forwarded (the crank shuts down on `SIGINT`, the registrar on `SIGTERM`).
 
+Both entrypoints refuse shell tracing (`bash -x`, `SHELLOPTS=xtrace`: exit 2), because tracing
+would print the key into the deploy log. They remove the key directory when they stop early, on
+a failed step or on `SIGTERM` (`SIGKILL` cannot be caught: the file then stays until the container
+is gone). On Railway they refuse to start unless `RAILWAY_VOLUME_MOUNT_PATH` is `/data` (exit 1).
+In the image they listen on `0.0.0.0:$PORT`.
+
+Do not open a Railway shell on the crank or the registrar. The service's first environment stays
+readable to root inside the container whatever the entrypoint unsets, so `env`, `printenv`, `set`
+or a read of `/proc/*/environ` there prints the keys. Everything the first-deploy check needs is
+in the deploy log (below).
+
 ### 10.6 Checks without Docker
 
 ```bash
-python3 deploy/railway/check.py     # COPY sources, digest pins, no VOLUME, schema keys, healthcheck routes, empty secrets, hadolint, shellcheck
+python3 deploy/railway/check.py             # 76 checks: COPY sources, digest pins, no VOLUME, schema keys, healthcheck routes, empty secrets,
+                                            # the entrypoint guards, the dashboard build guard under sh and dash, hadolint, shellcheck
+python3 deploy/railway/test_entrypoints.py  # both entrypoints with a made-up key and a stub service: 43 cases per bash
 ```
 
 The Docker build steps were also replayed natively (section 12).
@@ -642,7 +668,7 @@ Railway's healthcheck runs only when a deployment starts, so it is not monitorin
 |---|---|---|
 | crank alive and pinned | uptime monitor (Better Stack, UptimeRobot, Grafana Cloud synthetic) on `https://<crank>/healthz` every minute | non-200 for 3 minutes. 503 with a `breaker` reason means an ORE account failed its pin or ORE was upgraded: nothing digs until an operator restarts after the fork suites pass (docs/ORE.md §8) |
 | crank economics | scrape `https://<crank>/metrics` (public, no addresses) | `hd_crank_executor_lamports` < 820,240; `hd_crank_cranker_lamports` < 10,000,000 (0.01 SOL); `hd_crank_circuit_breaker_tripped` = 1; `hd_crank_digs_landed_total` flat for an hour while `hd_crank_heartbeats_accepted_total` grows; `hd_crank_txs_failed_total` rising |
-| indexer | uptime on `/v1/health`; check `data.lastSlot` and `data.problems` | down, `lastSlot` older than 10 minutes, any decode problem |
+| indexer | uptime on `/v1/health`; check `data.lastPollOk`, `data.lastPollAt` and `data.problems` | down; `lastPollOk` false for more than two passes; `asOf - lastPollAt` above 3 x `INGEST_INTERVAL_S` plus 2 minutes (17 minutes at 300, 3.5 minutes at 30); any decode problem. `lastSlot` is the newest stored transaction and stands still whenever no rig is active, so it is not a liveness signal. The log line `rpc: transaction not yet available, will retry` repeating for many passes is a stall that `lastPollOk` does not show |
 | registrar | uptime on `/healthz`; `status_list.age_secs` | down, `status: degraded`, status list older than 24 h (it fails closed at 48 h) |
 | dashboard | uptime on `/healthz` | down |
 | Railway | project → Settings → Webhooks (deploy failed / crashed), and a usage limit | any |
@@ -765,10 +791,11 @@ Docker is not available on the build machine, so every image was checked another
 
 | Check | Result |
 |---|---|
-| `python3 deploy/railway/check.py` (COPY sources, digest pins, no VOLUME, schema keys, healthcheck routes, empty secrets, hadolint 2.15.1, shellcheck 0.11.0) | 64 checks, all passed |
+| `python3 deploy/railway/check.py` (COPY sources, digest pins, no VOLUME, schema keys, healthcheck routes, empty secrets, hadolint 2.15.1, shellcheck 0.11.0; since 2026-10-04 also the entrypoint guards and the dashboard build guard, run under sh and dash) | 64 checks on 2026-10-01, 76 on 2026-10-04, all passed |
+| `python3 deploy/railway/test_entrypoints.py` (2026-10-04): both entrypoints with a made-up key and a stub service, under bash 3.2.57 and bash 5.2.15 (the image's version, built from source) | 86 runs, all passed: tracing refused, the key directory gone after every early exit, the volume refusal, exit codes passed on, no key bytes in any output |
 | the four `railway.json` against `https://railway.com/railway.schema.json` (jsonschema, Draft 2020-12) | all valid |
 | crank: both RUN steps replayed in a scratch copy of exactly the COPY set (`crates/p256-introspect`, crank manifests, `crank/src`), `RUSTUP_TOOLCHAIN=1.97.1`, `--locked` | dependency layer 1 m 22 s, crank 27 s; `hd-crank --version` = `hd-crank 0.1.0` |
-| registrar: the same for `registrar/{Cargo.toml,Cargo.lock,src,roots}` with Rust 1.97.1 and `--locked` (identical in both registrar Dockerfiles) | dependency layer 1 m 07 s, service 14 s; `cargo test`: 105 passed |
+| registrar: the same for `registrar/{Cargo.toml,Cargo.lock,src,roots}` with Rust 1.97.1 and `--locked` (identical in both registrar Dockerfiles) | dependency layer 1 m 07 s, service 14 s; `cargo test`: 105 passed (116 on 2026-10-04) |
 | indexer: `pnpm install --frozen-lockfile --prod` (pnpm 11.1.2), then `node src/main.ts serve` with the image's environment and an in-memory database | devDependencies skipped (`@electric-sql`, `@solana`, `pg` only); `GET /v1/health` 200 |
 | dashboard: `pnpm install --frozen-lockfile`, `pnpm build` with `NEXT_PUBLIC_HD_API_BASE=https://indexer.example.org` | 8 static routes, 56 files; the API base is inlined |
 | dashboard `server.mjs` on that export | `/healthz` 200, `/` 200, `/cohorts` 308 → `/cohorts/` 200, unknown page 404 (export's page), `/%2e%2e/%2e%2e/etc/passwd` 404, `/.env` 404, `POST /` 405, `HEAD /` 200, hashed assets `immutable`, HTML `must-revalidate`, `nosniff`/`DENY`/HSTS headers, listening on `::` |
@@ -777,8 +804,12 @@ Docker is not available on the build machine, so every image was checked another
 | `deploy/railway/crank/crank.toml` under hd-crank's strict loader, `hd-crank check` against mainnet (read-only) | parsed; ORE upgrade slot = pin (450,496,378 at the time), breaker closed |
 
 `setpriv` and a tmpfs `/dev/shm` exist only on Linux, so the root branch of the entrypoints
-(dropping to uid 10001) runs for the first time on Railway: check the first deploy's log for
-`key file removed` and for the process running as uid 10001 (Railway shell: `ps -o user,cmd`).
+(dropping to uid 10001) cannot run on the build machine. It first ran on Railway on 2026-10-04,
+for the registrar: the deploy log showed `key file removed; hd-registrar (pid 13) on 0.0.0.0:8080`,
+and the service answered. Since then the line also names the uid: on every first deploy of the
+crank or the registrar, read the log for `key file removed; hd-<service> (pid N, uid 10001)`. A line
+`no Railway volume is mounted at /data` means the volume is missing or Railway did not pass its
+mount path: roll back to the previous deployment in Railway.
 
 ## 13. Rollback and incidents
 
@@ -887,7 +918,8 @@ one: 0.035 in the deployer, and the crank's 0.05 and governance's 0.01, which ar
 | Path | Committed | Holds |
 |---|---|---|
 | `scripts/mainnet/*.sh` | yes | the runbook's scripts (no secrets; `scripts/mainnet/.gitignore` refuses `*.json` and `*.env` there, and the root `.gitignore` refuses the key file names anywhere in the repository) |
-| `deploy/railway/<service>/` | yes | Dockerfile, `railway.json`, `.env.example` (names only), entrypoints, `crank.toml` (placeholders only) |
+| `deploy/railway/<service>/` | yes | Dockerfile, `railway.json` (a record of the service's settings), `.env.example` (names only), entrypoints, `crank.toml` (placeholders only) |
+| `.railway/` | never (ignored) | where `railway config pull` writes the project as code. Never run it with `--include-variables` in the repository: it writes every unsealed value into that file |
 | `deploy/receipts/mainnet/` | **yes, after each change** | public receipts |
 | `deploy/receipts/localnet/` | no (ignored) | dry-run receipts |
 | `~/.config/heads-down/` | never | every key and `helius.env` (dir 700, files 600) |
