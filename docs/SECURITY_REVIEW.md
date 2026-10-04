@@ -4,7 +4,8 @@ This is the record of an internal review of Heads Down before its first deployme
 looked at, what was found, what was changed, and what is still open. It is not a third-party
 audit. Nothing described here was ever deployed in its unfixed form.
 
-- **When.** 1 to 3 October 2026, on `main` at `e4f9f62` and the branches merged after it.
+- **When.** 1 to 3 October 2026, on `main` at `e4f9f62` and the branches merged after it. A
+  second review on 4 October, of everything a deployment touches, is section 2c.
 - **How.** Ten review passes, each over one part of the system (the program's accounts, its
   cryptography, its ORE calls, its state machine and its SKR instructions; the Seeker Genesis
   Token verifier; the crank; the registrar; the Android client; operations and supply chain).
@@ -64,6 +65,52 @@ has a regression test, named in the tables.
 | The morning reveal said "the price gate stayed closed all night" for any shift with no dig, including one in which the phone never went dark | low (a false statement on screen) | **Fixed.** A shift with no dark round says so; a dark shift with no dig says nothing was dug and that a closed gate is the usual reason | `HaulMath.verdict`; test in `RevealCopyTest` |
 | The fourth Focus Bond choice did not fit its row and was drawn one letter per line | cosmetic | **Fixed.** The choices wrap; a test measures real text | `HomeScreen.kt`; test `every Focus Bond choice stays on one line on a narrow phone` |
 
+## 2c. Found by the review before deployment, and by the first day on Railway (4 October 2026)
+
+Before any SOL was sent, five more passes went over what a deployment touches: the container
+builds, the services' settings and their start order, where the money goes and what comes back,
+where a secret could leak, and the page behind the app's identity address. A second pass tried to
+disprove each finding of medium severity or higher in four of the five (the identity page's pass
+had none). 65 findings: 4 that would have stopped a step, 9 high, 19 medium, 21 low, 12
+informational. Of the 25 that were re-checked, 24 were confirmed and 1 could not be decided
+without sending transactions; the second pass added 17 of its own. Every code change that followed
+was written by one pass and attacked by another, which found and fixed further defects in each.
+Nothing here was live in its unfixed form, except where the table says "found on the live service".
+
+| Finding | Severity | Status | Where |
+|---|---|---|---|
+| The deploy would most likely have stopped half way on Helius' free plan (the Solana CLI sends about 200 writes 10 ms apart; the plan allows one a second), and could not be continued: preflight compared the full cost with the deployer's balance while 0.9996 SOL sat in the buffer, and told the founder to send that SOL again | high (no funds lost; a stalled deploy and a misleading request for 1 SOL) | **Fixed.** `deploy.sh` writes the buffer with a paced writer that can be stopped and continued, preflight counts what the buffer holds, and the rehearsal stops a deploy part way and continues it with exact funding. On the local fork behind a one-send-a-second proxy the CLI alone landed about 15 of 198 writes; the paced writer finished. Not run against Helius or on mainnet | `scripts/devstack/tool/src/buffer.rs`, `scripts/mainnet/deploy.sh`; `dry-run.sh` steps 3, 4 and 7 |
+| The first version of that writer never stopped when its writes were taken and could not land (a payer that ran out), and could land one chunk twice after a send with no answer | medium (found by the second pass) | **Fixed.** Only a write seen to land counts as progress, the payer is checked first, and a send with no answer is watched, not sent again | tool tests against a mock node |
+| An upgrade to a build that outgrew the program's space failed at the first try once the buffer was written beforehand: the CLI extended and upgraded back to back, and the loader refuses both in one slot | high (found by the second pass; no funds at risk, a second run completed) | **Fixed.** `deploy.sh` sends the extension itself and waits; preflight budgets the loader's 10,240-byte minimum | `dry-run.sh` step 9 |
+| A crank with an empty fee payer retried creating its lookup table without pause (about 335,000 RPC calls a day), and several failure paths could create a second table and forget the first. Each table locks 0.00256 SOL until it is closed by hand | high | **Fixed.** No create without the balance for it, a growing wait after a failure, the address on record before the create is sent, an answer older than the crank's own transaction is refused, and `max_tables` counts the tables on record | `crank/src/crank.rs`, `crank/src/alt.rs`; `tests/lookup_tables.rs` |
+| At the shipped polling rates the crank and the indexer used about 410,000 Helius credits a day with no rig at all: the free plan's month in under three days | high | **Fixed in part.** An idle crank reads nothing in most rounds, its chain poll is a setting, and the indexer scans accounts only when a transaction arrived: about 30,500 credits a day for the crank with the one-phone settings and about 2,000 for the indexer. That is still about the whole free plan in a month, so the crank is run for test nights, not left on | DEPLOY.md section 5; `crank/README.md` "RPC budget" |
+| The page at the app's identity address said that the address next to a signing prompt proves the request comes from the app. A wallet cannot verify that; any app can name the address | would have stopped publication | **Fixed before the page was published.** The page says what the wallet can and cannot check | `site/index.html` |
+| "Nothing but your phone's own hardware key can switch it on: not a server, not us" was stronger than the threat model: the program accepts any P-256 key the wallet registers, an emulator's key is software, and one key held by the founder can upgrade the program | high (wording) | **Fixed.** The page, the README, the pitch texts, the dashboard and the app say "a key in the phone's Android Keystore"; the app says "secure hardware" only where Android reports the key lives there | test `the rig key is called hardware only where Android says it is` |
+| The program's rent (0.9996 SOL) comes back only by closing the program for good, and the runbook's next steps (Squads, then final) remove that way out without saying so | high (a fact to decide on, not a defect) | **Documented.** DEPLOY.md section 3 says what closing strands and in which order to leave; the Squads step is now a decision | DEPLOY.md sections 3 and 15 |
+| Railway does not read `railway.json` for services created now, and the documented order deployed a service before it was configured | would have stopped the first deployments | **Fixed.** The settings are set on each service; the runbook describes the order that was used | DEPLOY.md section 10 |
+| The registrar exits at start without an app certificate digest, and no release key exists | would have stopped the registrar | **Fixed for the founder's phone only.** The registrar accepts this Mac's debug-signed build and says so on `/registrar`; that setting has to go before anyone else installs the app | DEPLOY.md 10.4 |
+| Private keys would have passed through an assistant's conversation on their way to Railway, and Railway's API cannot seal a variable | high | **Procedure.** A secret goes from its file to Railway's CLI through stdin, or is pasted in the dashboard, and is sealed there | DEPLOY.md 10.3 |
+| The indexer exited when its RPC check failed at start, after the healthcheck had passed; a lost Postgres connection ended it too | medium | **Fixed.** The check is retried inside the loop while the API serves; the webhook waits for it; pool and client errors are logged | `services/indexer/src/loop.ts`; `test/serve.test.ts`, `test/db.test.ts` |
+| Both entrypoints printed the keypair under shell tracing and left the key file behind on an early exit; the only guard for the `/data` volume was in a file Railway does not read; the first-deploy check sent the operator into a shell where `env` prints the keys | medium | **Fixed.** Tracing is refused, the key directory is removed on the way out, the entrypoints refuse to start on Railway without the volume, and the check is a log line. All of it ran on Railway for the registrar | `deploy/railway/test_entrypoints.py` |
+| The crank's default spend caps were as large as its whole 0.05 SOL float, and one rig's digs cost the crank more than the program reimburses | medium | **Fixed** (caps sized for the float) and **documented** (the float is spent in use) | `deploy/railway/crank/crank.toml`; DEPLOY.md section 3 |
+| The emergency pause used the same Helius key the services could exhaust | medium | **Fixed.** `--public-rpc` on every operator script | `scripts/mainnet/lib.sh`; `selftest.sh` |
+| Only the deployer's key file was compared with the address SOL is sent to | low | **Fixed.** The crank payer's and governance's are pinned too; all three pass against the real key files | `scripts/mainnet/lib.sh`; `selftest.sh` |
+| A fixture script wrote the RPC URL, key included, into tracked files; the root `.gitignore` did not cover the key file names; the dashboard build accepted a URL with a key in it; the indexer and the registrar could print a keyed URL | medium to low | **Fixed** | `fetch_fixtures.py`, `.gitignore`, `deploy/railway/dashboard/Dockerfile`, `services/indexer/src/sources/rpc.ts`, `registrar/src/config.rs` |
+| The registrar keyed its rate limits on a header Railway does not document | low | **Fixed.** An `X-Real-IP` option; on the live service 60 requests with 60 made-up addresses gave 24 answers and 36 refusals, so the edge replaces a client's own header | `registrar/src/http/ratelimit.rs` |
+| Costs missing from the runbook: Squads' 0.1 SOL fee, the loader's minimum extension, the SOL an upgrade borrows, the wallet on the phone; governance rotation described as scripted when it is not | medium to info | **Documented** | DEPLOY.md sections 3, 15, 16 |
+| Found on the live service: the public Solana RPC, the registrar's default, refuses requests from Railway's servers. Every attestation answered 503 while `/healthz` said ok, and the app registered a guest rig | medium (no funds; a rig that should be attested is not) | **Fixed.** The registrar uses a keyless RPC that answers, and says at start whether its RPC gives a slot | DEPLOY.md 10.4; `registrar/src/slot.rs` |
+| Found on the live service: the indexer's first read of ORE's rounds asked ORE's API for 14 days at once, was rate-limited, stored nothing and started over every pass | medium (no funds; an empty dashboard, and over a hundred wasted requests to ORE's API per pass) | **Worked around on the service** (a one-day window). The fix in code is written and waiting for its second pass | `ORE_ROUNDS_SINCE` |
+| Found by running the combined code: the crank's end-to-end test on a validator had not been run since 3 October and carried an expectation its own setup contradicted | low (a test, not the crank) | **Fixed.** The suite passes against the real program | `crank/tests/e2e_validator.rs` |
+| A build made as the runbook showed would not dig today: ORE's cost gate (about 770,000,000 lamports per ORE) is above the app's default ceilings (530,000,000 and 670,000,000) | medium (the product working as designed; a demo that shows no dig) | **Open, a decision.** A take that shows a dig needs a build with a raised ceiling, which places real SOL | DEPLOY.md 10.7 |
+| Nothing reclaims the rent of the crank's lookup tables or of the ShiftLogs the crank pays for | low | **Open.** The commands for the tables are in DEPLOY.md section 16; the one-phone settings use no table and seal no shift | |
+| With the one-phone settings, a flood of frames naming made-up rigs can delay a phone's first heartbeat after an idle stretch | low | **Open, documented** | `crank/README.md` |
+| Attestation is tried once, when the rig key is made. If the registrar cannot be reached at that moment, the rig stays a guest | low | **Open** | |
+| The Helius key in use is shared with another project of the founder's, so both draw on the same credits | medium (availability) | **Open, a decision** | DEPLOY.md section 5 |
+
+What this pass did not do: build an image with Docker (none on the build machine; the three
+services that run were built by Railway), run anything against Helius' rate limiter, send a
+transaction to mainnet, or run the app on a phone.
+
 ## 3. Open, and stated plainly
 
 These are true of what is deployed. None of them lets anyone take a user's mining funds, which
@@ -105,7 +152,9 @@ stay in the user's own ORE Automation and Miner accounts.
   taking SOL back, closing the rig and clocking in again, each signed in the wallet. An emulator
   has a software Keystore and stock Android, and the test wallet is not a production wallet, so
   these are still untested: hardware Keystore attestation, the foreground service surviving a
-  HyperOS night, Solflare, Phantom or Seed Vault signing and sending, and anything on mainnet.
+  HyperOS night, Solflare, Phantom or Seed Vault signing and sending, and any transaction of the
+  program on mainnet. The same emulator has signed in to the live registrar through the test
+  wallet (the registrar refused its software key, as it should).
 - ORE itself. Heads Down inherits ORE's custody of every Automation and Miner.
 
 ## 5. Tests after the fixes

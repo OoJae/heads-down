@@ -313,9 +313,16 @@ the Redmi 14C runs):
 sdkmanager "system-images;android-34;google_apis;arm64-v8a"
 avdmanager create avd -n hd34 -k "system-images;android-34;google_apis;arm64-v8a" -d pixel_6
 $ANDROID_HOME/emulator/emulator -avd hd34 -no-window -no-audio -no-boot-anim &
-cd android && ./gradlew :app:assembleLocaldev && cd ..
+cd android && ./gradlew :app:assembleLocaldev \
+  -Pheadsdown.policy.planMaxEvCost=2000000000 -Pheadsdown.policy.capMaxCost=2000000000 && cd ..
 scripts/devstack/up.sh && scripts/devstack/emulator-smoke.sh
 ```
+
+The two policy flags raise the price ceiling of the test build. The fork carries mainnet's ORE
+state, and on a day when ORE's cost is above the app's default ceiling (530,000,000 and
+670,000,000 lamports per ORE) the crank refuses to dig a rig the app armed, as it should: on
+2026-10-04 the run with a default build stopped there, with nine skips for `cost_gate`, and
+passed with the raised ceiling. The script now says so instead of waiting out its timeout.
 
 Real output, 2026-10-04, Android 14 emulator, fork carrying ORE's build of 2026-10-02:
 
