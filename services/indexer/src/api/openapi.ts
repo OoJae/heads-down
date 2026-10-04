@@ -110,7 +110,12 @@ export const openApiDocument = {
     license: { name: "MIT" },
   },
   paths: {
-    "/v1/health": { get: { summary: "Liveness and ingest health (decode problems are counted, never hidden).", responses: envelope(ref("Health")) } },
+    "/v1/health": {
+      get: {
+        summary: "Liveness and ingest health: when the last ingest pass finished and whether it succeeded (decode problems are counted, never hidden).",
+        responses: envelope(ref("Health")),
+      },
+    },
     "/v1/summary": { get: { summary: "Headline traction numbers with evidence.", parameters: [tzParam], responses: envelope(ref("Summary")) } },
     "/v1/cohorts": { get: { summary: "D1/D7/D14 retention by first-shift night.", parameters: [tzParam], responses: envelope(ref("CohortReport")) } },
     "/v1/share-by-hour": {
@@ -207,8 +212,25 @@ export const openApiDocument = {
         txs: int,
         failedTxs: int,
         truncatedTxs: int,
-        lastSlot: nullable(int),
-        lastBlockTime: nullable(int),
+        lastSlot: {
+          ...nullable(int),
+          description:
+            "Slot of the newest stored transaction (one that names the heads_down program or its Executor PDA), not the chain's slot: null before " +
+            "the first one, and it stands still whenever no such transaction lands. To see whether ingestion is running, use lastPollAt and lastPollOk.",
+        },
+        lastBlockTime: { ...nullable(int), description: "Block time (unix seconds) of the newest stored transaction; null like lastSlot." },
+        lastPollAt: {
+          ...nullable(int),
+          description:
+            "Unix seconds at which the last ingest pass finished, whether it succeeded or failed. A pass runs every INGEST_INTERVAL_S over the " +
+            "configured sources: the RPC poll when RPC_URL is set, and api.ore.com. Null when no pass has finished for this dataset " +
+            "(always for the simulated dataset). Compare it with the envelope's asOf: a value that stops advancing means ingestion has stopped.",
+        },
+        lastPollOk: {
+          ...nullable(bool),
+          description: "Whether that pass succeeded. False while, for example, the RPC is down, out of credits or on another cluster; the reason is in the server log only.",
+        },
+        lastOkPollAt: { ...nullable(int), description: "Unix seconds at which the last successful pass finished; null if none has." },
         problems: arr(obj({ code: str, count: int })),
       }),
       Summary: obj({

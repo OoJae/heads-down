@@ -55,10 +55,19 @@ export interface FakeChain {
   unavailable: Set<string>;
   /** Signatures a short-history node no longer knows (getSignaturesForAddress `until` fails). */
   pruned: Set<string>;
+  /** What getGenesisHash answers (mainnet's by default). */
+  genesisHash: string;
+  /** The endpoint does not answer at all: every request fails like a refused connection. */
+  offline: boolean;
+  /** Methods that answer HTTP 500. */
+  broken: Set<string>;
 }
 
 export function fakeChain(): FakeChain {
-  return { sigs: new Map(), txs: new Map(), accounts: [], slot: 1000, calls: [], throttleNext: 0, unavailable: new Set(), pruned: new Set() };
+  return {
+    sigs: new Map(), txs: new Map(), accounts: [], slot: 1000, calls: [], throttleNext: 0, unavailable: new Set(), pruned: new Set(),
+    genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", offline: false, broken: new Set(),
+  };
 }
 
 export function addTx(chain: FakeChain, tx: RawTransaction, addresses: string[]) {
@@ -76,12 +85,16 @@ export function fakeRpcFetch(chain: FakeChain): typeof fetch {
   return (async (_url: string | URL | Request, init?: RequestInit) => {
     const req = JSON.parse(String(init?.body));
     chain.calls.push({ method: req.method, params: req.params });
+    if (chain.offline) throw new TypeError("fetch failed");
     if (chain.throttleNext > 0) {
       chain.throttleNext--;
       return new Response("slow down", { status: 429 });
     }
+    if (chain.broken.has(req.method)) return new Response("upstream error", { status: 500 });
     const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }), { status: 200 });
     switch (req.method) {
+      case "getGenesisHash":
+        return ok(chain.genesisHash);
       case "getSignaturesForAddress": {
         const [address, opts] = req.params as [string, { before?: string; until?: string; limit: number }];
         if (opts.until && chain.pruned.has(opts.until)) {

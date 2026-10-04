@@ -51,7 +51,8 @@ export interface ApiDeps {
   market?: MarketPrice | null;
   /** RPC shown in localnet explorer links. */
   localExplorerRpc?: string;
-  webhook?: { secret: string; rpc: RpcClient | null; trustPayload: boolean; ctx: IngestContext } | null;
+  /** `verifyCluster` rejects until the RPC has shown the dataset's genesis hash; until then the webhook stores nothing. */
+  webhook?: { secret: string; rpc: RpcClient | null; trustPayload: boolean; ctx: IngestContext; verifyCluster?: () => Promise<void> } | null;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
@@ -350,6 +351,12 @@ export function createApiServer(deps: ApiDeps): http.Server {
     const w = deps.webhook;
     if (!w || ds.simulated) throw new HttpError(404, "not found");
     if (!checkWebhookAuth(req.headers.authorization, w.secret)) throw new HttpError(401, "unauthorized");
+    if (w.verifyCluster) {
+      await w.verifyCluster().catch((e: unknown) => {
+        deps.log?.("webhook: refused, the RPC's cluster is not verified", { error: e instanceof Error ? e.message.slice(0, 200) : "" });
+        throw new HttpError(503, "not ready: the RPC's cluster is not verified yet", 30);
+      });
+    }
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const c of req) {

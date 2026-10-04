@@ -29,7 +29,7 @@ data for development and demos. That data is labelled and cannot mix with real d
 ```bash
 cd services/indexer
 pnpm install
-pnpm test            # 347 tests: golden bytes, metrics math, cohorts, haul, store, sources, API
+pnpm test            # 379 tests: golden bytes, metrics math, cohorts, haul, store, sources, ingest loop, API
 pnpm typecheck
 pnpm demo            # in-memory Postgres + simulated dataset + API on http://127.0.0.1:8787
 curl -s localhost:8787/v1/summary | jq .data.rigs
@@ -73,7 +73,8 @@ second implementation of the contract.
 
 ```
   RPC poller ──────┐  getSignaturesForAddress(program id, Executor PDA) → getTransaction
-  (finalized, v1)  │  getProgramAccounts (Rig/SeekerSeat/ShiftLog/Config, tag+size filters)
+  (finalized, v1)  │  getProgramAccounts (Rig/SeekerSeat/ShiftLog/Config, tag+size filters),
+                   │  only when a new transaction asks for it (see "Ingest loop and RPC use")
                    │
   Helius webhook ──┤  raw webhook = hint → signatures re-fetched from RPC (a leaked secret
                    │  cannot inject digs)
@@ -104,13 +105,87 @@ second implementation of the contract.
 | Account decoders check length, tag and version; the address must be the canonical PDA; the owner must be the program | `codec/accounts.ts` | `accounts.test.ts` (foreign owner, swapped authority, non-canonical bump) |
 | No decoder throws anything but `DecodeError` on attacker bytes; lengths are bounded before base58/base64 | `codec/*` | fuzz loops in `events.test.ts`, `codec.test.ts` |
 | Simulated and real data never mix | `store/store.ts` binds one dataset; `(dataset, …)` primary keys; `runSimulation` refuses real datasets; the API is bound to one dataset | `store.test.ts` "isolates datasets", `simulate.test.ts` "refuses to write into a real dataset" |
-| A mainnet dataset cannot be fed from a devnet RPC | `main.ts` genesis-hash check | (startup check) |
+| A mainnet dataset cannot be fed from a devnet RPC | `loop.ts` genesis-hash check: before the first poll, and before the webhook stores anything | `loop.test.ts` "never ingests from an RPC on another cluster", `api.test.ts` "webhook stores nothing until the RPC's cluster is verified" |
 | Only `finalized` commitment, so a fork cannot leave phantom digs | `sources/rpc.ts` | fake-RPC tests |
 | api.ore.com is spot-checked against the chain, and the chain wins | `sources/oreApi.ts` | "chain wins when api.ore.com disagrees" |
 | Webhook: constant-time secret check, 5 MB cap, payload re-fetched from RPC | `sources/helius.ts`, `api/server.ts` | `sources.test.ts`, `api.test.ts` |
-| Secrets (RPC key, DB password) never logged or returned | `config.ts` `describeConfig`, `RpcError` | "never leaks the URL's API key" |
+| Secrets (RPC key, DB password) never logged or returned | `config.ts` `describeConfig`, `RpcError`; a provider's own error text is scrubbed of the URL, of any `api-key=` value and of the URL's keys (`sources/rpc.ts` `scrubRpcText`) | "never leaks the URL's API key", "scrubs a provider's error text…", "scrubs a key that sits in the URL's path" |
 | CSV formula injection is neutralised | `api/csv.ts` | `api.test.ts` |
 | u64 stays exact end to end (BigInt → NUMERIC(20,0) → decimal strings) | everywhere | `store.test.ts` domain test |
+
+### Ingest loop and RPC use
+
+`serve` and `ingest` run one pass every `INGEST_INTERVAL_S` (`src/loop.ts`):
+
+1. **Cluster check.** With `RPC_URL` set and a `mainnet` or `devnet` dataset, the RPC's genesis hash
+   must match the dataset's cluster before anything is ingested, by the poller or by the webhook
+   (`localnet` has no pinned hash and is not checked). A check that fails (wrong cluster, RPC down,
+   credits used up) is logged as `ingest error` and tried again at the next interval. Once it has
+   passed it is not repeated.
+2. **Signatures.** `getSignaturesForAddress` for the program id and for the Executor PDA (two
+   calls), then one `getTransaction` per new signature whose transaction succeeded.
+3. **Account snapshot.** Four `getProgramAccounts` scans. Taken on the first poll after start, on
+   every poll that finds a new transaction that succeeded, and otherwise every
+   `SNAPSHOT_EVERY_N_POLLS` polls (default 20; 1 = every poll).
+4. **ORE rounds.** The resolver reads the Round account of each round a rig dug in (and its reset
+   transaction where no ResetEvent has arrived), and calls nothing while no round is waiting.
+   api.ore.com needs no RPC; up to `ORE_API_VERIFY_SAMPLE` of its new rounds per pass are re-read
+   from chain with `getTransaction`.
+
+A pass that fails, at any step, is logged and tried again at the next interval. It does not end the
+process: the API keeps serving what is stored (`serve.test.ts` runs the real command against an RPC
+that refuses connections). `ingest --once` still exits with a non-zero code when its pass fails.
+With `RPC_URL` unset there is no chain ingestion and no RPC call; ORE rounds still come from
+api.ore.com.
+
+**Why a new signature is enough to ask for the snapshot.** The scans read accounts owned by the
+heads_down program. Only the owning program can change an account's data, give a new account its
+tag, or close it, and a transaction that runs the program names the program id among its accounts,
+so it is in the program id's signature list. SOL sent to an account from outside changes no data,
+and a failed transaction changes no account data. Three things are outside that reasoning, and the
+periodic snapshot is what bounds them:
+
+- an RPC whose signature list misses a transaction (its events are then missing as well; only the
+  accounts are repaired);
+- a second process on the same database (`ingest` next to `serve`) that moved the cursor and
+  stopped before its own snapshot;
+- accounts written straight into a local validator (`--account` files, cheat codes).
+
+A scan answered from a slot older than the newest signature (a lagging node behind a load
+balancer) is noticed from its context slot and repeated on the next poll. An Agave node lists a
+transaction under every address it names, lookup-table addresses included
+(`rpc/src/transaction_status_service.rs`, read at v4.1.2). Helius' own signature index was not
+tested here.
+
+**Cost at Helius' prices** (`getProgramAccounts` 10 credits, every other call 1; their billing
+page, read 2026-10-04). Computed from the code, not measured against Helius:
+
+| | calls | credits |
+|---|---|---|
+| pass with nothing new | 2 `getSignaturesForAddress` | 2 |
+| ORE spot-check | up to `ORE_API_VERIFY_SAMPLE` `getTransaction` per pass with new ORE rounds | up to 3 |
+| round resolver | the ORE Board and the Round accounts, only while a dug round waits for its outcome | 2 or more |
+| snapshot | 4 `getProgramAccounts` | 40 |
+| before `SNAPSHOT_EVERY_N_POLLS` existed | every pass: the two signature calls, the snapshot, the ORE Board | 43 |
+
+With no rig active that is about 12,600 credits a day at `INGEST_INTERVAL_S=30` and about 2,000 at
+300: the signature calls, a snapshot every 20th poll, and the ORE spot-check (about 1,100 rounds a
+day at 78 s a round; at 300 s the cap of 3 per pass makes it 864). Before, the same two cases
+came to about 125,000 and 13,200.
+
+The call counts themselves were measured on 2026-10-04 through a counting proxy in front of the
+public mainnet RPC (program not deployed yet, api.ore.com off, 5 s interval, 63 s): 10 passes and
+the start of an 11th made 21 `getSignaturesForAddress` calls, the 4 scans of the first poll and
+one `getGenesisHash`. The code before made 18 `getSignaturesForAddress`, 36 `getProgramAccounts`
+and 9 `getMultipleAccounts` calls in 9 passes.
+
+**Postgres.** A lost connection (Postgres restarts) is logged as `pg pool error` or
+`pg client error` and the query that hit it fails; the process stays up and the pool connects again
+for the next query. Only the error's message is logged: the error object node-postgres hands over
+carries the client, and with it the database password. `db.test.ts` checks this with the real `pg`
+driver against a stand-in server that speaks the wire protocol and drops its connections the way a
+shutdown does. It has not been run against a Postgres server: none is available where the suite
+runs, so the first deployment is the first time the migrations and queries meet node-postgres.
 
 ## API
 
@@ -121,7 +196,7 @@ strings.
 
 | Route | What |
 |---|---|
-| `GET /v1/health` | tx counts, failed/truncated txs, decode problems by code |
+| `GET /v1/health` | tx counts, failed/truncated txs, decode problems by code, and when the last ingest pass finished and whether it succeeded (`lastPollAt`, `lastPollOk`, `lastOkPollAt`) |
 | `GET /v1/summary?tz=` | headline tiles, each with `evidence[]` (`{label, kind, id, url}`) |
 | `GET /v1/cohorts?tz=` | D1/D7/D14 retention by first-shift night |
 | `GET /v1/share-by-hour?tz=&days=` | Heads Down share of unique ORE miners per round, by hour, each with its peak round and its reset and dig signatures |
@@ -131,6 +206,23 @@ strings.
 | `GET /v1/export/rounds.csv?days=` | per ORE round: total miners, Heads Down miners, share, lamports, reset and dig signatures |
 | `GET /v1/export/digs.csv?days=` | every dig with its signature |
 | `GET /v1/export/monthly.csv?tz=` | monthly milestone report |
+
+**Watching ingestion.** `/v1/health` answers 200 with `status: "ok"` whenever the database answers,
+so it shows that the API is up, not that data is arriving. For that, read the poll fields (times
+are unix seconds, like the envelope's `asOf`):
+
+- `lastPollAt` and `lastPollOk`: when the last ingest pass finished, and whether it succeeded. A
+  pass covers the sources that are configured (the RPC poll only when `RPC_URL` is set).
+  `asOf - lastPollAt` growing past a few intervals means the loop has stopped or a pass is stuck;
+  `lastPollOk: false` means passes run and fail (RPC down, credits used up, wrong cluster). The
+  reason is in the log line `ingest error`, not in the response.
+- `lastOkPollAt`: when the last successful pass finished.
+- All three are null until a pass has finished for the dataset, and always for `simulated`. They
+  are stored with the cursors, so they survive a restart and a separate `ingest` process fills them too.
+
+`lastSlot` and `lastBlockTime` belong to the newest stored transaction. They are null before the
+first one and stand still whenever nothing lands on chain, so they say nothing about a stalled
+ingest.
 
 ## Metric definitions
 
@@ -193,9 +285,18 @@ pnpm typecheck   # tsc --noEmit, strict
 - `accounts.test.ts`: Rig, ShiftLog and SeekerSeat oracle bytes; owner and canonical-PDA checks.
 - `store.test.ts`: idempotent ingest, dataset isolation, DB-level domains, closed-account tracking.
 - `metrics.test.ts`: night boundaries, cohort maths, ORE-mined formula, share by hour, pairing, summary.
-- `sources.test.ts`: RPC retry and secret redaction, polling cursors, api.ore.com parsing and chain override, webhook.
+- `sources.test.ts`: RPC retry and secret redaction (a provider's error text included), polling cursors, when the account
+  snapshot is taken and when it is skipped, api.ore.com parsing and chain override, webhook.
+- `loop.test.ts`: the ingest loop against a fake RPC: the genesis-hash check is retried, nothing is ingested before it
+  passes, a wrong cluster never ingests, a failed pass does not end the loop, `--once` still fails.
+- `serve.test.ts`: the real `serve` command as a process with an RPC that refuses connections: it stays up and `/v1/health`
+  reports the failed pass.
+- `db.test.ts`: a lost Postgres connection is logged and does not end the process (the real `pg` driver against a
+  stand-in server; no Postgres involved).
 - `simulate.test.ts`: determinism, and a full ingest with zero problems and consistent metrics.
-- `api.test.ts`: OpenAPI completeness, schema validation of live responses, parameter validation, CSV, links.
+- `api.test.ts`: OpenAPI completeness, schema validation of live responses, parameter validation, CSV, links, the poll
+  fields of `/v1/health`.
+- `config.test.ts`: settings, and that both `.env.example` files list every variable the code reads.
 
 ## Known limits
 
@@ -203,4 +304,7 @@ pnpm typecheck   # tsc --noEmit, strict
   hackathon scale (tens of thousands of digs). Past that, move the aggregates into materialized views.
 - The webhook path re-fetches at `finalized`, so a transaction the webhook announces before
   finalization is left for the RPC poller, which backstops completeness.
+- Between new transactions the account snapshot is refreshed every `SNAPSHOT_EVERY_N_POLLS` polls:
+  with the default of 20 that is 10 minutes at `INGEST_INTERVAL_S=30` and 100 minutes at 300. That
+  is how old the accounts can get in the three cases listed under "Ingest loop and RPC use".
 - The contract gaps and the choices made for them are in [INTERFACE-NOTES.md](INTERFACE-NOTES.md).

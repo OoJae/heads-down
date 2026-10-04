@@ -85,6 +85,26 @@ describe("ORE round resolver", () => {
     expect((await store.health()).problems).toEqual([]);
   });
 
+  it("asks the RPC nothing while no round is waiting for its outcome", async () => {
+    const store = await Store.bind(db, { name: "mainnet", programId: HD, executorPda: EXECUTOR_PDA });
+    const ctx = { store, programId: HD, executorPda: EXECUTOR_PDA };
+    const chain = fakeChain();
+    chain.accounts.push({ address: ORE_BOARD, owner: ORE_PROGRAM_ID, data: board(600n) });
+    const rpc = new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: async () => {} });
+    // Nothing was dug: not even the Board is read.
+    expect(await resolveRounds(ctx, rpc, { maxRounds: 50, withShiftRounds: true, resetLookups: 5 })).toEqual({ board: null, snapshots: 0, missing: 0, pending: 0, resets: 0 });
+    expect(chain.calls).toEqual([]);
+    // A dig in round 599, which has been reset: the Board and that Round account are read.
+    await store.ingestTxs([extractTransaction(dig(20, 599n), ctx)], "test");
+    chain.accounts.push({ address: oreRoundPda(599n), owner: ORE_PROGRAM_ID, data: encodeOreRound(roundAccount(599n, true)) });
+    expect(await resolveRounds(ctx, rpc, { maxRounds: 50, withShiftRounds: true, resetLookups: 0 })).toMatchObject({ board: "600", snapshots: 1 });
+    expect(chain.calls.map((c) => c.method)).toEqual(["getMultipleAccounts", "getMultipleAccounts"]);
+    // Its outcome is stored: the next pass is free again.
+    chain.calls.length = 0;
+    expect((await resolveRounds(ctx, rpc, { maxRounds: 50, withShiftRounds: true, resetLookups: 0 })).board).toBeNull();
+    expect(chain.calls).toEqual([]);
+  });
+
   it("rejects a Round account not owned by ORE", async () => {
     const store = await Store.bind(db, { name: "devnet", programId: HD, executorPda: EXECUTOR_PDA });
     const ctx = { store, programId: HD, executorPda: EXECUTOR_PDA };

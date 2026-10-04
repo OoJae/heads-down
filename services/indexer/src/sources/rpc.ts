@@ -5,7 +5,8 @@
  *  - `maxSupportedTransactionVersion: 1`: mainnet already carries v1 transactions (the ORE
  *    reset fixture is one), and heads_down cranks may use v1 for 27 heartbeats per tx.
  *  - The RPC URL may embed an API key (Helius `?api-key=`); it is never logged or returned in
- *    errors, only its host.
+ *    errors, only its host. A provider's own error text is scrubbed of the URL and its keys
+ *    before it is used ({@link scrubRpcText}), as the crank does (crank/src/redact.rs).
  */
 import { decodeBase64Strict } from "../codec/bytes.ts";
 import { isAddress, isSignature } from "../codec/base58.ts";
@@ -20,6 +21,44 @@ export class RpcError extends Error {
   }
 }
 
+const REDACTED = "<redacted>";
+/** Shorter parts of a URL are not treated as keys: replacing them would mangle ordinary error text. */
+const MIN_SECRET_LEN = 8;
+
+/**
+ * The parts of an RPC URL that may be a provider key: query values (`?api-key=<key>`), path
+ * segments (`/<key>/`) and userinfo, as written in the URL and percent-decoded. Longest first, so
+ * a key that contains another is replaced whole.
+ */
+export function urlSecrets(url: string): string[] {
+  const u = new URL(url);
+  const parts = [u.username, u.password, u.hash.slice(1), ...u.pathname.split("/"), ...u.search.slice(1).split("&").map((kv) => kv.slice(kv.indexOf("=") + 1))];
+  const out = new Set<string>();
+  for (const p of parts) {
+    out.add(p);
+    try {
+      out.add(decodeURIComponent(p));
+    } catch {
+      /* not percent-encoded text */
+    }
+  }
+  return [...out].filter((s) => s.length >= MIN_SECRET_LEN).sort((a, b) => b.length - a.length);
+}
+
+/**
+ * `text` from a provider without the request URL, any `api-key=` value or the URL's own keys
+ * (`secrets`, from {@link urlSecrets}). A provider is not trusted to leave the URL out of its errors.
+ */
+export function scrubRpcText(text: string, url: string, secrets: string[]): string {
+  const u = new URL(url);
+  // A URL that is only scheme and host (a local validator, a public endpoint) holds no key and stays readable.
+  const bare = !u.username && !u.password && !u.search && !u.hash && u.pathname === "/";
+  let s = bare ? text : text.replaceAll(url, `${u.protocol}//${u.host}/${REDACTED}`);
+  s = s.replace(/(api[-_]?key=)[^&\s"']*/gi, `$1${REDACTED}`);
+  for (const k of secrets) s = s.replaceAll(k, REDACTED);
+  return s;
+}
+
 export interface RpcOptions {
   timeoutMs?: number;
   maxAttempts?: number;
@@ -32,6 +71,7 @@ const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export class RpcClient {
   private readonly url: string;
+  private readonly secrets: string[];
   readonly host: string;
   private readonly opts: Required<RpcOptions>;
   private id = 0;
@@ -40,6 +80,7 @@ export class RpcClient {
     const u = new URL(url);
     if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("RPC URL must be http(s)");
     this.url = url;
+    this.secrets = urlSecrets(url);
     this.host = u.host;
     this.opts = {
       timeoutMs: opts.timeoutMs ?? 20_000,
@@ -48,6 +89,11 @@ export class RpcClient {
       fetchImpl: opts.fetchImpl ?? fetch,
       sleep: opts.sleep ?? defaultSleep,
     };
+  }
+
+  /** Text that came from this provider, made safe to log or put in an error. */
+  scrub(text: string): string {
+    return scrubRpcText(text, this.url, this.secrets);
   }
 
   async call<T>(method: string, params: unknown[]): Promise<T> {
@@ -71,8 +117,8 @@ export class RpcClient {
         if (text.length > this.opts.maxResponseBytes) throw new RpcError(`${method}: response too large`);
         const body = JSON.parse(text) as { result?: T; error?: { code?: number; message?: string } };
         if (body.error) {
-          // JSON-RPC errors are deterministic: do not retry.
-          throw Object.assign(new RpcError(`${method}: ${String(body.error.message ?? "error").slice(0, 200)}`, body.error.code ?? null), { final: true });
+          // JSON-RPC errors are deterministic: do not retry. The text is the provider's: scrub it, then cut it.
+          throw Object.assign(new RpcError(`${method}: ${this.scrub(String(body.error.message ?? "error")).slice(0, 200)}`, body.error.code ?? null), { final: true });
         }
         return body.result as T;
       } catch (e) {
