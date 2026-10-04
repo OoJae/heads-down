@@ -199,8 +199,11 @@ mod tests {
             request.contains(r#""method":"getSlot""#) && request.contains(r#""commitment":"finalized""#),
             "{request}"
         );
-        // The slot is cached: the stand-in is gone, and the next call still answers.
-        assert_eq!(rpc.current_slot().await.unwrap(), 453_000_000);
+        // The slot is cached for the calls of the next seconds. (Looked at directly, so that the
+        // test does not depend on being quicker than the cache's five seconds.)
+        let SlotSource::Rpc { cache, .. } = &rpc else { unreachable!() };
+        let cached = *cache.lock().await;
+        assert_eq!(cached.map(|(slot, _)| slot), Some(453_000_000));
         let log = logged(&log);
         assert!(log.contains("slot source answered") && log.contains("453000000"), "{log}");
         assert!(!log.contains(KEY), "{log}");
@@ -225,7 +228,10 @@ mod tests {
             let rpc = SlotSource::rpc(keyed_url(port)).unwrap();
             assert!(!rpc.report_at_start().await, "{status} {body}");
             served.await.unwrap();
-            assert!(rpc.current_slot().await.is_err(), "a failure is not cached");
+            // A failure is not cached. (Looked at directly: the stand-in's port is free again
+            // and may by now belong to another test.)
+            let SlotSource::Rpc { cache, .. } = &rpc else { unreachable!() };
+            assert!(cache.lock().await.is_none());
             let log = logged(&log);
             assert!(log.contains("WARN") && log.contains("slot source gave no slot"), "{log}");
             assert!(
