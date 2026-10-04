@@ -2,13 +2,15 @@
  * The ingest loop behind `serve` and `ingest`: every INGEST_INTERVAL_S one pass over the sources
  * that are configured (the RPC poll with its account snapshot, the ORE round resolver, api.ore.com).
  *
- * A pass that fails is logged as `ingest error` and tried again at the next interval. It never ends
- * the process: the API keeps serving what is stored while the RPC is down or out of credits. The
- * time and outcome of each pass are stored for /v1/health.
+ * A pass has two steps, the RPC's and api.ore.com's. A step that fails is logged as `ingest error`
+ * and does not keep the other from running; the pass is failed if either did, and it is tried
+ * again at the next interval. It never ends the process: the API keeps serving what is stored
+ * while the RPC is down or out of credits. The time and outcome of each pass are stored for
+ * /v1/health.
  */
 import { GENESIS_HASH, type Config } from "./config.ts";
 import { newSnapshotState, pollRpcOnce, type IngestContext } from "./ingest.ts";
-import { pollOreRounds } from "./sources/oreApi.ts";
+import { ORE_API_STALLED_PASSES, pollOreRounds } from "./sources/oreApi.ts";
 import { resolveRounds } from "./sources/rounds.ts";
 import type { RpcClient } from "./sources/rpc.ts";
 
@@ -51,6 +53,8 @@ export interface LoopOptions {
   now?: () => number;
   /** fetch for api.ore.com. */
   oreFetch?: typeof fetch;
+  /** The pause between two api.ore.com pages (default: a real wait). */
+  orePause?: (ms: number) => Promise<void>;
 }
 
 export async function ingestLoop(ctx: IngestContext, cfg: Config, rpc: RpcClient | null, opts: LoopOptions): Promise<void> {
@@ -63,12 +67,17 @@ export async function ingestLoop(ctx: IngestContext, cfg: Config, rpc: RpcClient
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
   const snapshot = newSnapshotState();
   for (;;) {
-    let failed = false;
-    let failure: unknown;
-    try {
-      // First in the pass: until the RPC has shown the right cluster, nothing below runs.
-      await verifyCluster();
-      if (rpc) {
+    const failures: unknown[] = [];
+    const failed = (step: "rpc" | "ore-api", e: unknown) => {
+      failures.push(e);
+      log("ingest error", { step, error: errorText(e) }, "error");
+    };
+    // Whether the RPC answered everything this pass asked of it: the ORE spot check below needs that.
+    let rpcWorked = false;
+    if (rpc) {
+      try {
+        // First in the step: until the RPC has shown the right cluster, nothing is read from it.
+        await verifyCluster();
         const r = await pollRpcOnce(
           ctx,
           rpc,
@@ -82,20 +91,31 @@ export async function ingestLoop(ctx: IngestContext, cfg: Config, rpc: RpcClient
           const rr = await resolveRounds(ctx, rpc, { maxRounds: cfg.resolveMaxRounds, withShiftRounds, resetLookups: cfg.resolveResetLookups });
           if (rr.snapshots || rr.missing || rr.resets) log("ore rounds resolved", { ...rr });
         }
+        rpcWorked = true;
+      } catch (e) {
+        failed("rpc", e);
       }
-      if (cfg.oreApiEnabled && cfg.dataset === "mainnet") {
-        const r = await pollOreRounds(ctx, { since: cfg.oreRoundsSince, maxPages: 200, verifySample: cfg.oreApiVerifySample, sleepMs: 500, fetchImpl: opts.oreFetch }, rpc);
-        log("ore rounds", r);
+    }
+    if (cfg.oreApiEnabled && cfg.dataset === "mainnet") {
+      try {
+        // api.ore.com is not reached through the RPC, so it is asked whatever became of the step above.
+        // Its spot check does use the RPC: after an RPC step that failed, this pass stores its rounds without it.
+        const r = await pollOreRounds(
+          ctx,
+          { since: cfg.oreRoundsSince, maxPages: cfg.oreApiPagesPerPass, verifySample: cfg.oreApiVerifySample, fetchImpl: opts.oreFetch, sleep: opts.orePause, now },
+          rpcWorked ? rpc : null,
+        );
+        log("ore rounds", { ...r });
+        // Turned away is not a failure. Turned away pass after pass, without getting further, is.
+        if ((r.stalledPasses ?? 0) >= ORE_API_STALLED_PASSES) throw new Error(`api.ore.com: ${r.stopped}; ${r.stalledPasses} passes in a row without progress`);
+      } catch (e) {
+        failed("ore-api", e);
       }
-    } catch (e) {
-      failed = true;
-      failure = e;
-      log("ingest error", { error: errorText(e) }, "error");
     }
     // Its own guard: a database that cannot take this note must not end the loop.
-    await ctx.store.recordPoll(now(), !failed).catch((e: unknown) => log("ingest: poll outcome not stored", { error: errorText(e) }, "error"));
+    await ctx.store.recordPoll(now(), failures.length === 0).catch((e: unknown) => log("ingest: poll outcome not stored", { error: errorText(e) }, "error"));
     if (opts.once) {
-      if (failed) throw failure;
+      if (failures.length > 0) throw failures[0];
       return;
     }
     await sleep(cfg.ingestIntervalS * 1000);

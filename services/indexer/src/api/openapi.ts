@@ -228,7 +228,9 @@ export const openApiDocument = {
         },
         lastPollOk: {
           ...nullable(bool),
-          description: "Whether that pass succeeded. False while, for example, the RPC is down, out of credits or on another cluster; the reason is in the server log only.",
+          description:
+            "Whether that pass succeeded. False while, for example, the RPC is down, out of credits or on another cluster, or while api.ore.com has turned " +
+            "the indexer away for three passes in a row (a single HTTP 429 does not make it false); the reason is in the server log only.",
         },
         lastOkPollAt: { ...nullable(int), description: "Unix seconds at which the last successful pass finished; null if none has." },
         problems: arr(obj({ code: str, count: int })),

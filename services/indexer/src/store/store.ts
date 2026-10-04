@@ -257,6 +257,42 @@ export class Store {
     await this.db.transaction((db) => this.insertRounds(db, rows, source));
   }
 
+  /**
+   * One page from api.ore.com: its rounds and the note of which round ids have been read (cursor
+   * `ore-api`/`covered`), in one transaction, so the note never says more than is stored. One
+   * process per dataset is assumed to read api.ore.com: a second one would replace the note with
+   * its own, and the rounds its note leaves out are asked for again.
+   */
+  async storeOreApiPage(rows: { event: OreResetEvent; resetSignature: string | null }[], covered: string): Promise<void> {
+    await this.db.transaction(async (db) => {
+      await this.insertRounds(db, rows, "ore-api");
+      await db.query(
+        `INSERT INTO ingest_cursors (dataset, source, key, value) VALUES ($1,'ore-api','covered',$2)
+         ON CONFLICT (dataset, source, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [this.dataset, covered],
+      );
+    });
+  }
+
+  /** The oldest round id of the unbroken run of stored rounds that ends at `hi`; null when `hi` itself is not stored. */
+  async oreRunBottom(hi: bigint): Promise<bigint | null> {
+    const [r] = await this.db.query<{ lo: string }>(
+      `SELECT r.round_id::text AS lo FROM ore_rounds r
+       WHERE r.dataset = $1 AND r.round_id <= $2
+         AND EXISTS (SELECT 1 FROM ore_rounds h WHERE h.dataset = r.dataset AND h.round_id = $2)
+         AND NOT EXISTS (SELECT 1 FROM ore_rounds p WHERE p.dataset = r.dataset AND p.round_id = r.round_id - 1)
+       ORDER BY r.round_id DESC LIMIT 1`,
+      [this.dataset, s(hi)],
+    );
+    return r ? BigInt(r.lo) : null;
+  }
+
+  /** Reset time (unix seconds) of a stored round; null when it is not stored. */
+  async oreRoundTime(id: bigint): Promise<number | null> {
+    const [r] = await this.db.query<{ ts: unknown }>("SELECT ts FROM ore_rounds WHERE dataset = $1 AND round_id = $2", [this.dataset, s(id)]);
+    return optNum(r?.ts);
+  }
+
   private async insertRounds(db: Db, rows: { event: OreResetEvent; resetSignature: string | null }[], source: string) {
     await insertMany(
       db,

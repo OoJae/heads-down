@@ -8,6 +8,8 @@
  *  - `serve` with an RPC on another cluster stores nothing, by the poller or by the webhook, until
  *    the RPC shows the right cluster.
  *  - `ingest --once` exits with a non-zero code when its pass fails.
+ *  - `serve` without an RPC, turned away by api.ore.com (a stand-in over HTTP) half way through a
+ *    pass, keeps what it got, waits as told and finishes in the passes that follow.
  *  - Every log line carries a level; info lines are written to stdout, the others to stderr.
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -20,6 +22,7 @@ import { GENESIS_HASH } from "../src/config.ts";
 import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constants.ts";
 import { buildDigTx } from "../src/sim/txbuilder.ts";
 import { addr, sig } from "./helpers.ts";
+import { OreStandIn } from "./oreStandIn.ts";
 
 /** A port nothing listens on: bound once to learn a free number, then closed. */
 async function closedPort(): Promise<number> {
@@ -53,8 +56,8 @@ interface Line {
  * `node src/main.ts <args>` with exactly `env`: nothing of the developer's environment (an RPC_URL,
  * a DATABASE_URL) leaks in. Its log lines are collected from both streams as they are written.
  */
-function run(args: string[], env: Record<string, string>) {
-  const child = spawn(process.execPath, ["src/main.ts", ...args], { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", "pipe", "pipe"] });
+function run(args: string[], env: Record<string, string>, nodeArgs: string[] = []) {
+  const child = spawn(process.execPath, [...nodeArgs, "src/main.ts", ...args], { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(child);
   const lines: Line[] = [];
   /** Everything the process wrote, to either stream. */
@@ -75,9 +78,9 @@ function run(args: string[], env: Record<string, string>) {
       }
     });
   }
-  const logged = async (msg: string) => {
+  const logged = async (msg: string, also: (l: Line) => boolean = () => true) => {
     for (let i = 0; i < 400; i++) {
-      const hit = lines.find((l) => l.msg === msg);
+      const hit = lines.find((l) => l.msg === msg && also(l));
       if (hit) return hit;
       if (child.exitCode !== null) throw new Error(`${args.join(" ")} exited with code ${child.exitCode}: ${output.slice(-600)}`);
       await new Promise((r) => setTimeout(r, 100));
@@ -140,7 +143,7 @@ describe("serve with an unreachable RPC", () => {
 
     // Five attempts with 0.5, 1, 2 and 4 s between them, then the pass fails and is logged: an error, on stderr.
     const failure = await p.logged("ingest error");
-    expect(failure).toMatchObject({ level: "error", stream: "stderr", error: `getGenesisHash: request to 127.0.0.1:${rpcPort} failed (TypeError)` });
+    expect(failure).toMatchObject({ level: "error", stream: "stderr", step: "rpc", error: `getGenesisHash: request to 127.0.0.1:${rpcPort} failed (TypeError)` });
     const after = await healthAfterPass(apiPort);
     expect(after).toMatchObject({ status: 200, data: { status: "ok", txs: 0, lastPollOk: false, lastOkPollAt: null } });
     expect(typeof after.data.lastPollAt).toBe("number");
@@ -213,7 +216,7 @@ describe("ingest --once", () => {
     expect(await failing.ended()).toBe(1);
     // The whole of each line: the time, the level, the message and its fields. Both are errors, on stderr.
     expect(failing.lines).toEqual([
-      { t: expect.any(String), level: "error", msg: "ingest error", error: refusal, stream: "stderr" },
+      { t: expect.any(String), level: "error", msg: "ingest error", step: "rpc", error: refusal, stream: "stderr" },
       { t: expect.any(String), level: "error", msg: "fatal", error: refusal, stream: "stderr" },
     ]);
     expect(rpc.state.methods).toEqual(["getGenesisHash"]);
@@ -226,5 +229,68 @@ describe("ingest --once", () => {
     // One pass: the check, the two signature lists, the four scans of a first poll.
     expect(rpc.state.methods.slice(0, 3)).toEqual(["getGenesisHash", "getSignaturesForAddress", "getSignaturesForAddress"]);
     expect(rpc.state.methods.slice(3)).toEqual(Array.from({ length: 4 }, () => "getProgramAccounts"));
+  });
+});
+
+describe("serve turned away by api.ore.com half way through a pass", () => {
+  /** Sends what the process asks of api.ore.com to the stand-in instead (test/redirectOreApi.ts). */
+  const REDIRECT = new URL("./redirectOreApi.ts", import.meta.url).href;
+
+  // About 15 s: the pause between two pages is the real one, and so is the wait the stand-in asks for.
+  it("keeps what it got, waits as it was told, and finishes in the passes that follow", { timeout: 120_000 }, async () => {
+    // No RPC, as on the live service. 449 rounds are wanted, three pages a pass. The second request is
+    // refused with Retry-After, and two new rounds arrive at that moment.
+    const newest = 430_000;
+    const newestAt = Math.floor(Date.now() / 1000) - 600;
+    const api = new OreStandIn(newest, 1200, newestAt);
+    api.refuse = (_page, nth) => {
+      if (nth !== 1) return null;
+      api.add(2);
+      return { status: 429, headers: { "retry-after": "3" } };
+    };
+    const standIn = await api.listen();
+    rpcs.push(standIn.server);
+    const apiPort = await closedPort();
+    const p = run(
+      ["serve"],
+      {
+        DATABASE_URL: "pglite://memory", INDEXER_DATASET: "mainnet", HOST: "127.0.0.1", PORT: String(apiPort), INGEST_INTERVAL_S: "1",
+        ORE_API_PAGES_PER_PASS: "3", ORE_ROUNDS_SINCE: String(newestAt - 448 * 77), MARKET_PRICE_SOURCES: "none", HD_TEST_ORE_API: standIn.url,
+      },
+      ["--import", REDIRECT],
+    );
+
+    // The pass that was turned away: one info line that says where, the first page kept, and the pass is not failed.
+    expect(await p.logged("ore rounds")).toMatchObject({
+      level: "info", stream: "stdout", stored: 100, pages: 1, newest: String(newest), backfill: "running",
+      stopped: `HTTP 429 at page 1, asking for round ${newest - 100}`, retryAfterS: 3, stalledPasses: 1,
+    });
+    expect((await healthAfterPass(apiPort)).data).toMatchObject({ lastPollOk: true });
+
+    const done = await p.logged("ore rounds", (l) => l.backfill === "done");
+    // The passes up to that one, and the eight requests they made (a later pass may have asked again by now).
+    const all = p.lines.filter((l) => l.msg === "ore rounds");
+    const passes = all.slice(0, all.indexOf(done) + 1);
+    const requests = api.requests.slice(0, 8);
+    expect(done).toMatchObject({ level: "info", stream: "stdout", newest: String(newest + 2), backTo: new Date((newestAt - 448 * 77) * 1000).toISOString() });
+    // Every round from the bound to the two that arrived, each stored once: 100, then 200, then 151.
+    expect(passes.filter((l) => (l.stored as number) > 0).map((l) => l.stored)).toEqual([100, 200, 151]);
+    const csv = await (await fetch(`http://127.0.0.1:${apiPort}/v1/export/rounds.csv?days=1`)).text();
+    expect(csv.trim().split("\n")).toHaveLength(1 + 451);
+    // Never more than three requests a pass, and every request the stand-in answered is one a pass reported.
+    expect(passes.every((l) => (l.pages as number) <= 3)).toBe(true);
+    expect(requests.map((q) => q.page)).toEqual([0, 1, 0, 1, 2, 0, 3, 4]);
+    expect(requests.filter((q) => q.status === 200)).toHaveLength(passes.reduce((n, l) => n + (l.pages as number), 0));
+    // Retry-After: 3 was honoured. The clock counts whole seconds, so the next request is more than 2 s after the refusal.
+    expect(requests[2]!.at - requests[1]!.at).toBeGreaterThan(2000);
+    // Two pages of one pass are a second apart.
+    expect(requests[4]!.at - requests[3]!.at).toBeGreaterThanOrEqual(990);
+    // Nothing went wrong, and nothing was written as if it had: every line is an info line on stdout.
+    expect(p.lines.map((l) => [l.level, l.stream])).toEqual(p.lines.map(() => ["info", "stdout"]));
+    expect(p.lines[0]).toMatchObject({ msg: "api listening", rpc: null, oreApi: true, oreApiPagesPerPass: 3 });
+    expect((await health(apiPort)).data).toMatchObject({ lastPollOk: true, problems: [] });
+
+    p.child.kill("SIGTERM");
+    expect(await p.ended()).toBe(0);
   });
 });
