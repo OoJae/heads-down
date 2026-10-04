@@ -323,7 +323,8 @@ looked at after this change, and that documentation does not say which of the tw
 | `error` | `ingest error` (with `step`: `rpc` or `ore-api`), `ingest: poll outcome not stored`, `ingest stopped`, `api: internal error`, `pg client error`, `fatal` |
 
 What a line may carry has not changed: hosts, counts and messages, never the RPC URL's key, the
-webhook secret or the database password (`serve.test.ts` looks for them in both streams).
+webhook secret or the database password. `serve.test.ts` looks for the key and the secret in both
+streams of the real command; `db.test.ts` looks for the password in what the database layer logs.
 
 ## API
 
