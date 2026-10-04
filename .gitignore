@@ -29,6 +29,23 @@ ml/**/checkpoints/
 .env
 .env.*
 !.env.example
+# The deployment's keys and helius.env live outside the repository (~/.config/heads-down).
+# Their file names are refused anywhere in the tree all the same, so a copy made by mistake is
+# never staged.
+*.env
+*keypair*.json
+*-payer.json
+deployer.json
+governance.json
+buffer-*.json
+*-secret
+registrar.json
+# The two tracked files of that name are public test vectors, not keys.
+!/programs/heads-down/vectors/registrar.json
+!/android/core/chain/src/test/resources/golden/registrar.json
+# Where `railway config pull` writes the project's configuration; with --include-variables it
+# holds every value that is not sealed.
+/.railway/
 
 # OS / IDE
 .DS_Store

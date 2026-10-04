@@ -10,7 +10,16 @@
 # 3. hd-crank listens on $PORT, dual-stack ([::]) when the container has IPv6.
 # 4. hd-crank loads the key before it binds its port; once the port answers (or after 30 s),
 #    the key file is deleted. SIGTERM / SIGINT are forwarded as SIGINT (hd-crank's shutdown).
+#    If this script stops before that (a step fails, a signal arrives), the key directory is
+#    removed on the way out.
+# 5. Shell tracing is refused (`bash -x`, SHELLOPTS=xtrace): it would print the key into the
+#    deploy log.
+# 6. On Railway it refuses to start unless a volume is mounted at /data: without one hd-crank
+#    forgets its lookup table and creates a new one on every deploy.
 set -euo pipefail
+case $- in
+  *x*) echo "refusing to run with xtrace: set -x would print secrets" >&2; exit 2 ;;
+esac
 umask 077
 
 APP_UID=10001
@@ -21,7 +30,19 @@ STATE_DIR=/data/hd-crank
 say() { printf '{"timestamp":"%s","level":"%s","source":"entrypoint","message":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >&2; }
 fail() { say ERROR "$1"; exit 1; }
 
+# The key directory, once it exists. Whatever ends this script takes it along: a step below can
+# fail after the key file is written, and a signal can arrive before hd-crank is up.
+key_dir=""
+trap 'if [[ -n "$key_dir" ]]; then rm -rf "$key_dir"; fi' EXIT
+
 [[ "$PORT" =~ ^[0-9]{1,5}$ ]] || fail "PORT must be a port number"
+# Railway sets RAILWAY_SERVICE_NAME in every container and RAILWAY_VOLUME_MOUNT_PATH when a
+# volume is attached. Without the volume the lookup-table list would sit on the container's own
+# disk, and the next deploy would create (and pay rent for) another table.
+if [[ -n "${RAILWAY_SERVICE_NAME:-}" ]]; then
+  volume="${RAILWAY_VOLUME_MOUNT_PATH:-}"
+  [[ "${volume%/}" == /data ]] || fail "no Railway volume is mounted at /data (RAILWAY_VOLUME_MOUNT_PATH is ${volume:-not set}): attach a volume to this service with mount path /data"
+fi
 if [[ -z "${HD_CRANK_LISTEN:-}" ]]; then
   if [[ -s /proc/net/if_inet6 ]]; then HD_CRANK_LISTEN="[::]:$PORT"; else HD_CRANK_LISTEN="0.0.0.0:$PORT"; fi
   export HD_CRANK_LISTEN
@@ -67,7 +88,11 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 rm -rf "$key_dir"
-say INFO "key file removed; hd-crank (pid $child) on $HD_CRANK_LISTEN"
+key_dir=""
+# /proc/<pid> is owned by the uid the process runs as (Linux), so this line shows whether the
+# drop to uid 10001 happened. "unknown" where there is no /proc (macOS) or hd-crank has already
+# exited. The Linux half has not run yet: the first Railway deploy is its first run.
+say INFO "key file removed; hd-crank (pid $child, uid $(stat -c %u "/proc/$child" 2>/dev/null || echo unknown)) on $HD_CRANK_LISTEN"
 
 status=0
 while :; do

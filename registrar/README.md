@@ -34,11 +34,13 @@ phone (Keystore P-256)            registrar                               heads_
 
 ```sh
 cd registrar
-cargo test                                   # 105 tests; no network needed
+cargo test                                   # 114 tests; no network needed
+mkdir -p data
 cargo run -- keygen ./data/registrar-keypair.json   # prints the registrar pubkey; file is 0600
 export HD_SESSION_SECRET=$(openssl rand -hex 32)
 export HD_REGISTRAR_KEYPAIR=./data/registrar-keypair.json
 export HD_APP_RELEASE_CERT_SHA256=<sha256 of the release signing cert>
+export HD_SIWS_DOMAIN=headsdown.example      # the host of the site the app identifies itself with
 export HD_LOG_FORMAT=pretty
 cargo run -- serve                           # listens on 0.0.0.0:8080
 curl -s localhost:8080/registrar | jq .
@@ -184,7 +186,7 @@ policy allows it.
 | 37 | 32 | `authority` (the wallet; the Rig PDA is `[b"rig", authority]`) |
 | 69 | 33 | `p256_pubkey`, SEC1 compressed |
 | 102 | 1 | `level` u8: 0 unattested, 1 TEE, 2 StrongBox |
-| 103 | 8 | `expiry_slot` u64 LE = finalized slot at issuance + `HD_VOUCHER_TTL_SLOTS` (default 6,480,000, about 30 days) |
+| 103 | 8 | `expiry_slot` u64 LE = finalized slot at issuance + `HD_VOUCHER_TTL_SLOTS` (default 6,480,000: about 20 days at today's slot time of about 270 ms, 30 days at 400 ms) |
 
 #### The Ed25519SigVerify instruction (223 bytes, no accounts)
 
@@ -286,11 +288,18 @@ Other adversaries:
   THREAT_MODEL.md K4 states. The damage is the capped Stack exposure above.
 - **Debug builds.** Anyone can sign with a debug keystore, so debug digests are off unless
   `HD_APP_DEBUG_CERT_SHA256` is set. The service then warns at startup and labels such vouchers
-  `"signer": "debug"`.
+  `"signer": "debug"` in the log; the voucher itself, and so the chain, does not say which
+  certificate signed the app. It is for the operator's own phone while no release key exists,
+  with `HD_APP_RELEASE_CERT_SHA256` left unset, and it must be removed before anyone else installs
+  the app.
 - **Denial of service.** Per-IP GCRA rate limits: a general bucket and a tight attest bucket
-  (default 6/min, burst 3). `X-Forwarded-For` is trusted only for `HD_TRUSTED_PROXY_HOPS`. There is
-  a 64 KiB body cap, a 20 s timeout, bounded verification concurrency, an outstanding-nonce cap, and
-  size limits inside every parser.
+  (default 6/min, burst 3). By default the limits key on the TCP peer and no header is read.
+  Behind a proxy one setting names the header to trust: `HD_TRUST_REAL_IP=true` for `X-Real-IP`
+  (its last line), or `HD_TRUSTED_PROXY_HOPS=n` for the n-th address from the right of
+  `X-Forwarded-For`; the registrar refuses to start with both. Either is only as good as the
+  proxy: with nothing in front that sets the header, a caller picks its own bucket by sending it.
+  There is a 64 KiB body cap, a 20 s timeout, bounded verification concurrency, an
+  outstanding-nonce cap, and size limits inside every parser.
 - **Dependency outage.** A revocation-list or RPC outage returns 503 **before** the nonce is spent.
   There is no fallback slot guess.
 
@@ -305,7 +314,10 @@ key serial can link two rigs registered from the same phone while that key lives
 **Secrets handling.** The registrar key is loaded from a file (refused if group/other-writable;
 warning if readable) or from an env var. It is zeroized on drop, has no printable form except its
 public key, and is created by `keygen` with mode 0600 and no overwrite. The session key must be
->= 32 bytes and is zeroized and redacted. No secret is committed, and `.gitignore` and
+>= 32 bytes and is zeroized and redacted. `HD_RPC_URL` may carry a provider's API key: a `{:?}`
+of the configuration shows only its scheme, host and port, and the service does not log it (a
+run at `RUST_LOG=trace` with a key in the path and in the query string, once with the RPC
+answering and once with it down, logged neither). No secret is committed, and `.gitignore` and
 `.dockerignore` exclude keypairs, `.env` and runtime state.
 
 ## Code map
@@ -328,8 +340,10 @@ public key, and is created by `keygen` with mode 0600 and no overwrite. The sess
 
 ## Tests
 
-`cargo test` runs 105 tests offline in about a second: 56 unit, 19 real-vector, 13 SIWS HTTP and
-17 attestation HTTP. Lint: `cargo +1.97.1 clippy --all-targets`. The
+`cargo test` runs 114 tests offline in about a second: 63 unit, 19 real-vector, 14 SIWS HTTP and
+18 attestation HTTP. Two of the unit tests read `.env.example` and
+`deploy/railway/registrar/.env.example`: both files must name exactly the variables the code
+reads and show its defaults. Lint: `cargo +1.97.1 clippy --all-targets`. The
 library and binary deny `unwrap`, `expect`, `panic`, indexing and unchecked arithmetic outside
 tests. Format: `cargo +1.95 fmt --check`.
 
@@ -344,7 +358,10 @@ validity windows.
 - **Keys.** `hd-registrar keygen <path>` / `hd-registrar pubkey <path>`. Put the public key into
   `Config.registrar` at `initialize_config`. Rotation goes through `propose_config` / `apply_config`
   (72 h timelock): run old and new registrars side by side until `apply_config`.
-- **Deploy behind a proxy** (Railway, Fly): set `HD_TRUSTED_PROXY_HOPS=1`, mount `/data` on a
-  persistent volume, and back up `attestations.jsonl` (append-only; mirror it publicly).
+- **Deploy behind a proxy:** set the one setting that names the header the proxy writes
+  (`HD_TRUST_REAL_IP=true` on Railway, whose documentation says its edge sets `X-Real-IP`;
+  `HD_TRUSTED_PROXY_HOPS=n` behind n proxies that append to `X-Forwarded-For`) and check it with
+  the two commands in `deploy/railway/registrar/.env.example`. Mount `/data` on a persistent
+  volume, and back up `attestations.jsonl` (append-only; mirror it publicly).
 - **Devnet builds** sign in with `solana:devnet`: set `HD_SIWS_CHAINS=solana:devnet` on the devnet
   registrar. Keep mainnet and devnet registrars separate (different keys and program ids).
