@@ -17,6 +17,7 @@
 //! intake's per-IP and per-rig rate limits.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -438,6 +439,8 @@ impl WindowRule {
 pub struct HeartbeatStore {
     max_rigs: usize,
     inner: Mutex<HashMap<Address, (VerifiedHeartbeat, Instant)>>,
+    /// Heartbeats stored since the process started (see [`Self::stored_total`]).
+    stored: AtomicU64,
 }
 
 /// Result of [`HeartbeatStore::offer`].
@@ -454,7 +457,13 @@ pub enum Offer {
 impl HeartbeatStore {
     /// Store at most `max_rigs` rigs.
     pub fn new(max_rigs: usize) -> Self {
-        HeartbeatStore { max_rigs: max_rigs.max(1), inner: Mutex::new(HashMap::new()) }
+        HeartbeatStore { max_rigs: max_rigs.max(1), inner: Mutex::new(HashMap::new()), stored: AtomicU64::new(0) }
+    }
+
+    /// How many heartbeats were ever stored. The crank compares two readings to see that a
+    /// heartbeat was held in between, even if it has been applied and removed since.
+    pub fn stored_total(&self) -> u64 {
+        self.stored.load(Ordering::Relaxed)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Address, (VerifiedHeartbeat, Instant)>> {
@@ -478,6 +487,7 @@ impl HeartbeatStore {
             _ => {}
         }
         m.insert(hb.rig, (hb, Instant::now()));
+        self.stored.fetch_add(1, Ordering::Relaxed);
         Offer::Stored
     }
 
@@ -749,6 +759,7 @@ mod tests {
             pubkey: [2; 33],
             digest: [0; 32],
         };
+        assert_eq!(s.stored_total(), 0);
         assert_eq!(s.offer(mk(1, 5)), Offer::Stored);
         assert_eq!(s.offer(mk(1, 5)), Offer::Stale);
         assert_eq!(s.offer(mk(1, 4)), Offer::Stale);
@@ -757,6 +768,7 @@ mod tests {
         assert_eq!(s.offer(mk(2, 1)), Offer::Full, "bounded");
         s.prune(11, Duration::from_secs(60));
         assert!(s.is_empty(), "lease [10,10] ended before round 11");
+        assert_eq!(s.stored_total(), 2, "what was stored stays counted after it is gone; refusals never count");
     }
 
     #[test]

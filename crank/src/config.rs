@@ -52,6 +52,14 @@ pub const RESERVED_ENV: [&str; 2] = ["HD_CRANK_CONFIG", "HD_CRANK_KEYPAIR_JSON"]
 /// Legacy short names, kept working: `(alias, canonical variable)`.
 pub const ENV_ALIASES: [(&str, &str); 2] =
     [("HD_CRANK_KEYPAIR", "HD_CRANK_KEYPAIR_PATH"), ("HD_CRANK_TX_FORMAT", "HD_CRANK_DIG_TX_FORMAT")];
+/// Largest `chain_poll_secs`. When the WebSocket goes silent the HTTP poll is the only thing
+/// that moves the slot, and `/healthz` reports `degraded` once the slot is older than
+/// [`crate::intake::STALE_CHAIN_AFTER`] (30 s). With an interval of 20 s or less the slot
+/// stays inside 30 s as long as every poll answers within [`crate::rpc::RPC_TIMEOUT`] (10 s)
+/// in all. A poll is two calls, each with that timeout: an RPC so slow that the two take
+/// longer together, or a poll that fails, can still show as `degraded` until the next poll
+/// that works (at 15 s, one failed poll is enough).
+pub const MAX_CHAIN_POLL_SECS: u64 = crate::intake::STALE_CHAIN_AFTER.as_secs() - crate::rpc::RPC_TIMEOUT.as_secs();
 
 /// Top-level config.
 #[derive(Clone, Deserialize, Serialize)]
@@ -76,6 +84,13 @@ pub struct Config {
     /// On SIGTERM / SIGINT: stop taking work, then wait this long for transactions in flight
     /// (a BREAK that was acknowledged, a check-in that was sent) before exiting.
     pub shutdown_grace_secs: u64,
+    /// How often the chain watcher re-reads the slot and ORE's Board, Treasury, Config and
+    /// Round over HTTP (two calls), beside the WebSocket stream. 1..=[`MAX_CHAIN_POLL_SECS`].
+    /// The stream delivers every slot; the poll covers a stream that stalled, and while it
+    /// does the crank sees the chain once per interval. The dig window (`deploy_margin_slots`
+    /// down to `min_slots_left`) is under 5 s long at today's slot time, so the longer the
+    /// interval, the likelier a stalled stream costs that round's dig.
+    pub chain_poll_secs: u64,
     /// Digging.
     pub dig: DigConfig,
     /// Heartbeat intake.
@@ -108,6 +123,7 @@ impl Default for Config {
             state_dir: PathBuf::from(".hd-crank"),
             log_json: false,
             shutdown_grace_secs: 8,
+            chain_poll_secs: 5,
             dig: DigConfig::default(),
             intake: IntakeToml::default(),
             alt: AltConfig::default(),
@@ -265,8 +281,8 @@ impl RecordConfig {
 
 /// Permissionless `end_shift` for shifts past their window whose lease has been expired for
 /// more than the program's 3-round grace. The
-/// caller pays the ShiftLog rent (128 bytes: 1,781,760 lamports at the default rent) plus the
-/// fee, and nothing reimburses it, so it is capped.
+/// caller pays the ShiftLog rent (128 bytes: 1,300,480 lamports at mainnet's 5,080 lamports
+/// per byte) plus the fee, and nothing reimburses it, so it is capped.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct EndShiftConfig {
@@ -366,7 +382,7 @@ pub struct StackConfig {
     /// Settle attempts per table at most.
     pub settle_max_attempts: u32,
     /// Create the Bury vault and the lot's SKR token account when a settle or a forfeit needs
-    /// them and nobody has (one time: 0.00427 SOL of rent the crank never gets back).
+    /// them and nobody has (once: 3,114,040 lamports of rent at mainnet's rate, never returned).
     pub init_bury_vault: bool,
 }
 
@@ -532,6 +548,12 @@ pub struct DigConfig {
     pub ore_programdata_slot: u64,
     /// How often to re-read ORE's ProgramData header and the heads_down Config.
     pub config_poll_secs: u64,
+    /// A dig pass reads nothing while the crank is idle: no heartbeat held, no known rig
+    /// with a lease covering the round, nothing held or planned in the last few rounds (see
+    /// [`crate::idle`]). An idle crank still makes one full pass every this many rounds, so
+    /// that a rig whose heartbeat another crank applied is seen. A lease lasts at most 3
+    /// rounds: only 3 or less can never miss one. 0 = every pass reads the chain.
+    pub idle_full_read_rounds: u64,
 }
 
 impl Default for DigConfig {
@@ -563,6 +585,7 @@ impl Default for DigConfig {
             checkpoints_per_tx: 8,
             ore_programdata_slot: ore::PINNED_PROGRAMDATA_SLOT,
             config_poll_secs: 30,
+            idle_full_read_rounds: 10,
         }
     }
 }
@@ -661,11 +684,19 @@ pub struct AltConfig {
     pub enabled: bool,
     /// Tables to use (in addition to the ones in `state_dir`).
     pub tables: Vec<String>,
-    /// Create a table when none is known.
+    /// Create a table when the crank owns none. A create is only sent when the fee payer
+    /// holds the table's rent, its address is written to `state_dir` first, and a create that
+    /// did not land is retried after a growing wait (1 min doubling to 1 h), not every round.
     pub auto_create: bool,
     /// Extend tables with shared and per-rig accounts as rigs appear.
     pub auto_extend: bool,
-    /// Tables the crank will create at most (256 addresses each; the operator pays the rent).
+    /// Tables the crank will own at most, the first one included (256 addresses each; 0 =
+    /// create none). A table the state file says this crank created counts whether or not
+    /// the chain still shows it: after closing one by hand, remove it from the state file.
+    /// The operator pays the rent and gets it back only by deactivating and
+    /// closing the table by hand: on mainnet today (5,080 lamports per byte) 934,720 lamports
+    /// for an empty table, 2,560,320 with the 10 shared accounts, 650,240 more per rig, and
+    /// 42,550,080 for a full one.
     pub max_tables: usize,
 }
 
@@ -735,9 +766,8 @@ pub fn substitute_key(url: &str, key: Option<&str>) -> Result<String, ConfigErro
         return Ok(url.to_string());
     }
     match key {
-        Some(k) if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') => {
-            Ok(url.replace(HELIUS_PLACEHOLDER, k))
-        }
+        Some("") => Err(ConfigError::Invalid("URL uses {HELIUS_API_KEY} but HELIUS_API_KEY is set to an empty value".into())),
+        Some(k) if k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') => Ok(url.replace(HELIUS_PLACEHOLDER, k)),
         Some(_) => Err(ConfigError::Invalid("HELIUS_API_KEY has unexpected characters".into())),
         None => Err(ConfigError::Invalid("URL uses {HELIUS_API_KEY} but HELIUS_API_KEY is not set".into())),
     }
@@ -903,6 +933,9 @@ impl Config {
         if !matches!(self.commitment.as_str(), "processed" | "confirmed" | "finalized") {
             return bad("commitment must be processed, confirmed or finalized");
         }
+        if self.chain_poll_secs == 0 || self.chain_poll_secs > MAX_CHAIN_POLL_SECS {
+            return bad("chain_poll_secs must be 1..=20: above that, /healthz could report a stale slot between two polls that both succeeded");
+        }
         let d = &self.dig;
         if d.min_slots_left >= d.deploy_margin_slots {
             return bad("dig.min_slots_left must be < dig.deploy_margin_slots");
@@ -1054,6 +1087,58 @@ mod tests {
     }
 
     #[test]
+    fn an_unset_an_empty_and_a_malformed_helius_key_each_get_their_own_message() {
+        let toml = r#"rpc_url = "https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}""#;
+        let message = |value: Option<&str>| {
+            let value = value.map(str::to_string);
+            let env = move |k: &str| (k == "HELIUS_API_KEY").then(|| value.clone()).flatten();
+            Config::from_toml(toml).unwrap().finalize(&env).unwrap_err().to_string()
+        };
+        assert!(message(None).contains("HELIUS_API_KEY is not set"));
+        // What a shared variable that does not resolve leaves behind: the name with no value.
+        assert!(message(Some("")).contains("HELIUS_API_KEY is set to an empty value"), "{}", message(Some("")));
+        assert!(!message(Some("")).contains("unexpected characters"));
+        for bad in [" ", "abc def", "abc\n", "a/b"] {
+            assert!(message(Some(bad)).contains("HELIUS_API_KEY has unexpected characters"), "{bad:?}");
+        }
+        // A URL without the placeholder needs no key, whatever the variable holds.
+        let empty = |k: &str| (k == "HELIUS_API_KEY").then(String::new);
+        assert!(Config::from_toml("").unwrap().finalize(&empty).is_ok());
+    }
+
+    #[test]
+    fn the_chain_poll_interval_keeps_a_polled_slot_fresh() {
+        // The bound is what /healthz and the RPC timeout leave: a poll that takes one whole
+        // timeout to answer (both of its calls together) still moves the slot before it
+        // counts as stale.
+        assert_eq!(MAX_CHAIN_POLL_SECS, 20);
+        assert_eq!(Duration::from_secs(MAX_CHAIN_POLL_SECS) + crate::rpc::RPC_TIMEOUT, IntakeConfig::default().stale_chain_after);
+        assert_eq!(IntakeConfig::default().stale_chain_after, crate::intake::STALE_CHAIN_AFTER);
+        let with = |secs: &str| Config::from_toml(&format!("chain_poll_secs = {secs}")).and_then(|c| c.finalize(&no_env));
+        assert_eq!(Config::from_toml("").unwrap().finalize(&no_env).unwrap().chain_poll_secs, 5, "a config that does not name it keeps the 5 s poll");
+        for ok in ["1", "5", "15", "20"] {
+            assert_eq!(with(ok).unwrap().chain_poll_secs.to_string(), ok);
+        }
+        for bad in ["0", "21", "30", "600"] {
+            let err = with(bad).unwrap_err().to_string();
+            assert!(err.contains("chain_poll_secs must be 1..=20"), "{bad}: {err}");
+        }
+        let env = |k: &str| (k == "HD_CRANK_CHAIN_POLL_SECS").then(|| "15".to_string());
+        assert_eq!(Config::from_toml("").unwrap().finalize(&env).unwrap().chain_poll_secs, 15);
+        let env = |k: &str| (k == "HD_CRANK_CHAIN_POLL_SECS").then(|| "45".to_string());
+        assert!(Config::from_toml("chain_poll_secs = 10").unwrap().finalize(&env).is_err(), "the environment is checked like the file");
+    }
+
+    #[test]
+    fn the_idle_full_read_setting() {
+        let c = Config::from_toml("").unwrap().finalize(&no_env).unwrap();
+        assert_eq!(c.dig.idle_full_read_rounds, 10);
+        let env = |k: &str| (k == "HD_CRANK_DIG_IDLE_FULL_READ_ROUNDS").then(|| "0".to_string());
+        assert_eq!(Config::from_toml("[dig]\nidle_full_read_rounds = 3").unwrap().finalize(&env).unwrap().dig.idle_full_read_rounds, 0, "0 turns skipping off");
+        assert!(Config::from_toml("[dig]\nidle_full_read_rounds = -1").is_err());
+    }
+
+    #[test]
     fn the_helius_websocket_url_is_built_from_the_key_and_never_printed() {
         let key = "5ecre7-k3y_ABCDEF0123456789";
         let env = |k: &str| (k == "HELIUS_API_KEY").then(|| key.to_string());
@@ -1132,6 +1217,8 @@ mod tests {
             "HD_CRANK_LOG_JSON",
             "HD_CRANK_STATE_DIR",
             "HD_CRANK_SHUTDOWN_GRACE_SECS",
+            "HD_CRANK_CHAIN_POLL_SECS",
+            "HD_CRANK_DIG_IDLE_FULL_READ_ROUNDS",
             "HD_CRANK_DIG_TX_FORMAT",
             "HD_CRANK_DIG_CU_ESTIMATE_PER_RIG",
             "HD_CRANK_INTAKE_TRUST_FORWARDED_FOR",
@@ -1323,5 +1410,69 @@ mod tests {
         assert_eq!(c.stack.max_lamports_per_hour, 5_000_000);
         assert!(c.stack.enabled && c.cleanup.enabled, "the new duties are on by default on Railway");
         assert!(!format!("{c:?}").contains("railway-key"));
+        // The file's own values (without the override above): the watcher's HTTP poll is
+        // slower than the default and inside the range /healthz allows, and no spend cap of
+        // the three it sizes lets a duty use more than about a quarter of a 0.05 SOL fee payer
+        // in a day (a bucket starts full and refills once per period).
+        let env = |k: &str| (k == "HELIUS_API_KEY").then(|| "railway-key-0123456789".to_string());
+        let c = Config::from_toml(&text).unwrap().finalize(&env).unwrap();
+        assert_eq!(c.chain_poll_secs, 15);
+        assert!(c.chain_poll_secs > Config::default().chain_poll_secs && c.chain_poll_secs <= MAX_CHAIN_POLL_SECS);
+        assert_eq!(c.dig.idle_full_read_rounds, 10);
+        let float = 50_000_000u64;
+        let per_day = [
+            ("signals", c.signals.max_lamports_per_hour * 25),
+            ("end_shift", c.end_shift.max_lamports_per_day * 2),
+            ("stack", c.stack.max_lamports_per_hour * 25),
+        ];
+        for (duty, lamports) in per_day {
+            assert!(lamports <= float / 4, "{duty}: up to {lamports} lamports in a day");
+        }
+        assert_eq!(c.end_shift.max_lamports_per_day, 6_000_000);
+        assert!(c.stack.max_lamports_per_table <= float / 4);
+        assert_eq!(c.alt.max_tables, 1);
+        assert!(c.alt.enabled && c.alt.auto_create && c.end_shift.enabled && c.record.gate_closed_rigs);
+    }
+
+    #[test]
+    fn the_railway_env_example_names_real_settings_with_values_that_load() {
+        // deploy/railway/crank/.env.example lists overrides as comments (`# HD_CRANK_X=value`).
+        // Each one must be a setting this binary knows, with a value it accepts: a misspelled
+        // name is only a warning at start, and the override silently does nothing.
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../deploy/railway/crank/");
+        let (Ok(example), Ok(toml)) = (std::fs::read_to_string(format!("{dir}.env.example")), std::fs::read_to_string(format!("{dir}crank.toml")))
+        else {
+            return; // the crank can be built without the deploy directory
+        };
+        let overrides: Vec<(String, String)> = example
+            .lines()
+            .filter_map(|l| l.strip_prefix("# HD_CRANK_"))
+            .filter_map(|l| l.split_once('='))
+            .map(|(name, value)| (format!("HD_CRANK_{name}"), value.to_string()))
+            .filter(|(name, value)| name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_') && !value.contains('<'))
+            .collect();
+        let names: Vec<&str> = overrides.iter().map(|(n, _)| n.as_str()).collect();
+        let profile = [
+            ("HD_CRANK_ALT_ENABLED", "false"),
+            ("HD_CRANK_STACK_ENABLED", "false"),
+            ("HD_CRANK_STACK_INIT_BURY_VAULT", "false"),
+            ("HD_CRANK_END_SHIFT_ENABLED", "false"),
+            ("HD_CRANK_CLEANUP_ENABLED", "false"),
+            ("HD_CRANK_INTAKE_RIG_FETCHES_PER_SECOND", "1"),
+        ];
+        for (name, value) in profile {
+            assert!(overrides.contains(&(name.to_string(), value.to_string())), "the one-phone profile has {name}={value}");
+        }
+        assert!(names.len() >= 12, "{names:?}");
+        assert_eq!(unknown_env_overrides(names.iter().copied()), Vec::<String>::new());
+        // All of them at once load on top of the Railway file and say what they say.
+        let env = |k: &str| match k {
+            "HELIUS_API_KEY" => Some("railway-key-0123456789".to_string()),
+            _ => overrides.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()),
+        };
+        let c = Config::from_toml(&toml).unwrap().finalize(&env).unwrap();
+        assert!(!c.alt.enabled && !c.stack.enabled && !c.stack.init_bury_vault && !c.end_shift.enabled && !c.cleanup.enabled);
+        assert_eq!(c.intake.rig_fetches_per_second, 1.0);
+        assert!(c.dig.enabled && c.signals.enabled && c.record.enabled, "the profile leaves digging, BREAK / FREEZE and records on");
     }
 }

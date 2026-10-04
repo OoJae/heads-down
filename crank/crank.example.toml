@@ -18,6 +18,7 @@ listen = "0.0.0.0:8787"            # /ws (alias /v1/heartbeats: contract A frame
 state_dir = ".hd-crank"           # remembers the crank's lookup tables and what each Stack table has cost
 log_json = false
 shutdown_grace_secs = 8            # on SIGTERM / SIGINT: wait this long for sent transactions and queued BREAK / FREEZE
+chain_poll_secs = 5                # HTTP re-read of the slot and ORE's accounts beside the WebSocket (2 calls); 1..=20, see README "RPC budget"
 
 [dig]
 enabled = true
@@ -45,6 +46,7 @@ checkpoint_sweep_interval_rounds = 20
 checkpoints_per_tx = 8
 ore_programdata_slot = 452682055   # ORE upgrade pin (docs/ORE.md); 0 disables. A mismatch trips the breaker.
 config_poll_secs = 30
+idle_full_read_rounds = 10         # while idle (no heartbeat held, no known lease) a dig pass reads nothing; one pass in N rounds still does. 0 = every pass reads
 
 [dig.cu_estimate]                  # used before simulation / when simulate = false
 base = 10000
@@ -71,9 +73,10 @@ rig_fetches_per_second = 50.0
 [alt]
 enabled = true
 tables = []                        # extra tables to use (read-only unless the crank is their authority)
-auto_create = true
+auto_create = true                 # only when the fee payer can pay for the table; a create that fails is retried after 1 min, 2 min, ... 1 h
 auto_extend = true
-max_tables = 8                     # ~500 heartbeating rigs; the operator pays ~0.00089 SOL of rent per rig
+max_tables = 8                     # ~500 heartbeating rigs; the operator pays the rent: 650,240 lamports per rig at mainnet's 5,080 lamports per byte.
+                                   # A table named in state_dir/lookup_tables.json counts until it is removed there, also after it was closed by hand
 
 [sender]
 # Requires a build with --features helius-sender. No default tip accounts on purpose:
@@ -109,7 +112,7 @@ cu_per_rig = 4000
 enabled = true
 grace_secs = 60                    # after plan_window_end_ts
 max_per_pass = 4
-max_lamports_per_day = 50000000    # ShiftLog rent 1,781,760 + fee each: ~27 shifts per day
+max_lamports_per_day = 50000000    # ShiftLog rent 1,300,480 (mainnet, 5,080 lamports per byte) + fee each: ~38 shifts per day
 poll_secs = 60
 cu_limit = 15000                   # measured: 5,195 CU
 
@@ -137,7 +140,7 @@ settle = true                      # settle_stack once Board.round_id > end_roun
 settle_cu_limit = 40000            # measured: 5,413 CU (3 seats, with the Bury transfer), 5,550 (8 seats)
 settle_retry_secs = 30
 settle_max_attempts = 6
-init_bury_vault = true             # create the Bury vault + its SKR account when a settle or forfeit needs them (once: 0.00427 SOL)
+init_bury_vault = true             # create the Bury vault + its SKR account when a settle or forfeit needs them (once: 3,114,040 lamports at mainnet's rent)
 
 [cleanup]                          # permissionless cleanups: the crank gains nothing and pays the fee
 enabled = true

@@ -17,7 +17,7 @@ use crate::heartbeat::{HeartbeatStore, RigCache, Verifier};
 use crate::intake::{self, Intake};
 use crate::metrics::Metrics;
 use crate::mirror::{HeartbeatMirror, NoMirror, NudgeMirror};
-use crate::rpc::{redact_url, RpcClient, RpcRigSource};
+use crate::rpc::{redact_url, RpcClient, RpcRigSource, RPC_TIMEOUT};
 use crate::sender::Submitter;
 use crate::signal::SignalHub;
 use crate::{demo, gate, hd, keys, ore, redact, skr};
@@ -73,7 +73,7 @@ pub async fn run_until(cfg: Config, shutdown: impl std::future::Future<Output = 
     log_startup(&cfg, &key.keypair().pubkey());
     let metrics = Arc::new(Metrics::default());
     let breaker = Arc::new(Breaker::new(metrics.clone()));
-    let rpc = RpcClient::new(cfg.rpc_url.clone(), cfg.commitment.clone(), Duration::from_secs(10))?;
+    let rpc = RpcClient::new(cfg.rpc_url.clone(), cfg.commitment.clone(), RPC_TIMEOUT)?;
 
     let (chain_tx, chain_rx) = watch::channel(ChainView::default());
     // The program's log stream is a hint for the Stack and cleanup loops (they also poll).
@@ -87,8 +87,10 @@ pub async fn run_until(cfg: Config, shutdown: impl std::future::Future<Output = 
     {
         let (rpc, breaker, metrics) = (rpc.clone(), breaker.clone(), metrics.clone());
         let program = stream_events.then_some((program_id, events_tx));
+        // The stream is the main source; the HTTP poll covers a stream that stalled.
+        let poll_every = Duration::from_secs(cfg.chain_poll_secs);
         tokio::spawn(async move {
-            if let Err(e) = chain::run_watcher_with(source, rpc, chain_tx, breaker, metrics, Duration::from_secs(5), program).await {
+            if let Err(e) = chain::run_watcher_with(source, rpc, chain_tx, breaker, metrics, poll_every, program).await {
                 tracing::error!(error = %e, "chain watcher stopped");
             }
         });
@@ -136,7 +138,7 @@ pub async fn run_until(cfg: Config, shutdown: impl std::future::Future<Output = 
         signals,
         chain_rx,
         Box::new(move |a, r| seed.verifier().rigs.insert(a, r)),
-        CrankWiring { nudge, events: stream_events.then_some(events_rx), in_flight: Arc::new(InFlight::default()) },
+        CrankWiring { nudge, events: stream_events.then_some(events_rx), in_flight: Arc::new(InFlight::default()), clock: None },
     );
     // The loop runs as its own task so that a shutdown does not cut a pass in half: it keeps
     // running in draining mode (see `Crank::drain`) until the process returns.

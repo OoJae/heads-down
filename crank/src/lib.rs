@@ -19,6 +19,7 @@
 //! | [`planner`] | pre-checks everything the program checks: which rigs dig, which heartbeats to record |
 //! | [`tx`], [`alt`] | batched v0 (+ lookup table) / v1 / legacy transactions, packed under the size limit |
 //! | [`sender`], [`ledger`] | submit, confirm, retry with a fresh blockhash, idempotent per (rig, round) |
+//! | [`idle`] | when a dig pass may skip its chain reads (no heartbeat, no lease, nothing recent) |
 //! | [`breaker`], [`metrics`] | circuit breaker on ORE layout drift; Prometheus text metrics |
 //! | [`crank`] | the loop: digs, `record_heartbeats`, BREAK / FREEZE landing, permissionless `end_shift` |
 //! | [`demo`] | `replay` (a landed dig's heartbeat, refused as stale) and `decode` (captions) |
@@ -38,6 +39,7 @@ pub mod demo;
 pub mod gate;
 pub mod hd;
 pub mod heartbeat;
+pub mod idle;
 pub mod intake;
 pub mod keys;
 pub mod ledger;
