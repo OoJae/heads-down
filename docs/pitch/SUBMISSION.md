@@ -68,7 +68,7 @@ by the command in section 5.
 > SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program.
 > Stack: players bond SKR on keeping their phones face-down for a window of ORE rounds, at a table
 > in person or remotely (Seekers only, SGT re-checked on-chain). A seat counts a round only if its
-> phone's hardware-key heartbeat, verified by Solana's secp256r1 precompile, landed in that round;
+> phone's Keystore-key heartbeat, verified by Solana's secp256r1 precompile, landed in that round;
 > a recorded pickup breaks it. Anyone can settle: finishers get their bond back plus 80% of
 > forfeits, and 20% goes to a no-oracle Dutch auction where buyers pay ORE that the program sends
 > through ORE's own bury instruction. Focus Bond: SKR locked on one shift comes back if the shift
@@ -81,7 +81,7 @@ by the command in section 5.
 > SKR is Heads Down's commitment collateral and gifting currency. It is built into the Solana
 > program and tested on a fork of mainnet; the program is not deployed on mainnet yet. Stack:
 > players bond SKR on keeping their phones face-down for a window of ORE rounds. A seat counts a
-> round only if its phone's hardware-key heartbeat, verified by Solana's secp256r1 precompile,
+> round only if its phone's Keystore-key heartbeat, verified by Solana's secp256r1 precompile,
 > landed in that round. Finishers get their bond back plus 80% of forfeits; 20% goes to a
 > no-oracle Dutch auction where buyers pay ORE that goes through ORE's own bury instruction. Focus
 > Bond: SKR locked on one shift, chosen on the app's home screen, comes back if the shift
@@ -202,7 +202,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - The demo shows a replayed heartbeat skipped with `StaleHeartbeat` and a fresh one digging, on a
   block explorer. `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 168, registrar 105, `p256-introspect` 30, `sgt-verify` host 69,
-  indexer 347, dashboard 48, Android 854. `docs/pitch/DECK.md` slide 14
+  indexer 347, dashboard 48, Android 855. `docs/pitch/DECK.md` slide 14
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
   with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 

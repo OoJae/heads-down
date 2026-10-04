@@ -138,6 +138,16 @@ class EndpointPolicyTest {
         // default host that somebody else could register.
         assertEquals(java.net.URI(BuildConfig.IDENTITY_URI).host, BuildConfig.SIWS_DOMAIN)
         assertEquals("https", java.net.URI(BuildConfig.IDENTITY_URI).scheme)
+        // Wallets resolve the icon against the identity. A site below the host root ends in "/",
+        // so a wallet that appends the path and one that follows the URL standard reach the same file.
+        val identity = java.net.URI(BuildConfig.IDENTITY_URI)
+        if (!identity.rawPath.isNullOrEmpty()) {
+            assertTrue(BuildConfig.IDENTITY_URI, identity.rawPath.endsWith("/"))
+            assertEquals(
+                BuildConfig.IDENTITY_URI + xyz.headsdown.core.wallet.HeadsDownIdentity.ICON,
+                identity.resolve(xyz.headsdown.core.wallet.HeadsDownIdentity.ICON).toString(),
+            )
+        }
         for (url in listOf(BuildConfig.IDENTITY_URI, BuildConfig.CRANK_WS_URL, BuildConfig.REGISTRAR_URL, BuildConfig.INDEXER_URL)) {
             assertFalse(url, url.contains("headsdown.xyz"))
         }

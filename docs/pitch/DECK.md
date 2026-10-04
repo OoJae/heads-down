@@ -26,8 +26,8 @@ The slide text and speaker notes below contain no word from its banned list.
 
 ## Slide 1: Heads Down, your phone's night shift
 
-- **Message:** Face-down, your phone digs ORE from your own ORE Automation, and only the phone's
-  hardware key can switch it on.
+- **Message:** Face-down, your phone digs ORE from your own ORE Automation, and only a heartbeat
+  signed inside the phone can switch it on.
 - **On slide:**
   - "Heads Down: your phone's night shift. Powered by ORE."
   - "Face-down, it digs ORE. Pick it up, the rig goes cold."
@@ -36,8 +36,8 @@ The slide text and speaker notes below contain no word from its banned list.
   the main logo. Small caption: "Filmed on a Redmi 14C."
 - **Speaker notes:** "I'm [founder name], a solo builder in Nigeria, building with AI agents.
   Heads Down gives an idle phone a night job. It digs ORE from your own ORE Automation account
-  while the phone lies face-down. Nothing but the phone's own hardware key can switch it on: not a
-  server, not me."
+  while the phone lies face-down. Only a heartbeat signed inside the phone can switch it on. No
+  server can forge one, mine included."
 - **Serves:** Public: Presentation & Demo. Align: Innovation.
 - **Sources:** `README.md`, `programs/heads-down/README.md`.
 
@@ -247,7 +247,7 @@ The slide text and speaker notes below contain no word from its banned list.
   - "`specialUse` foreground service. Killed by the OS = cold, nothing spent."
   - "HyperOS/MIUI keep-alive onboarding and a 'killed last night' health check"
   - "Android 16 Live Update notification with a 14/15 fallback"
-  - "854 JVM unit tests"
+  - "855 JVM unit tests"
 - **Visual:** Phone captures: the tile in the Quick Settings panel, the wallet sheet, the ongoing
   notification `[TBD after device test]`.
 - **Speaker notes:** "Only the launcher activity and the tile service are exported. The trampoline
@@ -352,7 +352,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
   | Indexer | 347 passed | re-run 2026-10-03 |
   | Dashboard | 48 passed | re-run 2026-10-03 |
-  | Android | 854 JVM unit tests | re-run 2026-10-03 |
+  | Android | 855 JVM unit tests | re-run 2026-10-04 |
   | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |
 
   - "16 bug classes mapped to named tests; 9,000 fuzzed instructions on the program binary, no aborts"

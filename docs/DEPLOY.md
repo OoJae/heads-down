@@ -48,6 +48,8 @@ In order. Until step 5 no transaction is signed by these keys.
 8. **Monitoring**: add the uptime checks and balance alerts of section 11.
 9. **Within the first week**: create the Squads multisig with a 72 h time lock and move the
    upgrade authority to its vault (section 15). Decide how governance moves (section 15).
+10. **Identity page**: after steps 5 and 6, and again after the first run on a phone, update the
+    dated status line in `site/index.html`, commit, and publish it again (section 10.7).
 
 ## 1. What runs where
 
@@ -385,7 +387,8 @@ runs without a Config but has nothing to dig).
 | `HD_SESSION_SECRET` | | S | | | contents of `registrar-session-secret` |
 | `HD_RPC_URL` | | S/R | | | `https://mainnet.helius-rpc.com/?api-key=${{shared.HELIUS_API_KEY}}` |
 | `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing cert (`apksigner verify --print-certs`) |
-| `HD_SIWS_DOMAIN` / `HD_SIWS_URI` | | - | | | **required, no default.** The host and URL of the site the app identifies itself with: the app build's `-Pheadsdown.identityUri` (default `https://oojae.github.io/heads-down`, so `oojae.github.io` and that URL). It must be a site the team controls |
+| `HD_SIWS_DOMAIN` | | - | | | **required, no default.** The host of the site the app identifies itself with: the host of the app build's `-Pheadsdown.identityUri` (default `oojae.github.io`). It must be a site the team controls |
+| `HD_SIWS_URI` | | - | | | that site's URL, `https://oojae.github.io/heads-down/`. The code's default is `https://<HD_SIWS_DOMAIN>` |
 | `HD_TRUSTED_PROXY_HOPS` | | `1` | | | Railway's edge appends the client to X-Forwarded-For |
 | `HD_NONCE_STORE` / `HD_TRANSPARENCY_LOG` | | image defaults | | | `/data/nonces.db`, `/data/attestations.jsonl` |
 | `DATABASE_URL` | | | R | | `${{Postgres.DATABASE_URL}}` |
@@ -416,48 +419,6 @@ ORE's cost never drops under a rig's ceiling nothing is dug, and without a recor
 seal with no dark round (no streak day; a Focus Bond would go to the Bury lot). The crank pays for
 those records itself, at most 1,000,000 lamports an hour.
 
-### 10.7 The app build that talks to this deployment
-
-A mainnet build must name every endpoint and the site it identifies itself with; the Gradle
-configuration fails otherwise (there is no default service host, because a default would be a
-name somebody else can register):
-
-```bash
-cd android
-./gradlew :app:assembleDebug -Pheadsdown.cluster=mainnet \
-  -Pheadsdown.rpcUrl=https://<rpc proxy, no key in the URL> \
-  -Pheadsdown.crankUrl=wss://<crank domain>/ws \
-  -Pheadsdown.registrarUrl=https://<registrar domain> \
-  -Pheadsdown.indexerUrl=https://<indexer domain> \
-  -Pheadsdown.identityUri=https://oojae.github.io/heads-down
-```
-
-`identityUri` is what a wallet shows next to every signing prompt and, through its host, the
-Sign In With Solana domain; the registrar's `HD_SIWS_DOMAIN` / `HD_SIWS_URI` must match it. The
-default is the project's GitHub Pages address, which only the repository owner's GitHub account
-can publish to. The page and its `favicon.ico` (wallets fetch it for the prompt) are in `site/`.
-To publish them, once:
-
-```bash
-git subtree push --prefix site origin gh-pages     # the site becomes the root of the gh-pages branch
-# GitHub → Settings → Pages → Build and deployment → Deploy from a branch → gh-pages, / (root)
-curl -sI https://oojae.github.io/heads-down/favicon.ico | head -1     # HTTP/2 200 a minute later
-```
-
-**What the wallet says about the identity.** On the emulator, Solana Mobile's test wallet showed
-the name and the address and "Verification failed": the address is not published yet, and nothing
-ties it to the app. A wallet can tie the two together through Android's Digital Asset Links: a file
-at `https://<identity host>/.well-known/assetlinks.json` naming the app's package and the SHA-256
-of its signing certificate. That file is fetched from the host's root, so for `oojae.github.io` it
-belongs in the `OoJae/oojae.github.io` repository (the account's own site), not in this project's
-page under `/heads-down/`. It also needs a release signing key, which does not exist yet: release
-builds are unsigned and debug builds carry the debug key. Neither is needed to sign and send; an
-unverified identity is what most apps show.
-
-The
-RPC URL must not carry an API key: the public `https://api.mainnet-beta.solana.com` works for a
-demo build; a keyed provider needs a proxy that adds the key server-side.
-
 ### 10.5 How the keys reach the processes
 
 The crank and registrar images start their entrypoint as root for two things only: the
@@ -475,6 +436,59 @@ python3 deploy/railway/check.py     # COPY sources, digest pins, no VOLUME, sche
 ```
 
 The Docker build steps were also replayed natively (section 12).
+
+### 10.7 The app build that talks to this deployment
+
+A mainnet build must name every endpoint and the site it identifies itself with; the Gradle
+configuration fails otherwise (there is no default service host, because a default would be a
+name somebody else can register):
+
+```bash
+cd android
+./gradlew :app:assembleDebug -Pheadsdown.cluster=mainnet \
+  -Pheadsdown.rpcUrl=https://<rpc proxy, no key in the URL> \
+  -Pheadsdown.crankUrl=wss://<crank domain>/ws \
+  -Pheadsdown.registrarUrl=https://<registrar domain> \
+  -Pheadsdown.indexerUrl=https://<indexer domain> \
+  -Pheadsdown.identityUri=https://oojae.github.io/heads-down/
+```
+
+The RPC URL must not carry an API key: the public `https://api.mainnet-beta.solana.com` works for a
+demo build; a keyed provider needs a proxy that adds the key server-side.
+
+**The app's identity.** `identityUri` is the site the app names to the wallet as its identity
+(Mobile Wallet Adapter). Solana Mobile's test wallet shows it on the connect and sign-in prompts,
+not on the transaction prompt; other wallets are untested. Through its host it is also the Sign In
+With Solana domain; the registrar's `HD_SIWS_DOMAIN` / `HD_SIWS_URI` must match it. The default is
+the project's GitHub Pages address, which only the repository owner's GitHub account can publish
+to. It ends in `/` on purpose: wallets resolve the icon `icon.png` against it, and without the
+slash a wallet that follows the URL standard asks `https://oojae.github.io/icon.png` for it. The
+build refuses a path without the slash. The page and its icon are in `site/` (the icon the app
+names is a PNG, which every Android image loader decodes; `favicon.ico` is for browsers). To publish them, and
+again after every change to `site/` (the command publishes what is committed at HEAD):
+
+```bash
+git subtree push --prefix site origin gh-pages     # the site becomes the root of the gh-pages branch
+# first time only: GitHub → Settings → Pages → Build and deployment → Deploy from a branch → gh-pages, / (root)
+curl -sI https://oojae.github.io/heads-down/ | head -1                # HTTP/2 200 within about ten minutes
+curl -sI https://oojae.github.io/heads-down/icon.png | head -1
+```
+
+The page carries a dated status line ("not deployed on mainnet, not run on a physical phone yet").
+Keep it true: founder checklist step 10.
+
+**What a wallet can and cannot check.** The identity is a string the app hands to the wallet.
+Nothing ties it to the app, so another app can name the same address, name and icon. On the
+emulator, Solana Mobile's test wallet showed the name and the address and "Verification failed". A
+wallet can tie the two together through Android's Digital Asset Links: a file at
+`https://<identity host>/.well-known/assetlinks.json` naming the app's package and the SHA-256 of
+its signing certificate. That file is fetched from the host's root, so for `oojae.github.io` it
+belongs in the `OoJae/oojae.github.io` repository (the account's own site, which would then vouch
+for every project on that host), not in this project's page under `/heads-down/`. It also needs a
+release signing key, which does not exist yet: release builds are unsigned and debug builds carry
+the debug key. Solana Mobile's test wallet signs and sends without either. Solflare, Phantom and
+Seed Vault have not been tried; the protocol lets a wallet decline an identity it cannot verify, so
+the connect prompt of the wallet used for the demo is the first thing to try on the phone.
 
 ## 11. Monitoring and alerts
 

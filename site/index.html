@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Heads Down: your phone's night shift, powered by ORE</title>
-<meta name="description" content="Put your phone face-down and it mines ORE from your own ORE Automation. Pick it up and the rig goes cold. Open source.">
+<meta name="description" content="Clock in, lay your phone face-down, and it can mine ORE from your own ORE Automation account. Pick it up and the rig goes cold. The source is public.">
 <link rel="icon" href="favicon.ico">
 <style>
   :root { color-scheme: dark; }
@@ -24,14 +24,14 @@
   <img src="icon.png" width="64" height="64" alt="">
   <div class="tag">Powered by ORE</div>
   <h1>Heads Down: your phone's night shift</h1>
-  <p>Put your phone face-down and it mines <a href="https://ore.com">ORE</a> from your own ORE Automation account. Pick it up and the rig goes cold. Nothing but your phone's own hardware key can switch it on: not a server, not us.</p>
-  <p>If a wallet shows this address next to a signing prompt, the request comes from the Heads Down Android app. The app asks for one approval when you clock in. It never asks for your seed phrase, and nothing here will ever ask you to connect a wallet on a web page.</p>
+  <p>Clock in, lay your phone face-down on its charger, and it can mine <a href="https://ore.com">ORE</a> from your own ORE Automation account. Pick it up and the rig goes cold. The program digs only when a heartbeat signed by a key in your phone's Android Keystore verifies on-chain, and only in rounds when ORE's cost is at or under the ceiling your wallet signed. Our servers cannot forge that heartbeat.</p>
+  <p>The Heads Down Android app gives your wallet this address as its identity. A wallet cannot verify that yet, and another app could name the same address, so read what the wallet says before you approve. The app opens your wallet to sign in while it makes the rig key, to clock in, to clock out, and to take your SOL back or close the rig. It never asks for your seed phrase, and this page will never ask you to connect a wallet.</p>
   <ul>
-    <li><a href="https://github.com/OoJae/heads-down">Source code</a>, open and tested</li>
-    <li><a href="https://github.com/OoJae/heads-down/blob/main/docs/THREAT_MODEL.md">What each key can do in the worst case</a></li>
-    <li><a href="https://github.com/OoJae/heads-down/blob/main/docs/SECURITY_REVIEW.md">What our own security pass found and fixed</a></li>
+    <li><a href="https://github.com/OoJae/heads-down">Source code</a>, public, with its tests</li>
+    <li><a href="https://github.com/OoJae/heads-down/blob/main/docs/THREAT_MODEL.md">What each key can do in the worst case</a>, including the one key that can upgrade the program at launch</li>
+    <li><a href="https://github.com/OoJae/heads-down/blob/main/docs/SECURITY_REVIEW.md">What our own security review found, what was fixed and what is still open</a></li>
   </ul>
-  <p class="small">An entry for Clock In, the third Solana Mobile hackathon. Not deployed on mainnet yet.</p>
+  <p class="small">An entry for Clock In, the third Solana Mobile hackathon. On 4 October 2026: not deployed on mainnet, not run on a physical phone yet, no third-party audit.</p>
 </main>
 </body>
 </html>

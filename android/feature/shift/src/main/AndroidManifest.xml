@@ -17,7 +17,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-started overnight or desk shift: while the phone lies face-down, the app signs one hardware-key heartbeat per ~78 s ORE mining round so the user's own on-chain ORE automation may deploy. Picking the phone up stops it within 10 s." />
+                android:value="User-started overnight or desk shift: while the phone lies face-down, the app signs one heartbeat per ~78 s ORE mining round with a key held in the Android Keystore so the user's own on-chain ORE automation may deploy. Picking the phone up stops it within 10 s." />
         </service>
     </application>
 

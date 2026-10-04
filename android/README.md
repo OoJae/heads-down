@@ -1,8 +1,8 @@
 # Heads Down: Android app
 
 Native Kotlin + Jetpack Compose. Package `xyz.headsdown`. minSdk 31, targetSdk 36, compileSdk 37.
-Built and tested against a Redmi 14C (HyperOS / Android 14, no gyroscope, virtual proximity) and
-designed for stock Android 16 (Seeker).
+Built for a Redmi 14C (HyperOS / Android 14, no gyroscope, virtual proximity) and for stock
+Android 16 (Seeker). So far it has run only on an Android 14 emulator, not on a physical phone.
 
 The on-chain contract is `programs/heads-down/INTERFACE.md` **v1.3** and its machine-checked
 vectors in `programs/heads-down/vectors/`. The app's builders are tested byte for byte against
@@ -46,11 +46,15 @@ build, never in source:
   -Pheadsdown.identityUri=https://example.org
 ```
 
-`identityUri` is the site a wallet shows next to every signing prompt (the Mobile Wallet Adapter
-identity), and its host is the Sign In With Solana domain (`-Pheadsdown.siwsDomain` overrides
-it; the registrar's `HD_SIWS_DOMAIN` must be the same). It has to be a site the team controls:
-whoever controls it can present itself to wallets as Heads Down. The default,
-`https://oojae.github.io/heads-down`, is the project's GitHub Pages address.
+`identityUri` is the site the app names to the wallet as its identity (Mobile Wallet Adapter).
+Solana Mobile's test wallet shows it on the connect and sign-in prompts, not on the transaction
+prompt; other wallets are untested. Its host is the Sign In With Solana domain
+(`-Pheadsdown.siwsDomain` overrides it; the registrar's `HD_SIWS_DOMAIN` must be the same). A
+wallet cannot verify the identity yet ([docs/DEPLOY.md](../docs/DEPLOY.md), section 10.7),
+so it has to be a site the team controls: whoever controls it can present itself to wallets as
+Heads Down. The default, `https://oojae.github.io/heads-down/`, is the project's GitHub Pages
+address. A site below the host root must end in `/`: the wallet resolves the icon `icon.png`
+against it, and the build refuses a path without the slash.
 
 An empty `crankUrl` builds a local-only app (no digs), an empty `registrarUrl` registers every
 rig as a guest, and an empty `indexerUrl` shows no morning haul. The build refuses a non-`https`

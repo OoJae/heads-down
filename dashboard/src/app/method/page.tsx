@@ -82,7 +82,7 @@ export default function MethodPage() {
           </dd>
           <dt>Dark round</dt>
           <dd>
-            An ORE round covered by a heartbeat lease: the phone, face-down, signed a fresh heartbeat with its hardware key,
+            An ORE round covered by a heartbeat lease: the phone, face-down, signed a fresh heartbeat with its Keystore key,
             and the program accepted it on chain for that round and at most two more. A round with no lease is not dark,
             whatever the phone was doing.
           </dd>

@@ -444,7 +444,8 @@ private fun Stat(label: String, value: String) {
 }
 
 private fun trustFootnote(snapshot: ShiftSnapshot, onboarding: OnboardingState): String = buildString {
-    append(if (onboarding.rigKeyReady) "Heartbeats are signed by this phone's hardware key. " else "Create your rig key to sign heartbeats. ")
+    append(rigKeyLine(onboarding.rigKey))
+    append(' ')
     if (onboarding.rigRegistered) {
         append("Your rig is registered on-chain: every dig needs a fresh heartbeat from this phone, verified on-chain, ")
         append("inside the caps your wallet signed.")

@@ -34,17 +34,24 @@ val crankUrl = prop("headsdown.crankUrl") ?: ""
 val registrarUrl = prop("headsdown.registrarUrl") ?: ""
 val indexerUrl = prop("headsdown.indexerUrl") ?: ""
 
-// WHO THE APP SAYS IT IS. The wallet shows this site next to every signing prompt (Mobile Wallet
-// Adapter identity) and the SIWS message names its host, so it must be a site the team controls:
-// whoever controls it can present itself as Heads Down. The default is the project's GitHub Pages
-// address, which only the repository owner's GitHub account can publish to.
+// WHO THE APP SAYS IT IS. This is the site the app names to the wallet as its identity (Mobile
+// Wallet Adapter) and the SIWS message names its host. Solana Mobile's test wallet shows it on the
+// connect and sign-in prompts, not on the transaction prompt; other wallets are untested. A wallet
+// cannot verify it yet (docs/DEPLOY.md section 10.7), so it must at least be a site the
+// team controls: whoever controls it can present itself as Heads Down. The default is the project's
+// GitHub Pages address, which only the repository owner's GitHub account can publish to.
 //   -Pheadsdown.identityUri=https://example.org          (https, no query, no fragment)
 //   -Pheadsdown.siwsDomain=example.org                   (default: the host of identityUri; the
 //                                                         registrar's HD_SIWS_DOMAIN must equal it)
-val identityUri = prop("headsdown.identityUri") ?: "https://oojae.github.io/heads-down"
+// A site below the host root ends in "/": the wallet resolves the icon "icon.png" against this
+// address, and without the slash a wallet that follows the URL standard asks the host root for it.
+val identityUri = prop("headsdown.identityUri") ?: "https://oojae.github.io/heads-down/"
 val identity = URI(identityUri)
 require(identity.scheme == "https" && !identity.host.isNullOrEmpty() && identity.rawQuery == null && identity.rawFragment == null && identity.rawUserInfo == null) {
     "headsdown.identityUri must be an https:// URL with a host and no credentials, query string or fragment"
+}
+require(identity.rawPath.isNullOrEmpty() || identity.rawPath.endsWith("/")) {
+    "headsdown.identityUri must end in \"/\" when it has a path (wallets resolve the app icon against it)"
 }
 val siwsDomain = prop("headsdown.siwsDomain") ?: identity.host.lowercase()
 require(siwsDomain.isNotEmpty() && siwsDomain.none { it.isWhitespace() || it == '/' || it == ':' }) { "headsdown.siwsDomain must be a bare host name" }

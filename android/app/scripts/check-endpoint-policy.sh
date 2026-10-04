@@ -26,6 +26,9 @@ expect ACCEPTED "cluster=mainnet with all five" -Pheadsdown.cluster=mainnet -Phe
 expect ACCEPTED "cluster=mainnet, services deliberately off" -Pheadsdown.cluster=mainnet -Pheadsdown.rpcUrl=https://rpc.example.org -Pheadsdown.crankUrl= -Pheadsdown.registrarUrl= -Pheadsdown.indexerUrl= -Pheadsdown.identityUri=https://example.org
 expect REFUSED  "identityUri=http://example.org" -Pheadsdown.identityUri=http://example.org
 expect REFUSED  "identityUri with a query string" "-Pheadsdown.identityUri=https://example.org/?x=1"
+# The wallet resolves the icon against the identity: a site below the host root must end in "/".
+expect REFUSED  "identityUri with a path and no trailing slash" -Pheadsdown.identityUri=https://example.org/app
+expect ACCEPTED "identityUri with a path and a trailing slash" -Pheadsdown.identityUri=https://example.org/app/
 expect REFUSED  "siwsDomain with a path" -Pheadsdown.siwsDomain=example.org/app
 expect REFUSED  "rpcUrl=http://127.0.0.1:8899 (debug and release)" -Pheadsdown.rpcUrl=http://127.0.0.1:8899
 expect REFUSED  "crankUrl=ws://127.0.0.1:8787/ws (debug and release)" -Pheadsdown.crankUrl=ws://127.0.0.1:8787/ws

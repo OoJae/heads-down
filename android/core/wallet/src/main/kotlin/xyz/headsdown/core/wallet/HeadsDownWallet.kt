@@ -55,11 +55,17 @@ data class SubmissionReport(val outcomes: List<ConfirmationOutcome>) {
 object HeadsDownIdentity {
     const val NAME = "Heads Down"
 
+    /**
+     * The icon, relative to the identity site (`site/icon.png` in the repository). A PNG, not the
+     * site's `favicon.ico`: every Android image loader decodes PNG, and not all of them decode ICO.
+     */
+    const val ICON = "icon.png"
+
     /** @param identityUri an absolute `https` URL; the icon is resolved relative to it by the wallet. */
     fun connectionIdentity(identityUri: String): ConnectionIdentity {
         val uri = identityUri.toUri()
         require(uri.scheme == "https" && !uri.host.isNullOrEmpty()) { "the identity URI must be an https URL" }
-        return ConnectionIdentity(identityUri = uri, iconUri = "favicon.ico".toUri(), identityName = NAME)
+        return ConnectionIdentity(identityUri = uri, iconUri = ICON.toUri(), identityName = NAME)
     }
 }
 
