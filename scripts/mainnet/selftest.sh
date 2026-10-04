@@ -183,6 +183,12 @@ is "one transaction is budgeted at 5,000 lamports + 1.4M CU at the price" "$(HD_
 is "the budget for max-len 196,608" "$(HD_CU_PRICE=100000 HD_MAX_LEN=196608 deploy_fee_budget)" 32335000
 is "without a priority fee" "$(HD_CU_PRICE=0 HD_MAX_LEN=196608 deploy_fee_budget)" 1115000
 is "HD_DEPLOY_FEE_BUDGET overrides the total" "$(HD_DEPLOY_FEE_BUDGET=7 deploy_fee_budget)" 7
+# A build that fits max-len changes nothing; a larger one (an upgrade that outgrew it) has more
+# writes than the max-len budget covers: 250,000 bytes are 261 writes of 960 bytes, for which
+# the CLI wants 150,000 + 261 x 145,000 + 145,000 lamports in the payer.
+is "a build that fits max-len: the same budget" "$(HD_CU_PRICE=100000 HD_MAX_LEN=196608 deploy_fee_budget_for 190048)" 32335000
+is "a build larger than max-len: budgeted for its own size" "$(HD_CU_PRICE=100000 HD_MAX_LEN=196608 deploy_fee_budget_for 250000)" 40890000
+is "HD_DEPLOY_FEE_BUDGET overrides that too" "$(HD_DEPLOY_FEE_BUDGET=7 HD_MAX_LEN=196608 deploy_fee_budget_for 250000)" 7
 is "the buffer keypair is per key directory and commit" "$(buffer_keypair /k 0123456789abcdef0123)" "/k/buffer-0123456789ab.json"
 
 if [[ $LIVE == 1 ]]; then

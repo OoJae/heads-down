@@ -74,18 +74,23 @@ HD_WRITE_RATE="${HD_WRITE_RATE:-1}"
 # The paced writer, the default, has no such check and pays about 5,300 lamports per write. The
 # budget is kept so that the CLI can write the buffer itself (deploy.sh --cli-only) with the
 # same funding. A deploy that continues an existing buffer is budgeted for the chunks still to
-# write only, and an upgrade to a build of more chunks than this budget covers for its own
-# chunks (preflight gets deploy_fee_per_tx for both).
-# HD_DEPLOY_FEE_BUDGET overrides the total. Call both after the flags are parsed (--max-len,
-# --cu-price).
+# write only (preflight gets deploy_fee_per_tx for that).
+# deploy_fee_budget_for BYTES is the same for a build of BYTES bytes when that is more than
+# --max-len: an upgrade that outgrew max-len has more writes than the max-len budget covers.
+# preflight.sh uses it with the build's size.
+# HD_DEPLOY_FEE_BUDGET overrides the total, whatever the build's size. Call them after the
+# flags are parsed (--max-len, --cu-price).
 deploy_fee_per_tx() { echo $(( 5000 + 1400000 * HD_CU_PRICE / 1000000 )); }
-deploy_fee_budget() {
+deploy_fee_budget_for() {
   if [[ -n "${HD_DEPLOY_FEE_BUDGET:-}" ]]; then
     echo "$HD_DEPLOY_FEE_BUDGET"
   else
-    echo $(( ((HD_MAX_LEN + 899) / 900 + 4) * $(deploy_fee_per_tx) ))
+    local len="$HD_MAX_LEN"
+    if [[ "$1" -gt "$len" ]]; then len="$1"; fi
+    echo $(( ((len + 899) / 900 + 4) * $(deploy_fee_per_tx) ))
   fi
 }
+deploy_fee_budget() { deploy_fee_budget_for "$HD_MAX_LEN"; }
 # Recommended balances for the service keys (lamports).
 HD_CRANK_PAYER_LAMPORTS="${HD_CRANK_PAYER_LAMPORTS:-50000000}"   # 0.05 SOL
 HD_GOVERNANCE_LAMPORTS="${HD_GOVERNANCE_LAMPORTS:-10000000}"     # 0.01 SOL

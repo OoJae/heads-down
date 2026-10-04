@@ -228,7 +228,8 @@ pub fn judge(held: &Held, buffer: &Address, deployer: &Address, program: &[u8], 
         Held::Other(what) => Resume::Refused(format!("{buffer} holds {what}, not a buffer of this deploy")),
         Held::Buffer { authority: None, .. } => Resume::Refused(format!("{buffer} is a buffer with no authority: nobody can write or close it")),
         Held::Buffer { authority: Some(a), .. } if a != deployer => Resume::Refused(format!(
-            "{buffer} is a buffer whose authority is {a}, not the deployer {deployer}: it was handed over, or it is someone else's"
+            "{buffer} is a buffer whose authority is {a}, not the deployer {deployer}: it was handed over, or it is someone else's. \
+             Another buffer needs another keypair: move this one's keypair file out of the key directory first (deploy.sh then makes a new one)"
         )),
         Held::Buffer { bytes, .. } if bytes.len() != program.len() => Resume::Refused(format!(
             "{buffer} is the deployer's buffer, but it holds {} program bytes and this build has {}: it was written for another build. \
@@ -485,7 +486,7 @@ impl Job<'_> {
         let need = fees.saturating_add(keep);
         if balance < need {
             bail!(
-                "the payer {payer} holds {} SOL, and the {writes} writes still to send need {} SOL: {} in fees ({fee} lamports each) \
+                "the payer {payer} holds {} SOL, and the {writes} write(s) still to send need {} SOL: {} in fees ({fee} lamports each) \
                  and the {} a fee payer has to keep (the rent-exempt minimum). Send it at least {} SOL, then run this again: it continues",
                 sol(balance),
                 sol(need),
@@ -999,7 +1000,9 @@ mod tests {
             Resume::Refused(why) => why,
             other => panic!("not refused: {other:?}"),
         };
-        assert!(refused(buffer_account(Some(other), &build)).contains(&format!("authority is {other}, not the deployer {deployer}")));
+        let handed_over = refused(buffer_account(Some(other), &build));
+        assert!(handed_over.contains(&format!("authority is {other}, not the deployer {deployer}")));
+        assert!(handed_over.contains("move this one's keypair file out of the key directory"), "{handed_over}");
         assert!(refused(buffer_account(None, &build)).contains("no authority"));
         // A buffer of another size is never continued: the CLI would deploy what follows the build.
         assert!(refused(buffer_account(Some(deployer), &program(251))).contains("251 program bytes and this build has 250"));
@@ -1496,7 +1499,7 @@ mod tests {
         }
         let chain = Chain::with_timeout(&url, ms(500)).unwrap();
         let e = job(&chain, &payer, buffer, &build, quick()).fill(&mut Tally::default()).await.unwrap_err().to_string();
-        assert!(e.contains("the 3 writes still to send need 0.000906681 SOL") && e.contains("5267 lamports each"), "{e}");
+        assert!(e.contains("the 3 write(s) still to send need 0.000906681 SOL") && e.contains("5267 lamports each"), "{e}");
         assert!(e.contains("Send it at least 0.000000001 SOL"), "{e}");
         assert_eq!(node.lock().unwrap().accepted, 0);
         // With that lamport it starts.
