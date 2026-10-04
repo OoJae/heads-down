@@ -58,6 +58,17 @@ pub fn retry_later(e: &RpcError) -> bool {
     }
 }
 
+/// True when the RPC answered and did not take the request: a JSON-RPC error object, or an HTTP
+/// 429 whose body is not JSON-RPC. Any other failure (a timeout, a dropped connection, another
+/// error page) leaves open whether a `sendTransaction` reached a node.
+pub fn refused(e: &RpcError) -> bool {
+    match e {
+        RpcError::Rpc { .. } => true,
+        RpcError::Decode(m) => m.contains("http 429"),
+        RpcError::Http(_) => false,
+    }
+}
+
 /// True for Helius' "429 max usage reached" (its FAQ): the key's monthly credits are used up,
 /// so waiting a few seconds does not help. It is recognised by those words in a JSON-RPC error;
 /// what the body looks like exactly is not documented and was not seen live.
@@ -468,6 +479,27 @@ mod tests {
         }
         let gone = rpc_error(-32005, "max usage reached");
         assert!(retry_later(&gone) && credits_used_up(&gone));
+    }
+
+    #[test]
+    fn a_refusal_is_told_from_no_answer() {
+        // The RPC said no: a JSON-RPC error, or an HTTP 429 page that is not JSON-RPC.
+        for e in [
+            rpc_error(-32005, "Too many requests"),
+            rpc_error(-32003, "Transaction signature verification failure"),
+            RpcError::Decode("sendTransaction: http 429 Too Many Requests: expected value at line 1".into()),
+        ] {
+            assert!(refused(&e), "{e}");
+        }
+        // No answer, or one that says nothing about the request: a node may have taken it.
+        for e in [
+            RpcError::Http("operation timed out".into()),
+            RpcError::Http("connection closed before message completed".into()),
+            RpcError::Decode("sendTransaction: http 502 Bad Gateway: expected value at line 1".into()),
+            RpcError::Decode("sendTransaction: no signature".into()),
+        ] {
+            assert!(!refused(&e) && retry_later(&e), "{e}");
+        }
     }
 
     #[test]

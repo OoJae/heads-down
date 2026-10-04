@@ -270,13 +270,20 @@ pub fn extend_bytes(current_len: u64, needed_len: u64) -> u64 {
 }
 
 /// The fee budget of one deploy. `full` is what the Solana CLI wants to see in the payer for
-/// every write it would send itself (`deploy_fee_budget` in `scripts/mainnet/lib.sh`). A
-/// buffer that exists already needs the budget of the chunks still to write only, at `per_tx`
-/// each, and never more than `full`.
-pub fn fee_budget_for(full: u64, per_tx: Option<u64>, buffer_exists: bool, to_write: u64) -> u64 {
-    match per_tx {
-        Some(per_tx) if buffer_exists => full.min(per_tx.saturating_mul(to_write.saturating_add(FEE_BUDGET_SPARE_TXS))),
-        _ => full,
+/// every write it would send itself for a program of `--max-len` (`deploy_fee_budget` in
+/// `scripts/mainnet/lib.sh`). A build of more chunks than that budget covers (an upgrade that
+/// outgrew max-len by more than a few kilobytes) is budgeted for its own `chunks` at `per_tx`
+/// each. A buffer that exists already needs the budget of the chunks still to write only, and
+/// never more than the whole.
+pub fn fee_budget_for(full: u64, per_tx: Option<u64>, chunks: u64, buffer_exists: bool, to_write: u64) -> u64 {
+    let Some(per_tx) = per_tx else {
+        return full;
+    };
+    let whole = full.max(per_tx.saturating_mul(chunks.saturating_add(FEE_BUDGET_SPARE_TXS)));
+    if buffer_exists {
+        whole.min(per_tx.saturating_mul(to_write.saturating_add(FEE_BUDGET_SPARE_TXS)))
+    } else {
+        whole
     }
 }
 
@@ -820,7 +827,7 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
         Resume::Continue { lamports, to_write } => (Some(*lamports), to_write.len() as u64),
         other => (None, other.to_write().map_or(0, <[usize]>::len) as u64),
     };
-    let fee_budget = fee_budget_for(o.fee_budget, o.fee_per_tx, held_lamports.is_some(), to_write);
+    let fee_budget = fee_budget_for(o.fee_budget, o.fee_per_tx, chunks_total as u64, held_lamports.is_some(), to_write);
     let fees_for = match held_lamports {
         Some(_) => format!("fees {} for the {to_write} chunks still to write", sol(fee_budget)),
         None => format!("fees {}", sol(fee_budget)),
@@ -919,6 +926,7 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
             "deploy_need": deploy_need, "init_need": init_need, "executor_float_target": float, "executor_balance": exec_bal,
             "fee_budget": fee_budget, "fee_budget_full": o.fee_budget, "buffer_lamports": held_lamports,
             "chunks_total": chunks_total, "chunks_to_write": to_write,
+            "programdata_extend_bytes": add, "programdata_growth_lamports": grow,
             "deployer": o.deployer.to_string(), "deployer_balance": bal, "deployer_need": need,
         }),
     );
@@ -1699,11 +1707,11 @@ mod tests {
         use DeployMode::{Buffer, Fresh, Upgrade};
 
         // A first run needs the whole rent and the whole fee budget.
-        assert_eq!(fee_budget_for(full, Some(per_tx), false, 198), full);
+        assert_eq!(fee_budget_for(full, Some(per_tx), 198, false, 198), full);
         assert_eq!(deploy_lamports(Fresh, pd, prog, pd, None, 0, full), 1_032_815_600);
 
         // It stopped after 62 of 198 chunks: the buffer holds the rent and 136 chunks are left.
-        let fees = fee_budget_for(full, Some(per_tx), true, 136);
+        let fees = fee_budget_for(full, Some(per_tx), 198, true, 136);
         assert_eq!(fees, (136 + 4) * 145_000);
         let resume = deploy_lamports(Fresh, pd, prog, pd, Some(pd), 0, fees);
         assert_eq!(resume, 833_120 + 20_300_000);
@@ -1716,9 +1724,19 @@ mod tests {
 
         // Nothing left to write: the four spare transactions. Never more than the full budget,
         // and the full budget when no per-transaction figure is given.
-        assert_eq!(fee_budget_for(full, Some(per_tx), true, 0), 580_000);
-        assert_eq!(fee_budget_for(full, Some(per_tx), true, 5_000), full);
-        assert_eq!(fee_budget_for(full, None, true, 10), full);
+        assert_eq!(fee_budget_for(full, Some(per_tx), 198, true, 0), 580_000);
+        assert_eq!(fee_budget_for(full, Some(per_tx), 198, true, 5_000), full);
+        assert_eq!(fee_budget_for(full, None, 198, true, 10), full);
+
+        // The budget for max-len covers 219 chunks. An upgrade to a 250,000-byte build has 261:
+        // the CLI, writing them itself, wants 150,000 for the buffer's creation, 145,000 for
+        // each write and 145,000 for the upgrade in the payer, more than the max-len budget.
+        assert_eq!(fee_budget_for(full, Some(per_tx), 219, false, 219), full);
+        let large = fee_budget_for(full, Some(per_tx), 261, false, 261);
+        assert_eq!(large, (261 + 4) * 145_000);
+        assert!(large >= 150_000 + 261 * 145_000 + 145_000 && 150_000 + 261 * 145_000 + 145_000 > full);
+        // Continued with 100 chunks left, it is those again.
+        assert_eq!(fee_budget_for(full, Some(per_tx), 261, true, 100), (100 + 4) * 145_000);
 
         // An upgrade: its buffer, then the same with a ProgramData that has to grow.
         assert_eq!(deploy_lamports(Upgrade, pd, prog, up, None, 0, full), 998_657_680);

@@ -14,8 +14,13 @@
 //!    compute-unit limit and the priority price;
 //! 3. it looks the sent writes up in batches (one `getBlockHeight` and one
 //!    `getSignatureStatuses` per poll), signs a write again once its blockhash has expired, and
-//!    takes "too many requests" or a timeout as "slow down", not as failure;
+//!    takes "too many requests" or a timeout as "slow down", not as failure. A send that got no
+//!    answer is watched like one that was taken, so the same chunk is not sent twice at once;
 //! 4. it ends by reading the buffer back and comparing every byte with the file.
+//!
+//! It stops by itself when it cannot get anywhere: before the first write if the payer cannot
+//! pay for the writes that are left, and after `Pace::stall` without one write seen to land
+//! (writes that an RPC takes and that never land do not keep it going).
 //!
 //! Nothing is kept on disk: the buffer account is the only state, so the command can be killed
 //! at any point and run again. `solana program deploy --buffer <keypair>` then finds every chunk
@@ -42,7 +47,7 @@ use solana_signer::Signer;
 
 use crate::cluster::{self, Cluster};
 use crate::ops::{require_yes, so_info, write_json, DeployMode, BUFFER_HEADER_LEN, PROGRAMDATA_HEADER_LEN};
-use crate::util::{credits_used_up, patiently, read_keypair, retry_later, rfc3339, sign_tx, sol, tail, unix_now, Chain, Patience};
+use crate::util::{credits_used_up, patiently, read_keypair, refused, retry_later, rfc3339, sign_tx, sol, tail, unix_now, Chain, Patience};
 
 /// `UpgradeableLoaderInstruction::InitializeBuffer` (u32 tag).
 const IX_INITIALIZE_BUFFER: u32 = 0;
@@ -248,7 +253,7 @@ pub struct Pace {
     pub poll: Duration,
     /// A blockhash older than this is replaced before the next signature.
     pub blockhash_age: Duration,
-    /// Stop when no write was accepted or confirmed for this long.
+    /// Stop when no write was seen to land for this long.
     pub stall: Duration,
     /// Reads, the simulation and the buffer's creation.
     pub patience: Patience,
@@ -266,7 +271,8 @@ impl Pace {
             max_gap: gap.max(Duration::from_secs(30)),
             poll: (gap * 2).clamp(Duration::from_millis(400), Duration::from_secs(2)),
             blockhash_age: Duration::from_secs(10),
-            stall: Duration::from_secs(300),
+            // Five minutes, or four writes' time at a rate slower than that.
+            stall: Duration::from_secs(300).max(gap * 4),
             patience: Patience::default(),
         })
     }
@@ -303,7 +309,7 @@ pub struct Job<'a> {
 /// What the writer did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tally {
-    /// Writes an RPC accepted.
+    /// Writes an RPC took, or may have taken (a send that got no answer).
     pub sent: u64,
     /// Writes seen confirmed.
     pub landed: u64,
@@ -392,9 +398,6 @@ impl Job<'_> {
     async fn send_loop(&self, board: &Mutex<Board>, cu_limit: u32) -> Result<()> {
         let mut gap = self.pace.gap;
         let mut blockhash: Option<(Hash, u64, Instant)> = None;
-        // A write that was signed but not accepted yet. The same bytes are offered again, so a
-        // send that timed out after the node took it cannot land twice.
-        let mut signed: Option<(usize, String, Vec<u8>)> = None;
         let mut used_up = 0u32;
         loop {
             let next = {
@@ -405,10 +408,14 @@ impl Job<'_> {
                 if b.queue.is_empty() && b.flying.is_empty() {
                     return Ok(());
                 }
+                // Only a write seen to land counts: an RPC takes a write the payer cannot pay
+                // for, or one the cluster drops, and it never lands however often it is signed.
                 if b.progress.elapsed() > self.pace.stall {
                     bail!(
-                        "no write was accepted or confirmed for {} s; the RPC's last answer: {}",
+                        "no write was seen to land for {} s ({} sent and not confirmed, {} not sent yet); the RPC's last answer: {}",
                         self.pace.stall.as_secs(),
+                        b.flying.len(),
+                        b.queue.len(),
                         if b.last_answer.is_empty() { "none" } else { &b.last_answer }
                     );
                 }
@@ -428,7 +435,6 @@ impl Job<'_> {
                 None => match self.chain.rpc.get_latest_blockhash().await {
                     Ok((hash, last_valid)) => {
                         blockhash = Some((hash.clone(), last_valid, Instant::now()));
-                        signed = None;
                         (hash, last_valid)
                     }
                     Err(e) => {
@@ -438,28 +444,57 @@ impl Job<'_> {
                     }
                 },
             };
-            let (signature, wire) = match signed.take().filter(|(c, _, _)| *c == chunk) {
-                Some((_, signature, wire)) => (signature, wire),
-                None => sign_tx(&[self.payer], &self.write_ixs(chunk, cu_limit), &hash)?,
-            };
-            match self.chain.submit(&wire).await {
+            let (signature, wire) = sign_tx(&[self.payer], &self.write_ixs(chunk, cu_limit), &hash)?;
+            // A write is in flight once the RPC took it, and also when no answer came (a
+            // timeout, a dropped connection, an error page): a node may have taken it all the
+            // same. It is then watched like the others and signed again only once its blockhash
+            // has expired; sending the chunk again at once could land it twice. Only a refusal
+            // ("too many requests") leaves the chunk at the head of the queue.
+            let in_flight = match self.chain.submit(&wire).await {
                 Ok(_) => {
-                    let mut b = lock(board);
-                    b.queue.pop_front();
-                    b.flying.push(Flight { chunk, signature, last_valid });
-                    b.tally.sent += 1;
-                    b.progress = Instant::now();
                     used_up = 0;
                     gap = self.pace.faster(gap);
+                    true
                 }
                 Err(e) if retry_later(&e) => {
-                    signed = Some((chunk, signature, wire));
                     gap = self.slow_down(board, gap, &e, &mut used_up)?;
+                    !refused(&e)
                 }
                 Err(e) => bail!("the RPC refused the write at offset {}: {e}", chunk * self.chunk),
+            };
+            if in_flight {
+                let mut b = lock(board);
+                b.queue.pop_front();
+                b.flying.push(Flight { chunk, signature, last_valid });
+                b.tally.sent += 1;
             }
             tokio::time::sleep(gap).await;
         }
+    }
+
+    /// Refuse to start on writes the payer cannot pay for. A write whose fee the payer lacks
+    /// is taken by an RPC and never lands, so nothing but the stall time would end the run.
+    async fn can_pay(&self, writes: usize, cu_limit: u32) -> Result<()> {
+        let p = self.pace.patience;
+        let payer = self.payer.pubkey();
+        let fee = tx::fee_for(0, cu_limit, self.cu_price, tx::LAMPORTS_PER_SIGNATURE);
+        let fees = fee.saturating_mul(writes as u64);
+        let balance = patiently(p, "getBalance", || self.chain.rpc.get_balance(&payer)).await?;
+        // A fee payer may not be left below the rent-exempt minimum of an account.
+        let keep = patiently(p, "getMinimumBalanceForRentExemption", || self.chain.rpc.get_minimum_balance_for_rent_exemption(0)).await?;
+        let need = fees.saturating_add(keep);
+        if balance < need {
+            bail!(
+                "the payer {payer} holds {} SOL, and the {writes} writes still to send need {} SOL: {} in fees ({fee} lamports each) \
+                 and the {} a fee payer has to keep (the rent-exempt minimum). Send it at least {} SOL, then run this again: it continues",
+                sol(balance),
+                sol(need),
+                sol(fees),
+                sol(keep),
+                sol(need - balance)
+            );
+        }
+        Ok(())
     }
 
     /// A "slow down" answer: count it and double the pause.
@@ -580,6 +615,7 @@ impl Job<'_> {
             if tally.cu_limit == 0 {
                 tally.cu_limit = self.simulate(*first).await?;
             }
+            self.can_pay(to_write.len(), tally.cu_limit).await?;
             self.write(&to_write, tally).await?;
             // Every write is confirmed; give a load-balanced RPC one poll interval to show the
             // last block before the buffer is read back.
@@ -757,8 +793,9 @@ pub async fn write_buffer(o: WriteBufferOpts) -> Result<()> {
         }
         Err(e) => {
             println!(
-                "write-buffer: STOPPED with {} of {total} chunks written ({counts}). Nothing is lost: run it again and it continues",
-                left.map_or_else(|| "?".to_string(), |l| (total - l).to_string())
+                "write-buffer: STOPPED with {} of {total} chunks written ({counts}); the payer holds {} SOL. Nothing is lost: run it again and it continues",
+                left.map_or_else(|| "?".to_string(), |l| (total - l).to_string()),
+                balance_after.map_or_else(|| "?".to_string(), sol)
             );
             Err(e)
         }
@@ -981,6 +1018,11 @@ mod tests {
         let p = Pace::per_second(50.0).unwrap();
         assert_eq!((p.gap, p.poll), (ms(20), ms(400)));
         assert_eq!(Pace::per_second(0.01).unwrap().max_gap, Duration::from_secs(100));
+        // The run gives up after five minutes without a write landing; at a rate slower than
+        // one write in 75 s, after four writes' time.
+        assert_eq!(Pace::per_second(1.0).unwrap().stall, Duration::from_secs(300));
+        assert_eq!(Pace::per_second(50.0).unwrap().stall, Duration::from_secs(300));
+        assert_eq!(Pace::per_second(0.01).unwrap().stall, Duration::from_secs(400));
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, 1_000.5] {
             assert!(Pace::per_second(bad).is_err(), "{bad}");
         }
@@ -1023,6 +1065,7 @@ mod tests {
         throttle_all: bool,
         drop_sends: usize,
         hang_sends: usize,
+        lose_sends: usize,
         fail_writes: bool,
         /// The next reads of the buffer answer "no such account" (a node that lags behind).
         lagging_reads: usize,
@@ -1095,6 +1138,7 @@ mod tests {
                 throttle_all: false,
                 drop_sends: 0,
                 hang_sends: 0,
+                lose_sends: 0,
                 fail_writes: false,
                 lagging_reads: 0,
                 last_accepted: None,
@@ -1221,6 +1265,11 @@ mod tests {
                         // The node takes the transaction, and the answer never arrives.
                         self.hang_sends -= 1;
                         self.land(&wire);
+                        return None;
+                    }
+                    if self.lose_sends > 0 {
+                        // The request is lost on the way: no answer, and no node has it.
+                        self.lose_sends -= 1;
                         return None;
                     }
                     let now = Instant::now();
@@ -1365,23 +1414,95 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_send_that_timed_out_is_offered_again_as_the_same_transaction() {
+    async fn a_send_that_got_no_answer_is_watched_and_not_sent_a_second_time() {
         let (payer, buffer) = (Keypair::new(), key(9));
         let build = program(4 * 960);
         let (node, url) = node(buffer).await;
         {
             let mut n = node.lock().unwrap();
             n.create(&payer.pubkey(), build.len(), &[]);
+            // The node takes the first two writes, and its answers never arrive.
             n.hang_sends = 2;
         }
         let chain = Chain::with_timeout(&url, ms(100)).unwrap();
         let mut tally = Tally::default();
-        // The blockhash outlives the timeouts, so the retry is the very same signed bytes.
-        let pace = Pace { blockhash_age: Duration::from_secs(5), ..quick() };
-        job(&chain, &payer, buffer, &build, pace).fill(&mut tally).await.unwrap();
+        // The blockhash is long replaced when the timeout is over, as it is at the real pace
+        // (10 s against a 15 s timeout): the chunk must not be signed and sent again for that.
+        job(&chain, &payer, buffer, &build, quick()).fill(&mut tally).await.unwrap();
         let n = node.lock().unwrap();
         assert_eq!(n.program_bytes(), build);
-        assert_eq!((tally.slowed, n.duplicates, n.landed_writes), (2, 2, 4));
+        // Each chunk reached the node once: the two unanswered writes were found landed.
+        assert_eq!((n.duplicates, n.landed_writes, n.accepted), (0, 4, 2));
+        assert_eq!((tally.slowed, tally.sent, tally.landed, tally.resigned), (2, 4, 4, 0));
+    }
+
+    #[tokio::test]
+    async fn a_send_that_was_lost_is_signed_again_once_its_blockhash_expired() {
+        let (payer, buffer) = (Keypair::new(), key(9));
+        let build = program(4 * 960);
+        let (node, url) = node(buffer).await;
+        {
+            let mut n = node.lock().unwrap();
+            n.create(&payer.pubkey(), build.len(), &[]);
+            // The first write never reaches a node, and no answer comes; a blockhash lives 4 blocks.
+            n.lose_sends = 1;
+            n.valid_for = 4;
+        }
+        let chain = Chain::with_timeout(&url, ms(100)).unwrap();
+        let mut tally = Tally::default();
+        job(&chain, &payer, buffer, &build, quick()).fill(&mut tally).await.unwrap();
+        let n = node.lock().unwrap();
+        assert_eq!(n.program_bytes(), build);
+        assert_eq!((n.duplicates, n.landed_writes), (0, 4));
+        assert_eq!((tally.slowed, tally.resigned, tally.sent, tally.landed), (1, 1, 5, 4));
+    }
+
+    #[tokio::test]
+    async fn writes_that_are_taken_and_never_land_end_the_run_after_the_stall_time() {
+        let (payer, buffer) = (Keypair::new(), key(9));
+        let build = program(3 * 960);
+        let (node, url) = node(buffer).await;
+        {
+            let mut n = node.lock().unwrap();
+            n.create(&payer.pubkey(), build.len(), &[]);
+            // What a cluster does with a write its payer cannot pay for: the RPC takes it, and
+            // it never lands. Signed again after every expiry, it is taken again.
+            n.drop_sends = usize::MAX;
+            n.valid_for = 4;
+        }
+        let chain = Chain::with_timeout(&url, ms(500)).unwrap();
+        let pace = Pace { stall: ms(300), ..quick() };
+        let mut tally = Tally::default();
+        let run = tokio::time::timeout(Duration::from_secs(10), job(&chain, &payer, buffer, &build, pace).fill(&mut tally)).await;
+        let e = run.expect("the run went on although no write ever landed").unwrap_err().to_string();
+        assert!(e.contains("no write was seen to land") && e.contains("sent and not confirmed"), "{e}");
+        // The writes were taken and signed again, more than once each, and that did not count.
+        assert!(tally.sent > 3 && tally.resigned >= 3 && tally.landed == 0, "{tally:?}");
+        assert_eq!(node.lock().unwrap().landed_writes, 0);
+    }
+
+    #[tokio::test]
+    async fn a_payer_that_cannot_pay_for_the_writes_is_told_before_anything_is_sent() {
+        let (payer, buffer) = (Keypair::new(), key(9));
+        let build = program(3 * 960);
+        let (node, url) = node(buffer).await;
+        // One write costs 5,000 lamports and 2,670 units at 100,000 micro-lamports: 5,267. The
+        // payer has to keep the rent-exempt minimum of an account (890,880 at the mock's rent).
+        let enough = 890_880 + 3 * 5_267;
+        {
+            let mut n = node.lock().unwrap();
+            n.create(&payer.pubkey(), build.len(), &[]);
+            n.balance = enough - 1;
+        }
+        let chain = Chain::with_timeout(&url, ms(500)).unwrap();
+        let e = job(&chain, &payer, buffer, &build, quick()).fill(&mut Tally::default()).await.unwrap_err().to_string();
+        assert!(e.contains("the 3 writes still to send need 0.000906681 SOL") && e.contains("5267 lamports each"), "{e}");
+        assert!(e.contains("Send it at least 0.000000001 SOL"), "{e}");
+        assert_eq!(node.lock().unwrap().accepted, 0);
+        // With that lamport it starts.
+        node.lock().unwrap().balance = enough;
+        job(&chain, &payer, buffer, &build, quick()).fill(&mut Tally::default()).await.unwrap();
+        assert_eq!(node.lock().unwrap().landed_writes, 3);
     }
 
     #[tokio::test]
@@ -1433,7 +1554,7 @@ mod tests {
         let pace = Pace { stall: ms(300), ..quick() };
         let mut tally = Tally::default();
         let e = job(&chain, &payer, buffer, &build, pace).fill(&mut tally).await.unwrap_err().to_string();
-        assert!(e.contains("no write was accepted or confirmed") && e.contains("Too many requests"), "{e}");
+        assert!(e.contains("no write was seen to land") && e.contains("Too many requests"), "{e}");
         assert!(tally.slowed >= 3 && tally.sent == 0, "{tally:?}");
         assert_eq!(node.lock().unwrap().landed_writes, 0);
     }
