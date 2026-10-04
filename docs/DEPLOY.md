@@ -203,11 +203,11 @@ deployer; rents read from mainnet on 2026-10-04):
 | Config (256 bytes) | 1,950,720 | never: no instruction closes it |
 | Executor float | 1,450,240 | never: nothing can be withdrawn from the Executor (section 9) |
 | deploy and init fees | about 1,076,000 (measured in the dry run) | never |
-| left in the deployer | 35,042,524 | yes: a plain transfer |
+| left in the deployer | about 35,042,000 | yes: a plain transfer |
 | crank fee payer | 50,000,000 | what is left of it: it is spent in use (below) |
 | governance | 10,000,000 | what is left of it: a pause or a proposal costs about 5,100 to 5,500 lamports |
 
-So of 1.10 SOL: **0.99965 SOL is locked** in the program's rent, **0.0053 SOL (5,309,996
+So of 1.10 SOL: **0.99965 SOL is locked** in the program's rent, **0.0053 SOL (about 5,310,000
 lamports) is gone for good**, and 0.095 SOL is still liquid on day one.
 
 **Getting the locked rent back means closing the program.**
@@ -794,20 +794,30 @@ isolated from any other dev stack: its own home (`~/.local/share/heads-down/dryr
 (`~/.config/heads-down/dryrun/`) and ports (RPC 38899, crank 38787, indexer 38788). The fork is
 `scripts/devstack/up.sh --no-deploy`: mainnet's ORE programs and accounts and mainnet's feature
 set, but no `heads_down`, so `deploy.sh` runs its real fresh path with the real program id,
-`--max-len`, buffer and receipt. Then the existing `scripts/devstack/smoke.sh` runs against the
-result, the program is upgraded in place (`--mode upgrade`), a buffer is written and handed to
-a stand-in vault (`--mode buffer`), a pause is drilled, and the stack is stopped.
+`--max-len`, buffer and receipt. It builds the program itself when the checkout has no build.
 
-Real output of `scripts/mainnet/dry-run.sh --tight` on 2026-10-03 at commit `14b0c3b06110`
-(the preflight tables, the key table, the deploy plans and the service logs are cut; paths
-shortened). The fork carries the ORE build deployed on 2026-10-02, and `--tight` gives every key
-exactly what section 3 asks for at the local validator's rent, then tops the deployer up before
-each later drill with what that drill needs (the temporary buffer's rent and the fee budget):
+`scripts/mainnet/selftest.sh` runs first. Before the deploy that counts, two fresh deploys are
+stopped part way by killing the buffer writer: one is refunded with `solana.sh -- program close`
+(a throwaway deployer of its own, checked to the lamport), the other is continued by re-running
+`deploy.sh` with no top-up. Then `init-config.sh`, `scripts/devstack/smoke.sh`, an upgrade through
+`scripts/devstack/rate-limit-proxy.py` (HTTP 429 beyond 4 `sendTransaction` a second, in the form
+Helius documents), the same upgrade with `--cli-only`, an upgrade to a build that outgrew
+`--max-len` (this build padded with zero bytes to 196,709 bytes: there is no larger build yet, so
+this rehearses the path, not a larger program's code), a buffer handed to a stand-in vault
+(`--mode buffer`), a pause, and the stack is stopped.
+
+Real output of `scripts/mainnet/dry-run.sh --tight` on 2026-10-04 at commit `db7f948b89e4`, the
+tree that became `main` (the preflight tables, the key table, the deploy plans, the progress lines
+and the service logs are cut; paths shortened). The fork carries the ORE build deployed on
+2026-10-02. `--tight` gives every key exactly what section 3 asks for at the local validator's
+rent, and tops the deployer up before each later drill with exactly what that drill needs. The
+stopped deploy of step 4 is continued with no top-up at all:
 
 ```text
+== 0a. selftest.sh (no cluster: which RPC a script picks, the pins on the funded addresses, argument checks) ==
+selftest: 72 checks passed
+
 == 0. local stack without heads_down (up.sh --no-deploy, RPC :38899, home ~/.local/share/heads-down/dryrun) ==
-[devstack] dumping mainnet ORE state into ~/.local/share/heads-down/dryrun/fixtures (RPC host: api.mainnet-beta.solana.com)
-[devstack] fixtures: ORE round 427290, 14 files (sha256_ore.so=b16a10029a35e709956cfe42c4dc51cf2c59522f477eba10816a40bcaa7dd5bd)
 [devstack] --no-deploy: heads_down is NOT deployed; next: scripts/mainnet/deploy.sh --cluster localnet, then init-config.sh
 [devstack] stack is up (test-validator)
 
@@ -815,87 +825,165 @@ each later drill with what that drill needs (the temporary buffer's rent and the
 funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.40753572 SOL
 funded 8c3KKqwEPRDKpjqqpi9k4rrSnPu2LbVFn1cPudBHqJMp: balance 0.05 SOL
 funded HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R: balance 0.01 SOL
+funded 5sU1nebNJvoDNU6Fti1sETgRuAXDGNDyybLLxYgafuKz: balance 1.40753572 SOL
 
 == 2. preflight.sh --cluster localnet (read-only) ==
+INFO  buffer                 no buffer for this commit yet: the deploy creates one (198 of 198 chunks to write)
 PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.407535720 SOL >= 1.407535720 SOL needed
-PASS  ORE program hash       9dbd2e0d232563f0e2b3eae89bf7d6f55d483c464863adb4f46d117f427ca695: the fork runs mainnet's ORE bytes
-GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261003T220816Z.json)
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T064410Z.json)
 
-== 3. deploy.sh --cluster localnet (build, preflight, deploy, verify, receipt) ==
-[deploy] built 190048 bytes, sha256 07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d (cargo-build-sbf 4.1.0 platform-tools v1.54 rustc 1.89.0)
-deploy plan (localnet, mode fresh)
-  program id         HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p
-  max-len            196608 bytes
-{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"Dhwss7UfWotYTXnXfUTym6MKsVoQi9FxWYePnEpqZpUhhCkiXNTY1APffAD7h5pHDnfdkTUDSJXLeegmNbgcNy1"}
+== 3. refund drill: a fresh deploy stopped part way, then its buffer closed (a deployer of its own: ~/.config/heads-down/dryrun/keys-refund) ==
+INFO  buffer                 Ct67WMv9ePSxjXy8UcuB5kYimMuLadFdNHzGh7UEw5QH does not exist yet: 198 of 198 chunks to write
+PASS  deployer balance       5sU1nebNJvoDNU6Fti1sETgRuAXDGNDyybLLxYgafuKz holds 1.407535720 SOL >= 1.407535720 SOL needed
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T064411Z.json)
+write-buffer: created Ct67WMv9ePSxjXy8UcuB5kYimMuLadFdNHzGh7UEw5QH with 1369595760 lamports (tx 3HsPiKhTtL79KhygBjXnwYTih5jReMyqCaQAgyAK58zFTaijiMFDy76KeV99EzmCcocs7ZEHSx1F5yjnbUvhr6nT)
+[dry-run] killed the buffer writer (pid 62468) with 20 chunks written
+buffer: Ct67WMv9ePSxjXy8UcuB5kYimMuLadFdNHzGh7UEw5QH is the deployer's buffer for this build: 1.369595760 SOL in it, 174 of 198 chunks still to write
+[dry-run] stopped part way: no program; buffer Ct67WMv9ePSxjXy8UcuB5kYimMuLadFdNHzGh7UEw5QH is the deployer's, holds 1369595760 lamports and 24 of 198 chunks
+buffer: Ct67WMv9ePSxjXy8UcuB5kYimMuLadFdNHzGh7UEw5QH does not exist yet: 198 of 198 chunks to write
+fees: 5sU1nebNJvoDNU6Fti1sETgRuAXDGNDyybLLxYgafuKz paid for 26 transaction(s) after slot 0 (0 failed): 141829 lamports
+
+== 4. a fresh deploy stopped part way, then continued by re-running deploy.sh at the same commit ==
+INFO  buffer                 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp does not exist yet: 198 of 198 chunks to write
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.407535720 SOL >= 1.407535720 SOL needed
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T064430Z.json)
+write-buffer: created 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp with 1369595760 lamports (tx qvMCV63A4Yb8RfZqQbAr1ZNxXJ9vuT3i2u9xaGDU2Qvo1bZvRWNm6QLwxDmHSxBcbejtcKL9FARFxjT7hgL2yVW)
+[dry-run] killed the buffer writer (pid 62969) with 23 chunks written
+buffer: 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp is the deployer's buffer for this build: 1.369595760 SOL in it, 171 of 198 chunks still to write
+[dry-run] stopped part way: no program; buffer 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp is the deployer's, holds 1369595760 lamports and 27 of 198 chunks
+PASS  buffer                 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp is the deployer's buffer for this build: 1.369595760 SOL in it, 171 of 198 chunks still to write
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 0.037787330 SOL >= 0.030979960 SOL needed (the 1.369595760 SOL in the buffer is counted, not asked for again)
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T064446Z.json)
+write-buffer: 171 of 171 writes confirmed, 0 in flight (0 signed again, 0 slow-downs)
+write-buffer: 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes read back and compared); 171 writes sent, 171 confirmed, 0 signed again, 0 slow-downs, 900657 lamports of fees, 5 s
+{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"2jkLQe7JAnWLoXgm2j2PZv8YADdmgphcsLUPoqXKFDaQErQkKYRzmamtcd9tEDwcaWgG1wZQ6cjnEVYhPAJYGw6d"}
+verify: after slot 191 the Solana CLI sent 1 transaction(s), 10297 lamports of fees
 verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
-verify: receipt deploy/receipts/localnet/20261003T220816Z-fresh-14b0c3b06110.json
+verify: receipt deploy/receipts/localnet/20261004T064446Z-fresh-db7f948b89e4.json
 
-== 4. init-config.sh --cluster localnet (initialize_config + Executor float) ==
-init: initialize_config tx ETQaEAGrHjjSLUbz1NVi1pF8KbXq3A8qjUimd8XZbEvSNvaN5p44wfVjF28Q9uJ16SdtDWqngWQ5NU6qRj8RbDV -> Config inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW (executor_fee 10000, crank_fee 7000, governance HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R, registrar YyyL6FBuH816aWaKoWzWZ8VmecgvmwbMHG1J8zwwZS3); read back and verified
-init: funded the Executor PDA By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge with 1690880 lamports to 1690880 (tx rBgwWDeiec6hKUNHVH3mtPGSSwshv8v1vpdwjGKsbZcnqgsMm8gPt2hX1cpRZHZrS3Le9jtRmbLdWqNC8M14Si2)
+== 5. init-config.sh --cluster localnet (initialize_config + Executor float) ==
+init: initialize_config tx 2FAKwje5bAzypLf9cA6C9hhYmjK66EZYek2TX1M1yJrxdfTrPpJCwfgYzDreA6N7w5rVZSiWXDbmHU1s2NSwsfEp -> Config inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW (executor_fee 10000, crank_fee 7000, governance HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R, registrar YyyL6FBuH816aWaKoWzWZ8VmecgvmwbMHG1J8zwwZS3); read back and verified
+init: funded the Executor PDA By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge with 1690880 lamports to 1690880 (tx 5jNLT4vjLqfD5AczdYAk3QZjgGBavQ3F1CubsXRQoBQxXfCKgji5jBD7X4cxqA7LHqHhh5Tabx1L4uoYikgfJHYM)
 
-== 5. scripts/devstack/smoke.sh against the deployed + initialized program ==
+== 6. scripts/devstack/smoke.sh against the deployed + initialized program ==
 [smoke +   0s] stack up: crank healthy, indexer healthy; heads_down Config executor_fee 10000 crank_fee 7000; ORE round 427290 (ema 715235766 lamports/ORE)
-[smoke +   1s] clock-in (automate + register_rig + set_caps + arm_shift, 1 tx XLniLNGQrfff1w257buNS7e4qQJ4S85V3xoHTTBw5fLnyv2AkVQfgGZ1YAUJRM6jQWSKsbA5Ho2fcWdR9VkCUL7): rig 9i3Tdf7iPvxmPa7VsoF66LJ6KNS26hZr8peLup291JF3 Armed, shift 1, 0.001 SOL digs on 10 split tiles
-[smoke +   1s] phone face-down: heartbeat #1 for round 427290 accepted by the crank (207 slots left)
-[smoke + 106s] CRANK DUG round 427290: tx 3iHEV11s7n3cVMop4xsCQdNkRUNFMKnHPnm5Q9Djw3xgB996ntWgDZrQjxSXyFGdR6XdpmJ6Lw6qwZfkYHhzTE5d; RigDug 1000000 lamports on 10 squares (mask 0x00386ae); rig Down, hb_counter 1, lease [427290, 427290]; Automation balance 48990000 (fee 10000)
-[smoke + 106s] PHONE LIFTED after round 427290: no more heartbeats
-[smoke + 151s] ORE round 427291 is now current (reset by the round driver)
-[smoke + 152s] hostile crank REPLAYS heartbeat #1 in round 427291: tx 3k75Rf4hsGrqiPgpp7RNmwcaz5h6TssWDrVHVt45Q5Rz524pAtBvATFNVmKY2eUCLipYm7SUgsJkwfMo37qjTDzw -> RigSkipped(StaleHeartbeat)
-[smoke + 152s] hostile crank REUSES the old lease in round 427291: tx oABFi6ck3oMGZkb6b1NP9haSi8MLPJaY3zv3dE8r4hmHovMtNJzLsMjVc6JWjXKNvLTgi8nxxmQuvCxSAm3zwYi -> RigSkipped(LeaseExpired)
-[smoke + 284s] round 427291 closed (board at 427291): crank did NOT dig the lifted rig (last_dug_round 427290, lease_to 427290); hd_crank_digs_landed_total 1
-[smoke + 284s] INDEXER recorded RigDug: rig "9i3Tdf7iPvxmPa7VsoF66LJ6KNS26hZr8peLup291JF3" round "427290" lamports "1000000" squares 10 (dataset localnet)
-[smoke + 284s] indexer health: 7 txs ingested through slot 296, 0 decode problem kinds
-SMOKE PASSED: face-down -> dug (round 427290); lifted -> no dig, replay and lease reuse refused on-chain (round 427291).
+[smoke +   1s] clock-in (automate + register_rig + set_caps + arm_shift, 1 tx 5wgHBta3Av5FeL2MFAN2yRRiCUexPhaJJh3akE3uzNgYAVtH8F3SgvnopSEqdmvgHPzwgNpHLikCYq3RjGLCU275): rig 5hVqnQ4BHaibR3nAtWiTj9NZUH3UYtpbbLGMKtVpCHQj Armed, shift 1, 0.001 SOL digs on 10 split tiles
+[smoke +   1s] crank intake status: {"ema_ev":853163935,"end_slot":243,"round_id":427290,"slot":199,"start_slot":3,"type":"status"}
+[smoke +   1s] phone face-down: heartbeat #1 for round 427290 accepted by the crank (45 slots left)
+[smoke +  51s] phone face-down: heartbeat #2 for round 427291 accepted by the crank (not started)
+[smoke + 169s] CRANK DUG round 427291: tx 5ikDpMpYjgyVdVbF9mWvfuTKCymJ988WNCVtjjYgbMj2WY9RhpruRBhmkgooLGtJQS1xmx5dSuXGpoVkBJhTdVVz; RigDug 1000000 lamports on 10 squares (mask 0x002cb1d); rig Down, hb_counter 2, lease [427291, 427291]; Automation balance 48990000 (fee 10000)
+[smoke + 169s] crank metrics: hd_crank_digs_landed_total 1, heartbeats accepted 2
+[smoke + 169s] PHONE LIFTED after round 427291: no more heartbeats
+[smoke + 206s] ORE round 427292 is now current (reset by the round driver)
+[smoke + 207s] hostile crank REPLAYS heartbeat #2 in round 427292: tx 256v2o2JxLkhpuw8Bkwz5VKxWZXXHE2D3TocxQEqBPNJiyVc3JoMx3eVuRwdStbQfqzToeG2m892C8hgXRATLSnL -> RigSkipped(StaleHeartbeat)
+[smoke + 207s] hostile crank REUSES the old lease in round 427292: tx 3WMKD7nNh4QwcJe2M6J7Wpn1EkX26Pb3eUo81J8JoErE96owuZutq46mBXToaQ4C3c3L3eWT2yQagynutiugCa13 -> RigSkipped(LeaseExpired)
+[smoke + 340s] round 427292 closed (board at 427292): crank did NOT dig the lifted rig (last_dug_round 427291, lease_to 427291); hd_crank_digs_landed_total 1
+[smoke + 340s] INDEXER recorded RigDug: rig "5hVqnQ4BHaibR3nAtWiTj9NZUH3UYtpbbLGMKtVpCHQj" round "427291" lamports "1000000" squares 10 (dataset localnet)
+[smoke + 340s] indexer health: 7 txs ingested through slot 588, 0 decode problem kinds
+SMOKE PASSED: face-down -> dug (round 427291); lifted -> no dig, replay and lease reuse refused on-chain (round 427292).
 
-== 6. upgrade drill: deploy.sh --mode upgrade (same commit, fresh buffer), then solana.sh program show ==
-funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.387576564 SOL
-{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"2riradqjeXqTSgYkg91qtnbCF9qhP7KCgm2fjeiZthfMnKSHFEvDbr9QJyiUGgXuNTVz3jxHar8vnE7DjgQXS7rt"}
+== 7. upgrade drill behind a rate limit: deploy.sh --mode upgrade through an RPC that answers HTTP 429 beyond 4 sendTransaction a second ==
+funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.387632105 SOL
+rate-limit-proxy: 127.0.0.1:38898 -> http://127.0.0.1:38899, 4.0 sendTransaction a second
+INFO  buffer                 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp does not exist yet: 198 of 198 chunks to write
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.387632105 SOL >= 1.356273160 SOL needed
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T065041Z.json)
+write-buffer: created 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp with 1323938160 lamports (tx FmPngTokJCP3et8Mrany5bCKo3sAE6HCmcNE4tEoWmQ7csuApYiutzEY7z9Eeo72Xit8RN2KmmimupABt5Mvok7)
+write-buffer: 39 of 198 writes confirmed, 0 in flight (0 signed again, 10 slow-downs)
+write-buffer: 198 of 198 writes confirmed, 0 in flight (0 signed again, 34 slow-downs)
+write-buffer: 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes read back and compared); 198 writes sent, 198 confirmed, 0 signed again, 34 slow-downs, 1053287 lamports of fees, 80 s
+{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"5nRFK5DniQwLzPFFmRW6XgqcqKh4NA1HTMZsg7JGcN88bjo2QqLWCjrRQTV3PASKYqCawEbAfGDpwfd2fNkFPypM"}
+verify: after slot 992 the Solana CLI sent 1 transaction(s), 5267 lamports of fees
 verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
-verify: receipt deploy/receipts/localnet/20261003T221313Z-upgrade-14b0c3b06110.json
-Last Deployed In Slot: 558
+verify: receipt deploy/receipts/localnet/20261004T065041Z-upgrade-db7f948b89e4.json
+Last Deployed In Slot: 994
+[dry-run] the rate limit let 200 sends through and refused 34; the writer was asked for 50 a second, counted 34 slow-downs and signed 0 writes again
 
-== 7. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault ==
-funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.418853149 SOL
-{"buffer":"6Rj23VBAvb7htNxVa6UWbeQHfSz6VLHwXHXPSUGTkBAt"}
+== 8. fallback drill: the same upgrade with --cli-only (the Solana CLI writes the buffer itself) ==
+buffer: 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp does not exist yet: 198 of 198 chunks to write
+INFO  buffer                 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp does not exist yet: 198 of 198 chunks to write
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.386573551 SOL >= 1.356273160 SOL needed
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T065209Z.json)
+{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"2CqHQhNXqUrLqU3gjeAhCe44S2mZcN29EA96Cnw3mCZWscrwb65HzxSJrcXdd91Gwu6Ck9hsVWmmiSCS9BncTFAb"}
+verify: after slot 1007 the Solana CLI sent 200 transaction(s), 1058415 lamports of fees
+verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
+verify: receipt deploy/receipts/localnet/20261004T065209Z-upgrade-db7f948b89e4.json
+
+== 9. growth drill: an upgrade to a build that outgrew --max-len (this build, padded with zero bytes to 196709 bytes) ==
+funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.47390412 SOL
+WARN  max-len                the build is 101 bytes larger than the 196608 the deployed ProgramData holds: the upgrade extends it by 10240 bytes (the loader's minimum is 10240), and their rent stays locked like the rest
+INFO  buffer                 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp does not exist yet: 198 of 205 chunks to write
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.473904120 SOL >= 1.473904120 SOL needed
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T065222Z.json)
+  ProgramData        extended by 10240 bytes before the upgrade (the build outgrew it): 0.071270400 SOL of rent, locked like the rest
+write-buffer: created 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp with 1370298720 lamports (tx W7cxsvkptzRsV3mqSUthtcYHppi2ZJdiCzURwUSiS5aM9Y64aQP8Vh3QNGcQkAR2txjr8jb2t76cU5spcxSPAEu)
+write-buffer: 198 of 198 writes confirmed, 0 in flight (0 signed again, 0 slow-downs)
+write-buffer: 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp holds exactly ~/.local/share/heads-down/dryrun/heads_down-grown.so (196709 bytes read back and compared); 198 writes sent, 198 confirmed, 0 signed again, 0 slow-downs, 1053287 lamports of fees, 7 s
+[deploy] extending the ProgramData of HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p by 10240 bytes (0.071270400 SOL of rent)
+Extended Program Id HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p by 10240 bytes
+{"programId":"HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p","signature":"59qpEjstiqmesDqfbD9RtcRy9NX84QRsSB2GdsB23zKimZsYGgMN6b2TcAQ8dVNv7jBg1LAdRYMX7rdVha55u5QV"}
+verify: after slot 1035 the Solana CLI sent 2 transaction(s), 10267 lamports of fees
+verify: ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ holds exactly ~/.local/share/heads-down/dryrun/heads_down-grown.so (196709 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
+verify: receipt deploy/receipts/localnet/20261004T065222Z-upgrade-db7f948b89e4.json
+
+== 10. Squads drill: deploy.sh --mode buffer, handing the buffer to governance.json's key as a stand-in vault ==
+funded k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt: balance 1.433905166 SOL
+INFO  buffer                 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp does not exist yet: 198 of 198 chunks to write
+PASS  deployer balance       k5mgognA8cahpUoZQp2e45DgfU3XHkRZUQqyR73mzDt holds 1.433905166 SOL >= 1.356217480 SOL needed
+GO: localnet preflight passed (0 local warnings; chain details in ~/.local/share/heads-down/dryrun/deploy/preflight-localnet-20261004T065237Z.json)
+write-buffer: created 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp with 1323882480 lamports (tx VfWefBBaU3RYcRiAyHkh9G6HqpWbHVkZaAJUPKGhkoekoFEmwCwjBCXt9dwoZeN17CBq2TMVSq3tfXiM7GXMDGF)
+write-buffer: 198 of 198 writes confirmed, 0 in flight (0 signed again, 0 slow-downs)
+write-buffer: 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes read back and compared); 198 writes sent, 198 confirmed, 0 signed again, 0 slow-downs, 1053287 lamports of fees, 6 s
+{"buffer":"5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp"}
 [deploy] handing the buffer to HuTaKR8uXLGSqDGhyiPSuoJcGrU14TUzYBcjkvqGmj7R
-verify: buffer 6Rj23VBAvb7htNxVa6UWbeQHfSz6VLHwXHXPSUGTkBAt holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
-verify: receipt deploy/receipts/localnet/20261003T221324Z-buffer-14b0c3b06110.json
+verify: after slot 1073 the Solana CLI sent 1 transaction(s), 5000 lamports of fees
+verify: buffer 5ti3cZm9pvw5Ehxem1y7cxXNcGrDzFShWuRUR7wdr5zp holds exactly programs/heads-down/target/deploy/heads_down.so (190048 bytes, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58)
+verify: receipt deploy/receipts/localnet/20261004T065237Z-buffer-db7f948b89e4.json
 
-== 8. rollback drill: governance.sh pause (immediate), then show ==
-propose_config tx H4TScjVLtARnojyqLW1tFDUCFX1uY4qJkKw8waf6JApXjmerm3cqEBMwwnDnurVnECQNLMbtXx534fSm3Q78Wxk: pending until slot 864578 (paused now true, pending paused 1)
+== 11. rollback drill: governance.sh pause (immediate), then show ==
+propose_config tx 2stSnLf63TDs29qrNm3wHvhtu83bGqB2RYZg8pa8LsVVxVritdknjwXNMvjXRqEjW2ZKSNPthcepi8qbnwRun9ae: pending until slot 865077 (paused now true, pending paused 1)
 heads_down      Config inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW executor_fee 10000 crank_fee 7000 paused true
-pending         registrar YyyL6FBuH816aWaKoWzWZ8VmecgvmwbMHG1J8zwwZS3 crank_fee 7000 bury_bps 0 paused 1; apply_config from slot 864578 (864000 slots to go)
-Executor PDA    By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge 1693880 lamports
+pending         registrar YyyL6FBuH816aWaKoWzWZ8VmecgvmwbMHG1J8zwwZS3 crank_fee 7000 bury_bps 0 paused 1; apply_config from slot 865077 (864000 slots to go)
 
 == stop the stack ==
 [devstack] stopped indexer
 [devstack] stopped crank
 [devstack] stopped driver
 [devstack] stopped validator
-
 summary
+  PASS  0a selftest.sh: 72 checks passed
   PASS  0 up.sh --no-deploy: fork, driver, crank, indexer up; no heads_down
   PASS  1 keys.sh: keys created (600 in a 700 dir), every key holds exactly what the funding table asks for (deployer 1407535720 lamports)
   PASS  2 preflight.sh: GO
-  PASS  3 deploy.sh: fresh deploy of HDn4vg… with max-len 196608, bytes verified, receipt written
-  PASS  4 init-config.sh: Config created and read back, Executor float funded, receipt written
-  PASS  5 smoke.sh: SMOKE PASSED
-  PASS  6 deploy.sh --mode upgrade: upgraded in place from a fresh buffer, bytes verified, receipt written
-  PASS  7 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written
-  PASS  8 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock
+  PASS  3 refund: writer killed at 24 of 198 chunks; solana.sh program close gave back all but the 141829 lamports of fees (1407535720 -> 1407393891)
+  PASS  4 deploy.sh stopped at 27 of 198 chunks, re-run with no top-up: preflight GO, the other 171 written, the CLI sent 1 transaction, bytes verified, receipt written
+  PASS  5 init-config.sh: Config created and read back, Executor float funded, receipt written
+  PASS  6 smoke.sh: SMOKE PASSED
+  PASS  7 deploy.sh --mode upgrade behind a rate limit of 4 sends a second: 34 sends refused with HTTP 429, the writer slowed down and finished, the CLI sent 1 transaction, bytes verified, receipt written
+  PASS  8 deploy.sh --mode upgrade --cli-only: the CLI sent 200 transactions itself, bytes verified, receipt written
+  PASS  9 deploy.sh --mode upgrade with a build of 196709 bytes: the ProgramData extended by 10240 bytes, then upgraded at the first try (deployer need 1473904120 lamports), bytes verified, receipt written
+  PASS  10 deploy.sh --mode buffer: buffer written and handed over, bytes verified, receipt written
+  PASS  11 governance.sh pause: Config.paused = 1 immediately; un-pause waits for the timelock
 DRY RUN PASSED (log ~/.local/share/heads-down/dryrun/dry-run.log)
 ```
 
-**What it cost.** The deployer started with 1,407,535,720 lamports and had 31,359,084 left after
+**What it cost.** The deployer started with 1,407,535,720 lamports and had 31,358,945 left after
 the fresh deploy and `init-config`: ProgramData 1,369,595,760 + Program 1,141,440 + Config
-2,672,640 + Executor float 1,690,880 + **1,075,916 of fees**. The buffer's rent came back, as
-section 3 says. The upgrade cost 1,058,415 lamports of fees. The Executor PDA ended at 1,693,880
-lamports: the 1,690,880 float, +10,000 fee in, -7,000 reimbursed to the crank.
+2,672,640 + Executor float 1,690,880 + **1,076,055 of fees** (the deploy across its stopped and its
+continued run, and the init). The stopped deploy that was refunded cost its own deployer 141,829
+lamports of fees and nothing else. The upgrade through the paced writer cost 1,058,554 lamports of
+fees, the same upgrade with `--cli-only` 1,058,415. The growing upgrade cost 1,063,554 of fees and
+locked 71,270,400 lamports of rent for the 10,240 bytes (the fork's rent; 52,019,200 on mainnet).
+The Executor PDA ended at 1,693,880 lamports: the 1,690,880 float, +10,000 fee in, -7,000
+reimbursed to the crank.
 
 Note the local validator's rent is the historical 6,960 lamports per byte (mainnet's is now
 5,080), which is why the amounts differ from section 3: every amount is read from the cluster it
 applies to. The fees and what is left over are the same on both.
+
+What the rehearsal cannot show: Helius' own limiter (the proxy copies the answer Helius
+documents), a real network's timeouts, and the mainnet confirmation prompt, which needs a
+terminal.
 
 ### Docker-free checks of the Railway images (2026-10-01)
 
