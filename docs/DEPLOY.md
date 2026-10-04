@@ -529,7 +529,7 @@ the registrar gets neither (it uses a keyless RPC, below).
 | `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing certificate, once a release key exists (none does). With both digest variables empty the registrar exits at start; with only a release digest it refuses a debug build (`wrong_signer`) and the app registers a guest rig |
 | `HD_SIWS_DOMAIN` | | - | | | **required, no default.** The host of the site the app identifies itself with: the host of the app build's `-Pheadsdown.identityUri` (default `oojae.github.io`). It must be a site the team controls |
 | `HD_SIWS_URI` | | - | | | that site's URL, `https://oojae.github.io/heads-down/`. The code's default is `https://<HD_SIWS_DOMAIN>` |
-| `HD_TRUSTED_PROXY_HOPS` / `HD_TRUST_REAL_IP` | | `0` / unset | | | which header names the client, for the rate limits. Railway's documentation lists `X-Real-IP` among the headers its edge sets, not `X-Forwarded-For`, so the hops stay `0`. With neither set every client shares one bucket, which a client cannot choose. `HD_TRUST_REAL_IP=true` (lower case; never together with hops above 0, the registrar exits at start) keys the limits on `X-Real-IP`: set it only after the check below shows that the edge replaces a made-up header |
+| `HD_TRUST_REAL_IP` | | `true` | | | keys the rate limits on `X-Real-IP`, the header Railway's edge writes the client's address in (its documentation does not list `X-Forwarded-For`, so `HD_TRUSTED_PROXY_HOPS` stays `0` or unset; with hops above 0 as well the registrar exits at start). The value is `true` or `false` in lower case. Checked on the live service on 2026-10-04 with the command below: of 60 requests carrying 60 different made-up addresses, 24 answered 200 and 36 answered 429, so the edge replaces a client's own header and a caller cannot choose its bucket |
 | `HD_NONCE_STORE` / `HD_TRANSPARENCY_LOG` | | image defaults | | | `/data/nonces.db`, `/data/attestations.jsonl` |
 | `DATABASE_URL` | | | R | | `${{Postgres.DATABASE_URL}}` |
 | `RPC_URL` | | | S | | unset until `initialize_config` has landed, then `https://mainnet.helius-rpc.com/?api-key=<key>` |
@@ -560,7 +560,8 @@ If the second call answers `203.0.113.9`, the edge is not overwriting the header
 be chosen by a client) and report it.
 
 **The registrar's client address.** The registrar has no `/whoami`, so its check counts answers.
-With `HD_TRUST_REAL_IP=true` set, send 60 requests that each carry a different made-up address:
+With `HD_TRUST_REAL_IP=true` set, send 60 requests that each carry a different made-up address
+(run it again after any change to the service's networking):
 
 ```bash
 seq 60 | xargs -P 20 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
