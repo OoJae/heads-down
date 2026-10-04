@@ -344,12 +344,12 @@ scripts/mainnet/preflight.sh            # read-only; exit 0 = GO
 
 Warnings (crank or governance key underfunded, no Automation sampled) do not block.
 
-Real run against mainnet on 2026-10-03 (before `helius.env` existed and before funding, so
-the chain checks used the public RPC and the verdict is NO-GO for exactly those two reasons):
+Real run against mainnet on 2026-10-04, through Helius, before funding: the verdict is NO-GO for
+exactly that one reason.
 
 ```text
-heads_down preflight: mainnet, mode fresh, 2026-10-03T22:13:47Z
-FAIL  helius.env             missing: ~/.config/heads-down/mainnet/helius.env (one line HELIUS_API_KEY=...; chmod 600)
+heads_down preflight: mainnet, mode fresh, 2026-10-04T18:15:00Z
+PASS  helius.env             present, mode 600, HELIUS_API_KEY well-formed (36 chars; value not shown)
 PASS  key dir                ~/.config/heads-down/mainnet (700)
 PASS  deployer.json          9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW (600)
 PASS  crank-payer.json       5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk (600)
@@ -357,25 +357,29 @@ PASS  governance.json        37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN (600)
 PASS  registrar.json         9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo (600)
 PASS  session secret         present (600; value not shown)
 PASS  program keypair        HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p (~/.config/heads-down/heads_down-program-keypair.json, 600)
-PASS  deployer               9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW
-PASS  git                    commit 710d661c7ce06336edc045cda6e62c97065cc0b5, clean tree
+PASS  deployer address       9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW is the funded address
+PASS  crank-payer address    5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk is the funded address
+PASS  governance address     37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN is the funded address
+PASS  git                    commit 534638af92ff037ffb1b573e888800ce5d44a914, clean tree
 PASS  program .so            190048 bytes, sha256 07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d (programs/heads-down/target/deploy/heads_down.so)
 
-chain checks via https://api.mainnet-beta.solana.com (public; helius.env missing or invalid)
-PASS  cluster                mainnet via https://api.mainnet-beta.solana.com (genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d)
+chain checks via https://mainnet.helius-rpc.com (Helius, key from helius.env)
+[hd-devstack] cluster mainnet via https://mainnet.helius-rpc.com/<redacted> (genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d)
+PASS  cluster                mainnet via https://mainnet.helius-rpc.com/<redacted> (genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d)
 PASS  program id             HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p (keypair = program crate = crank)
 PASS  program .so            190048 bytes, sha256 07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d, program hash 0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58, SBPF v3
 PASS  max-len                196608 bytes: 6560 bytes (3%) of headroom over this build
 PASS  SIMD-0500              inactive ; build is SBPF v3 and SBPFv3 deployment is active since slot 428976000
 PASS  program account        nothing deployed yet: fresh deploy
-INFO  rent                   ProgramData(196653) 0.999647480 SOL, Program 0.000833120 SOL, buffer(190085) 0.966282040 SOL, Config 0.001950720 SOL, Executor rent-exempt(0) 0.000650240 SOL
-INFO  deploy cost            1.032815600 SOL: ProgramData 0.999647480 + Program 0.000833120 + fees 0.032335000 (the 0.966282040 SOL buffer is refunded into the ProgramData payment)
+INFO  buffer                 no buffer for this commit yet: the deploy creates one (198 of 198 chunks to write)
+INFO  rent                   ProgramData(196653) 0.999647480 SOL, Program 0.000833120 SOL, a new buffer 0.999647480 SOL (the rent of 196653 bytes, what the Solana CLI puts in for this mode), Config 0.001950720 SOL, Executor rent-exempt(0) 0.000650240 SOL
+INFO  deploy cost            1.032815600 SOL: ProgramData 0.999647480 + Program 0.000833120 + fees 0.032335000 (the buffer holds the ProgramData rent while the deploy runs; the final transaction moves it into the ProgramData)
 INFO  init cost              0.003500960 SOL: Config 0.001950720 + Executor float 0.001450240 (target 1450240 = rent 650240 + reserve 100000 + 100 x crank_fee 7000; holds 0) + fees 0.000100000
 FAIL  deployer balance       9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW holds 0.000000000 SOL < 1.036316560 SOL needed: send at least 1.036316560 SOL
 PASS  ORE upgrade slot       452682055 = pin 452682055
 PASS  ORE program hash       9dbd2e0d232563f0e2b3eae89bf7d6f55d483c464863adb4f46d117f427ca695 = verify.osec.io 48c203bd
-PASS  ORE singletons         Board 40/105, Treasury 48/104, Config 232/101, Round 952/109 (round 427295)
-PASS  ORE user accounts      1 Automations (160/100) and 3 Miners (752/103) from recent ORE transactions match
+PASS  ORE singletons         Board 40/105, Treasury 48/104, Config 232/101, Round 952/109 (round 428227)
+PASS  ORE user accounts      13 Automations (160/100) and 19 Miners (752/103) from recent ORE transactions match
 PASS  init params            executor_fee 10000 (immutable), crank_fee 7000 (<= executor_fee; +3000 per dig accrues to the Executor)
 INFO  ore_layout_hash        cc9b3521eaa022a05fd9c38f745b8844a740ca9e3243a91f1bbda66a3448aa91 = sha256(heads_down::ore::LAYOUT_PREIMAGE)
 INFO  heads_down Config      not initialized (init-config.sh creates it)
@@ -384,13 +388,14 @@ WARN  crank-payer            5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk holds 
 WARN  governance             37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN holds 0.000000000 SOL (recommended 0.010000000): fund 0.010000000 SOL before starting it
 PASS  registrar              9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo holds 0.000000000 SOL (recommended 0.000000000)
 
-NO-GO: 1 local failure(s), chain checks FAILED (see FAIL lines above). Nothing was sent.
+NO-GO: 0 local failure(s), chain checks FAILED (see FAIL lines above). Nothing was sent.
 ```
 
-With `helius.env` in place and the deployer funded, those two lines turn PASS and the
-verdict is GO. Everything ORE-related passes against mainnet today, with the pin moved to the
-build ORE deployed on 2026-10-02. Earlier the same day this run answered NO-GO on the two ORE
-lines, which is how we learned of that upgrade ([ORE.md](ORE.md), section 1).
+With the deployer funded, that line turns PASS and the verdict is GO. Everything ORE-related
+passes against mainnet today, with the pin on the build ORE deployed on 2026-10-02. On 2026-10-03
+this run answered NO-GO on the two ORE lines, which is how we learned of that upgrade
+([ORE.md](ORE.md), section 1). The three `address` lines compare the real key files with the
+addresses in the funding table.
 
 ## 7. Deploy
 
