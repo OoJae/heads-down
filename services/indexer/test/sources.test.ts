@@ -1,16 +1,16 @@
 import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeRig, encodeSeekerSeat, type RigAccount } from "../src/codec/accounts.ts";
 import { findProgramAddress, seed, addrBytes } from "../src/codec/pda.ts";
 import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constants.ts";
-import { pollRpcOnce, type IngestContext } from "../src/ingest.ts";
+import { newSnapshotState, pollRpcOnce, type IngestContext } from "../src/ingest.ts";
 import { checkWebhookAuth, handleHeliusPayload } from "../src/sources/helius.ts";
 import { parseJsonBig, parseResetItem, pollOreRounds } from "../src/sources/oreApi.ts";
-import { RpcClient, RpcError } from "../src/sources/rpc.ts";
+import { RpcClient, RpcError, scrubRpcText, urlSecrets } from "../src/sources/rpc.ts";
 import { buildDigTx, buildEventTx } from "../src/sim/txbuilder.ts";
 import { migrate, openDb, type Db } from "../src/store/db.ts";
 import { Store } from "../src/store/store.ts";
-import { addTx, addr, fakeChain, fakeRpcFetch, sig } from "./helpers.ts";
+import { addTx, addr, fakeChain, fakeRpcFetch, sig, type FakeChain } from "./helpers.ts";
 
 const HD = HEADS_DOWN_PROGRAM_ID;
 const noSleep = async () => undefined;
@@ -34,6 +34,22 @@ function dig(n: number, rig = addr(1), authority = addr(11)) {
     rigs: [{ rig, authority, automation: addr(12), miner: addr(13), outcome: { kind: "dug", perTile: 66_666n, mask: 0x7fff, emaEv: 1n } }],
   });
 }
+
+/** The Rig account of authority addr(11), at its canonical PDA. */
+const RIG_PDA = findProgramAddress([seed("rig"), addrBytes(addr(11))], HD);
+function rigAccount(lifetimeRoundsDug = 3n): RigAccount {
+  return {
+    kind: "Rig", bump: RIG_PDA.bump, authority: addr(11), p256Pubkey: "03" + "22".repeat(32), attestationLevel: 1, tier: 0, state: 2, sgtMint: null,
+    attestationExpirySlot: 0n, capWeek: 0n, capShift: 0n, capRound: 0n, capMaxCost: 0n, capsExpiryTs: 0n, planMaxEvCost: 0n, planDigLamports: 0n,
+    planSplitTiles: 15, planSoloTiles: 0, planLeaseRounds: 3, planFlags: 0, planWindowStartTs: 0n, planWindowEndTs: 0n, shiftId: 1n, hbCounter: 0n,
+    leaseFromRound: 0n, leaseToRound: 0n, gapCount: 0, spentShift: 0n, spentWeek: 0n, weekStartTs: 0n, lastDugRound: 0n, shiftStartRound: 0n,
+    shiftDarkRounds: 0n, shiftRoundsDug: 0n, lifetimeDarkRounds: 0n, lifetimeRoundsDug, lifetimeLamportsDeployed: 2_999_970n, streak: 0, freezesLeft: 2, lastShiftDay: 0n,
+  };
+}
+
+/** A provider that answers every call with a JSON-RPC error carrying `message`. */
+const errorFetch = (message: string) =>
+  (async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message } }), { status: 200 })) as typeof fetch;
 
 describe("RpcClient", () => {
   it("retries HTTP 429 with backoff, then succeeds", async () => {
@@ -60,22 +76,68 @@ describe("RpcClient", () => {
   it("rejects non-http URLs", () => {
     expect(() => new RpcClient("file:///etc/passwd")).toThrow();
   });
+
+  it("scrubs a provider's error text of the URL, of any api-key value and of the key itself", async () => {
+    const key = "not-a-real-key-0f1e2d3c-4b5a-6978";
+    const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
+    const told = `Unauthorized: ${url} is not allowed (key ${key}, API-KEY=${key.toUpperCase()}&x=1) apikey=other-key`;
+    const err = (await new RpcClient(url, { fetchImpl: errorFetch(told) }).call("getSlot", []).catch((e: unknown) => e)) as RpcError;
+    expect(err).toBeInstanceOf(RpcError);
+    expect(err.code).toBe(-32000);
+    expect(err.message).toBe(
+      "getSlot: Unauthorized: https://mainnet.helius-rpc.com/<redacted> is not allowed (key <redacted>, API-KEY=<redacted>&x=1) apikey=<redacted>",
+    );
+  });
+
+  it("scrubs a key that sits in the URL's path", async () => {
+    const key = "notarealtoken0f1e2d3c4b5a69788796";
+    const url = `https://example.solana-mainnet.quiknode.pro/${key}/`;
+    const told = `token ${key} is over its limit; endpoint /${key}/ and ${url}`;
+    const err = (await new RpcClient(url, { fetchImpl: errorFetch(told) }).call("getSlot", []).catch((e: unknown) => e)) as RpcError;
+    expect(err.message).toBe("getSlot: token <redacted> is over its limit; endpoint /<redacted>/ and https://example.solana-mainnet.quiknode.pro/<redacted>");
+  });
+
+  it("scrubs before it cuts the text, so a key at the cut does not leak in part", async () => {
+    const key = "not-a-real-key-0f1e2d3c-4b5a-6978";
+    const told = "x".repeat(195) + key;
+    const err = (await new RpcClient(`https://rpc.example/?api-key=${key}`, { fetchImpl: errorFetch(told) }).call("getSlot", []).catch((e: unknown) => e)) as RpcError;
+    expect(err.message).toBe(`getSlot: ${"x".repeat(195)}<reda`);
+  });
+
+  it("leaves ordinary error text alone, including on a URL with no key", async () => {
+    const told = "Transaction version (0) is not supported by the requesting client";
+    for (const url of ["http://127.0.0.1:8899", "https://api.mainnet-beta.solana.com/", "https://rpc.ankr.com/solana/0123456789abcdef"]) {
+      const err = (await new RpcClient(url, { fetchImpl: errorFetch(`${told} at ${url}`) }).call("getSlot", []).catch((e: unknown) => e)) as RpcError;
+      expect(err.message.startsWith(`getSlot: ${told} at `)).toBe(true);
+      expect(err.message).not.toContain("0123456789abcdef");
+    }
+    // A keyless URL is not a secret: it stays readable.
+    expect(scrubRpcText("cannot reach http://127.0.0.1:8899", "http://127.0.0.1:8899", [])).toBe("cannot reach http://127.0.0.1:8899");
+    expect(scrubRpcText("ends with api-key=", "http://127.0.0.1:8899", [])).toBe("ends with api-key=<redacted>");
+  });
+
+  it("finds the parts of a URL that may be a key: query values, path segments and userinfo", () => {
+    expect(urlSecrets("https://mainnet.helius-rpc.com/?api-key=abcdef12-3456")).toEqual(["abcdef12-3456"]);
+    // Short path words ("solana", "v2") are not keys; replacing them would mangle ordinary text.
+    expect(urlSecrets("https://rpc.ankr.com/solana/0123456789abcdef")).toEqual(["0123456789abcdef"]);
+    expect(urlSecrets("https://solana-mainnet.g.alchemy.com/v2/AbCdEfGh12345678")).toEqual(["AbCdEfGh12345678"]);
+    expect(urlSecrets("https://lb.drpc.org/ogrpc?network=solana&dkey=Abcdefgh12345678")).toEqual(["Abcdefgh12345678"]);
+    expect(urlSecrets("https://user:long-password-1@host.example/ws")).toEqual(["long-password-1"]);
+    // Percent-encoded and decoded, longest first.
+    expect(urlSecrets("https://h.example/?token=ab%2Fcd%2Fef12")).toEqual(["ab%2Fcd%2Fef12", "ab/cd/ef12"]);
+    expect(urlSecrets("http://127.0.0.1:8899")).toEqual([]);
+    expect(urlSecrets("https://api.mainnet-beta.solana.com/")).toEqual([]);
+  });
 });
 
 describe("RPC polling source", () => {
   it("backfills, advances the cursor, is idempotent, and snapshots accounts", async () => {
     const ctx = await ctxFor("devnet");
     const chain = fakeChain();
-    const { address: rigPda, bump } = findProgramAddress([seed("rig"), addrBytes(addr(11))], HD);
+    const rigPda = RIG_PDA.address;
     addTx(chain, buildEventTx({ signature: sig(50), slot: 4000, blockTime: 1_790_790_000, signer: addr(11), programId: HD, events: [{ kind: "ShiftArmed", rig: rigPda, shiftId: 1n }] }), [HD]);
     for (let n = 1; n <= 3; n++) addTx(chain, dig(n, rigPda), [HD, EXECUTOR_PDA]);
-    const rig: RigAccount = {
-      kind: "Rig", bump, authority: addr(11), p256Pubkey: "03" + "22".repeat(32), attestationLevel: 1, tier: 0, state: 2, sgtMint: null,
-      attestationExpirySlot: 0n, capWeek: 0n, capShift: 0n, capRound: 0n, capMaxCost: 0n, capsExpiryTs: 0n, planMaxEvCost: 0n, planDigLamports: 0n,
-      planSplitTiles: 15, planSoloTiles: 0, planLeaseRounds: 3, planFlags: 0, planWindowStartTs: 0n, planWindowEndTs: 0n, shiftId: 1n, hbCounter: 0n,
-      leaseFromRound: 0n, leaseToRound: 0n, gapCount: 0, spentShift: 0n, spentWeek: 0n, weekStartTs: 0n, lastDugRound: 0n, shiftStartRound: 0n,
-      shiftDarkRounds: 0n, shiftRoundsDug: 0n, lifetimeDarkRounds: 0n, lifetimeRoundsDug: 3n, lifetimeLamportsDeployed: 2_999_970n, streak: 0, freezesLeft: 2, lastShiftDay: 0n,
-    };
+    const rig = rigAccount();
     chain.accounts.push({ address: rigPda, owner: HD, data: encodeRig(rig) });
     // A forged "rig" at a non-PDA address and one owned by another program are rejected.
     chain.accounts.push({ address: addr(66), owner: HD, data: encodeRig(rig) });
@@ -136,6 +198,126 @@ describe("RPC polling source", () => {
     const rpc = new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: noSleep });
     await pollRpcOnce(ctx, rpc, { addresses: [HD], maxBackfill: 10, concurrency: 1 });
     expect(chain.calls.filter((c) => c.method === "getTransaction")).toHaveLength(0);
+  });
+});
+
+describe("account snapshot schedule", () => {
+  // A database of its own per test: these tests count calls from an empty cursor.
+  let own: Db;
+  let ctx: IngestContext;
+  beforeEach(async () => {
+    own = await openDb("pglite://memory");
+    await migrate(own);
+    ctx = { store: await Store.bind(own, { name: "devnet", programId: HD, executorPda: EXECUTOR_PDA }), programId: HD, executorPda: EXECUTOR_PDA };
+  });
+  afterEach(async () => own.close());
+
+  const opts = { addresses: [HD, EXECUTOR_PDA], maxBackfill: 1000, concurrency: 2, snapshotEvery: 4 };
+  const scans = (chain: FakeChain) => chain.calls.filter((c) => c.method === "getProgramAccounts").length;
+  const rigsDug = async () => (await ctx.store.loadMetricsInput()).rigs.map((r) => r.lifetimeRoundsDug);
+  /** A chain whose scans answer from slot 9000, past every transaction of these tests (slots 5001 and up). */
+  function chainWithRig(): { chain: FakeChain; rpc: RpcClient } {
+    const chain = fakeChain();
+    chain.slot = 9000;
+    chain.accounts.push({ address: RIG_PDA.address, owner: HD, data: encodeRig(rigAccount(1n)) });
+    addTx(chain, dig(1, RIG_PDA.address), [HD, EXECUTOR_PDA]);
+    return { chain, rpc: new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: noSleep }) };
+  }
+
+  it("is taken on the first poll, on a poll that sees a new signature, and every Nth poll otherwise", async () => {
+    const { chain, rpc } = chainWithRig();
+    const state = newSnapshotState();
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 1, accounts: 1 });
+    expect(scans(chain)).toBe(4);
+
+    // Idle polls cost the two signature calls and nothing else.
+    chain.calls.length = 0;
+    for (let i = 0; i < 3; i++) expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: null });
+    expect(chain.calls.map((c) => c.method)).toEqual(Array.from({ length: 6 }, () => "getSignaturesForAddress"));
+    // The 4th poll since the last snapshot is the safety net.
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: 1 });
+    expect(scans(chain)).toBe(4);
+
+    // A new signature: the snapshot is taken in the same poll and shows what the transaction changed.
+    chain.calls.length = 0;
+    chain.accounts[0] = { address: RIG_PDA.address, owner: HD, data: encodeRig(rigAccount(2n)) };
+    addTx(chain, dig(2, RIG_PDA.address), [HD, EXECUTOR_PDA]);
+    expect(await rigsDug()).toEqual([1n]);
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 1, accounts: 1 });
+    expect(scans(chain)).toBe(4);
+    expect(await rigsDug()).toEqual([2n]);
+    // ... and the count towards the safety net starts again.
+    chain.calls.length = 0;
+    for (let i = 0; i < 3; i++) expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBeNull();
+    expect(scans(chain)).toBe(0);
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBe(1);
+  });
+
+  it("is taken on every poll when no state is kept, or when the interval is 1", async () => {
+    const { chain, rpc } = chainWithRig();
+    expect((await pollRpcOnce(ctx, rpc, opts)).accounts).toBe(1);
+    expect((await pollRpcOnce(ctx, rpc, opts)).accounts).toBe(1);
+    expect(scans(chain)).toBe(8);
+    const state = newSnapshotState();
+    for (let i = 0; i < 3; i++) expect((await pollRpcOnce(ctx, rpc, { ...opts, snapshotEvery: 1 }, state)).accounts).toBe(1);
+    expect(scans(chain)).toBe(20);
+  });
+
+  it("is not asked for by a failed transaction, which changed no account data", async () => {
+    const { chain, rpc } = chainWithRig();
+    const state = newSnapshotState();
+    await pollRpcOnce(ctx, rpc, opts, state);
+    chain.calls.length = 0;
+    const failed = buildDigTx({ signature: sig(77), slot: 5077, blockTime: 1, cranker: addr(9), programId: HD, configPda: CONFIG_PDA, executorPda: EXECUTOR_PDA, roundAccount: addr(10), roundId: 1n, rigs: [], failed: true });
+    addTx(chain, failed, [HD, EXECUTOR_PDA]);
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: null });
+    expect(chain.calls.map((c) => c.method)).toEqual(["getSignaturesForAddress", "getSignaturesForAddress"]);
+    expect(await ctx.store.getCursor("rpc-signatures", HD)).toBe(`5077:${sig(77)}`);
+  });
+
+  it("is taken again when the scan was answered from a slot before the new signature", async () => {
+    const { chain, rpc } = chainWithRig();
+    const state = newSnapshotState();
+    chain.slot = 5001; // the slot of the first dig: its scan has seen it
+    await pollRpcOnce(ctx, rpc, opts, state);
+    expect(state.due).toBe(false);
+    // The node behind getProgramAccounts lags: it still answers from slot 5001, before the dig in slot 5002.
+    addTx(chain, dig(2, RIG_PDA.address), [HD, EXECUTOR_PDA]);
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBe(1);
+    expect(state.due).toBe(true);
+    chain.calls.length = 0;
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBe(1); // no new signature, scanned all the same
+    expect(scans(chain)).toBe(4);
+    expect(await rigsDug()).toEqual([1n]);
+    // It catches up: this scan has seen the dig, and the idle polls after it scan nothing.
+    chain.slot = 5002;
+    chain.accounts[0] = { address: RIG_PDA.address, owner: HD, data: encodeRig(rigAccount(2n)) };
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBe(1);
+    expect(await rigsDug()).toEqual([2n]);
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBeNull();
+  });
+
+  it("stays owed when the scans fail after the transactions were stored", async () => {
+    const { chain, rpc } = chainWithRig();
+    const state = newSnapshotState();
+    chain.broken.add("getProgramAccounts");
+    await expect(pollRpcOnce(ctx, rpc, opts, state)).rejects.toThrow(/getProgramAccounts: HTTP 500 from rpc\.example/);
+    expect((await ctx.store.loadMetricsInput()).digs).toHaveLength(1); // the cursor has moved: the next poll sees no new signature
+    expect(await rigsDug()).toEqual([]);
+    chain.broken.clear();
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: 1 });
+    expect(await rigsDug()).toEqual([1n]);
+    expect((await pollRpcOnce(ctx, rpc, opts, state)).accounts).toBeNull();
+  });
+
+  it("stays owed while a new transaction is not served yet", async () => {
+    const { chain, rpc } = chainWithRig();
+    const state = newSnapshotState();
+    chain.unavailable.add(sig(1));
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 0, accounts: null });
+    expect(scans(chain)).toBe(0);
+    chain.unavailable.clear();
+    expect(await pollRpcOnce(ctx, rpc, opts, state)).toEqual({ ingested: 1, accounts: 1 });
   });
 });
 

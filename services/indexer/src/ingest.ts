@@ -68,11 +68,46 @@ export interface RpcPollOptions {
   /** First run only: how many recent signatures per address to backfill. */
   maxBackfill: number;
   concurrency: number;
+  /** Polls between account snapshots when no new signature asks for one (1 or absent: every poll). */
+  snapshotEvery?: number;
 }
 
-export async function pollRpcOnce(ctx: IngestContext, rpc: RpcClient, opts: RpcPollOptions): Promise<{ ingested: number; accounts: number }> {
+/**
+ * What a poller remembers between polls to decide when the account snapshot is due. It lives in
+ * memory, so a process always starts with a snapshot.
+ */
+export interface SnapshotState {
+  /** A snapshot is owed: none was taken yet, or a transaction succeeded that none has seen. */
+  due: boolean;
+  /** Highest slot among those transactions: a scan answered from an older slot has not seen them. */
+  dueSlot: number;
+  /** Polls since the last snapshot. */
+  polls: number;
+}
+
+export const newSnapshotState = (): SnapshotState => ({ due: true, dueSlot: 0, polls: 0 });
+
+/**
+ * One poll: new signatures of `opts.addresses`, their transactions, then the account snapshot.
+ *
+ * The snapshot is four getProgramAccounts scans, so it is taken only when it can have changed:
+ * on the first poll with a given `state`, on a poll that sees a new successful signature, and
+ * otherwise every `opts.snapshotEvery` polls. `accounts` is null when it was not taken. Without
+ * `state` every call takes it.
+ *
+ * New signatures are enough because only the owning program can write, tag or close the accounts
+ * the scans read, and a transaction that runs the program is in the program id's signature list.
+ * The periodic snapshot covers the rest (README, "Ingest loop and RPC use").
+ */
+export async function pollRpcOnce(
+  ctx: IngestContext,
+  rpc: RpcClient,
+  opts: RpcPollOptions,
+  state: SnapshotState = newSnapshotState(),
+): Promise<{ ingested: number; accounts: number | null }> {
   let ingested = 0;
   const done = new Set<string>();
+  state.polls++;
   for (const address of opts.addresses) {
     // Cursor: "<slot>:<signature>" (older rows hold just the signature).
     const raw = await ctx.store.getCursor("rpc-signatures", address);
@@ -81,6 +116,12 @@ export async function pollRpcOnce(ctx: IngestContext, rpc: RpcClient, opts: RpcP
     const cursorSlot = m ? Number(m[1]) : null;
     const newestFirst = await collectNewSignatures(rpc, address, cursor, opts.maxBackfill, cursorSlot);
     const oldestFirst = newestFirst.reverse();
+    // Noted before anything is fetched: the snapshot stays owed if the rest of this poll fails.
+    for (const s of oldestFirst) {
+      if (s.err !== null && s.err !== undefined) continue; // a failed transaction changed no account data
+      state.due = true;
+      if (s.slot > state.dueSlot) state.dueSlot = s.slot;
+    }
     for (let i = 0; i < oldestFirst.length; i += 50) {
       const chunk = oldestFirst.slice(i, i + 50);
       const wanted = chunk.filter((s) => !done.has(s.signature) && (s.err === null || s.err === undefined));
@@ -94,17 +135,22 @@ export async function pollRpcOnce(ctx: IngestContext, rpc: RpcClient, opts: RpcP
         const lastOk = missing === 0 ? null : wanted[missing - 1]!;
         if (lastOk) await ctx.store.setCursor("rpc-signatures", address, `${lastOk.slot}:${lastOk.signature}`);
         ctx.log?.("rpc: transaction not yet available, will retry", { address });
-        return { ingested, accounts: 0 };
+        return { ingested, accounts: null };
       }
       const last = chunk[chunk.length - 1]!;
       await ctx.store.setCursor("rpc-signatures", address, `${last.slot}:${last.signature}`);
     }
   }
-  const accounts = await snapshotAccountsViaRpc(ctx, rpc);
-  return { ingested, accounts };
+  if (!state.due && state.polls < (opts.snapshotEvery ?? 1)) return { ingested, accounts: null };
+  const snap = await snapshotAccountsViaRpc(ctx, rpc);
+  state.polls = 0;
+  // A scan answered from a slot before the newest signature (a node that lags) has not seen it: scan again next poll.
+  state.due = snap.slot < state.dueSlot;
+  return { ingested, accounts: snap.rigs };
 }
 
-export async function snapshotAccountsViaRpc(ctx: IngestContext, rpc: RpcClient): Promise<number> {
+/** The four scans (Rig, SeekerSeat, ShiftLog, Config); `slot` is the oldest of their context slots. */
+export async function snapshotAccountsViaRpc(ctx: IngestContext, rpc: RpcClient): Promise<{ rigs: number; slot: number }> {
   const tagFilter = (tag: number, size: number) => [{ dataSize: size }, { memcmp: { offset: 0, bytes: encodeBase58(Uint8Array.of(tag)) } }];
   const scans = await Promise.all([
     rpc.getProgramAccounts(ctx.programId, tagFilter(2, 384)),
@@ -114,5 +160,5 @@ export async function snapshotAccountsViaRpc(ctx: IngestContext, rpc: RpcClient)
   ]);
   const slot = Math.min(...scans.map((s) => s.slot));
   const res = await ingestAccountSnapshot(ctx, scans.flatMap((s) => s.accounts), slot);
-  return res.rigs;
+  return { rigs: res.rigs, slot };
 }

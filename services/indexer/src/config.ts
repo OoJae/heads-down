@@ -21,6 +21,12 @@ export interface Config {
   tzOffsetMinutes: number;
   teamCrankers: string[];
   ingestIntervalS: number;
+  /**
+   * Account snapshot (four getProgramAccounts scans) at least every this many polls. It is also
+   * taken on the first poll after start and on every poll that finds a new transaction that
+   * succeeded; 1 = every poll.
+   */
+  snapshotEveryPolls: number;
   rpcMaxBackfill: number;
   oreApiEnabled: boolean;
   oreRoundsSince: number;
@@ -82,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     tzOffsetMinutes: assertTzOffset(int(env, "NIGHT_TZ_OFFSET_MINUTES", 60, -720, 840)),
     teamCrankers,
     ingestIntervalS: int(env, "INGEST_INTERVAL_S", 30, 0, 86_400),
+    snapshotEveryPolls: int(env, "SNAPSHOT_EVERY_N_POLLS", 20, 1, 100_000),
     rpcMaxBackfill: int(env, "RPC_MAX_BACKFILL", 5000, 0, 1_000_000),
     oreApiEnabled: env.ORE_API_ENABLED !== "0",
     oreRoundsSince: int(env, "ORE_ROUNDS_SINCE", Math.floor(Date.now() / 1000) - 14 * 86_400, 0, 4_102_444_800),
@@ -113,6 +120,7 @@ export function describeConfig(c: Config): Record<string, unknown> {
     listen: `${c.host}:${c.port}`,
     nightTz: c.tzOffsetMinutes,
     ingestIntervalS: c.ingestIntervalS,
+    snapshotEveryPolls: c.snapshotEveryPolls,
     oreApi: c.oreApiEnabled,
     marketSources: c.marketSources,
     roundResolver: c.resolveRounds,

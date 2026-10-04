@@ -279,6 +279,29 @@ describe("real dataset", () => {
     expect(csv.headers.get("content-disposition")).not.toContain("SIMULATED");
   });
 
+  it("health shows when the last ingest pass finished and whether it succeeded", async () => {
+    const main = await Store.bind(db, { name: "mainnet", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA });
+    const health = async () => {
+      const r = await fetch(`${mainBase}/v1/health`);
+      expect(r.status).toBe(200);
+      const body = await j(r);
+      expect(check(body, responseSchema("/v1/health"))).toEqual([]);
+      return body;
+    };
+    // No pass has finished: lastSlot is that of the one stored transaction, the poll fields are null.
+    expect((await health()).data).toMatchObject({ status: "ok", txs: 1, lastSlot: 1, lastPollAt: null, lastPollOk: null, lastOkPollAt: null });
+    await main.recordPoll(1_790_899_940, true);
+    const ok = await health();
+    expect(ok.data).toMatchObject({ lastPollAt: 1_790_899_940, lastPollOk: true, lastOkPollAt: 1_790_899_940 });
+    // What a monitor computes: seconds since the last pass, from the same response.
+    expect(ok.asOf - ok.data.lastPollAt).toBe(60);
+    // Passes fail from here on (RPC down, credits used up): still 200, and it says so.
+    await main.recordPoll(1_790_899_970, false);
+    expect((await health()).data).toMatchObject({ status: "ok", lastSlot: 1, lastPollAt: 1_790_899_970, lastPollOk: false, lastOkPollAt: 1_790_899_940 });
+    // The simulated dataset is never polled.
+    expect((await j(await fetch(`${simBase}/v1/health`))).data).toMatchObject({ lastPollAt: null, lastPollOk: null, lastOkPollAt: null });
+  });
+
   it("webhook requires the secret and caps the body", async () => {
     expect((await fetch(`${mainBase}/webhooks/helius`, { method: "POST", body: "[]" })).status).toBe(401);
     expect((await fetch(`${mainBase}/webhooks/helius`, { method: "POST", body: "[]", headers: { authorization: "wrong" } })).status).toBe(401);
@@ -288,6 +311,42 @@ describe("real dataset", () => {
     const huge = "[" + "0,".repeat(3_000_000) + "0]";
     const r = await fetch(`${mainBase}/webhooks/helius`, { method: "POST", body: huge, headers: { authorization: "hook-secret" } }).catch(() => null);
     expect(r === null || r.status === 413).toBe(true);
+  });
+
+  it("webhook stores nothing until the RPC's cluster is verified", async () => {
+    const store = await Store.bind(db, { name: "devnet", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA });
+    let verified = false;
+    const logged: string[] = [];
+    const base = await listen(
+      createApiServer({
+        store, info: await store.info(), defaultTzOffsetMinutes: 60, teamCrankers: [], log: (msg) => logged.push(msg),
+        webhook: {
+          secret: "hook-secret", rpc: null, trustPayload: true, ctx: { store, programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA },
+          verifyCluster: async () => {
+            if (!verified) throw new Error("RPC rpc.example is not devnet (genesis x); refusing to mix clusters");
+          },
+        },
+      }),
+    );
+    const tx = buildDigTx({
+      signature: sig(2), slot: 2, blockTime: 1_790_800_000, cranker: addr(9), programId: HEADS_DOWN_PROGRAM_ID, configPda: CONFIG_PDA,
+      executorPda: EXECUTOR_PDA, roundAccount: addr(10), roundId: 5n,
+      rigs: [{ rig: addr(1), authority: addr(11), automation: addr(12), miner: addr(13), outcome: { kind: "dug", perTile: 10n, mask: 7, emaEv: 1n } }],
+    });
+    const post = () => fetch(`${base}/webhooks/helius`, { method: "POST", body: JSON.stringify([tx]), headers: { authorization: "hook-secret" } });
+    const refused = await post();
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("retry-after")).toBe("30");
+    expect(await j(refused)).toEqual({ error: "not ready: the RPC's cluster is not verified yet" });
+    expect((await store.health()).txs).toBe(0);
+    expect(logged).toEqual(["webhook: refused, the RPC's cluster is not verified"]);
+    // The secret is still checked first.
+    expect((await fetch(`${base}/webhooks/helius`, { method: "POST", body: "[]", headers: { authorization: "wrong" } })).status).toBe(401);
+    verified = true;
+    const taken = await post();
+    expect(taken.status).toBe(200);
+    expect(await j(taken)).toEqual({ received: 1, ingested: 1, rejected: 0 });
+    expect((await store.health()).txs).toBe(1);
   });
 });
 
