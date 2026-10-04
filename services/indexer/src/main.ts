@@ -11,17 +11,16 @@
  */
 import { parseArgs } from "node:util";
 import { createApiServer } from "./api/server.ts";
-import { GENESIS_HASH, describeConfig, loadConfig, type Config } from "./config.ts";
+import { describeConfig, loadConfig, type Config } from "./config.ts";
 import { resolveExecutorPda, CONFIG_PDA, HEADS_DOWN_PROGRAM_ID } from "./constants.ts";
 import { derivePda } from "./constants.ts";
-import { pollRpcOnce, type IngestContext } from "./ingest.ts";
+import type { IngestContext } from "./ingest.ts";
+import { clusterCheck, ingestLoop } from "./loop.ts";
 import { DEFAULT_SIM, runSimulation } from "./sim/simulate.ts";
 import { describeTransaction, formatDescribed } from "./decode.ts";
 import { explorerUrl } from "./api/explorer.ts";
 import { isSignature } from "./codec/base58.ts";
 import { MarketPrice, fixedSource, sourcesFromConfig } from "./sources/market.ts";
-import { pollOreRounds } from "./sources/oreApi.ts";
-import { resolveRounds } from "./sources/rounds.ts";
 import { RpcClient } from "./sources/rpc.ts";
 import { migrate, openDb, type Db } from "./store/db.ts";
 import { Store } from "./store/store.ts";
@@ -40,42 +39,6 @@ async function bind(db: Db, cfg: Config, simSeed?: string): Promise<IngestContex
   const executorPda = await resolveExecutorPda(cfg.programId);
   const store = await Store.bind(db, { name: cfg.dataset, programId: cfg.programId, executorPda, simSeed: simSeed ?? null });
   return { store, programId: cfg.programId, executorPda, log };
-}
-
-async function checkCluster(cfg: Config, rpc: RpcClient): Promise<void> {
-  const expected = GENESIS_HASH[cfg.dataset];
-  if (!expected) return;
-  const got = await rpc.call<string>("getGenesisHash", []);
-  if (got !== expected) throw new Error(`RPC ${rpc.host} is not ${cfg.dataset} (genesis ${got}); refusing to mix clusters`);
-}
-
-async function ingestLoop(ctx: IngestContext, cfg: Config, once: boolean): Promise<void> {
-  const rpc = cfg.rpcUrl ? new RpcClient(cfg.rpcUrl) : null;
-  if (rpc) await checkCluster(cfg, rpc);
-  if (!rpc && !cfg.oreApiEnabled) throw new Error("nothing to ingest: set RPC_URL and/or ORE_API_ENABLED");
-  for (;;) {
-    try {
-      if (rpc) {
-        const r = await pollRpcOnce(ctx, rpc, { addresses: [ctx.programId, ctx.executorPda], maxBackfill: cfg.rpcMaxBackfill, concurrency: 4 });
-        log("rpc poll", r);
-        if (cfg.resolveRounds) {
-          // Without api.ore.com (localnet, devnet) the chain is the only source for every round of a shift.
-          const withShiftRounds = !(cfg.oreApiEnabled && cfg.dataset === "mainnet");
-          const rr = await resolveRounds(ctx, rpc, { maxRounds: cfg.resolveMaxRounds, withShiftRounds, resetLookups: cfg.resolveResetLookups });
-          if (rr.snapshots || rr.missing || rr.resets) log("ore rounds resolved", { ...rr });
-        }
-      }
-      if (cfg.oreApiEnabled && cfg.dataset === "mainnet") {
-        const r = await pollOreRounds(ctx, { since: cfg.oreRoundsSince, maxPages: 200, verifySample: cfg.oreApiVerifySample, sleepMs: 500 }, rpc);
-        log("ore rounds", r);
-      }
-    } catch (e) {
-      log("ingest error", { error: e instanceof Error ? e.message : String(e) });
-      if (once) throw e;
-    }
-    if (once) return;
-    await new Promise((r) => setTimeout(r, cfg.ingestIntervalS * 1000));
-  }
 }
 
 async function simulate(db: Db, cfg: Config, args: Record<string, string | undefined>): Promise<string[]> {
@@ -112,6 +75,8 @@ async function simulate(db: Db, cfg: Config, args: Record<string, string | undef
 
 async function serve(db: Db, cfg: Config, ctx: IngestContext, teamCrankers: string[]): Promise<void> {
   const rpc = cfg.rpcUrl ? new RpcClient(cfg.rpcUrl) : null;
+  // One genesis-hash check for the ingest loop and the webhook: neither stores anything before it has passed.
+  const verifyCluster = clusterCheck(cfg, rpc);
   // The simulated dataset carries its own (simulated, labelled) market price; real datasets ask Jupiter / api.ore.com.
   const simPrice = cfg.dataset === "simulated" ? await ctx.store.getCursor("sim", "market-lamports-per-ore") : null;
   const market =
@@ -131,14 +96,16 @@ async function serve(db: Db, cfg: Config, ctx: IngestContext, teamCrankers: stri
     market,
     localExplorerRpc: cfg.localExplorerRpc,
     webhook: cfg.heliusWebhookSecret && cfg.dataset !== "simulated"
-      ? { secret: cfg.heliusWebhookSecret, rpc, trustPayload: cfg.heliusTrustPayload, ctx }
+      ? { secret: cfg.heliusWebhookSecret, rpc, trustPayload: cfg.heliusTrustPayload, ctx, verifyCluster }
       : null,
     log,
   });
   await new Promise<void>((r) => server.listen(cfg.port, cfg.host, r));
   log("api listening", describeConfig(cfg));
   if (cfg.dataset !== "simulated" && cfg.ingestIntervalS > 0 && (rpc || cfg.oreApiEnabled)) {
-    void ingestLoop(ctx, cfg, false);
+    // The loop catches a failed pass itself. This is the second guard: whatever still escapes it is
+    // logged instead of ending the process, and /v1/health then shows the last poll growing old.
+    ingestLoop(ctx, cfg, rpc, { once: false, verifyCluster }).catch((e: unknown) => log("ingest stopped", { error: e instanceof Error ? e.message : String(e) }));
   }
   const stop = () => server.close(() => void db.close().then(() => process.exit(0)));
   process.on("SIGINT", stop);
@@ -182,7 +149,7 @@ async function main(): Promise<void> {
       databaseUrl: process.env.DATABASE_URL || "pglite://memory",
       ...(values.port ? { port: Number(values.port) } : {}),
     });
-    const db = await openDb(cfg.databaseUrl);
+    const db = await openDb(cfg.databaseUrl, log);
     await migrate(db);
     const team = await simulate(db, cfg, values as Record<string, string | undefined>);
     const ctx = await bind(db, cfg, values.seed ?? DEFAULT_SIM.seed);
@@ -190,7 +157,7 @@ async function main(): Promise<void> {
     return;
   }
   const cfg = loadConfig(process.env, values.port ? { port: Number(values.port) } : {});
-  const db = await openDb(cfg.databaseUrl);
+  const db = await openDb(cfg.databaseUrl, log);
   await migrate(db);
   switch (cmd) {
     case "migrate":
@@ -204,7 +171,7 @@ async function main(): Promise<void> {
     case "ingest": {
       if (cfg.dataset === "simulated") throw new Error("ingest writes real data; use `simulate` for the simulated dataset");
       const ctx = await bind(db, cfg);
-      await ingestLoop(ctx, cfg, values.once === true);
+      await ingestLoop(ctx, cfg, cfg.rpcUrl ? new RpcClient(cfg.rpcUrl) : null, { once: values.once === true });
       await db.close();
       return;
     }

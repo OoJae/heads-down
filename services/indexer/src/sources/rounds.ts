@@ -13,6 +13,7 @@
  *     verifiable link).
  *
  * Only rounds below the Board's current round are resolved: their reset has already happened.
+ * A pass with no round waiting makes no RPC call at all.
  */
 import { DecodeError } from "../codec/errors.ts";
 import { decodeOreBoard, decodeOreRound, isRoundReset, oreRoundPda, type OreRoundAccount } from "../codec/round.ts";
@@ -42,6 +43,9 @@ export interface ResolveResult {
 export async function resolveRounds(ctx: IngestContext, rpc: RpcClient, opts: ResolveOptions): Promise<ResolveResult> {
   const out: ResolveResult = { board: null, snapshots: 0, missing: 0, pending: 0, resets: 0 };
   const ids = await ctx.store.roundsToResolve(opts.maxRounds, opts.withShiftRounds, HAUL_MAX_ROUNDS);
+  const lacking = opts.resetLookups > 0 ? await ctx.store.dugRoundsWithoutReset(opts.resetLookups * 2) : [];
+  // No round is waiting for its outcome: nothing to ask the RPC, not even for the Board.
+  if (ids.length === 0 && lacking.length === 0) return out;
   const board = await rpc.getMultipleAccounts([ORE_BOARD]);
   const b = board.accounts[0];
   if (!b || b.owner !== ORE_PROGRAM_ID) {
@@ -96,7 +100,7 @@ export async function resolveRounds(ctx: IngestContext, rpc: RpcClient, opts: Re
   }
 
   if (opts.resetLookups > 0) {
-    const need = (await ctx.store.dugRoundsWithoutReset(opts.resetLookups * 2)).filter((id) => id < boardRound).slice(0, opts.resetLookups);
+    const need = lacking.filter((id) => id < boardRound).slice(0, opts.resetLookups);
     const found: { event: import("../codec/ore.ts").OreResetEvent; resetSignature: string }[] = [];
     for (const id of need) {
       const r = await findResetEvent(ctx, rpc, id);

@@ -371,6 +371,22 @@ export class Store {
     );
   }
 
+  /**
+   * Notes that an ingest pass finished at `at` (unix seconds) and whether it succeeded; /v1/health
+   * shows it. Kept with the cursors, so it survives a restart and a separate `ingest` process reports too.
+   */
+  async recordPoll(at: number, ok: boolean): Promise<void> {
+    const rows: Param[][] = [[this.dataset, "ingest", "last-poll", `${at}:${ok ? "ok" : "failed"}`]];
+    if (ok) rows.push([this.dataset, "ingest", "last-ok-poll", String(at)]);
+    await insertMany(
+      this.db,
+      "ingest_cursors",
+      ["dataset", "source", "key", "value"],
+      rows,
+      "ON CONFLICT (dataset, source, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+    );
+  }
+
   // ------------------------------------------------------------------ reads
 
   async loadMetricsInput(): Promise<MetricsInput> {
@@ -554,7 +570,22 @@ export class Store {
     };
   }
 
-  async health(): Promise<{ txs: number; failedTxs: number; truncatedTxs: number; problems: { code: string; count: number }[]; lastSlot: number | null; lastBlockTime: number | null }> {
+  /**
+   * `lastSlot` and `lastBlockTime` are those of the newest stored transaction, so they stand still
+   * whenever no heads_down transaction lands. Whether ingestion itself is running is in the
+   * `lastPoll*` fields ({@link recordPoll}): all null until a pass has finished for this dataset.
+   */
+  async health(): Promise<{
+    txs: number;
+    failedTxs: number;
+    truncatedTxs: number;
+    problems: { code: string; count: number }[];
+    lastSlot: number | null;
+    lastBlockTime: number | null;
+    lastPollAt: number | null;
+    lastPollOk: boolean | null;
+    lastOkPollAt: number | null;
+  }> {
     const [t] = await this.db.query<Record<string, unknown>>(
       `SELECT count(*)::int AS n, count(*) FILTER (WHERE failed)::int AS failed, count(*) FILTER (WHERE logs_truncated)::int AS truncated,
               max(slot)::text AS last_slot, max(block_time)::text AS last_bt
@@ -565,6 +596,13 @@ export class Store {
       "SELECT code, count(*)::int AS n FROM ingest_problems WHERE dataset = $1 GROUP BY code ORDER BY code",
       [this.dataset],
     );
+    const polls = new Map(
+      (await this.db.query<{ key: string; value: string }>("SELECT key, value FROM ingest_cursors WHERE dataset = $1 AND source = 'ingest'", [this.dataset])).map(
+        (r) => [r.key, r.value] as const,
+      ),
+    );
+    const last = /^(\d{1,15}):(ok|failed)$/.exec(polls.get("last-poll") ?? "");
+    const lastOk = /^\d{1,15}$/.exec(polls.get("last-ok-poll") ?? "");
     return {
       txs: num(t?.n ?? 0),
       failedTxs: num(t?.failed ?? 0),
@@ -572,6 +610,9 @@ export class Store {
       problems: problems.map((p) => ({ code: p.code, count: num(p.n) })),
       lastSlot: optNum(t?.last_slot),
       lastBlockTime: optNum(t?.last_bt),
+      lastPollAt: last ? Number(last[1]) : null,
+      lastPollOk: last ? last[2] === "ok" : null,
+      lastOkPollAt: lastOk ? Number(lastOk[0]) : null,
     };
   }
 

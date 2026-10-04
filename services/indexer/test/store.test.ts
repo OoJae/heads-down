@@ -80,6 +80,23 @@ describe("Store", () => {
     expect((await mainnet.loadMetricsInput()).arms).toHaveLength(1);
   });
 
+  it("keeps the time and outcome of the last ingest pass per dataset", async () => {
+    const devnet = await Store.bind(db, { name: "devnet", programId: HD, executorPda: EXECUTOR_PDA });
+    const none = { lastPollAt: null, lastPollOk: null, lastOkPollAt: null };
+    expect(await devnet.health()).toMatchObject(none);
+    await devnet.recordPoll(1_790_800_000, false);
+    expect(await devnet.health()).toMatchObject({ lastPollAt: 1_790_800_000, lastPollOk: false, lastOkPollAt: null });
+    await devnet.recordPoll(1_790_800_030, true);
+    await devnet.recordPoll(1_790_800_060, false);
+    expect(await devnet.health()).toMatchObject({ lastPollAt: 1_790_800_060, lastPollOk: false, lastOkPollAt: 1_790_800_030 });
+    // Another dataset in the same database has its own.
+    const mainnet = await Store.bind(db, { name: "mainnet", programId: HD, executorPda: EXECUTOR_PDA });
+    expect(await mainnet.health()).toMatchObject(none);
+    // A value this code did not write reads as "no pass", not as a number.
+    await devnet.setCursor("ingest", "last-poll", "soon");
+    expect(await devnet.health()).toMatchObject({ lastPollAt: null, lastPollOk: null, lastOkPollAt: 1_790_800_030 });
+  });
+
   it("refuses to bind a dataset to a different program or executor", async () => {
     await expect(Store.bind(db, { name: "mainnet", programId: HD, executorPda: addr(99) })).rejects.toThrow(DatasetMismatchError);
   });
