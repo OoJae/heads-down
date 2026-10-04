@@ -321,7 +321,7 @@ describe("real dataset", () => {
     const logged: string[] = [];
     const base = await listen(
       createApiServer({
-        store, info: await store.info(), defaultTzOffsetMinutes: 60, teamCrankers: [], log: (msg) => logged.push(msg),
+        store, info: await store.info(), defaultTzOffsetMinutes: 60, teamCrankers: [], log: (msg, _fields, level = "info") => logged.push(`${level} ${msg}`),
         webhook: {
           secret: "hook-secret", rpc: null, trustPayload: true, ctx: { store, programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA },
           verifyCluster: async () => {
@@ -341,7 +341,7 @@ describe("real dataset", () => {
     expect(refused.headers.get("retry-after")).toBe("30");
     expect(await j(refused)).toEqual({ error: "not ready: the RPC's cluster is not verified yet" });
     expect((await store.health()).txs).toBe(0);
-    expect(logged).toEqual(["webhook: refused, the RPC's cluster is not verified"]);
+    expect(logged).toEqual(["warn webhook: refused, the RPC's cluster is not verified"]);
     // The secret is still checked first.
     expect((await fetch(`${base}/webhooks/helius`, { method: "POST", body: "[]", headers: { authorization: "wrong" } })).status).toBe(401);
     verified = true;
@@ -349,6 +349,22 @@ describe("real dataset", () => {
     expect(taken.status).toBe(200);
     expect(await j(taken)).toEqual({ received: 1, ingested: 1, rejected: 0 });
     expect((await store.health()).txs).toBe(1);
+  });
+
+  it("answers 500 without the reason when the store fails, and logs the reason as an error", async () => {
+    const store = await Store.bind(db, { name: "devnet", programId: HEADS_DOWN_PROGRAM_ID, executorPda: EXECUTOR_PDA });
+    const failing = Object.create(store) as Store;
+    failing.health = async () => {
+      throw new Error("the database is away");
+    };
+    const logged: unknown[] = [];
+    const base = await listen(
+      createApiServer({ store: failing, info: await store.info(), defaultTzOffsetMinutes: 60, teamCrankers: [], log: (msg, fields, level) => logged.push({ msg, ...fields, level }) }),
+    );
+    const r = await fetch(`${base}/v1/health`);
+    expect(r.status).toBe(500);
+    expect(await j(r)).toEqual({ error: "internal error" });
+    expect(logged).toEqual([{ msg: "api: internal error", error: "Error", detail: "the database is away", level: "error" }]);
   });
 });
 

@@ -90,10 +90,10 @@ export async function ingestLoop(ctx: IngestContext, cfg: Config, rpc: RpcClient
     } catch (e) {
       failed = true;
       failure = e;
-      log("ingest error", { error: errorText(e) });
+      log("ingest error", { error: errorText(e) }, "error");
     }
     // Its own guard: a database that cannot take this note must not end the loop.
-    await ctx.store.recordPoll(now(), !failed).catch((e: unknown) => log("ingest: poll outcome not stored", { error: errorText(e) }));
+    await ctx.store.recordPoll(now(), !failed).catch((e: unknown) => log("ingest: poll outcome not stored", { error: errorText(e) }, "error"));
     if (opts.once) {
       if (failed) throw failure;
       return;

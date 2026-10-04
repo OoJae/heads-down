@@ -8,6 +8,7 @@
  *  - `serve` with an RPC on another cluster stores nothing, by the poller or by the webhook, until
  *    the RPC shows the right cluster.
  *  - `ingest --once` exits with a non-zero code when its pass fails.
+ *  - Every log line carries a level; info lines are written to stdout, the others to stderr.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
@@ -39,41 +40,53 @@ afterEach(() => {
   }
 });
 
+interface Line {
+  msg: string;
+  level?: string;
+  error?: string;
+  /** Where the process wrote it. */
+  stream: "stdout" | "stderr";
+  [field: string]: unknown;
+}
+
 /**
  * `node src/main.ts <args>` with exactly `env`: nothing of the developer's environment (an RPC_URL,
- * a DATABASE_URL) leaks in. Its log lines are collected as they are written.
+ * a DATABASE_URL) leaks in. Its log lines are collected from both streams as they are written.
  */
 function run(args: string[], env: Record<string, string>) {
-  const child = spawn(process.execPath, ["src/main.ts", ...args], { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", "ignore", "pipe"] });
+  const child = spawn(process.execPath, ["src/main.ts", ...args], { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(child);
-  const lines: { msg: string; error?: string }[] = [];
-  let buffered = "";
-  let stderr = "";
-  child.stderr!.setEncoding("utf8").on("data", (chunk: string) => {
-    stderr += chunk;
-    buffered += chunk;
-    const parts = buffered.split("\n");
-    buffered = parts.pop()!;
-    for (const p of parts) {
-      try {
-        lines.push(JSON.parse(p));
-      } catch {
-        /* not a log line (a Node warning) */
+  const lines: Line[] = [];
+  /** Everything the process wrote, to either stream. */
+  let output = "";
+  for (const stream of ["stdout", "stderr"] as const) {
+    let buffered = "";
+    child[stream]!.setEncoding("utf8").on("data", (chunk: string) => {
+      output += chunk;
+      buffered += chunk;
+      const parts = buffered.split("\n");
+      buffered = parts.pop()!;
+      for (const p of parts) {
+        try {
+          lines.push({ ...JSON.parse(p), stream });
+        } catch {
+          /* not a log line (a Node warning) */
+        }
       }
-    }
-  });
+    });
+  }
   const logged = async (msg: string) => {
     for (let i = 0; i < 400; i++) {
       const hit = lines.find((l) => l.msg === msg);
       if (hit) return hit;
-      if (child.exitCode !== null) throw new Error(`${args.join(" ")} exited with code ${child.exitCode}: ${stderr.slice(-600)}`);
+      if (child.exitCode !== null) throw new Error(`${args.join(" ")} exited with code ${child.exitCode}: ${output.slice(-600)}`);
       await new Promise((r) => setTimeout(r, 100));
     }
-    throw new Error(`no "${msg}" within 40 s: ${stderr.slice(-600)}`);
+    throw new Error(`no "${msg}" within 40 s: ${output.slice(-600)}`);
   };
   /** The exit code, once the process has ended and its log has been read to the end. */
   const ended = async () => ((await once(child, "close")) as [number | null])[0];
-  return { child, lines, stderr: () => stderr, logged, ended };
+  return { child, lines, output: () => output, logged, ended };
 }
 
 async function health(apiPort: number) {
@@ -121,18 +134,19 @@ describe("serve with an unreachable RPC", () => {
       PORT: String(apiPort), INGEST_INTERVAL_S: "1", ORE_API_ENABLED: "0", MARKET_PRICE_SOURCES: "none",
     });
 
-    await p.logged("api listening");
+    // An info line, on stdout: a log viewer must not show it as an error.
+    expect(await p.logged("api listening")).toMatchObject({ level: "info", stream: "stdout", dataset: "mainnet", rpc: `127.0.0.1:${rpcPort}` });
     expect(await health(apiPort)).toMatchObject({ status: 200, data: { status: "ok", txs: 0, lastPollAt: null, lastPollOk: null } });
 
-    // Five attempts with 0.5, 1, 2 and 4 s between them, then the pass fails and is logged.
+    // Five attempts with 0.5, 1, 2 and 4 s between them, then the pass fails and is logged: an error, on stderr.
     const failure = await p.logged("ingest error");
-    expect(failure.error).toBe(`getGenesisHash: request to 127.0.0.1:${rpcPort} failed (TypeError)`);
+    expect(failure).toMatchObject({ level: "error", stream: "stderr", error: `getGenesisHash: request to 127.0.0.1:${rpcPort} failed (TypeError)` });
     const after = await healthAfterPass(apiPort);
     expect(after).toMatchObject({ status: 200, data: { status: "ok", txs: 0, lastPollOk: false, lastOkPollAt: null } });
     expect(typeof after.data.lastPollAt).toBe("number");
     expect(p.child.exitCode).toBeNull();
     expect(p.lines.some((l) => l.msg === "fatal" || l.msg === "ingest stopped")).toBe(false);
-    expect(p.stderr()).not.toContain("not-a-real-key-0001");
+    expect(p.output()).not.toContain("not-a-real-key-0001");
 
     p.child.kill("SIGTERM");
     expect(await p.ended()).toBe(0);
@@ -164,7 +178,7 @@ describe("serve with an RPC on another cluster", () => {
     const refused = await post();
     expect(refused.status).toBe(503);
     expect(refused.headers.get("retry-after")).toBe("30");
-    expect((await p.logged("webhook: refused, the RPC's cluster is not verified")).error).toBe(refusal);
+    expect(await p.logged("webhook: refused, the RPC's cluster is not verified")).toMatchObject({ level: "warn", stream: "stderr", error: refusal });
     expect((await healthAfterPass(apiPort)).data).toMatchObject({ txs: 0, lastPollOk: false, lastOkPollAt: null });
     // Only the check was asked of the RPC: no signature, no transaction, no account.
     expect([...new Set(rpc.state.methods)]).toEqual(["getGenesisHash"]);
@@ -172,14 +186,17 @@ describe("serve with an RPC on another cluster", () => {
 
     // The RPC now shows mainnet: the next pass polls, and the webhook stores the dig.
     rpc.state.genesis = GENESIS_HASH.mainnet!;
-    await p.logged("rpc poll");
+    expect(await p.logged("rpc poll")).toMatchObject({ level: "info", stream: "stdout" });
     const taken = await post();
     expect(taken.status).toBe(200);
     expect(await taken.json()).toEqual({ received: 1, ingested: 1, rejected: 0 });
     expect((await health(apiPort)).data).toMatchObject({ txs: 1, lastSlot: 2 });
     expect(rpc.state.methods).toEqual(expect.arrayContaining(["getSignaturesForAddress", "getProgramAccounts"]));
-    expect(p.stderr()).not.toContain(KEY);
-    expect(p.stderr()).not.toContain(HOOK);
+    expect(p.output()).not.toContain(KEY);
+    expect(p.output()).not.toContain(HOOK);
+    // Every line has its level, and the stream that goes with it.
+    expect(p.lines.length).toBeGreaterThan(3);
+    for (const l of p.lines) expect([l.msg, l.level, l.stream]).toEqual([l.msg, expect.stringMatching(/^(info|warn|error)$/), l.level === "info" ? "stdout" : "stderr"]);
 
     p.child.kill("SIGTERM");
     expect(await p.ended()).toBe(0);
@@ -194,14 +211,18 @@ describe("ingest --once", () => {
 
     const failing = run(["ingest", "--once"], env);
     expect(await failing.ended()).toBe(1);
-    expect(failing.lines).toEqual([{ t: expect.any(String), msg: "ingest error", error: refusal }, { t: expect.any(String), msg: "fatal", error: refusal }]);
+    // The whole of each line: the time, the level, the message and its fields. Both are errors, on stderr.
+    expect(failing.lines).toEqual([
+      { t: expect.any(String), level: "error", msg: "ingest error", error: refusal, stream: "stderr" },
+      { t: expect.any(String), level: "error", msg: "fatal", error: refusal, stream: "stderr" },
+    ]);
     expect(rpc.state.methods).toEqual(["getGenesisHash"]);
 
     rpc.state.genesis = GENESIS_HASH.mainnet!;
     rpc.state.methods.length = 0;
     const passing = run(["ingest", "--once"], env);
     expect(await passing.ended()).toBe(0);
-    expect(passing.lines.map((l) => l.msg)).toEqual(["rpc poll"]);
+    expect(passing.lines).toEqual([{ t: expect.any(String), level: "info", msg: "rpc poll", ingested: 0, accounts: 0, stream: "stdout" }]);
     // One pass: the check, the two signature lists, the four scans of a first poll.
     expect(rpc.state.methods.slice(0, 3)).toEqual(["getGenesisHash", "getSignaturesForAddress", "getSignaturesForAddress"]);
     expect(rpc.state.methods.slice(3)).toEqual(Array.from({ length: 4 }, () => "getProgramAccounts"));

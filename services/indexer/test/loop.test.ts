@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GENESIS_HASH, loadConfig, type Config } from "../src/config.ts";
 import { CONFIG_PDA, EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constants.ts";
 import type { IngestContext } from "../src/ingest.ts";
+import type { LogLevel } from "../src/log.ts";
 import { clusterCheck, ingestLoop } from "../src/loop.ts";
 import { RpcClient } from "../src/sources/rpc.ts";
 import { buildDigTx } from "../src/sim/txbuilder.ts";
@@ -39,7 +40,8 @@ interface Setup {
   cfg: Config;
   chain: FakeChain;
   rpc: RpcClient;
-  logs: { msg: string; error?: string }[];
+  /** Every log line, with the level it was written at. */
+  logs: { msg: string; level: LogLevel; error?: string; [field: string]: unknown }[];
   /** Calls made to the fake api.ore.com. */
   ore: { calls: number; fetch: typeof fetch };
   now: () => number;
@@ -50,7 +52,7 @@ async function setup(dataset: Dataset, env: Record<string, string> = {}): Promis
   const cfg = loadConfig({ INDEXER_DATASET: dataset, RESOLVE_ROUNDS: "0", ...env });
   const logs: Setup["logs"] = [];
   const store = await Store.bind(db, { name: dataset, programId: HD, executorPda: EXECUTOR_PDA });
-  const ctx: IngestContext = { store, programId: HD, executorPda: EXECUTOR_PDA, log: (msg, fields) => logs.push({ msg, ...fields }) };
+  const ctx: IngestContext = { store, programId: HD, executorPda: EXECUTOR_PDA, log: (msg, fields, level = "info") => logs.push({ msg, level, ...fields }) };
   const chain = fakeChain();
   chain.slot = 9000;
   addTx(chain, dig(1), [HD, EXECUTOR_PDA]);
@@ -195,13 +197,13 @@ describe("ingest loop: passes", () => {
     await expect(ingestLoop(r.ctx, r.cfg, r.rpc, { once: false, sleep, now: r.now })).rejects.toBe(STOP);
     expect([...scansAfter, scans()]).toEqual([4, 4, 4, 8, 8, 8, 12]);
     expect(r.logs.filter((l) => l.msg === "rpc poll")).toEqual([
-      { msg: "rpc poll", ingested: 1, accounts: 0 },
-      { msg: "rpc poll", ingested: 0, accounts: null },
-      { msg: "rpc poll", ingested: 0, accounts: null },
-      { msg: "rpc poll", ingested: 0, accounts: 0 },
-      { msg: "rpc poll", ingested: 0, accounts: null },
-      { msg: "rpc poll", ingested: 0, accounts: null },
-      { msg: "rpc poll", ingested: 0, accounts: 0 },
+      { msg: "rpc poll", level: "info", ingested: 1, accounts: 0 },
+      { msg: "rpc poll", level: "info", ingested: 0, accounts: null },
+      { msg: "rpc poll", level: "info", ingested: 0, accounts: null },
+      { msg: "rpc poll", level: "info", ingested: 0, accounts: 0 },
+      { msg: "rpc poll", level: "info", ingested: 0, accounts: null },
+      { msg: "rpc poll", level: "info", ingested: 0, accounts: null },
+      { msg: "rpc poll", level: "info", ingested: 0, accounts: 0 },
     ]);
   });
 
@@ -220,11 +222,11 @@ describe("ingest loop: passes", () => {
       if (pass === 2) r.chain.broken.clear();
     });
     await expect(ingestLoop({ ...r.ctx, store }, r.cfg, r.rpc, { once: false, sleep, now: r.now })).rejects.toBe(STOP);
-    expect(r.logs.map((l) => `${l.msg}${l.error ? `: ${l.error}` : ""}`)).toEqual([
-      "ingest error: getSignaturesForAddress: HTTP 500 from rpc.example",
-      "ingest: poll outcome not stored: database is gone",
-      "ingest error: getSignaturesForAddress: HTTP 500 from rpc.example",
-      "rpc poll",
+    expect(r.logs.map((l) => `${l.level} ${l.msg}${l.error ? `: ${l.error}` : ""}`)).toEqual([
+      "error ingest error: getSignaturesForAddress: HTTP 500 from rpc.example",
+      "error ingest: poll outcome not stored: database is gone",
+      "error ingest error: getSignaturesForAddress: HTTP 500 from rpc.example",
+      "info rpc poll",
     ]);
     expect(await r.ctx.store.health()).toMatchObject({ txs: 1, lastPollAt: 1_800_000_002, lastPollOk: true, lastOkPollAt: 1_800_000_002 });
   });
@@ -243,7 +245,7 @@ describe("ingest loop: passes", () => {
     const r = await setup("mainnet", { ORE_API_ENABLED: "0" });
     r.chain.unavailable.add(sig(1));
     await ingestLoop(r.ctx, r.cfg, r.rpc, { once: true, now: r.now });
-    expect(r.logs.map((l) => l.msg)).toEqual(["rpc: transaction not yet available, will retry", "rpc poll"]);
+    expect(r.logs.map((l) => `${l.level} ${l.msg}`)).toEqual(["warn rpc: transaction not yet available, will retry", "info rpc poll"]);
     expect(await r.ctx.store.health()).toMatchObject({ txs: 0, lastPollOk: true });
     r.chain.unavailable.clear();
     await ingestLoop(r.ctx, r.cfg, r.rpc, { once: true, now: r.now });

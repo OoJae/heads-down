@@ -29,7 +29,7 @@ data for development and demos. That data is labelled and cannot mix with real d
 ```bash
 cd services/indexer
 pnpm install
-pnpm test            # 385 tests: golden bytes, metrics math, cohorts, haul, store, sources, ingest loop, API
+pnpm test            # 390 tests: golden bytes, metrics math, cohorts, haul, store, sources, ingest loop, API
 pnpm typecheck
 pnpm demo            # in-memory Postgres + simulated dataset + API on http://127.0.0.1:8787
 curl -s localhost:8787/v1/summary | jq .data.rigs
@@ -205,7 +205,7 @@ and 9 `getMultipleAccounts` calls in 9 passes.
 for the next query. Only the error's message is logged: the error object node-postgres hands over
 carries the client, and with it the database password. `db.test.ts` checks this with the real `pg`
 driver against a stand-in server that speaks the wire protocol and drops its connections the way a
-shutdown does.
+shutdown does. The pool's line is a warning (no query failed), the client's an error.
 
 The node-postgres path as a whole was run by hand on 2026-10-04 against PGlite behind the Postgres
 wire protocol (`@electric-sql/pglite-socket` 0.2.11, which is not a dependency of this package).
@@ -216,6 +216,25 @@ stand-in RPC gave the same API answers as the embedded engine, apart from the ti
 reached through the driver. A Postgres server, with its authentication, its own concurrency and
 Railway's version, has still not been used: none is available where the suite runs, so the first
 deployment is the first run against one.
+
+### Logs
+
+One JSON object per line: `t` (the time), `level`, `msg`, then the message's own fields
+(`src/log.ts`). `info` lines are written to stdout, `warn` and `error` lines to stderr. Before,
+every line went to stderr without a level, and Railway showed `api listening` as an error: its log
+viewer takes the severity from a JSON line's `level`, and from the stream when there is none
+(stdout is info, stderr is error; Railway's documentation, read 2026-10-04). No deployment was
+looked at after this change, and that documentation does not say which of the two wins for a
+`warn` line on stderr.
+
+| Level | Messages |
+|---|---|
+| `info` | `api listening`, `rpc poll`, `ore rounds`, `ore rounds resolved`, `migrations applied`, the simulator's lines |
+| `warn` | `rpc: transaction not yet available, will retry`; `webhook: refused, the RPC's cluster is not verified`; `pg pool error` |
+| `error` | `ingest error`, `ingest: poll outcome not stored`, `ingest stopped`, `api: internal error`, `pg client error`, `fatal` |
+
+What a line may carry has not changed: hosts, counts and messages, never the RPC URL's key, the
+webhook secret or the database password (`serve.test.ts` looks for them in both streams).
 
 ## API
 
@@ -325,7 +344,9 @@ pnpm typecheck   # tsc --noEmit, strict
   passes, a wrong cluster never ingests, a failed pass does not end the loop, `--once` still fails.
 - `serve.test.ts`: the real commands as processes. `serve` with an RPC that refuses connections stays up and `/v1/health`
   reports the failed pass; `serve` with an RPC on another cluster stores nothing, by the poller or by the webhook, until the
-  RPC shows the right one; `ingest --once` exits with code 1 when its pass fails and 0 when it succeeds.
+  RPC shows the right one; `ingest --once` exits with code 1 when its pass fails and 0 when it succeeds. Every log line
+  has its level, info lines on stdout and the others on stderr.
+- `log.test.ts`: the log line (one JSON object, `t`, `level` and `msg` first) and the stream each level is written to.
 - `db.test.ts`: a lost Postgres connection is logged and does not end the process (the real `pg` driver against a
   stand-in server; no Postgres involved).
 - `simulate.test.ts`: determinism, and a full ingest with zero problems and consistent metrics.

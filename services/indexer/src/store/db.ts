@@ -7,6 +7,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { writeLog, type Log } from "../log.ts";
 
 export type Param = string | number | boolean | null | Uint8Array;
 
@@ -24,11 +25,7 @@ function norm(params?: Param[]): unknown[] {
 }
 
 /** Where a lost Postgres connection is reported (main.ts passes its logger). */
-export type DbLog = (msg: string, fields?: Record<string, unknown>) => void;
-
-const stderrLog: DbLog = (msg, fields = {}) => {
-  process.stderr.write(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }) + "\n");
-};
+export type DbLog = Log;
 
 /** Only the message: the errors node-postgres emits carry the client, and with it the database password. */
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
@@ -39,7 +36,7 @@ class PgDb implements Db {
   private readonly client: import("pg").PoolClient | null;
   private readonly log: DbLog;
 
-  constructor(pool: import("pg").Pool, client: import("pg").PoolClient | null = null, log: DbLog = stderrLog) {
+  constructor(pool: import("pg").Pool, client: import("pg").PoolClient | null = null, log: DbLog = writeLog) {
     this.pool = pool;
     this.client = client;
     this.log = log;
@@ -60,7 +57,7 @@ class PgDb implements Db {
     // A checked-out client reports a lost connection as an 'error' event of its own (the pool only
     // listens while a client is idle), and Node ends the process on an 'error' nobody listens to.
     // With a listener the query in flight, or the next one, rejects and the caller handles that.
-    const onError = (e: unknown) => this.log("pg client error", { error: errorText(e) });
+    const onError = (e: unknown) => this.log("pg client error", { error: errorText(e) }, "error");
     client.on("error", onError);
     try {
       await client.query("BEGIN");
@@ -124,14 +121,15 @@ class PGliteDb implements Db {
  * Opens `postgres://…`/`postgresql://…` with node-postgres, or `pglite://memory` /
  * `pglite://<directory>` with PGlite. `log` hears about Postgres connections that were lost.
  */
-export async function openDb(url: string, log: DbLog = stderrLog): Promise<Db> {
+export async function openDb(url: string, log: DbLog = writeLog): Promise<Db> {
   if (url.startsWith("postgres://") || url.startsWith("postgresql://")) {
     const pg = await import("pg");
     const pool = new pg.default.Pool({ connectionString: url, max: 8, statement_timeout: 30_000 });
     // An idle client that loses its connection (Postgres restarts) emits 'error' on the pool, and
     // Node ends the process on an 'error' nobody listens to. The pool has already dropped that
-    // client and opens a new one for the next query, so logging is all there is to do.
-    pool.on("error", (e) => log("pg pool error", { error: errorText(e) }));
+    // client and opens a new one for the next query, so logging is all there is to do: a warning,
+    // because no query failed.
+    pool.on("error", (e) => log("pg pool error", { error: errorText(e) }, "warn"));
     return new PgDb(pool, null, log);
   }
   if (url.startsWith("pglite://")) {

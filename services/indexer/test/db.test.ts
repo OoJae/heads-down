@@ -79,11 +79,11 @@ const until = async (cond: () => boolean) => {
 describe("Postgres connection loss (real pg driver, stand-in server)", () => {
   let pg: Awaited<ReturnType<typeof standInPostgres>>;
   let db: Db;
-  let logged: { msg: string; error?: unknown }[];
+  let logged: { msg: string; error?: unknown; level?: string }[];
   beforeEach(async () => {
     pg = await standInPostgres();
     logged = [];
-    db = await openDb(`postgres://indexer:not-a-real-password@127.0.0.1:${pg.port}/headsdown`, (msg, fields) => logged.push({ msg, ...fields }));
+    db = await openDb(`postgres://indexer:not-a-real-password@127.0.0.1:${pg.port}/headsdown`, (msg, fields, level) => logged.push({ msg, ...fields, level }));
   });
   afterEach(async () => {
     await db.close();
@@ -96,7 +96,8 @@ describe("Postgres connection loss (real pg driver, stand-in server)", () => {
     expect(pg.state.connections).toBe(1);
     pg.shutDownConnections(); // the client sits idle in the pool
     await until(() => logged.length > 0);
-    expect(logged).toEqual([{ msg: "pg pool error", error: "terminating connection due to administrator command" }]);
+    // A warning: no query failed, the pool had only an idle connection to lose.
+    expect(logged).toEqual([{ msg: "pg pool error", error: "terminating connection due to administrator command", level: "warn" }]);
     expect(await db.query("SELECT 1")).toEqual([]);
     expect(pg.state.connections).toBe(2);
     expect(JSON.stringify(logged)).not.toContain("not-a-real-password");
@@ -112,7 +113,8 @@ describe("Postgres connection loss (real pg driver, stand-in server)", () => {
     await expect(failing).rejects.toThrow(/not queryable|Connection terminated/);
     expect(logged.length).toBeGreaterThan(0);
     expect(logged.every((l) => l.msg === "pg client error")).toBe(true);
-    expect(logged[0]).toEqual({ msg: "pg client error", error: "terminating connection due to administrator command" });
+    // An error: the transaction that held this connection fails.
+    expect(logged[0]).toEqual({ msg: "pg client error", error: "terminating connection due to administrator command", level: "error" });
     expect(pg.state.queries).toEqual(["BEGIN", "SELECT 1"]);
 
     expect(await db.transaction(async (tx) => (await tx.query("SELECT 3")).length)).toBe(0);

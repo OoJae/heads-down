@@ -15,6 +15,7 @@ import { describeConfig, loadConfig, type Config } from "./config.ts";
 import { resolveExecutorPda, CONFIG_PDA, HEADS_DOWN_PROGRAM_ID } from "./constants.ts";
 import { derivePda } from "./constants.ts";
 import type { IngestContext } from "./ingest.ts";
+import { writeLog as log } from "./log.ts";
 import { clusterCheck, ingestLoop } from "./loop.ts";
 import { DEFAULT_SIM, runSimulation } from "./sim/simulate.ts";
 import { describeTransaction, formatDescribed } from "./decode.ts";
@@ -31,9 +32,6 @@ const SIMULATED_TABLES = [
   "ev_heartbeats_recorded", "ev_shift_broken", "hd_heartbeats", "hd_arm_plans", "ore_deploys", "txs", "ore_rounds", "ore_round_state",
   "ore_round_missing", "acc_rigs", "acc_shift_logs", "acc_seeker_seats", "acc_config", "ingest_cursors", "ingest_problems",
 ];
-
-const log = (msg: string, fields: Record<string, unknown> = {}) =>
-  process.stderr.write(JSON.stringify({ t: new Date().toISOString(), msg, ...fields }) + "\n");
 
 async function bind(db: Db, cfg: Config, simSeed?: string): Promise<IngestContext> {
   const executorPda = await resolveExecutorPda(cfg.programId);
@@ -105,7 +103,7 @@ async function serve(db: Db, cfg: Config, ctx: IngestContext, teamCrankers: stri
   if (cfg.dataset !== "simulated" && cfg.ingestIntervalS > 0 && (rpc || cfg.oreApiEnabled)) {
     // The loop catches a failed pass itself. This is the second guard: whatever still escapes it is
     // logged instead of ending the process, and /v1/health then shows the last poll growing old.
-    ingestLoop(ctx, cfg, rpc, { once: false, verifyCluster }).catch((e: unknown) => log("ingest stopped", { error: e instanceof Error ? e.message : String(e) }));
+    ingestLoop(ctx, cfg, rpc, { once: false, verifyCluster }).catch((e: unknown) => log("ingest stopped", { error: e instanceof Error ? e.message : String(e) }, "error"));
   }
   const stop = () => server.close(() => void db.close().then(() => process.exit(0)));
   process.on("SIGINT", stop);
@@ -189,6 +187,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  log("fatal", { error: e instanceof Error ? e.message : String(e) });
+  log("fatal", { error: e instanceof Error ? e.message : String(e) }, "error");
   process.exit(1);
 });

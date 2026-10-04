@@ -6,6 +6,7 @@ import { UNINDEXED_ACCOUNT_TAGS, decodeHdAccount, verifyAccount, type ConfigAcco
 import { encodeBase58 } from "./codec/base58.ts";
 import { DecodeError } from "./codec/errors.ts";
 import { TxShapeError, extractTransaction, type ExtractedTx, type RawTransaction } from "./codec/tx.ts";
+import type { Log } from "./log.ts";
 import type { Store } from "./store/store.ts";
 import { RpcClient, collectNewSignatures, mapLimit, type RawAccount } from "./sources/rpc.ts";
 
@@ -13,7 +14,7 @@ export interface IngestContext {
   store: Store;
   programId: string;
   executorPda: string;
-  log?: (msg: string, fields?: Record<string, unknown>) => void;
+  log?: Log;
 }
 
 export async function ingestRawTransactions(ctx: IngestContext, raws: RawTransaction[], source: string): Promise<number> {
@@ -134,7 +135,7 @@ export async function pollRpcOnce(
         // Not yet served by this RPC node: keep the cursor before it and retry next poll.
         const lastOk = missing === 0 ? null : wanted[missing - 1]!;
         if (lastOk) await ctx.store.setCursor("rpc-signatures", address, `${lastOk.slot}:${lastOk.signature}`);
-        ctx.log?.("rpc: transaction not yet available, will retry", { address });
+        ctx.log?.("rpc: transaction not yet available, will retry", { address }, "warn");
         return { ingested, accounts: null };
       }
       const last = chunk[chunk.length - 1]!;

@@ -38,6 +38,7 @@ import { MAX_WEBHOOK_BYTES, checkWebhookAuth, handleHeliusPayload } from "../sou
 import type { MarketPrice } from "../sources/market.ts";
 import type { RpcClient } from "../sources/rpc.ts";
 import type { IngestContext } from "../ingest.ts";
+import type { Log } from "../log.ts";
 
 export interface ApiDeps {
   store: Store;
@@ -53,7 +54,7 @@ export interface ApiDeps {
   localExplorerRpc?: string;
   /** `verifyCluster` rejects until the RPC has shown the dataset's genesis hash; until then the webhook stores nothing. */
   webhook?: { secret: string; rpc: RpcClient | null; trustPayload: boolean; ctx: IngestContext; verifyCluster?: () => Promise<void> } | null;
-  log?: (msg: string, fields?: Record<string, unknown>) => void;
+  log?: Log;
 }
 
 class HttpError extends Error {
@@ -353,7 +354,7 @@ export function createApiServer(deps: ApiDeps): http.Server {
     if (!checkWebhookAuth(req.headers.authorization, w.secret)) throw new HttpError(401, "unauthorized");
     if (w.verifyCluster) {
       await w.verifyCluster().catch((e: unknown) => {
-        deps.log?.("webhook: refused, the RPC's cluster is not verified", { error: e instanceof Error ? e.message.slice(0, 200) : "" });
+        deps.log?.("webhook: refused, the RPC's cluster is not verified", { error: e instanceof Error ? e.message.slice(0, 200) : "" }, "warn");
         throw new HttpError(503, "not ready: the RPC's cluster is not verified yet", 30);
       });
     }
@@ -407,7 +408,7 @@ export function createApiServer(deps: ApiDeps): http.Server {
       else await rigRoute(rig!, res);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
-      if (status === 500) deps.log?.("api: internal error", { error: e instanceof Error ? e.name : "unknown", detail: e instanceof Error ? e.message.slice(0, 200) : "" });
+      if (status === 500) deps.log?.("api: internal error", { error: e instanceof Error ? e.name : "unknown", detail: e instanceof Error ? e.message.slice(0, 200) : "" }, "error");
       const extra: Record<string, string> = e instanceof HttpError && e.retryAfterS !== null ? { "retry-after": String(e.retryAfterS) } : {};
       if (!res.headersSent) json(res, status, { error: e instanceof HttpError ? e.message : "internal error" }, extra);
       else res.destroy();
