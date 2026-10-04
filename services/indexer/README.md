@@ -100,7 +100,7 @@ second implementation of the contract.
 | Property | Where | Test |
 |---|---|---|
 | Events count only from the heads_down program's own invocations | `codec/logs.ts` | `tx.test.ts` "ignores heads_down-shaped events emitted by another program", "a forged 'invoke' inside a Program log…" |
-| Failed transactions contribute nothing | `codec/tx.ts` | "a failed transaction yields no events" |
+| Failed transactions contribute nothing | `codec/tx.ts` | "a failed transaction contributes no events" |
 | ORE events only from a Board-signed ORE `Log`; Heads Down only when signer == Executor PDA | `codec/tx.ts` | "rejects an ORE Log whose account is not the Board", "ignores ORE deploys signed by anyone but the Executor PDA" |
 | Account decoders check length, tag and version; the address must be the canonical PDA; the owner must be the program | `codec/accounts.ts` | `accounts.test.ts` (foreign owner, swapped authority, non-canonical bump) |
 | No decoder throws anything but `DecodeError` on attacker bytes; lengths are bounded before base58/base64 | `codec/*` | fuzz loops in `events.test.ts`, `codec.test.ts` |
