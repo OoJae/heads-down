@@ -84,6 +84,11 @@ impl LabeledCounter {
 pub struct Metrics {
     pub rigs_seen: Gauge,
     pub rigs_eligible: Gauge,
+    /// Dig passes, by why they read the chain (`skipped`: idle, nothing was read).
+    pub dig_passes: LabeledCounter,
+    /// Lookup-table maintenance, by what happened (`created`, `create_failed`, `extended`,
+    /// `extend_failed`, `low_balance`, `state_file`).
+    pub lookup_tables: LabeledCounter,
     pub heartbeats_accepted: Counter,
     pub heartbeats_rejected: LabeledCounter,
     pub heartbeats_held: Gauge,
@@ -199,8 +204,10 @@ impl Metrics {
     /// Prometheus text exposition.
     pub fn render(&self) -> String {
         let mut o = String::with_capacity(4096);
-        gauge(&mut o, "hd_crank_rigs_seen", "Armed or Down rigs read this round", self.rigs_seen.get());
-        gauge(&mut o, "hd_crank_rigs_eligible", "Rigs the planner chose to dig this round", self.rigs_eligible.get());
+        gauge(&mut o, "hd_crank_rigs_seen", "Armed, Down or Cooling rigs in the last dig pass that read the chain", self.rigs_seen.get());
+        gauge(&mut o, "hd_crank_rigs_eligible", "Rigs the planner chose to dig in the last dig pass that read the chain", self.rigs_eligible.get());
+        labeled(&mut o, "hd_crank_dig_passes_total", "Dig passes, by why they read the chain (skipped: idle, nothing read)", "why", &self.dig_passes);
+        labeled(&mut o, "hd_crank_lookup_tables_total", "Lookup-table maintenance, by what happened", "event", &self.lookup_tables);
         counter(&mut o, "hd_crank_heartbeats_accepted_total", "Heartbeats that verified and were stored", self.heartbeats_accepted.get());
         labeled(&mut o, "hd_crank_heartbeats_rejected_total", "Heartbeats refused, by reason", "reason", &self.heartbeats_rejected);
         gauge(&mut o, "hd_crank_heartbeats_held", "Rigs with a held heartbeat", self.heartbeats_held.get());

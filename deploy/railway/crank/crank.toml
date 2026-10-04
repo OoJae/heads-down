@@ -2,16 +2,28 @@
 # Nothing here is secret: the fee-payer key arrives as HD_CRANK_KEYPAIR_JSON (entrypoint -> tmpfs),
 # the Helius key as HELIUS_API_KEY, which hd-crank substitutes for {HELIUS_API_KEY} itself and
 # never logs (crank/src/config.rs). A literal api-key= value in this file is refused at start.
-# Edit and redeploy to change a knob; HD_CRANK_RPC_URL / HD_CRANK_WS_URL / HD_CRANK_TX_FORMAT and
-# HD_CRANK_LISTEN (set from PORT by the entrypoint) override the matching fields.
+# Edit and redeploy to change a knob, or set HD_CRANK_<SECTION>_<FIELD> on the service: every
+# setting has one (`hd-crank config --env` lists them), and it wins over this file.
+# HD_CRANK_LISTEN is set from PORT by the entrypoint.
+#
+# The spend caps of [signals], [end_shift] and [stack] are sized for a fee payer that holds
+# 0.05 SOL (50,000,000 lamports): none of them lets its duty use more than about a quarter of
+# that in a day (their defaults allow the whole balance). The two that are not: [record] (up to
+# 24,000,000 a day) and the lookup table, whose rent grows with every heartbeating rig. Raise
+# the caps together with the balance. crank/README.md ("RPC budget") explains the settings
+# that decide the RPC use, and .env.example has the overrides for one phone on Helius' free plan.
 
 rpc_url = "https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
 ws_url = "wss://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
 commitment = "confirmed"
 program_id = "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p"
-listen = "0.0.0.0:8787"            # replaced by HD_CRANK_LISTEN = [::]:$PORT at start
+listen = "0.0.0.0:8787"            # replaced at start: the entrypoint sets HD_CRANK_LISTEN from PORT
 state_dir = "/data/hd-crank"       # the Railway volume: the crank's lookup tables survive redeploys
 log_json = true                    # Railway's log explorer parses JSON lines
+# The WebSocket delivers every slot; this HTTP poll (2 calls) only covers a stream that has
+# stalled. 15 s instead of the default 5 saves about 23,000 calls a day. 20 is the most the
+# crank accepts: /healthz calls a slot older than 30 s stale, and a poll may take 10 s.
+chain_poll_secs = 15
 
 [dig]
 enabled = true
@@ -35,6 +47,10 @@ start_rounds = false               # never make the crank's dig the first deploy
 checkpoint_sweep = true            # settle idle miners before ORE's 12 h bot window
 ore_programdata_slot = 452682055   # ORE upgrade pin (docs/ORE.md): a mismatch trips the breaker
 config_poll_secs = 30
+# While no heartbeat is held and no known rig has a lease, a dig pass reads nothing; one pass
+# in every 10 rounds (about 12 minutes) still does. Only a rig whose heartbeat another crank
+# applied waits for that read. 0 = every pass reads (3 scans, up to 3 times a round).
+idle_full_read_rounds = 10
 
 [intake]
 # Railway's edge sets X-Real-IP to the client's remote address (Railway docs, Networking >
@@ -48,6 +64,11 @@ max_connections_per_ip = 64
 ip_burst = 60
 ip_per_second = 4.0
 
+[signals]
+# Landing a phone's BREAK or FREEZE costs the crank 10,100 lamports and nothing pays it back.
+# 250,000 an hour is 24 of them; the default (2,000,000) could use the whole balance in a day.
+max_lamports_per_hour = 250000
+
 [record]
 # A night when the cost gate never opens places no SOL, so no dig carries the phone's heartbeats
 # on-chain. Without this the shift would seal with no dark round: no streak day, and a Focus Bond
@@ -57,8 +78,28 @@ ip_per_second = 4.0
 gate_closed_rigs = true
 max_lamports_per_hour = 1000000
 
+[end_shift]
+# Sealing a stale shift costs the crank the ShiftLog rent (1,300,480 lamports at today's 5,080
+# lamports per byte) plus a fee of about 5,000. The rent goes back to the crank through
+# close_shift_log, 30 days after the shift ended; the crank does not send that instruction.
+# 6,000,000 a day is 4 shifts; the default (50,000,000) is the whole balance.
+max_lamports_per_day = 6000000
+
+[stack]
+# Nothing pays the crank back for check-ins: about 6,300 lamports per seat per round, which
+# is about 300,000 an hour at today's 75 s rounds. This covers one seat; the default
+# (10,000,000 an hour) lets the whole balance go in five hours. Stack is fail-closed: before
+# serving more seats, raise this and the balance together.
+max_lamports_per_hour = 500000
+max_lamports_per_table = 10000000  # 0.01 SOL per table (default 0.1 SOL)
+# init_bury_vault stays on: the first settle or forfeit that needs the Bury vault makes the
+# crank pay its rent once (3,114,040 lamports at today's rent, never returned).
+
 [alt]
 enabled = true
-auto_create = true
+auto_create = true                 # only when the fee payer can pay for it; a failed create is retried after 1 min, 2 min, ... 1 h
 auto_extend = true
-max_tables = 8                     # ~500 heartbeating rigs; ~0.00065 SOL of table rent per rig
+# One table holds 61 rigs. Its rent comes back only by closing it by hand: 2,560,320 lamports
+# with the 10 shared accounts, 650,240 more per rig, 42,550,080 when full. A second table would
+# be more than this balance can carry.
+max_tables = 1

@@ -30,6 +30,7 @@ crank can make rigs miss rounds; it cannot move a lamport anywhere ORE and the p
 - [Demo tools: replay and decode](#demo-tools-replay-and-decode)
 - [Transactions, packing and measured sizes](#transactions-packing-and-measured-sizes)
 - [Operating costs](#operating-costs)
+- [RPC budget](#rpc-budget)
 - [Threat model](#threat-model)
 - [Observability](#observability)
 - [Tests](#tests)
@@ -79,9 +80,10 @@ heads_down     Config not found at inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW (
 ```
 
 Environment overrides: `HD_CRANK_RPC_URL`, `HD_CRANK_WS_URL`, `HD_CRANK_KEYPAIR`, `HD_CRANK_LISTEN`,
-`HD_CRANK_TX_FORMAT` (`legacy|v0|v1`), `HD_CRANK_CONFIG`, `RUST_LOG`. A config file that embeds a literal
-`api-key=` value is refused. The keypair file must be mode 600. Logs go to stderr, so `decode --json` output
-on stdout stays clean.
+`HD_CRANK_TX_FORMAT` (`legacy|v0|v1`), `HD_CRANK_CONFIG`, `RUST_LOG`, and one variable per setting:
+`HD_CRANK_<SECTION>_<FIELD>` (`hd-crank config --env` lists them; `hd-crank config` prints the effective
+configuration without anything secret). A config file that embeds a literal `api-key=` value is refused.
+The keypair file must be mode 600. Logs go to stderr, so `decode --json` output on stdout stays clean.
 
 ## How it works
 
@@ -112,6 +114,7 @@ on stdout stays clean.
 | `planner` | pure functions: the dig plan (state, Cooling, lease, idempotency, caps, window, gate, v1.1 amount rule, strategy / fee / executor / authority, balance, Motherlode, Miner checkpoint, executor float) and the record plan |
 | `tx`, `alt` | ComputeBudget, checkpoints, precompile instructions (8 per ix), dig / record batches; legacy / v0 + lookup tables / v1; exact packing; signal and end_shift transactions; lookup-table create/extend/decode |
 | `sender`, `ledger` | send (`maxRetries: 0`), rebroadcast, confirm; per-(rig, round) attempts with bounded retries |
+| `idle` | when a dig pass may skip its chain reads: no heartbeat held, no known lease, nothing in the last few rounds |
 | `breaker`, `metrics` | latched circuit breaker; Prometheus text with bounded label sets |
 | `crank`, `app` | the loop and the process wiring |
 | `demo` | `replay` and `decode` |
@@ -148,9 +151,47 @@ transaction for a round only after its previous one expired, failed, or stayed u
 attempt is re-planned from fresh chain state**: an old ORE `checkpoint` instruction, resent after the miner moved
 rounds, aborts the whole batch (`tests/fork.rs`).
 
-**Lookup tables.** The crank creates its own table on first run (remembered in `state_dir`), adds the 10
+**Idle rounds.** A dig pass that reads the chain costs three `getProgramAccounts` scans, a
+`getMultipleAccounts` and a `getBlockHeight`, up to three times a round. While the crank is idle a pass reads
+nothing. Idle means all of: no heartbeat is held; no rig of the last read has a lease that covers the round;
+no heartbeat was held and no rig was a dig candidate in the last 4 rounds (a lease lasts at most 3, and the rig
+list is read before a dig lands, so the lease a dig leaves is not in it). An idle crank still makes one full
+pass every `dig.idle_full_read_rounds` rounds (default 10; `0` makes every pass read, as before), and the first
+pass after start always reads. The same rule stops the poller's rig scan, the one that finds rigs for the
+lookup table; that scan also stops while the lookup-table work itself is stopped (the fee payer is short, or
+the wait after a failed transaction runs). What an idle crank can miss: a lease that another crank created
+and that starts and ends between two of those reads. Set `idle_full_read_rounds` to 3 or less to rule that
+out.
+
+**Lookup tables.** The crank creates its own table (remembered in `state_dir/lookup_tables.json`), adds the 10
 accounts every dig repeats, and adds each heartbeating rig's `rig, authority, automation, miner` as rigs appear
-(never inside the dig window). Only tables it is the authority of are extended.
+(never inside the dig window). Only tables it is the authority of are extended. A table locks rent that comes
+back only when its authority deactivates and closes it by hand, so the crank is careful with it:
+
+- Nothing is created before the tables were read from the chain. A read that fails at start is retried at
+  every sync (each new round at least); it never leads to a create. A state file that exists and cannot be
+  read or understood stops creates and extends until it is fixed or removed.
+- A create is sent only when the fee payer holds the rent of the table with its shared accounts, room for
+  the fees, and what its own account must keep to stay rent-exempt: on mainnet today 2,560,320 + 100,000 +
+  650,240 = 3,310,560 lamports. If it holds less, one warning is logged and nothing is asked or sent until the
+  poller's balance reading (every `dig.config_poll_secs`) says the money is there. The same check runs before
+  every extend, for the rent of the entries it adds.
+- The table's address is written to the state file before the create is sent. If that write fails, the create
+  is not sent. A create that lands without the crank seeing it (lost status, a crash, a restart) is found
+  again from that entry.
+- A lookup-table transaction that does not land is retried after 1 minute, then 2, 4, and so on up to 1 hour.
+  The count is kept in the state file, so a restart does not start it over. Before anything else is sent the
+  tables are read again, from a node that is past the last block that transaction could land in: a second
+  extend with the same addresses would pay their rent twice.
+- `alt.max_tables` counts the first table too (`0`: the crank creates none).
+- If the state file cannot be updated after a create landed, the table stays in use from memory, an error
+  line names its address, and no other table is created.
+
+Once the log shows `created lookup table`, the table can be pinned in configuration (`alt.tables = ["<address>"]`,
+`alt.auto_create = false`): the crank then finds it without its state file. The crank never deactivates or
+closes a table. To get the rent back, stop the crank and use the Solana CLI's `address-lookup-table deactivate`
+and, a few minutes later, `address-lookup-table close`, signed by the crank's fee payer (not run for this
+README).
 
 **Checkpoint sweep.** Miners of idle rigs that owe a checkpoint for a round older than 400 rounds (~8.7 h) are
 checkpointed in batches of 8, before ORE's 12-hour bot window.
@@ -244,10 +285,10 @@ whose window ended more than `grace_secs` ago and whose lease has been expired f
 (`lease_to_round + 3 < Board.round_id`), exactly the program's condition for a caller that is not the
 authority. The three rounds are the program's grace: a rig whose next heartbeat is still on its way cannot have
 its shift ended by someone else between two heartbeats. The crank pays the ShiftLog rent
-(1,781,760 lamports for 128 bytes) plus the fee, so it is capped: at most `max_per_pass` per pass and
-`max_lamports_per_day` (default 0.05 SOL, about 27 shifts). Oldest window first; a (rig, shift) that fails is
-left alone for 10 minutes. The program emits `ShiftEnded` (tag 4) and then `ShiftEndedV2` (tag 10); the crank's
-decoder keeps only the V2, so a shift is never counted twice.
+(1,300,480 lamports for 128 bytes at mainnet's 5,080 lamports per byte) plus the fee, so it is capped: at most
+`max_per_pass` per pass and `max_lamports_per_day` (default 0.05 SOL, about 38 shifts). Oldest window first; a
+(rig, shift) that fails is left alone for 10 minutes. The program emits `ShiftEnded` (tag 4) and then
+`ShiftEndedV2` (tag 10); the crank's decoder keeps only the V2, so a shift is never counted twice.
 
 ## Demo tools: replay and decode
 
@@ -333,12 +374,108 @@ program, CU limit sized by simulation (+15% + 1,000), 1,000 micro-lamports/CU, `
   |---|---|---|
   | BREAK / FREEZE | 10,100 lamports each (2 signatures + 5,000 CU × 20,000 µL) | 2,000,000 / hour |
   | `record_heartbeats` | 6,254 per rig at 4 per legacy tx (5,000 + 5,000/4 + priority); 10,007 alone | 2,000,000 / hour |
-  | `end_shift` | 1,781,760 ShiftLog rent + 5,015 fee | 50,000,000 / day |
+  | `end_shift` | 1,300,480 ShiftLog rent (at mainnet's 5,080 lamports per byte) + 5,015 fee | 50,000,000 / day |
 
   A focus-only rig recorded every 3 rounds costs about 520,000 lamports per 8-hour night (~250 ORE rounds).
-- **One-time per heartbeating rig:** 4 lookup-table entries = 890,880 lamports of table rent (recoverable by
-  closing the table) + ~1,000 lamports of extend fees.
+- **One-time per heartbeating rig:** 4 lookup-table entries are 128 bytes: 650,240 lamports of table rent at
+  mainnet's 5,080 lamports per byte (read on 2026-10-04), plus ~1,000 lamports of extend fees. The table
+  itself is 934,720 lamports when created and 2,560,320 with the 10 shared accounts. The rent comes back only
+  when the table is deactivated and closed by hand.
 - **Idle miners:** the checkpoint sweep costs at most 5,000 lamports per 8 miners, once per ~8.7 h of idleness.
+
+## RPC budget
+
+What the crank asks of its RPC while nothing is happening, and which setting decides each part. Credits are
+Helius' prices as published on 2026-10-04: `getProgramAccounts` costs 10, every other call 1, WebSocket data 2
+per 0.1 MB; the free plan is 1,000,000 a month, 10 requests a second.
+
+The table is **computed from the code**, for an idle crank whose fee payer is funded: the program is
+initialized, no heartbeat, no rig with a lease, 266 ms slots and one ORE round every 75 s (1,150 a day; both
+read from mainnet on 2026-10-04), and an RPC that answers fast enough for three dig passes to fit a round.
+"Before" is commit `3a17e09` with the `deploy/railway/crank/crank.toml` of that commit.
+
+| Loop | What it asks | Setting | Before | Now, with the deployed `crank.toml` | Now, with the one-phone overrides |
+|---|---|---|---|---|---|
+| chain watcher's HTTP poll | `getSlot` + `getMultipleAccounts`; the new Round account once a round | `chain_poll_secs` (was a fixed 5 s; 15 in the deployed file) | 35,700 | 12,700 | 12,700 |
+| poller | heads_down Config, ORE's upgrade pin, two balances | `dig.config_poll_secs` (30) | 11,500 | 11,500 | 11,500 |
+| poller's rig scan, for the lookup table | 3 scans, on the polls outside the dig window (about 3 in 4) | `alt.enabled` | 65,000 | 0 | off |
+| dig passes | 3 scans + 2 calls, 3 times a round | `dig.idle_full_read_rounds` (10) | 110,000 | 3,700 | 3,700 |
+| checkpoint sweep | 1 scan every 20 rounds | `dig.checkpoint_sweep` | 600 | 600 | 600 |
+| Stack discovery | 2 scans every 30 s | `stack.enabled`, `stack.discover_secs` | 57,600 | 57,600 | off |
+| end_shift sweep | 1 scan a minute | `end_shift.enabled`, `end_shift.poll_secs` | 14,400 | 14,400 | off |
+| cleanup sweep | 2 scans + 1 call every 5 minutes | `cleanup.enabled`, `cleanup.poll_secs` | 6,000 | 6,000 | off |
+| WebSocket data | slot, Board, Treasury, ORE Config, Round | | 2,000 | 2,000 | 2,000 |
+| **credits a day** | | | **303,000** | **108,500** | **30,500** |
+
+The one-phone overrides are the six commented lines in `deploy/railway/crank/.env.example`. With them an
+idle crank uses about 0.9 million credits in 30 days: the free plan carries it, with little left for the
+nights and nothing for another service on the same key. Three more settings lower it, each at a price:
+
+- `dig.config_poll_secs = 120` saves 8,600 a day. An ORE upgrade then trips the breaker up to 2 minutes
+  later, a paused or changed heads_down Config is noticed that much later between dig passes (a dig pass that
+  reads still reads the Config itself), and funding the fee payer is noticed that much later.
+- `chain_poll_secs = 20` saves 2,900 a day; see below for what the poll is for.
+- `dig.idle_full_read_rounds = 50` saves 2,900 a day. Only a rig whose heartbeat another crank applied waits
+  for that read.
+
+**A night with a phone is not idle.** While a heartbeat is held, or a lease runs, every dig pass reads
+(96 credits a round), and the record pass scans once a round (30) while a heartbeat is held. Computed, not
+measured: one phone heads down for 8 hours (384 rounds) adds about 50,000 credits to the idle figure. Thirty
+such nights are more than the free plan.
+
+**An unfunded fee payer.** Before, a crank with lookup tables on and nothing in its fee payer sent a create
+every 45 s or so and polled each one until its blockhash expired. Now it asks three calls once (two rents,
+one balance), logs one warning, and asks nothing more about tables until the balance is there.
+
+### Measured
+
+Each run is the release binary for 12 minutes with a new, never funded key and the Railway `crank.toml`,
+against a loopback stub that counts calls by method, forwards reads to `https://api.mainnet-beta.solana.com`
+and answers `sendTransaction` itself, so no transaction left the machine. The WebSocket went to the public
+endpoint directly. Mainnet had no heads_down program on that day, and the fee payer was empty, so these runs
+are the "program not deployed, crank not funded" case, not the table above. Run on 2026-10-04; credits are the
+calls at the prices above, without the WebSocket data.
+
+| Run (720 s each) | Calls | of them `getProgramAccounts` | `sendTransaction` | Credits | Calls a day | Credits a day |
+|---|---|---|---|---|---|---|
+| before (`3a17e09`), the `crank.toml` of that commit | 1,158 | 115 | 133 | 2,193 | 138,900 | 263,000 |
+| before, with the six one-phone overrides | 450 | 46 | 0 | 864 | 54,000 | 103,600 |
+| now, the deployed `crank.toml` | 269 | 62 | 0 | 827 | 32,300 | 99,200 |
+| now, with the six one-phone overrides | 207 | 7 | 0 | 270 | 24,800 | 32,400 |
+
+What the runs show:
+
+- The old binary sent 16 lookup-table creates in its 12 minutes from a fee payer that held nothing (133
+  `sendTransaction` calls with the rebroadcasts) and asked for their status 271 times. The new one sent nothing:
+  it logged the `lookup_table_unfunded` warning once and `hd_crank_lookup_tables_total{event="low_balance"}`
+  stayed at 1.
+- The new binary made 26 and 27 dig passes and read the chain in 2 of them (`hd_crank_dig_passes_total`:
+  `first` 2, `skipped` 24 and 25). It would have been 1: in both runs the first pass failed on a connection
+  error between the crank and the stub, and a pass that fails is repeated.
+- `/healthz` answered 200 at every one of the 48 checks of each run, also with `chain_poll_secs = 15`.
+
+A call through the stub took about 0.9 s from the machine used (the poller, which sleeps 30 s after its four
+calls, turned every 34 s). Every loop that sleeps after its work therefore ran slower than it would next to its
+RPC, and the old binary fitted fewer dig passes into a round and polled its creates slower: all four rows are
+lower than the same binaries would use on Railway, the two "before" rows by more. A run of 12 minutes also
+holds the start (one full read, and the lookup-table check) and at most one periodic read. The WebSocket
+figure in the table above is from a separate 10-minute run of the same five subscriptions on the public
+endpoint: 0.71 MB, which is 102 MB and 2,050 credits a day.
+
+### The settings
+
+- `chain_poll_secs` (top level, default 5, 1 to 20). The WebSocket delivers every slot and every change of
+  the accounts the crank watches. The HTTP poll re-reads the same things, for a stream that stalled without
+  closing: the stream is given 30 s of silence before it is reopened, and until then the poll is all the
+  crank sees. Two things bound it. `/healthz` reports `degraded` when the slot is older than 30 s, and a poll
+  may take the 10 s RPC timeout to answer: above 20 s a crank whose polls all succeed could still report
+  stale, so the crank refuses such a value at start. And a dig window is under 5 s long at today's slot time:
+  with the stream stalled, a 5 s poll falls into most windows and a 15 s poll into about one in three
+  (computed from the window's length, not tested). That is the price of the 23,000 calls a day the deployed
+  file saves.
+- `dig.idle_full_read_rounds` (default 10, `0` = every pass reads): see "Idle rounds" above.
+- `HELIUS_API_KEY` set but empty stops the crank at start with `HELIUS_API_KEY is set to an empty value`
+  (it used to say `unexpected characters`).
 
 ## Threat model
 
@@ -406,6 +543,12 @@ binary), the Nostr mirror hook, phones posting their own messages.
   `hd_crank_record_dark_rounds_total`, `hd_crank_record_skipped_total{reason}`, `hd_crank_record_fees_lamports_total`);
   end_shift (`hd_crank_shifts_ended_total`, `hd_crank_end_shift_failed_total{stage}`,
   `hd_crank_end_shift_lamports_total`); chain, breaker and balances as before.
+  `hd_crank_dig_passes_total{why}` counts the dig passes by why they read the chain (`first`, `heartbeat`,
+  `lease`, `recent`, `periodic`, `always`) and the ones that read nothing (`skipped`).
+  `hd_crank_lookup_tables_total{event}` counts lookup-table maintenance: `created`, `extended`,
+  `create_failed`, `extend_failed`, `low_balance` (the fee payer could not pay; nothing was sent) and
+  `state_file` (the state file could not be written). The last two and `create_failed` are worth an alert.
+  `hd_crank_rigs_seen` and `hd_crank_rigs_eligible` are those of the last pass that read the chain.
 
 ## Tests
 
@@ -430,16 +573,18 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| unit (`src/**`) | 65 | layouts and pins, the v1.1 Rig fields, lease grants equal to the program's, events 1..=10 and the tag-4/10 dedupe, error names, budget and week roll equal to the program's, held squares and `k`, ack-code mapping, signal hub idempotency / budget / queue, config, rate limiter, ALT, breaker, watcher, RPC transaction parsing |
-| `tests/golden.rs` | 6 | every builder against `programs/heads-down/vectors/`: `dig` (3 vectors, PDAs re-derived), `record_heartbeats`, `break_shift` / `freeze_rig` P-256, `end_shift` (both callers), all precompile data rebuilt byte for byte, all 5 messages, every event sample and skip-code name |
+| unit (`src/**`) | 120 | layouts and pins, the v1.1 Rig fields, lease grants equal to the program's, events 1..=10 and the tag-4/10 dedupe, error names, budget and week roll equal to the program's, held squares and `k`, ack-code mapping, signal hub idempotency / budget / queue, config (every setting's variable, the bound on `chain_poll_secs`, the Railway `crank.toml` and the overrides named in its `.env.example`), rate limiter, ALT (the state file, the backoff schedule), the idle decision table, breaker, watcher, RPC transaction parsing |
+| `tests/golden.rs` | 11 | every builder against `programs/heads-down/vectors/`: `dig` (3 vectors, PDAs re-derived), `record_heartbeats`, `break_shift` / `freeze_rig` P-256, `end_shift` (both callers), all precompile data rebuilt byte for byte, all 5 messages, every event sample and skip-code name |
 | `tests/vectors.rs` | 6 | preimages, digests and `ema_ev` against an independent Python implementation |
 | `tests/p256_verify.rs` | 7 | OpenSSL-made signatures (low and high S), wrong key, wrong message, r/s = 0 or n, tampering, replay, unknown rig fetched once, cache refresh after re-arm and key rotation, contract-A JSON |
 | `tests/packing.rs` | 7 | every batch under its limit and maximal; entries point at the right precompile entry; the real Agave precompile verifies crank-built data; one tampered signature sinks the tx |
-| `tests/planner.rs` | 14 | every skip reason at its boundary; the fee inside every cap; held squares and the first-deploy fee; Cooling; week rollover; checkpoint prepending; tile prediction; the record planner (due, extension, window, state, gate-closed opt-in) |
-| `tests/intake.rs` | 9 | real sockets: contract-A acks for heartbeats, BREAK and FREEZE (idempotent, stale, reasons, shift, state), decimal strings, unknown fields, legacy spellings, `/v1/heartbeats`, signal budget and disable, per-IP / per-rig limits, size and connection caps, `/healthz`, `/metrics` |
+| `tests/planner.rs` | 15 | every skip reason at its boundary; the fee inside every cap; held squares and the first-deploy fee; Cooling; week rollover; checkpoint prepending; tile prediction; the record planner (due, extension, window, state, gate-closed opt-in) |
+| `tests/intake.rs` | 14 | real sockets: contract-A acks for heartbeats, BREAK and FREEZE (idempotent, stale, reasons, shift, state), decimal strings, unknown fields, legacy spellings, `/v1/heartbeats`, signal budget and disable, per-IP / per-rig limits, size and connection caps, `/healthz`, `/metrics` |
 | `tests/litesvm_alt.rs` | 2 | ALT create/extend against the real ALT program |
+| `tests/lookup_tables.rs` | 15 | the crank's table maintenance through a JSON-RPC stub backed by LiteSVM (the real ALT program executes what the crank sends): an empty fee payer sends nothing and is asked about once; a create that does not land is retried after 60, 120, ... 3,600 s, across restarts; a failed read at start, a create or an extend that landed unseen, a node that lags, a state file that cannot be written or understood, each without a second table or a doubled entry; `max_tables`; a pinned table; and 12 seeded sequences of 100 random faults, checked after every step |
+| `tests/idle_passes.rs` | 6 | the dig pass and the poller against the same stub, counting calls: one read at start and one per `idle_full_read_rounds` while idle; every pass reads while a heartbeat is held, while a known lease runs and for 4 rounds after; a lease another crank made is seen at the periodic read; what a pass leaves behind (rig list, intake cache, Config) with and without a heads_down Config; the poller's rig scan stops while idle or unfunded |
 | `tests/fork.rs` (`fork`, mock) | 4 | live ORE: plan → pack → v0 + table → land; masks equal predictions; squares and debits exact; reimbursement; replay skipped; stale checkpoint aborts; wrong-shift heartbeat skipped with the p256 code; forged signature sinks the batch; Cooling; v1 and legacy land |
-| `tests/fork.rs` (`real-program`) | 9 | the 4 above against the real program, plus BREAK / FREEZE landed (Cooling → Broken → Frozen, stale resubmission refused), focus-only `record_heartbeats` (9 rigs, 3 batches, dark rounds on-chain), permissionless `end_shift` (rent, V2 event, refused while the lease lives), `replay` → `StaleHeartbeat`, and the cost table above |
+| `tests/fork.rs` (`real-program`) | 14 | the 4 above against the real program, plus BREAK / FREEZE landed (Cooling → Broken → Frozen, stale resubmission refused), focus-only `record_heartbeats` (9 rigs, 3 batches, dark rounds on-chain), permissionless `end_shift` (rent, V2 event, refused while the lease lives), `replay` → `StaleHeartbeat`, the cost table above, and the 5 Stack, Focus Bond and gift tests of `tests/real/skr_suite.rs` |
 | `tests/e2e_validator.rs` (`e2e`) | 1 | validator + live ORE + the binary's wiring: WS watcher, contract-A intake, table creation, simulate-sized CU, 3 rigs dug in one tx; with `real-program` also a BREAK and a FREEZE landed through the intake, a focus-only heartbeat recorded and a stale shift sealed |
 
 ## Features and stubs
@@ -465,6 +610,28 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   crank operator opts in (and pays for it).
 - Heartbeats, signal tracking and the ledger live in memory: a restart loses held heartbeats until phones send the
   next one (one round); on-chain counters keep everything idempotent.
+- **Lookup tables are never closed by the crank**, and a lost state directory still costs a table: without
+  `lookup_tables.json` (and without the table pinned in `alt.tables`) a restarted crank cannot know it owns one
+  and creates another. The first stays on chain with its rent until someone closes it by hand. Keep
+  `state_dir` on a volume, or pin the table.
+- The reads that guard the tables use `minContextSlot` and `getEpochInfo`. An RPC provider that rejects
+  `minContextSlot` makes those reads fail: the crank then digs without its table and logs the failed sync. One
+  that silently ignores it leaves only the 150-block margin against a node that lags. Checked by hand against
+  the public mainnet RPC on 2026-10-04 (it answers both as the crank expects, and refuses a slot it has not
+  reached with error -32016); not checked against Helius.
+- The state file holds the slot of the crank's last lookup-table transaction, and the tables are read from a
+  node that has reached it. A `state_dir` kept across a ledger reset (a local validator started anew) therefore
+  stops the table work, with `reading the lookup tables (as of slot N or later)` in the log, until
+  `lookup_tables.json` is removed. `scripts/devstack/up.sh` removes it together with the ledger. (Not run
+  against a validator: it is the lagging-node case of `tests/lookup_tables.rs` with a node that never catches
+  up.)
+- A crank that restarts while the wait after a failed lookup-table transaction runs reads its tables once, at
+  start. If that read fails, the next one comes when the wait is over (at most 1 hour); until then digs go
+  without the table, so fewer rigs fit a transaction.
+- A round with a phone heads down still costs three full dig passes (96 Helius credits) and one record scan
+  (30): the passes read every Armed, Down and Cooling rig of the program, not only the ones that heartbeat.
+- With the WebSocket stalled the crank sees the chain once per `chain_poll_secs`, and at 15 s it misses most
+  dig windows until the stream is reopened (30 s of silence). Not measured.
 - `hd_crank_fees_lamports_total`, `hd_crank_signal_fees_lamports_total` and `hd_crank_record_fees_lamports_total`
   read the fee from `getTransaction` after the landing (5 tries, about 4 s), so they can lag the landed counters
   and miss a transaction the RPC never returns. The lamport budgets are unaffected: they are debited with the
