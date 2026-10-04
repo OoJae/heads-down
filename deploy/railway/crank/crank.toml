@@ -101,5 +101,7 @@ auto_create = true                 # only when the fee payer can pay for it; a f
 auto_extend = true
 # One table holds 61 rigs. Its rent comes back only by closing it by hand: 2,560,320 lamports
 # with the 10 shared accounts, 650,240 more per rig, 42,550,080 when full. A second table would
-# be more than this balance can carry.
+# be more than this balance can carry. The table named in /data/hd-crank/lookup_tables.json
+# counts whether or not the chain still shows it: after closing it by hand, remove that file,
+# or the crank creates no other.
 max_tables = 1

@@ -292,6 +292,9 @@ struct AltRuntime {
     short_of: Option<u64>,
     /// The state file could not be written (one error line until a write works again).
     unsaved: bool,
+    /// `alt.max_tables` kept the crank from creating a table while one it created is not on
+    /// chain (one warning per process).
+    limit_logged: bool,
 }
 
 /// Unix seconds, for the lookup-table backoff.
@@ -704,7 +707,7 @@ impl Crank {
     /// short, or the wait after a failed transaction runs) and while the crank is idle, as a
     /// dig pass would be (see [`crate::idle`]). The sync of every new round still runs.
     fn rig_scan_due(&self, round: Option<u64>) -> bool {
-        if self.alt_short() || !lock(&self.alt_state).saved.retry.due(self.now_unix()) {
+        if self.alt_short() || !self.alt_retry_due() {
             return false;
         }
         round.is_none_or(|r| !matches!(self.pass_for(r), Pass::Skip | Pass::Periodic))
@@ -1405,10 +1408,43 @@ impl Crank {
         lock(&self.alts).iter().filter(|t| t.authority == Some(me)).count()
     }
 
-    /// Room for one more table: no create may still land, and the crank owns fewer than
-    /// `alt.max_tables`.
+    /// The tables that count against `alt.max_tables`: those the chain shows with this crank
+    /// as their authority, and those the state file says this crank created, whether or not
+    /// the last read shows them. A read is never taken as proof that a table is gone: each
+    /// one locks rent, and only the operator knows that one was closed.
+    fn tables_counted(&self) -> usize {
+        let me = self.cranker();
+        let mut keys: HashSet<Address> = lock(&self.alts).iter().filter(|t| t.authority == Some(me)).map(|t| t.key).collect();
+        keys.extend(lock(&self.alt_state).saved.tables.iter().copied());
+        keys.len()
+    }
+
+    /// Room for one more table: no create may still land, and fewer than `alt.max_tables`
+    /// count ([`Self::tables_counted`]).
     fn table_slot_free(&self) -> bool {
-        lock(&self.alt_state).saved.pending.is_empty() && self.owned_tables() < self.cfg.alt.max_tables
+        lock(&self.alt_state).saved.pending.is_empty() && self.tables_counted() < self.cfg.alt.max_tables
+    }
+
+    /// The crank owns no table and may not create one. When that is because the state file
+    /// names tables the chain does not show under this crank's key, say so once: they were
+    /// closed by hand, the key was changed, or the read is wrong, and the crank cannot tell
+    /// which.
+    fn note_table_limit(&self) {
+        let mut st = lock(&self.alt_state);
+        if st.saved.tables.is_empty() || !st.saved.pending.is_empty() || std::mem::replace(&mut st.limit_logged, true) {
+            return;
+        }
+        let tables: Vec<String> = st.saved.tables.iter().map(ToString::to_string).collect();
+        self.metrics.lookup_tables.inc("limit");
+        tracing::warn!(
+            alert = "lookup_table_not_on_chain",
+            file = %self.state_file().display(),
+            tables = %tables.join(","),
+            max_tables = self.cfg.alt.max_tables,
+            "the state file names lookup tables this crank created that the chain does not show with this crank as their authority, \
+             and alt.max_tables allows no other: no table is created. Digs go on without a table of the crank's own (fewer rigs fit a transaction). \
+             If they were closed by hand, or the fee payer's key was changed, remove them from the state file (or remove the file) and restart"
+        );
     }
 
     /// Read the state file, once: the tables this crank created, the creates that may still
@@ -1434,14 +1470,23 @@ impl Crank {
     }
 
     /// Write the state file: to a temporary file first, then renamed over the old one, so a
-    /// crash cannot leave half a file.
+    /// crash cannot leave half a file. The file is synced before the rename, and the
+    /// directory after it (best effort): the address of a table is on the disk, not in a
+    /// cache, when its create is sent.
     fn persist_alts(&self) -> std::io::Result<()> {
+        use std::io::Write;
         let text = lock(&self.alt_state).saved.to_json();
         std::fs::create_dir_all(&self.cfg.state_dir)?;
         let path = self.state_file();
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, &path)
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, &path)?;
+        if let Ok(dir) = std::fs::File::open(&self.cfg.state_dir) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
     }
 
     /// [`Self::persist_alts`], with one error line when it fails and one line when it works
@@ -1535,6 +1580,16 @@ impl Crank {
             self.save_alts();
         }
         Ok(())
+    }
+
+    /// Is the wait after a failed lookup-table transaction over? The wait is held to its cap
+    /// each time it is looked at: a system clock that was set back while the crank runs
+    /// cannot stretch it past [`alt::RETRY_MAX_SECS`].
+    fn alt_retry_due(&self) -> bool {
+        let now = self.now_unix();
+        let mut st = lock(&self.alt_state);
+        st.saved.retry = st.saved.retry.restored(now);
+        st.saved.retry.due(now)
     }
 
     /// The fee payer was short for the last lookup-table transaction and, by the poller's
@@ -1729,24 +1784,34 @@ impl Crank {
     /// Make sure the crank's tables hold the shared accounts and every known rig's four.
     ///
     /// A table locks rent that only comes back by closing it by hand, so this never guesses.
-    /// It does nothing while the wait after a failed transaction runs or while the fee payer
+    /// It sends nothing while the wait after a failed transaction runs or while the fee payer
     /// is known to be short. It reads the tables before deciding, at start and again after
-    /// every transaction it sent. And it creates a table only when the crank owns none, no
-    /// create may still land, `alt.max_tables` allows one and the fee payer can pay for it.
+    /// every transaction it sent; a read sends nothing, so it is not held back by the wait.
+    /// And it creates a table only when the crank owns none, no create may still land,
+    /// `alt.max_tables` allows one and the fee payer can pay for it.
     pub async fn sync_alts(&self) -> anyhow::Result<()> {
         // The poller and new-round maintenance both sync; never interleave (double creates).
         let _guard = self.alt_sync.lock().await;
         self.read_alt_state()?;
-        if !lock(&self.alt_state).saved.retry.due(self.now_unix()) || self.alt_short() {
-            return Ok(());
-        }
         if !lock(&self.alt_state).loaded {
             self.load_alts().await?;
         }
+        if !self.alt_retry_due() || self.alt_short() {
+            return Ok(());
+        }
         let c = &self.cfg.alt;
         let me = self.cranker();
-        if self.owned_tables() == 0 && (!c.auto_create || !self.table_slot_free() || !self.create_alt_if_funded().await?) {
-            return Ok(());
+        if self.owned_tables() == 0 {
+            if !c.auto_create {
+                return Ok(());
+            }
+            if !self.table_slot_free() {
+                self.note_table_limit();
+                return Ok(());
+            }
+            if !self.create_alt_if_funded().await? {
+                return Ok(());
+            }
         }
         if !c.auto_extend {
             return Ok(());
@@ -1781,9 +1846,9 @@ impl Crank {
                 }
                 // Not funded: nothing was sent, and what is in memory is still right.
                 Ok(None) => return Ok(()),
-                // It may or may not have landed: nothing more is sent now, and the tables are
-                // read again when the wait is over (a second extend with the same addresses
-                // would pay their rent twice).
+                // It may or may not have landed: nothing more is sent until the wait is over,
+                // and the tables are read again before that (a second extend with the same
+                // addresses would pay their rent twice).
                 Ok(Some(other)) => {
                     tracing::warn!(%table, outcome = ?other, "extend failed");
                     self.alt_failed("extend_failed");
@@ -1796,7 +1861,7 @@ impl Crank {
             }
         }
         if !overflow.is_empty() && c.auto_create {
-            let owned = self.owned_tables();
+            let owned = self.tables_counted();
             if owned >= c.max_tables {
                 tracing::warn!(owned, max = c.max_tables, "lookup tables full; new rigs use static keys");
             } else if self.table_slot_free() {

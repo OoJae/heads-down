@@ -17,8 +17,10 @@ mod rpc_stub;
 use common::Phone;
 use hd_crank::alt;
 use hd_crank::hd::{self, HdConfig, HeartbeatFields, Rig, RigAccounts, RigState};
+use hd_crank::heartbeat::{ParsedHeartbeat, Reject, RigCache, Verifier};
 use hd_crank::idle::{Pass, AWAKE_ROUNDS};
 use hd_crank::ore;
+use hd_crank::rpc::{RpcClient, RpcRigSource};
 use rpc_stub::{view, Bench, Process};
 use solana_address::Address;
 
@@ -286,6 +288,157 @@ async fn what_a_pass_leaves_behind_is_kept_whether_or_not_the_program_has_a_conf
         p.crank.record_pass(&view(9_001, 200)).await.unwrap();
         assert_eq!(b.stub.lock().total(), calls, "no heartbeat held: the record pass asks nothing");
     }
+}
+
+/// The intake's checks as the binary wires them (a rig cache in front of the RPC), with
+/// `fetches_per_second` rig lookups a second at most.
+fn intake_verifier(b: &Bench, p: &Process, fetches_per_second: f64) -> Verifier<RpcRigSource> {
+    let rpc = RpcClient::new(b.stub.url.clone(), "confirmed", std::time::Duration::from_secs(5)).unwrap();
+    Verifier {
+        program_id: hd::PROGRAM_ID,
+        rigs: RigCache::new(
+            RpcRigSource { rpc, program_id: hd::PROGRAM_ID },
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(30),
+            1_000,
+            fetches_per_second,
+        ),
+        store: p.store.clone(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_first_heartbeat_after_an_idle_stretch_costs_one_rig_lookup_and_is_planned_in_its_round() {
+    let b = Bench::new().await;
+    initialize(&b);
+    let p = b.start(b.config());
+    let r = 6_500;
+    // Idle since start: one pass read (there was no rig), and nothing was read after it.
+    assert_eq!(kinds(&round_of(&p, r).await), [Pass::First, Pass::Skip, Pass::Skip]);
+    assert_eq!(kinds(&round_of(&p, r + 1).await), [Pass::Skip; 3]);
+    assert!(p.seeded.lock().unwrap().is_empty(), "no pass has handed the intake a rig");
+
+    // A phone arms its rig and sends its first heartbeat. The idle crank has not read the
+    // rig, so the intake looks it up: one getAccountInfo, and the heartbeat is held.
+    let (rig_addr, _, phone) = arm_rig(&b, 7);
+    let fields = HeartbeatFields { counter: 1, shift_id: 1, round_id: r + 2, lease_rounds: 1 };
+    let frame = ParsedHeartbeat { rig: rig_addr, fields, sig: phone.sign_raw(&hd::PROGRAM_ID, &rig_addr, &fields) };
+    let intake = intake_verifier(&b, &p, 50.0);
+    let lookups = b.stub.lock().count("getAccountInfo");
+    intake.process(&frame, Some(r + 2)).await.expect("the heartbeat verifies against the rig just read");
+    assert_eq!(b.stub.lock().count("getAccountInfo"), lookups + 1);
+    // Every pass of the round it arrived in reads, and the rig reaches the planner: no round
+    // is lost to the idle stretch before it.
+    assert_eq!(kinds(&round_of(&p, r + 2).await), [Pass::Heartbeat; 3]);
+    assert_eq!(p.metrics.digs_skipped.get("no_automation"), 3);
+    assert!(p.seeded.lock().unwrap().contains(&rig_addr), "and those passes hand the rig to the intake's cache");
+
+    // With one lookup a second (the one-phone overrides) a frame that names a made-up rig
+    // can take the lookup first: the phone's frame is then refused as busy, which it is told
+    // as rate_limited, and no call is made for it.
+    let (other_addr, other_rig, other_phone) = arm_rig(&b, 8);
+    let other_fields = HeartbeatFields { counter: 1, shift_id: 1, round_id: r + 2, lease_rounds: 1 };
+    let other = ParsedHeartbeat { rig: other_addr, fields: other_fields, sig: other_phone.sign_raw(&hd::PROGRAM_ID, &other_addr, &other_fields) };
+    let slow = intake_verifier(&b, &p, 1.0);
+    let made_up = ParsedHeartbeat { rig: Address::new_from_array([0x5A; 32]), ..frame };
+    assert_eq!(slow.process(&made_up, Some(r + 2)).await, Err(Reject::UnknownRig));
+    let lookups = b.stub.lock().count("getAccountInfo");
+    assert_eq!(slow.process(&other, Some(r + 2)).await, Err(Reject::Busy));
+    assert_eq!(Reject::Busy.ack_code(), "rate_limited");
+    assert_eq!(b.stub.lock().count("getAccountInfo"), lookups);
+    // Once a pass that read has put the rig in the cache (what the crank's passes do while a
+    // heartbeat is held), the same frame needs no lookup.
+    slow.rigs.insert(other_addr, other_rig);
+    slow.process(&other, Some(r + 2)).await.expect("accepted from the cache");
+    assert_eq!(b.stub.lock().count("getAccountInfo"), lookups);
+}
+
+/// Dig passes the running loop has made so far, whatever each of them did.
+fn passes_made(p: &Process) -> u64 {
+    Pass::ALL.iter().map(|k| p.metrics.dig_passes.get(k.label())).sum()
+}
+
+/// Show the running loop the chain at `round`, `slots_left` before its end, and wait until it
+/// has made `passes` dig passes and asked the stub `calls` calls in all (both since start).
+async fn shown(b: &Bench, p: &Process, round: u64, slots_left: u64, passes: u64, calls: u64) {
+    p.chain.send_replace(view(round, slots_left));
+    let t0 = std::time::Instant::now();
+    loop {
+        let (made, asked) = (passes_made(p), b.stub.lock().total());
+        if (made, asked) == (passes, calls) {
+            break;
+        }
+        assert!(
+            made <= passes && asked <= calls && t0.elapsed() < std::time::Duration::from_secs(10),
+            "round {round}, {slots_left} slots left: {made} passes and {asked} calls, expected {passes} and {calls}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    // Nothing more follows: the loop wakes again within 400 ms and must find nothing to do.
+    tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+    assert_eq!((passes_made(p), b.stub.lock().total()), (passes, calls), "round {round}, {slots_left} slots left");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_running_loop_reads_at_start_rests_while_idle_and_wakes_for_a_heartbeat() {
+    // The loop itself (`Crank::run`), not a pass called by hand. Only the dig loop and the
+    // poller's first turn ask the stub anything: every other duty is off.
+    let b = Bench::new().await;
+    initialize(&b);
+    let (rig_addr, rig, phone) = arm_rig(&b, 6);
+    let mut cfg = b.config();
+    cfg.alt.enabled = false;
+    cfg.stack.enabled = false;
+    cfg.end_shift.enabled = false;
+    cfg.cleanup.enabled = false;
+    cfg.record.enabled = false;
+    cfg.dig.checkpoint_sweep = false;
+    cfg.dig.config_poll_secs = 3_600;
+    let p = b.start(cfg);
+    let running = tokio::spawn(p.crank.clone().run());
+    let r = 7_500;
+    // A pass that reads asks five calls: three scans, the ORE accounts, the block height.
+    // The poller's first turn asks four (the Config, ORE's upgrade pin, two balances).
+    const POLL: u64 = 4;
+    const READ: u64 = 5;
+    // Outside the dig window nothing is planned.
+    shown(&b, &p, r, 100, 0, POLL).await;
+    // The first pass after start reads, although nothing is held. The round's other two do not.
+    shown(&b, &p, r, 20, 1, POLL + READ).await;
+    shown(&b, &p, r, 14, 2, POLL + READ).await;
+    shown(&b, &p, r, 8, 3, POLL + READ).await;
+    assert_eq!((p.metrics.dig_passes.get("first"), p.metrics.dig_passes.get("skipped")), (1, 2));
+    assert_eq!(p.seeded.lock().unwrap().as_slice(), [rig_addr], "the intake's rig cache was seeded by the pass that read");
+
+    // The next round. A heartbeat arrives and is applied before the dig window opens (as a
+    // record or a Stack check-in does): the store is empty again, and the rig holds a lease
+    // that the crank's rig list, read a round ago, does not show.
+    shown(&b, &p, r + 1, 100, 3, POLL + READ).await;
+    let hb = phone.verified(&hd::PROGRAM_ID, &rig_addr, HeartbeatFields { counter: 1, shift_id: 1, round_id: r + 1, lease_rounds: 1 });
+    assert_eq!(p.store.offer(hb), hd_crank::heartbeat::Offer::Stored);
+    p.store.remove_if_counter_at_most(&rig_addr, 1);
+    let leased = Rig { state: RigState::Down, hb_counter: 1, lease_from_round: r + 1, lease_to_round: r + 1, ..rig.clone() };
+    b.stub.lock().set(rig_addr, hd::PROGRAM_ID, 2_600_960, leased.encode());
+    // Every pass of that round reads: the first because a heartbeat was held in the round,
+    // the others because the list now shows the lease.
+    shown(&b, &p, r + 1, 20, 4, POLL + 2 * READ).await;
+    shown(&b, &p, r + 1, 14, 5, POLL + 3 * READ).await;
+    shown(&b, &p, r + 1, 8, 6, POLL + 4 * READ).await;
+    assert_eq!((p.metrics.dig_passes.get("recent"), p.metrics.dig_passes.get("lease")), (1, 2));
+    assert_eq!(p.metrics.digs_skipped.get("no_automation"), 3, "the rig reached the planner in all three");
+    // The lease is over, and the crank stays awake for the rounds after it.
+    shown(&b, &p, r + 2, 20, 7, POLL + 5 * READ).await;
+    shown(&b, &p, r + 2, 14, 8, POLL + 6 * READ).await;
+    shown(&b, &p, r + 2, 8, 9, POLL + 7 * READ).await;
+    assert_eq!(p.metrics.dig_passes.get("recent"), 4);
+    // Past the awake rounds it rests again, until the periodic read (10 rounds after the last).
+    shown(&b, &p, r + 1 + AWAKE_ROUNDS + 1, 20, 10, POLL + 7 * READ).await;
+    shown(&b, &p, r + 1 + AWAKE_ROUNDS + 1, 14, 11, POLL + 7 * READ).await;
+    shown(&b, &p, r + 11, 20, 12, POLL + 7 * READ).await;
+    shown(&b, &p, r + 12, 20, 13, POLL + 8 * READ).await;
+    shown(&b, &p, r + 12, 14, 14, POLL + 8 * READ).await;
+    assert_eq!((p.metrics.dig_passes.get("periodic"), p.metrics.dig_passes.get("skipped")), (1, 6));
+    running.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

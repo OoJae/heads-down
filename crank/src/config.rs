@@ -54,9 +54,11 @@ pub const ENV_ALIASES: [(&str, &str); 2] =
     [("HD_CRANK_KEYPAIR", "HD_CRANK_KEYPAIR_PATH"), ("HD_CRANK_TX_FORMAT", "HD_CRANK_DIG_TX_FORMAT")];
 /// Largest `chain_poll_secs`. When the WebSocket goes silent the HTTP poll is the only thing
 /// that moves the slot, and `/healthz` reports `degraded` once the slot is older than
-/// [`crate::intake::STALE_CHAIN_AFTER`] (30 s). A poll may take the whole
-/// [`crate::rpc::RPC_TIMEOUT`] (10 s) to answer, so with an interval of 20 s or less the slot
-/// stays inside 30 s as long as the polls succeed.
+/// [`crate::intake::STALE_CHAIN_AFTER`] (30 s). With an interval of 20 s or less the slot
+/// stays inside 30 s as long as every poll answers within [`crate::rpc::RPC_TIMEOUT`] (10 s)
+/// in all. A poll is two calls, each with that timeout: an RPC so slow that the two take
+/// longer together, or a poll that fails, can still show as `degraded` until the next poll
+/// that works (at 15 s, one failed poll is enough).
 pub const MAX_CHAIN_POLL_SECS: u64 = crate::intake::STALE_CHAIN_AFTER.as_secs() - crate::rpc::RPC_TIMEOUT.as_secs();
 
 /// Top-level config.
@@ -689,7 +691,9 @@ pub struct AltConfig {
     /// Extend tables with shared and per-rig accounts as rigs appear.
     pub auto_extend: bool,
     /// Tables the crank will own at most, the first one included (256 addresses each; 0 =
-    /// create none). The operator pays the rent and gets it back only by deactivating and
+    /// create none). A table the state file says this crank created counts whether or not
+    /// the chain still shows it: after closing one by hand, remove it from the state file.
+    /// The operator pays the rent and gets it back only by deactivating and
     /// closing the table by hand: on mainnet today (5,080 lamports per byte) 934,720 lamports
     /// for an empty table, 2,560,320 with the 10 shared accounts, 650,240 more per rig, and
     /// 42,550,080 for a full one.
@@ -1104,8 +1108,9 @@ mod tests {
 
     #[test]
     fn the_chain_poll_interval_keeps_a_polled_slot_fresh() {
-        // The bound is what /healthz and the RPC timeout leave: a poll that takes the whole
-        // timeout to answer still moves the slot before it counts as stale.
+        // The bound is what /healthz and the RPC timeout leave: a poll that takes one whole
+        // timeout to answer (both of its calls together) still moves the slot before it
+        // counts as stale.
         assert_eq!(MAX_CHAIN_POLL_SECS, 20);
         assert_eq!(Duration::from_secs(MAX_CHAIN_POLL_SECS) + crate::rpc::RPC_TIMEOUT, IntakeConfig::default().stale_chain_after);
         assert_eq!(IntakeConfig::default().stale_chain_after, crate::intake::STALE_CHAIN_AFTER);

@@ -93,6 +93,9 @@ pub struct Inner {
     pub lag_after_next_tx: u32,
     /// The largest `minContextSlot` a read carried.
     pub min_context_slot_seen: u64,
+    /// The node drops `minContextSlot`: while it lags it answers with older state, and only
+    /// the slot in the answer's context says so.
+    pub ignores_min_context_slot: bool,
     /// Runs when a `sendTransaction` arrives, before it is handled.
     pub on_send: Option<Box<dyn FnMut() + Send>>,
 }
@@ -172,8 +175,9 @@ impl Inner {
 
     /// One account read by a node that may lag: it catches up after `lag_reads_left` reads,
     /// and until then a read that asks for a `minContextSlot` it has not reached gets the
-    /// node's error instead of older state.
-    fn account_read(&mut self, cfg: &Value) -> Result<(), (i64, String)> {
+    /// node's error instead of older state (unless the node ignores the parameter). Returns
+    /// the slot the answer is as of: what a node puts in the answer's context.
+    fn account_read(&mut self, cfg: &Value) -> Result<u64, (i64, String)> {
         if self.lagging.is_some() {
             if self.lag_reads_left == 0 {
                 self.lagging = None;
@@ -181,13 +185,14 @@ impl Inner {
                 self.lag_reads_left -= 1;
             }
         }
-        let Some(min) = cfg["minContextSlot"].as_u64() else { return Ok(()) };
-        self.min_context_slot_seen = self.min_context_slot_seen.max(min);
         let at = if self.lagging.is_some() { self.lag_slot } else { self.slot() };
-        if min > at {
-            return Err((-32016, "Minimum context slot has not been reached".into()));
+        if let Some(min) = cfg["minContextSlot"].as_u64() {
+            self.min_context_slot_seen = self.min_context_slot_seen.max(min);
+            if min > at && !self.ignores_min_context_slot {
+                return Err((-32016, "Minimum context slot has not been reached".into()));
+            }
         }
-        Ok(())
+        Ok(at)
     }
 
     fn send(&mut self, params: &Value) -> Result<Value, (i64, String)> {
@@ -285,16 +290,16 @@ impl Inner {
                 json!(self.svm.minimum_balance_for_rent_exemption(params[0].as_u64().unwrap_or(0) as usize))
             }
             "getAccountInfo" => {
-                self.account_read(&params[1])?;
-                json!({ "context": context, "value": Self::account_json(self.reads().get_account(&address(&params[0])?)) })
+                let at = self.account_read(&params[1])?;
+                json!({ "context": { "slot": at }, "value": Self::account_json(self.reads().get_account(&address(&params[0])?)) })
             }
             "getMultipleAccounts" => {
-                self.account_read(&params[1])?;
+                let at = self.account_read(&params[1])?;
                 let mut out = Vec::new();
                 for k in params[0].as_array().into_iter().flatten() {
                     out.push(Self::account_json(self.reads().get_account(&address(k)?)));
                 }
-                json!({ "context": context, "value": out })
+                json!({ "context": { "slot": at }, "value": out })
             }
             "getProgramAccounts" => {
                 let program = address(&params[0])?;
@@ -367,6 +372,7 @@ impl Stub {
             lag_reads_left: 0,
             lag_after_next_tx: 0,
             min_context_slot_seen: 0,
+            ignores_min_context_slot: false,
             on_send: None,
         };
         inner.next_slot();

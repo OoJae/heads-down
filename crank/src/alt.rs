@@ -258,8 +258,9 @@ impl Retry {
         *self = Retry::default();
     }
 
-    /// A value read back from the state file at `now_unix`: the wait is never longer than the
-    /// cap, whatever the file says (the system clock may have been set back since).
+    /// The value as it holds at `now_unix`, when it is read back from the state file and
+    /// each time the running crank looks at it: the wait is never longer than the cap,
+    /// whatever the stamp says (the system clock may have been set back since the failure).
     pub fn restored(self, now_unix: i64) -> Self {
         Retry { failures: self.failures, not_before_unix: self.not_before_unix.min(now_unix.saturating_add(RETRY_MAX_SECS)) }
     }

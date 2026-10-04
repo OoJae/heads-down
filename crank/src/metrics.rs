@@ -87,7 +87,7 @@ pub struct Metrics {
     /// Dig passes, by why they read the chain (`skipped`: idle, nothing was read).
     pub dig_passes: LabeledCounter,
     /// Lookup-table maintenance, by what happened (`created`, `create_failed`, `extended`,
-    /// `extend_failed`, `low_balance`, `state_file`).
+    /// `extend_failed`, `low_balance`, `state_file`, `limit`).
     pub lookup_tables: LabeledCounter,
     pub heartbeats_accepted: Counter,
     pub heartbeats_rejected: LabeledCounter,

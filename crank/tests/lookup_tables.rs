@@ -121,6 +121,58 @@ async fn an_empty_fee_payer_never_sends_a_create_and_is_asked_about_once() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_syncs_at_the_same_moment_create_one_table() {
+    // The poller and the maintenance of a new round both sync the tables. Started together,
+    // the second waits for the first and then finds the table.
+    let b = Bench::new().await;
+    b.fund(SOL);
+    let p = b.start(b.config());
+    let (first, second) = tokio::join!(p.crank.sync_alts(), p.crank.sync_alts());
+    first.unwrap();
+    second.unwrap();
+    let table = the_table(&b);
+    assert_eq!(sent(&b), (1, 1));
+    assert_eq!(settled_file(&b), vec![table.key]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_running_crank_creates_one_table_though_two_of_its_loops_sync() {
+    // The crank as it runs (`Crank::run`): the poller's first turn and the maintenance of
+    // the first round both sync the tables, and every later round syncs again.
+    let b = Bench::new().await;
+    b.fund(SOL);
+    let mut cfg = b.config();
+    cfg.stack.enabled = false;
+    cfg.end_shift.enabled = false;
+    cfg.cleanup.enabled = false;
+    cfg.record.enabled = false;
+    cfg.dig.checkpoint_sweep = false;
+    let p = b.start(cfg);
+    let running = tokio::spawn(p.crank.clone().run());
+    let t0 = std::time::Instant::now();
+    let mut round = 9_500;
+    while p.metrics.lookup_tables.get("extended") < 1 {
+        assert!(t0.elapsed() < std::time::Duration::from_secs(30), "no table after 30 s: {:?}", sent(&b));
+        // Far from the dig window, a new round every 100 ms: each one syncs.
+        p.chain.send_replace(rpc_stub::view(round, 200));
+        round += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    for _ in 0..10 {
+        p.chain.send_replace(rpc_stub::view(round, 200));
+        round += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    running.abort();
+    let table = the_table(&b);
+    assert_eq!(sent(&b), (1, 1), "one create and one extend, whichever loop got there first");
+    assert_eq!(b.stub.lock().count("sendTransaction"), 2);
+    assert_eq!(keys(&p), vec![table.key]);
+    assert_eq!(settled_file(&b), vec![table.key]);
+    assert_eq!((p.metrics.lookup_tables.get("created"), p.metrics.lookup_tables.get("extended")), (1, 1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_create_that_does_not_land_is_retried_after_a_growing_wait_also_across_restarts() {
     let b = Bench::new().await;
     b.fund(10 * SOL);
@@ -132,16 +184,16 @@ async fn a_create_that_does_not_land_is_retried_after_a_growing_wait_also_across
     let mut p = b.start(b.config());
     let t0 = b.clock.load(std::sync::atomic::Ordering::SeqCst);
     let mut attempts: Vec<i64> = Vec::new();
-    let mut quiet_calls = 0;
+    let (mut quiet_calls, mut reads) = (0, 0);
     // Three hours, a sync every 10 s (the crank syncs every 30 s and at every round), and a
     // restart now and then: the wait is in the state file, not only in memory.
     for step in 0..3 * 360 {
         if step % 97 == 96 {
             p = b.start(b.config());
         }
-        let (creates, calls) = {
+        let (creates, calls, sends) = {
             let s = b.stub.lock();
-            (s.creates.len(), s.total())
+            (s.creates.len(), s.total(), s.count("sendTransaction"))
         };
         let result = p.crank.sync_alts().await;
         let now = b.clock.load(std::sync::atomic::Ordering::SeqCst) - t0;
@@ -150,8 +202,15 @@ async fn a_create_that_does_not_land_is_retried_after_a_growing_wait_also_across
             attempts.push(now);
         } else {
             assert!(result.is_ok());
-            assert_eq!(b.stub.lock().total(), calls, "nothing is asked during the wait (at {now} s)");
-            quiet_calls += 1;
+            let s = b.stub.lock();
+            assert_eq!(s.count("sendTransaction"), sends, "nothing is sent during the wait (at {now} s)");
+            match s.total() - calls {
+                0 => quiet_calls += 1,
+                // The sync after a create that was not seen to land reads the chain once (its
+                // height, and the table): the create is given up, or its table is found.
+                2 => reads += 1,
+                n => panic!("{n} calls during the wait (at {now} s): {:?}", s.calls),
+            }
         }
         b.pass(10);
     }
@@ -159,6 +218,7 @@ async fn a_create_that_does_not_land_is_retried_after_a_growing_wait_also_across
     assert_eq!(attempts[0], 0);
     assert_eq!(gaps, vec![60, 120, 240, 480, 960, 1_920, 3_600], "one attempt per wait, and the wait doubles up to an hour");
     assert_eq!(gaps, (1..=7).map(Retry::delay_secs).collect::<Vec<_>>());
+    assert_eq!(reads, attempts.len(), "one read per create that was not seen to land, and nothing else is asked during the waits");
     assert!(quiet_calls > 1_000);
     assert_eq!(b.stub.lock().count("sendTransaction"), attempts.len() as u64, "one transaction per attempt");
     assert!(on_chain(&b).is_empty());
@@ -244,6 +304,61 @@ async fn a_failed_read_at_start_never_leads_to_a_second_table() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_read_is_repeated_at_the_next_sync_even_while_a_wait_runs() {
+    let b = Bench::new().await;
+    b.fund(SOL);
+    let p = b.start(b.config());
+    p.crank.sync_alts().await.unwrap();
+    let table = the_table(&b);
+    drop(p);
+    // An hour's wait is on record (seven lookup-table transactions failed in a row), and the
+    // crank restarts while its RPC still fails.
+    let now = b.clock.load(std::sync::atomic::Ordering::SeqCst);
+    let waiting = TableState { retry: Retry { failures: 7, not_before_unix: now + alt::RETRY_MAX_SECS }, ..file(&b) };
+    std::fs::write(b.state_file(), waiting.to_json()).unwrap();
+    b.stub.lock().fail("getMultipleAccounts", 1);
+    let p = b.start(b.config());
+    assert!(p.crank.sync_alts().await.is_err(), "the read at start fails");
+    assert!(keys(&p).is_empty(), "no table to dig with yet");
+    // The next sync reads again. The table is in use an hour before the wait is over, and
+    // the wait still holds back everything that would be sent.
+    p.crank.sync_alts().await.unwrap();
+    assert_eq!(keys(&p), vec![table.key]);
+    let calls = b.stub.lock().total();
+    for _ in 0..10 {
+        p.crank.sync_alts().await.unwrap();
+        b.pass(60);
+    }
+    assert_eq!(b.stub.lock().total(), calls, "once read, nothing more is asked during the wait");
+    assert_eq!(b.stub.lock().count("sendTransaction"), 2, "the create and the extend of the first run");
+    assert_eq!(file(&b).retry, waiting.retry, "the wait is not shortened by the read");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_clock_that_is_set_back_cannot_stretch_the_wait_past_its_cap() {
+    let b = Bench::new().await;
+    b.fund(10 * SOL);
+    {
+        let mut s = b.stub.lock();
+        s.send_mode = SendMode::Drop;
+        s.height_step = 151;
+    }
+    let p = b.start(b.config());
+    assert!(p.crank.sync_alts().await.is_err(), "the create does not land: a wait of 60 s starts");
+    assert_eq!(b.stub.lock().creates.len(), 1);
+    // The system clock was a day ahead when the create failed, and is now set right. By the
+    // stamp the next attempt would be a day and a minute away.
+    b.clock.fetch_sub(86_400, std::sync::atomic::Ordering::SeqCst);
+    p.crank.sync_alts().await.unwrap();
+    b.pass(alt::RETRY_MAX_SECS - 1);
+    p.crank.sync_alts().await.unwrap();
+    assert_eq!(b.stub.lock().creates.len(), 1, "not before the longest wait there is");
+    b.pass(1);
+    assert!(p.crank.sync_alts().await.is_err());
+    assert_eq!(b.stub.lock().creates.len(), 2, "an hour after the clock was set back, the crank tries again");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_table_pinned_in_configuration_needs_no_state_file() {
     let b = Bench::new().await;
     b.fund(SOL);
@@ -294,9 +409,12 @@ async fn a_create_that_landed_without_being_seen_is_found_again() {
         if restart {
             p = b.start(b.config());
         }
-        // During the wait nothing happens. After it the table is found, used and filled.
+        // During the wait nothing is sent, but the chain is read: the table is found and in
+        // use before the wait is over. After it the table is filled.
         p.crank.sync_alts().await.unwrap();
         assert_eq!(b.stub.lock().count("sendTransaction"), 1);
+        assert_eq!(keys(&p), vec![landed[0].key], "restart: {restart}");
+        assert_eq!((file(&b).tables, file(&b).pending), (vec![landed[0].key], vec![]));
         b.stub.lock().send_mode = SendMode::Execute;
         b.pass(60);
         p.crank.sync_alts().await.unwrap();
@@ -324,16 +442,27 @@ async fn an_extend_whose_outcome_is_unknown_is_never_sent_twice() {
         p.crank.sync_alts().await.unwrap();
         assert_eq!(sent(&b), (1, 1));
         assert_eq!(p.metrics.lookup_tables.get("extend_failed"), 1);
-        // The wait: nothing is asked. A restart in the middle changes nothing.
+        // The wait: nothing is sent. The tables are read once, from a node past the extend's
+        // last valid block (its height, then the table), and after that nothing is asked.
         let calls = b.stub.lock().total();
         for _ in 0..5 {
             p.crank.sync_alts().await.unwrap();
             b.pass(10);
         }
+        let asked = b.stub.lock().total() - calls;
+        assert_eq!(asked, 2, "{second:?}");
+        let on_chain_now = if second == SendMode::Drop { 0 } else { SHARED };
+        assert_eq!(p.crank.lookup_tables()[0].addresses.len(), on_chain_now, "what the chain holds is known before the wait is over");
+        // A restart in the middle reads the table once more and sends nothing either.
         let p = b.start(b.config());
         p.crank.sync_alts().await.unwrap();
-        assert_eq!(b.stub.lock().total(), calls);
-        // After it the tables are read again before anything is sent.
+        p.crank.sync_alts().await.unwrap();
+        let (asked, sends) = {
+            let s = b.stub.lock();
+            (s.total() - calls, s.count("sendTransaction"))
+        };
+        assert_eq!((asked, sends), (3, 2), "{second:?}: one more read, and still only the create and the one extend were sent");
+        // After the wait the extend is sent again only if the chain does not hold its addresses.
         b.pass(10);
         p.crank.sync_alts().await.unwrap();
         the_table(&b);
@@ -366,6 +495,138 @@ async fn a_node_that_lags_cannot_make_the_crank_forget_or_duplicate_a_table() {
     let table = the_table(&b);
     assert_eq!(sent(&b), (1, 1));
     assert_eq!(p.crank.lookup_tables(), vec![table]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lagging_node_that_ignores_min_context_slot_is_not_believed_either() {
+    let b = Bench::new().await;
+    b.fund(SOL);
+    {
+        let mut s = b.stub.lock();
+        // The provider drops `minContextSlot`: its lagging node answers with the state before
+        // the create instead of an error. Only the slot in the answer's context gives it away.
+        s.ignores_min_context_slot = true;
+        s.lag_after_next_tx = 6;
+    }
+    let p = b.start(b.config());
+    let err = p.crank.sync_alts().await.unwrap_err().to_string();
+    assert!(err.contains("answered as of slot"), "{err}");
+    assert_eq!(keys(&p).len(), 1, "the table stays in memory: an answer older than the create is not taken for the chain");
+    // Until the node has caught up the crank keeps asking, and sends nothing.
+    let mut failed = 1;
+    while p.crank.sync_alts().await.is_err() {
+        failed += 1;
+        assert!(failed < 20);
+    }
+    assert!(failed > 1);
+    let table = the_table(&b);
+    assert_eq!(sent(&b), (1, 1), "no second create, no second extend");
+    assert_eq!(p.crank.lookup_tables(), vec![table.clone()]);
+    assert_eq!(settled_file(&b), vec![table.key]);
+    // The same after a restart: the slot of the last transaction is in the state file.
+    b.stub.lock().lag_after_next_tx = 0;
+    {
+        let mut s = b.stub.lock();
+        s.lagging = Some(Box::new(litesvm::LiteSVM::new()));
+        s.lag_reads_left = 3;
+    }
+    let p = b.start(b.config());
+    for _ in 0..3 {
+        let err = p.crank.sync_alts().await.unwrap_err().to_string();
+        assert!(err.contains("answered as of slot"), "{err}");
+    }
+    p.crank.sync_alts().await.unwrap();
+    assert_eq!(keys(&p), vec![table.key]);
+    assert_eq!(sent(&b), (1, 1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_table_the_state_file_names_counts_against_max_tables_even_if_a_read_does_not_show_it() {
+    let b = Bench::new().await;
+    b.fund(SOL);
+    let mut cfg = b.config();
+    cfg.alt.max_tables = 1;
+    let p = b.start(cfg.clone());
+    p.crank.sync_alts().await.unwrap();
+    let table = the_table(&b);
+    drop(p);
+    // The account is gone when the crank reads it: closed by hand, or an RPC that answers
+    // wrongly. The crank cannot tell which, and its one table is on record.
+    b.stub.lock().set(table.key, hd_crank::ore::SYSTEM_PROGRAM_ID, 0, Vec::new());
+    let p = b.start(cfg.clone());
+    for _ in 0..5 {
+        p.crank.sync_alts().await.unwrap();
+        b.pass(3_600);
+    }
+    assert!(keys(&p).is_empty(), "no table in use");
+    assert_eq!(b.stub.lock().creates.len(), 1, "max_tables = 1 is one table per state file, whatever a read says");
+    assert_eq!(p.metrics.lookup_tables.get("limit"), 1, "one warning that names the table, not one per sync");
+    assert_eq!(file(&b).tables, vec![table.key], "and the address is never dropped from the state file");
+    // The operator, who knows the table was closed, removes the state file: one table again.
+    std::fs::remove_file(b.state_file()).unwrap();
+    let p = b.start(cfg);
+    p.crank.sync_alts().await.unwrap();
+    assert_eq!(b.stub.lock().creates.len(), 2);
+    assert_eq!(keys(&p).len(), 1);
+    drop(p);
+    // With room for more than one table the crank replaces a table that is gone, and the
+    // one on record still counts: two of two, so a third is never created.
+    let second = on_chain(&b)[0].key;
+    b.stub.lock().set(second, hd_crank::ore::SYSTEM_PROGRAM_ID, 0, Vec::new());
+    let mut cfg = b.config();
+    cfg.alt.max_tables = 2;
+    let p = b.start(cfg.clone());
+    p.crank.sync_alts().await.unwrap();
+    assert_eq!(b.stub.lock().creates.len(), 3, "one of two on record: a second may be created");
+    let third = on_chain(&b)[0].key;
+    b.stub.lock().set(third, hd_crank::ore::SYSTEM_PROGRAM_ID, 0, Vec::new());
+    let p = b.start(cfg);
+    for _ in 0..5 {
+        p.crank.sync_alts().await.unwrap();
+        b.pass(3_600);
+    }
+    assert_eq!(b.stub.lock().creates.len(), 3, "two of two on record");
+    assert_eq!(p.metrics.lookup_tables.get("limit"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_table_on_record_under_another_key_is_read_and_counts() {
+    let b = Bench::new().await;
+    b.fund(SOL);
+    // The table an earlier fee payer created: on chain under that key, and in the state file.
+    let (old_key, table) = (Address::new_from_array([7; 32]), Address::new_from_array([8; 32]));
+    let mut data = vec![0u8; alt::LOOKUP_TABLE_META_SIZE];
+    data[0] = 1; // a lookup table
+    data[4..12].copy_from_slice(&u64::MAX.to_le_bytes()); // not deactivated
+    data[21] = 1; // it has an authority
+    data[22..54].copy_from_slice(old_key.as_ref());
+    for a in alt::shared_addresses(&hd_crank::hd::PROGRAM_ID) {
+        data.extend_from_slice(a.as_ref());
+    }
+    b.stub.lock().set(table, alt::ALT_PROGRAM_ID, 2_560_320, data);
+    std::fs::create_dir_all(b.state_dir()).unwrap();
+    std::fs::write(b.state_file(), format!(r#"{{"tables":["{table}"]}}"#)).unwrap();
+    // One table allowed: the crank reads the old one and has it for its digs, creates no
+    // other, and says so once.
+    let mut cfg = b.config();
+    cfg.alt.max_tables = 1;
+    let p = b.start(cfg);
+    for _ in 0..3 {
+        p.crank.sync_alts().await.unwrap();
+        b.pass(3_600);
+    }
+    assert_eq!(keys(&p), vec![table]);
+    assert_eq!(p.crank.lookup_tables()[0].addresses.len(), SHARED);
+    assert_eq!(b.stub.lock().count("sendTransaction"), 0, "it is not the crank's to extend, and no other is created");
+    assert_eq!(p.metrics.lookup_tables.get("limit"), 1);
+    // Two allowed: the crank creates its own beside it.
+    let mut cfg = b.config();
+    cfg.alt.max_tables = 2;
+    let p = b.start(cfg);
+    p.crank.sync_alts().await.unwrap();
+    assert_eq!(b.stub.lock().creates.len(), 1);
+    assert_eq!(keys(&p).len(), 2);
+    assert_eq!(on_chain(&b).len(), 1, "one table under the crank's own key");
 }
 
 #[cfg(unix)]
@@ -524,6 +785,9 @@ async fn chaos(seed: u64) {
         s.height_step = 151;
         // Most sequences start with a node that does not land what it is sent.
         s.send_mode = modes[rng.below(modes.len() as u64) as usize];
+        // Every other sequence runs against a provider that drops `minContextSlot`: when its
+        // node lags it answers with older state, not with an error.
+        s.ignores_min_context_slot = seed % 2 == 1;
     }
     if rng.below(4) != 0 {
         b.fund(SOL);

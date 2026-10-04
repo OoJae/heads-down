@@ -37,6 +37,28 @@ pub enum RpcError {
     /// Unexpected response shape.
     #[error("decode: {0}")]
     Decode(String),
+    /// The answer is as of a slot before the one the read asked for (`minContextSlot`).
+    #[error("answered as of slot {slot}, before slot {min} that the read asked for")]
+    Behind {
+        /// The slot in the answer's context.
+        slot: u64,
+        /// The `minContextSlot` of the request.
+        min: u64,
+    },
+}
+
+/// Is `result` (an answer with a `context`) as of `min_context_slot` or later? A node that
+/// honors `minContextSlot` never answers from before it. This is for one that does not: its
+/// answer carries the slot it is as of, and an older one is refused here.
+fn check_context_slot(result: &Value, min_context_slot: u64) -> Result<(), RpcError> {
+    if min_context_slot == 0 {
+        return Ok(());
+    }
+    match result["context"]["slot"].as_u64() {
+        Some(slot) if slot >= min_context_slot => Ok(()),
+        Some(slot) => Err(RpcError::Behind { slot, min: min_context_slot }),
+        None => Err(RpcError::Decode("context slot".into())),
+    }
 }
 
 pub use crate::redact::{redact_url, scrub};
@@ -271,7 +293,9 @@ impl RpcClient {
 
     /// [`Self::get_multiple_accounts`] answered by a node that has processed `min_context_slot`
     /// (0: any node). A node that is behind answers with an error instead of older state, so
-    /// an account written in that slot can never be reported as missing.
+    /// an account written in that slot can never be reported as missing. A provider that
+    /// drops the parameter is not trusted to: the slot in its answer's context is checked as
+    /// well, and an answer from before `min_context_slot` is an error ([`RpcError::Behind`]).
     pub async fn get_multiple_accounts_at(&self, keys: &[Address], min_context_slot: u64) -> Result<Vec<Option<RawAccount>>, RpcError> {
         let mut out = Vec::with_capacity(keys.len());
         for chunk in keys.chunks(100) {
@@ -281,6 +305,7 @@ impl RpcClient {
                 cfg["minContextSlot"] = json!(min_context_slot);
             }
             let r = self.call("getMultipleAccounts", json!([ks, cfg])).await?;
+            check_context_slot(&r, min_context_slot)?;
             let arr = r["value"].as_array().ok_or_else(|| RpcError::Decode("value".into()))?;
             if arr.len() != chunk.len() {
                 return Err(RpcError::Decode("getMultipleAccounts length".into()));
@@ -713,6 +738,24 @@ mod tests {
         assert!(FullTransaction::from_json(&bad).is_err(), "index out of range");
         let f = open_shift_filters();
         assert_eq!(f[2], Filter::Memcmp { offset: 336, bytes: vec![1] });
+    }
+
+    #[test]
+    fn an_answer_from_before_the_slot_asked_for_is_refused() {
+        let at = |slot: u64| json!({ "context": { "apiVersion": "4.3.0", "slot": slot }, "value": [] });
+        // No slot was asked for: any answer is taken, also one without a context.
+        assert!(check_context_slot(&at(5), 0).is_ok());
+        assert!(check_context_slot(&json!({ "value": [] }), 0).is_ok());
+        // The slot asked for, or a later one.
+        assert!(check_context_slot(&at(453_000_000), 453_000_000).is_ok());
+        assert!(check_context_slot(&at(453_000_001), 453_000_000).is_ok());
+        // One slot short: what a node that lags answers when it ignores `minContextSlot`.
+        let err = check_context_slot(&at(452_999_999), 453_000_000).unwrap_err();
+        assert!(matches!(err, RpcError::Behind { slot: 452_999_999, min: 453_000_000 }), "{err}");
+        assert_eq!(err.to_string(), "answered as of slot 452999999, before slot 453000000 that the read asked for");
+        // An answer that does not say what slot it is as of is not trusted either.
+        assert!(matches!(check_context_slot(&json!({ "value": [] }), 7), Err(RpcError::Decode(_))));
+        assert!(matches!(check_context_slot(&json!({ "context": { "slot": "9" }, "value": [] }), 7), Err(RpcError::Decode(_))));
     }
 
     #[test]
