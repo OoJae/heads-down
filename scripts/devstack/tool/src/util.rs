@@ -47,7 +47,10 @@ impl Default for Patience {
 /// codes and wordings are what RPC providers are known to use; they were not seen live here.
 pub fn retry_later(e: &RpcError) -> bool {
     match e {
-        RpcError::Http(_) | RpcError::Decode(_) => true,
+        // `Behind`: the node answered a read from before the slot it was asked for. It is behind,
+        // so asking again later can succeed (the same case as code -32016 from a node that
+        // honors `minContextSlot`).
+        RpcError::Http(_) | RpcError::Decode(_) | RpcError::Behind { .. } => true,
         RpcError::Rpc { code, message } => {
             let m = message.to_ascii_lowercase();
             matches!(*code, 429 | -32429 | -32004 | -32005 | -32016)
@@ -63,7 +66,8 @@ pub fn retry_later(e: &RpcError) -> bool {
 /// error page) leaves open whether a `sendTransaction` reached a node.
 pub fn refused(e: &RpcError) -> bool {
     match e {
-        RpcError::Rpc { .. } => true,
+        // `Behind` is an answer to a read, never to a send: the RPC answered, and took nothing.
+        RpcError::Rpc { .. } | RpcError::Behind { .. } => true,
         RpcError::Decode(m) => m.contains("http 429"),
         RpcError::Http(_) => false,
     }
