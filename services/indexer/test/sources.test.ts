@@ -409,12 +409,13 @@ describe("api.ore.com rounds", () => {
     const resetTx = JSON.parse(readFileSync(new URL("./fixtures/ore-reset-mainnet-v1.json", import.meta.url), "utf8"));
     chain.txs.set(resetTx.transaction.signatures[0], resetTx);
     const rpc = new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: noSleep });
-    const res = await pollOreRounds(ctx, { since: 0, maxPages: 3, verifySample: 5, fetchImpl: apiFetch(page) }, rpc);
-    expect(res).toEqual({ stored: 2, verified: 1, mismatches: 0 });
+    const res = await pollOreRounds(ctx, { since: 0, maxPages: 3, verifySample: 5, fetchImpl: apiFetch(page), sleep: noSleep }, rpc);
+    // The recorded page's two rounds, and page 1, which is empty: the whole list.
+    expect(res).toEqual({ stored: 2, verified: 1, mismatches: 0, pages: 2, newest: "422680", backTo: "2026-09-29T18:56:07.000Z", backfill: "done" });
     const rounds = (await ctx.store.loadMetricsInput()).rounds;
     expect(rounds.map((r) => r.roundId)).toContain(422_680n);
-    // Second poll: nothing newer than the cursor.
-    expect((await pollOreRounds(ctx, { since: 0, maxPages: 3, verifySample: 5, fetchImpl: apiFetch(page) }, rpc)).stored).toBe(0);
+    // Second poll: nothing it has not read.
+    expect(await pollOreRounds(ctx, { since: 0, maxPages: 3, verifySample: 5, fetchImpl: apiFetch(page), sleep: noSleep }, rpc)).toMatchObject({ stored: 0, verified: 0, pages: 1 });
   });
 
   it("chain wins when api.ore.com disagrees", async () => {
@@ -425,7 +426,7 @@ describe("api.ore.com rounds", () => {
     const tampered = page.replace(/"num_winners":\s*170\b/, '"num_winners": 17');
     expect(tampered).not.toBe(page);
     const rpc = new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: noSleep });
-    const res = await pollOreRounds(ctx, { since: 0, maxPages: 1, verifySample: 5, fetchImpl: apiFetch(tampered) }, rpc);
+    const res = await pollOreRounds(ctx, { since: 0, maxPages: 1, verifySample: 5, fetchImpl: apiFetch(tampered), sleep: noSleep }, rpc);
     expect(res.mismatches).toBe(1);
     const r = (await ctx.store.loadMetricsInput()).rounds.find((x) => x.roundId === 422_680n);
     expect(r?.totalMiners).toBe(170n);
