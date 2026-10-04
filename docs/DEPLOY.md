@@ -22,9 +22,11 @@ In order. Until step 5 no transaction is signed by these keys.
 1. **Helius key.** Create a Helius account (the free plan is enough to start, section 5). Put one line in
    `~/.config/heads-down/mainnet/helius.env`: `HELIUS_API_KEY=<key>`, then
    `chmod 600 ~/.config/heads-down/mainnet/helius.env`. Never paste the key anywhere else.
-2. **Back up the keys.** `~/.config/heads-down/` holds the only copies (no seed phrases were
-   ever shown). Make an encrypted backup (for example an encrypted disk image or
-   `age`/`gpg`) of `heads_down-program-keypair.json` and `mainnet/` and store it offline.
+2. **Back up the keys, before any SOL is sent.** `~/.config/heads-down/` holds the only copies
+   (no seed phrases were ever shown), and `deployer.json` is the only way to get the program's
+   rent back (section 3). Make an encrypted backup (for example an encrypted disk image or
+   `age`/`gpg`) of `heads_down-program-keypair.json` and `mainnet/`, and keep a copy off this
+   machine.
 3. **Fund the keys** (section 3; amounts read from mainnet's rent on 2026-10-03):
 
    | Key | Public key | Send |
@@ -34,20 +36,24 @@ In order. Until step 5 no transaction is signed by these keys.
    | governance | `37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN` | **0.01 SOL** |
    | registrar | `9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo` | 0 (never pays fees) |
 
-   Total **1.10 SOL** of the ~2 SOL budget; keep the rest for the first upgrade's temporary
-   buffer (section 14) and top-ups. About 0.03 SOL of the deployer's share is never spent: the
-   Solana CLI only has to see it there (section 3), and it is still in the deployer afterwards.
+   Total **1.10 SOL**. About 0.03 SOL of the deployer's share is never spent: the Solana CLI
+   only has to see it there, and it is still in the deployer afterwards. Section 3 says what comes
+   back and what does not: 0.9996 SOL is locked in the program's rent and 0.0053 SOL is gone for
+   good. Two more amounts are not in the table: the **wallet on the phone** needs about 0.04 SOL
+   for a week of tests, and a **first upgrade** needs about 0.964 SOL lent to the deployer for a
+   few minutes, so the working budget is about 2.07 SOL if an upgrade must stay possible.
 4. **Preflight**: `scripts/mainnet/preflight.sh` must end with `GO`.
 5. **Deploy**: `scripts/mainnet/deploy.sh` (type the confirmation), then commit the receipt it
    writes under `deploy/receipts/mainnet/`.
 6. **Initialize**: `scripts/mainnet/init-config.sh` (type the confirmation), commit its receipt,
    and check `scripts/mainnet/governance.sh show`.
-7. **Railway**: create the project and the five services (section 10), in order: Postgres,
-   indexer, dashboard, registrar, crank. Set the variables from the matrix; attach volumes to
-   the crank and the registrar.
+7. **Railway** (section 10): Postgres, the indexer without `RPC_URL`, the dashboard and the
+   registrar can run before the deploy, and do. After step 6: set the indexer's `RPC_URL`, then
+   start the crank, last, with its fee payer funded.
 8. **Monitoring**: add the uptime checks and balance alerts of section 11.
-9. **Within the first week**: create the Squads multisig with a 72 h time lock and move the
-   upgrade authority to its vault (section 15). Decide how governance moves (section 15).
+9. **Decide about Squads** (section 15): a multisig with a 72 h time lock protects users against
+   a single key, costs 0.1 SOL that does not come back, and ends the one-signature way of
+   getting the program's rent back.
 10. **Identity page**: after steps 5 and 6, and again after the first run on a phone, update the
     dated status line in `site/index.html`, commit, and publish it again (section 10.7).
 
@@ -121,7 +127,7 @@ scripts always read it from the cluster):
 | Key | Needs (lamports) | SOL | For |
 |---|---|---|---|
 | deployer | 1,036,316,560 | **1.036316560** | ProgramData for max-len 196,608 (0.999647480) + Program account (0.000833120) + Config (0.001950720) + Executor float (0.001450240) + fee budget (0.032435000, see below) |
-| crank fee payer | 50,000,000 | **0.050000000** | lookup-table rent (0.0026 SOL + 0.00065 per rig) and fee float; digs refund `crank_fee` |
+| crank fee payer | 50,000,000 | **0.050000000** | a fee float that is spent in use (below), and lookup-table rent (0.00256 SOL + 0.00065 per rig) when lookup tables are on |
 | governance | 10,000,000 | **0.010000000** | `propose_config` fees: a pause must never fail for lack of SOL |
 | registrar | 0 | 0 | signs off-chain only |
 | **Total** | 1,096,316,560 | **1.096316560** | |
@@ -138,26 +144,92 @@ earlier version of this page budgeted 0.005 SOL and asked for 1.01 SOL: with exa
 CLI stopped before sending anything ("insufficient funds for spend + fee"). `dry-run.sh --tight`
 now funds every key with exactly the amounts above, and it has to pass.
 
-The deploy also needs the program **buffer** (0.966282040 SOL for today's 190,048-byte build)
-for a few minutes: `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
-for the ProgramData, so the peak is the larger of the two, not their sum. `preflight.sh`
-checks the deployer's balance against exactly this. What stays out of the deployer for good:
-ProgramData rent (recoverable only by closing the program), the Program account, the Config,
-the Executor float and the fees.
+During a fresh deploy the SOL sits in the program **buffer** for a few minutes. The buffer is
+created holding the ProgramData rent for max-len (999,647,480 lamports, not the buffer's own rent
+of 966,282,040), and `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
+for the ProgramData, so the peak is one ProgramData rent, not two. If a deploy stops half way,
+that SOL is in the buffer, whose authority is the deployer: section 7 says how the deploy is
+resumed or the buffer refunded.
 
-Later, not at launch: each upgrade needs a temporary buffer of `(37 + 128 + build size) x 5,080`
-lamports (0.97 SOL for today's build) plus the same fee budget, and the buffer's rent is
-refunded to the spill account when the upgrade executes.
-Today's build fills 97% of the 196,608-byte `--max-len`: an upgrade that grows the program by
-more than about 6.5 KB needs `solana program extend` first (5,080 lamports per added byte).
+**The first upgrade needs more SOL than a 2 SOL budget leaves.** An upgrade needs a temporary
+buffer holding the rent of 45 + build size bytes (966,322,680 lamports for today's 190,048-byte
+build) plus the fee budget: about 0.999 SOL in the deployer, which will hold about 0.035 SOL.
+That is a top-up of about **0.964 SOL**, and all of it but about 0.001 SOL of fees comes back
+when the upgrade executes (the buffer's rent goes to the spill account, the deployer). So the
+working budget is about **2.07 SOL** if a bug found on the phone must be fixable on-chain: the
+1.10 above, and 0.964 lent to the deployer for a few minutes per upgrade.
+
+Today's build fills 97% of the 196,608-byte `--max-len` (6,560 bytes of headroom). A build that
+outgrows it must extend the ProgramData, and mainnet enforces a minimum extension of 10,240 bytes:
+52,019,200 lamports, locked like the rest.
+
+### What comes back, and what does not
+
+Where the 1.10 SOL is the day after the deploy and `initialize_config` (1.04 SOL sent to the
+deployer; rents read from mainnet on 2026-10-04):
+
+| Where | Lamports | Does it come back? |
+|---|---|---|
+| ProgramData (45 + 196,608 bytes) | 999,647,480 | **only by closing the program for good** (below) |
+| Program account (36 bytes) | 833,120 | never: the loader cannot close a Program account |
+| Config (256 bytes) | 1,950,720 | never: no instruction closes it |
+| Executor float | 1,450,240 | never: nothing can be withdrawn from the Executor (section 9) |
+| deploy and init fees | 1,075,916 (measured in the dry run) | never |
+| left in the deployer | 35,042,524 | yes: a plain transfer |
+| crank fee payer | 50,000,000 | what is left of it: it is spent in use (below) |
+| governance | 10,000,000 | what is left of it: a pause or a proposal costs about 5,100 to 5,500 lamports |
+
+So of 1.10 SOL: **0.99965 SOL is locked** in the program's rent, **0.0053 SOL (5,309,996
+lamports) is gone for good**, and 0.095 SOL is still liquid on day one.
+
+**Getting the locked rent back means closing the program.**
+`scripts/mainnet/solana.sh -- program close HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p --bypass-warning --recipient <wallet>`,
+signed by the upgrade authority, returns all 999,647,480 lamports to the recipient. It is
+permanent: the program id can never be deployed or invoked again, and the app, the crank, the
+indexer and the registrar all pin that id. Everything the program owns is then stuck for ever:
+the Config, the Executor's balance, every Rig and tombstone, SeekerSeats, ShiftLogs (also those
+whose rent the crank paid), Stack tables and the SKR in their vaults, Focus Bonds and their SKR,
+gift escrows and the Bury lot. ORE's own Automations and Miners are untouched: users can still
+take their SOL back and claim in ORE. Three consequences:
+
+- The exit exists only while `deployer.json` is the upgrade authority. After a move to a Squads
+  vault it takes the multisig's threshold and its time lock; after `--final` it is gone
+  (section 15). Whoever holds `deployer.json` can also send the rent anywhere, so that file stays
+  offline and backed up.
+- Do it only before any outside user holds a rig, a bond, a seat or a gift. The program is
+  permissionless and a pause stops only digs, so closing would strand other people's accounts.
+- The order: stop the crank; from each wallet clock out, take the SOL back and close the rig;
+  close the ShiftLogs 30 days after the last shift and the crank's lookup tables (neither has
+  tooling yet); sweep the crank's and governance's balances; close the program last.
+
+**The crank's 0.05 SOL is a fee float, and one phone does not pay for itself.** A dig that
+carries one rig's fresh heartbeat costs the crank 10,047 lamports (one transaction signature, one
+secp256r1 signature, the priority fee) and the program reimburses `crank_fee` = 7,000: about 3,000
+lamports lost per dig, and the default caps allow at most 20 digs a shift. The reimbursement
+covers the fee only from three rigs per transaction up (crank/README.md). Never reimbursed: the
+heartbeat records on nights when the cost gate stays closed (about 10,000 lamports each, every
+third round: about 1,240,000 lamports over an 8-hour night for one rig), BREAK and FREEZE (about
+10,100 each), Stack check-ins, and the ShiftLog rent of a shift the crank seals (1,300,480
+lamports, which `close_shift_log` returns to the payer after 30 days; nothing sends that
+instruction yet). Expect roughly 0.001 to 0.003 SOL a night for one phone.
+
+**The wallet on the phone is a fourth key to fund.** The first clock-in with the default build
+moves about 0.029 SOL: 20,200,000 lamports into the wallet's own ORE Automation, and the rent of
+the Rig (2,600,960), of ORE's Automation (1,463,040) and of ORE's Miner (4,470,400), plus ORE's
+10,000 checkpoint reserve. Each sealed shift then costs 1,300,480 of ShiftLog rent. About 0.04 SOL
+covers a week of tests on one phone. What comes back: the Automation's balance and rent through
+"Take SOL back", and the Rig's rent less the 812,800 lamports that stay in the tombstone through
+"Close my rig". What does not: the tombstone, 10,000 lamports per dug round (7,000 to the crank,
+3,000 into the Executor), the SOL placed on squares that did not win, the fees, and the Miner's
+rent (ORE's account; whether ORE lets a wallet close it was not checked).
 
 ## 4. Parameters and why
 
 | Parameter | Value | Why |
 |---|---|---|
-| `--max-len` | **196,608** (192 KiB) | 1.76x the 111,600-byte v1.1 build: 85,008 bytes (76%) of headroom for the SKR instructions in development (Stack, Focus Bond, Gift, Bury) without an extend. Rent 0.9996 SOL. 2x (223,200) would cost 1.1347 SOL and 256 KiB 1.3326 SOL, leaving too little of the budget for the first upgrade's temporary buffer. If the SKR build outgrows it, `solana program deploy` extends the ProgramData automatically during the upgrade (the payer funds the extra rent). |
+| `--max-len` | **196,608** (192 KiB) | Chosen as 1.76x the 111,600-byte v1.1 build, to hold the SKR instructions without an extend. They are in now: today's v1.3 build is 190,048 bytes, which leaves 6,560 bytes (3%). Rent 0.9996 SOL. 2x (223,200) would cost 1.1347 SOL and 256 KiB 1.3326 SOL. If a later build outgrows it, `solana program deploy` extends the ProgramData during the upgrade, in steps of at least 10,240 bytes (52,019,200 lamports each, paid by the deployer and locked like the rest). |
 | `executor_fee` | **10,000** lamports | **Immutable** (no instruction changes it), and every rig's Automation must use exactly this Discretionary fee (`dig` skips any other value). It must cover the worst measured crank cost with room for congestion: crank/README.md measures 5,500 (v1, 11 rigs) to 7,550 (legacy, 2 rigs) lamports per fresh-heartbeat dig, 6,723 end to end; ORE's own executor charges 7,000 and a sampled third-party one 12,000. 10,000 is ECONOMICS.md's figure and lets `crank_fee` rise to 10,000 under congestion without touching user Automations. At 0.001 SOL per dig it is 1% of the per-round spend. |
-| `crank_fee` | **7,000** lamports | Covers a v0 + lookup-table batch (5 rigs: 5,000 secp256r1 + 1,000 signature share + priority ≈ 6,050-6,723). `crank_fee ≤ executor_fee` is enforced by the program. The 3,000 lamports per dig it leaves behind accrue in the Executor, which only ever pays ORE's CHECKPOINT_FEE top-ups and reimbursements, so the float grows with use. Raise it (timelocked) with `governance.sh propose --crank-fee N` if priority fees stay high. |
+| `crank_fee` | **7,000** lamports | Covers a v0 + lookup-table batch (5 rigs: 5,000 secp256r1 + 1,000 signature share + priority ≈ 6,050-6,723). `crank_fee ≤ executor_fee` is enforced by the program. The 3,000 lamports per dig it leaves behind accrue in the Executor, which only ever pays ORE's CHECKPOINT_FEE top-ups and reimbursements, so the float grows with use. With one rig per transaction the crank pays 10,047 and gets 7,000 back; the fee covers it from three rigs per transaction up (section 3). Raise it (timelocked) with `governance.sh propose --crank-fee N` if priority fees stay high. |
 | `bury_bps` | **0** | v1.1 has no bury path (`INTERFACE.md` §10). |
 | `ore_layout_hash` | `cc9b3521…48aa91` | `sha256(heads_down::ore::LAYOUT_PREIMAGE)`, computed by the program crate inside the tool; the program refuses any other value. |
 | Executor float | **rent-exempt(0) + 100,000 + 100 x crank_fee** = 1,450,240 lamports on mainnet | rent so the PDA exists, the program's own reserve (10 x CHECKPOINT_FEE, which reimbursements never touch), and 100 reimbursements of slack. A dig pays the Executor 10,000 before the program reimburses 7,000, so reimbursements are self-funding; the slack absorbs late third-party checkpoints that take 10,000 each. |
