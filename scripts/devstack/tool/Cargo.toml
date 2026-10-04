@@ -45,6 +45,10 @@ solana-transaction = { version = "4", features = ["wincode"] }
 solana-keypair = "3"
 solana-signer = "3"
 
+[dev-dependencies]
+# The write-buffer tests run the writer against a mock JSON-RPC server on a local socket.
+tokio = { version = "1.45", features = ["io-util"] }
+
 [profile.release]
 overflow-checks = true
 

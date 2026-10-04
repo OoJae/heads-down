@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Config governance: the emergency pause, timelocked changes, and the current state.
 #
-#   scripts/mainnet/governance.sh [--cluster mainnet|localnet] [--keys-dir DIR] [--yes] COMMAND
+#   scripts/mainnet/governance.sh [--cluster mainnet|localnet] [--keys-dir DIR] [--public-rpc] [--yes] COMMAND
 #
 #   show                       ORE + heads_down state: program, upgrade authority, Config, pending, Executor
 #   pause                      propose_config paused=1: `dig` fails with Paused (18) from the next slot.
@@ -13,7 +13,12 @@
 #                              replaces any pending proposal and restarts its clock
 #   apply                      apply_config once the timelock has passed (anyone may; governance pays)
 #
-# Signed by governance.json (Config.governance). executor_fee can never change.
+# Signed by governance.json (Config.governance). executor_fee can never change. There is no
+# command here for the program's governance rotation (propose_governance, accept_governance).
+#
+# --public-rpc (or HD_PUBLIC_RPC=1) sends over the public mainnet RPC although helius.env is
+# there: the way to pause when the Helius key has no credits left and answers HTTP 429 to
+# everything. The RPC in use is printed first.
 HD_SCRIPT=governance
 source "$(dirname "$0")/lib.sh"
 
@@ -22,17 +27,19 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cluster) set_cluster "$2"; shift 2 ;;
     --keys-dir) KEYS="$2"; shift 2 ;;
+    --public-rpc) PUBLIC_RPC=1; shift ;;
     --yes) YES=1; shift ;;
     --registrar | --crank-fee | --bury-bps) PASS+=("$1" "$2"); shift 2 ;;
     show | pause | unpause | propose | apply) CMD="$1"; shift ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
-[[ -n "$CMD" ]] || die "usage: governance.sh [--cluster C] [--keys-dir D] show|pause|unpause|propose|apply"
+[[ -n "$CMD" ]] || die "usage: governance.sh [--cluster C] [--keys-dir D] [--public-rpc] show|pause|unpause|propose|apply"
 default_keys
 need perl "perl ships with macOS"
 resolve_rpc
+say_rpc
 
 run() { # run SUBCOMMAND ARGS... : plan pass on mainnet, confirm, then send
   if [[ "$CLUSTER" == mainnet && $YES == 0 ]]; then

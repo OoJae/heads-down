@@ -3,9 +3,12 @@
 //! | Command | What | Signs |
 //! |---|---|---|
 //! | `init` | `initialize_config` + the Executor PDA float (idempotent: re-running tops the float up) | upgrade authority |
-//! | `preflight` | read-only go/no-go before a deploy | nothing |
+//! | `preflight` | read-only go/no-go before a deploy; counts what a half-written buffer already holds | nothing |
 //! | `verify-deploy` | checks the deployed bytes against the local `.so` and writes the public receipt | nothing |
+//! | `fees` | the transactions an address paid for after a slot, and their fees | nothing |
 //! | `propose-config` / `apply-config` | governance; `--paused 1` pauses `dig` immediately | governance / anyone |
+//!
+//! (`write-buffer` and `buffer-status` are in `buffer.rs`.)
 //!
 //! Every command runs the cluster guard first (`cluster::connect`). On `--cluster mainnet`
 //! nothing is signed without `--yes`: the scripts show the plan and ask before passing it.
@@ -28,9 +31,10 @@ use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
+use crate::buffer::{buffer_rent_len, chunk_count, chunk_len, differing_chunks, judge, read_held, resume_json, resume_line, Resume};
 use crate::cluster::{self, Cluster};
 use crate::hd as hdix;
-use crate::util::{read_keypair, rfc3339, sol, unix_now, wait_for, Chain, Landed};
+use crate::util::{patiently, read_keypair, rfc3339, sol, unix_now, wait_for, Chain, Landed, Patience};
 
 /// SIMD-0500: "Disable deployment of SBPF v0, v1 and v2 programs".
 pub const SIMD_0500: Address = Address::from_str_const("B8JJXCy5amZyWG9r7EnUYLwzXSXTxG7GZ1qZ1qggo83g");
@@ -53,6 +57,13 @@ pub const PROGRAMDATA_HEADER_LEN: u64 = 45;
 pub const BUFFER_HEADER_LEN: u64 = 37;
 /// Runtime cap on account data (10 MiB).
 pub const MAX_PROGRAM_LEN: u64 = 10 * 1024 * 1024;
+/// The loader's smallest `ExtendProgram` (SIMD-0431; feature
+/// `YbbRLkvenrocjGPGyoQE4wjnvYzTgfsk38NFmcYK7a5`, active on mainnet since slot 432,864,000).
+pub const MIN_EXTEND_BYTES: u64 = 10_240;
+/// Transactions the fee budget keeps in hand on top of the writes: the buffer's creation, the
+/// final deploy or upgrade, an extension or a hand-over, and one to spare (the `+ 4` of
+/// `deploy_fee_budget` in `scripts/mainnet/lib.sh`).
+pub const FEE_BUDGET_SPARE_TXS: u64 = 4;
 /// heads_down Config size (`programs/heads-down/program/src/state.rs` asserts 256).
 pub const CONFIG_LEN: u64 = std::mem::size_of::<heads_down::state::Config>() as u64;
 /// What the program keeps in the Executor above rent for later `CHECKPOINT_FEE` top-ups
@@ -246,7 +257,47 @@ pub fn default_float(rent0: u64, crank_fee: u64, reserve_digs: u64) -> u64 {
     rent0.saturating_add(EXECUTOR_RESERVE).saturating_add(crank_fee.saturating_mul(reserve_digs))
 }
 
-fn write_json(path: &PathBuf, v: &Value) -> Result<()> {
+/// Bytes an upgrade adds to a ProgramData of `current_len` so that it holds `needed_len`: none
+/// when it fits, otherwise the shortfall or the loader's minimum of 10,240, whichever is larger.
+/// Within 10,240 bytes of the 10 MiB account limit the loader takes exactly the room that is
+/// left. This is what the CLI's `extend_program_data_if_needed` asks for.
+pub fn extend_bytes(current_len: u64, needed_len: u64) -> u64 {
+    if needed_len <= current_len {
+        return 0;
+    }
+    let headroom = MAX_PROGRAM_LEN.saturating_sub(current_len);
+    (needed_len - current_len).max(MIN_EXTEND_BYTES.min(headroom))
+}
+
+/// The fee budget of one deploy. `full` is what the Solana CLI wants to see in the payer for
+/// every write it would send itself (`deploy_fee_budget` in `scripts/mainnet/lib.sh`). A
+/// buffer that exists already needs the budget of the chunks still to write only, at `per_tx`
+/// each, and never more than `full`.
+pub fn fee_budget_for(full: u64, per_tx: Option<u64>, buffer_exists: bool, to_write: u64) -> u64 {
+    match per_tx {
+        Some(per_tx) if buffer_exists => full.min(per_tx.saturating_mul(to_write.saturating_add(FEE_BUDGET_SPARE_TXS))),
+        _ => full,
+    }
+}
+
+/// Lamports a deploy takes out of the deployer, initialization aside. `new_buffer` is what a
+/// new buffer is created with in this mode and `held` what the deploy's buffer holds if it
+/// exists already; that is never asked for a second time.
+///
+/// * fresh: the buffer is created holding the ProgramData rent, and the final transaction
+///   drains it into the payer, who pays for the ProgramData with it. The rent leaves the
+///   deployer once; an existing buffer leaves only what it lacks to add.
+/// * upgrade and buffer: a new buffer's lamports, or nothing for one that exists.
+pub fn deploy_lamports(mode: DeployMode, programdata: u64, program: u64, new_buffer: u64, held: Option<u64>, grow: u64, fee_budget: u64) -> u64 {
+    let buffer = if held.is_some() { 0 } else { new_buffer };
+    match mode {
+        DeployMode::Fresh => programdata.saturating_sub(held.unwrap_or(0)).saturating_add(program).saturating_add(fee_budget),
+        DeployMode::Upgrade => buffer.saturating_add(grow).saturating_add(fee_budget),
+        DeployMode::Buffer => buffer.saturating_add(fee_budget),
+    }
+}
+
+pub(crate) fn write_json(path: &PathBuf, v: &Value) -> Result<()> {
     if let Some(dir) = path.parent() {
         if !dir.as_os_str().is_empty() {
             std::fs::create_dir_all(dir)?;
@@ -257,7 +308,7 @@ fn write_json(path: &PathBuf, v: &Value) -> Result<()> {
     std::fs::write(path, s).with_context(|| format!("write {}", path.display()))
 }
 
-fn require_yes(cluster: Cluster, yes: bool, what: &str) -> Result<()> {
+pub(crate) fn require_yes(cluster: Cluster, yes: bool, what: &str) -> Result<()> {
     if cluster.is_mainnet() && !yes {
         bail!("mainnet: {what} was NOT sent. Review the plan above, then re-run with --yes (the scripts ask first)");
     }
@@ -520,6 +571,12 @@ pub struct PreflightOpts {
     pub crank_reserve_digs: u64,
     /// Lamports budgeted for deploy transaction fees.
     pub fee_budget: u64,
+    /// The fee one transaction is budgeted at. With it, a deploy that continues an existing
+    /// buffer is budgeted for the chunks still to write only.
+    pub fee_per_tx: Option<u64>,
+    /// The deploy's per-commit buffer address. When that account exists it is checked, and
+    /// the lamports and chunks it already holds are counted.
+    pub buffer: Option<Address>,
     /// Other keys to report (crank payer, governance, …).
     pub keys: Vec<KeyNeed>,
     /// Accept a scheduled (not yet active) SIMD-0500 for a v0 build.
@@ -621,8 +678,8 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
         r.add(St::Fail, "SBPF version", "unknown e_flags: not a Solana SBF build");
     }
 
-    // 4. max-len.
-    if o.mode != DeployMode::Buffer {
+    // 4. max-len of a fresh deploy (an upgrade is measured against the deployed ProgramData in 6).
+    if o.mode == DeployMode::Fresh {
         if o.max_len < so.len {
             r.add(St::Fail, "max-len", format!("{} < program size {}", o.max_len, so.len));
         } else if o.max_len > MAX_PROGRAM_LEN {
@@ -701,7 +758,29 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
             let d = format!("deployed (last deploy slot {slot}, upgrade authority {who}, ProgramData {programdata_len} bytes)");
             match mode {
                 DeployMode::Fresh => r.add(St::Fail, "program account", format!("{d}: a fresh deploy is impossible; use --mode upgrade")),
-                DeployMode::Upgrade if *authority == Some(o.deployer) => r.add(St::Pass, "program account", d),
+                DeployMode::Upgrade if *authority == Some(o.deployer) => {
+                    r.add(St::Pass, "program account", d);
+                    let room = programdata_len.saturating_sub(PROGRAMDATA_HEADER_LEN);
+                    let add = extend_bytes(*programdata_len, PROGRAMDATA_HEADER_LEN + so.len);
+                    if PROGRAMDATA_HEADER_LEN + so.len > MAX_PROGRAM_LEN {
+                        r.add(St::Fail, "max-len", format!("the build ({} bytes) is above the 10 MiB account limit", so.len));
+                    } else if add == 0 {
+                        r.add(
+                            St::Pass,
+                            "max-len",
+                            format!("the deployed ProgramData holds up to {room} bytes: {} bytes ({}%) of headroom over this build", room - so.len, (room - so.len) * 100 / so.len.max(1)),
+                        );
+                    } else {
+                        r.add(
+                            St::Warn,
+                            "max-len",
+                            format!(
+                                "the build is {} bytes larger than the {room} the deployed ProgramData holds: the upgrade extends it by {add} bytes (the loader's minimum is {MIN_EXTEND_BYTES}), and their rent stays locked like the rest",
+                                so.len - room
+                            ),
+                        );
+                    }
+                }
                 DeployMode::Upgrade => r.add(
                     St::Fail,
                     "program account",
@@ -713,10 +792,45 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
         (ProgramState::Other(why), _) => r.add(St::Fail, "program account", why.clone()),
     }
 
-    // 7. Rent and the deployer's balance, from the cluster's own rent figures.
+    // 7. The deploy's buffer. A deploy that stopped part way left one behind, holding the rent
+    // that was put into it and the chunks that landed: neither is needed a second time.
+    let chunk = chunk_len(&o.deployer)?;
+    let chunks_total = chunk_count(bytes.len(), chunk);
+    let plan = match &o.buffer {
+        Some(addr) => {
+            let held = read_held(&chain, addr, Patience::default()).await?;
+            let plan = judge(&held, addr, &o.deployer, &bytes, chunk);
+            let st = match &plan {
+                Resume::Create { .. } => St::Info,
+                Resume::Continue { .. } => St::Pass,
+                Resume::Refused(_) => St::Fail,
+            };
+            r.add(st, "buffer", resume_line(addr, &plan, chunks_total));
+            out.insert("buffer".into(), resume_json(addr, &held, &plan, chunks_total, chunk));
+            plan
+        }
+        None => {
+            let plan = Resume::Create { to_write: differing_chunks(&bytes, &vec![0; bytes.len()], chunk) };
+            let n = plan.to_write().map_or(0, <[usize]>::len);
+            r.add(St::Info, "buffer", format!("no buffer for this commit yet: the deploy creates one ({n} of {chunks_total} chunks to write)"));
+            plan
+        }
+    };
+    let (held_lamports, to_write) = match &plan {
+        Resume::Continue { lamports, to_write } => (Some(*lamports), to_write.len() as u64),
+        other => (None, other.to_write().map_or(0, <[usize]>::len) as u64),
+    };
+    let fee_budget = fee_budget_for(o.fee_budget, o.fee_per_tx, held_lamports.is_some(), to_write);
+    let fees_for = match held_lamports {
+        Some(_) => format!("fees {} for the {to_write} chunks still to write", sol(fee_budget)),
+        None => format!("fees {}", sol(fee_budget)),
+    };
+
+    // 8. Rent and the deployer's balance, from the cluster's own rent figures.
     let r_pd = chain.rent(PROGRAMDATA_HEADER_LEN + o.max_len).await?;
     let r_prog = chain.rent(PROGRAM_ACCOUNT_LEN).await?;
-    let r_buf = chain.rent(BUFFER_HEADER_LEN + so.len).await?;
+    let new_buffer_len = buffer_rent_len(o.mode, so.len, o.max_len);
+    let r_buf = chain.rent(new_buffer_len).await?;
     let r_cfg = chain.rent(CONFIG_LEN).await?;
     let r0 = chain.rent(0).await?;
     let cfg = read_config(&chain).await?;
@@ -725,44 +839,47 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
     let cfg_need = if cfg.is_some() { 0 } else { r_cfg };
     let float_need = float.saturating_sub(exec_bal);
     let init_need = cfg_need.saturating_add(float_need).saturating_add(if cfg.is_some() && float_need == 0 { 0 } else { INIT_FEE_BUDGET });
-    let (deploy_need, peak_note) = match o.mode {
+    // The loader extends a ProgramData by at least MIN_EXTEND_BYTES, and the CLI leaves that
+    // payment out of its own balance check: budget the rent of what it will really add.
+    let add = if o.mode == DeployMode::Upgrade && existing_len > 0 { extend_bytes(existing_len, PROGRAMDATA_HEADER_LEN + so.len) } else { 0 };
+    let grow = if add == 0 { 0 } else { chain.rent(existing_len + add).await?.saturating_sub(existing_lamports) };
+    let deploy_need = deploy_lamports(o.mode, r_pd, r_prog, r_buf, held_lamports, grow, fee_budget);
+    let peak_note = match o.mode {
         DeployMode::Fresh => {
-            // DeployWithMaxDataLen drains the buffer into the payer before it pays for the
-            // ProgramData, so the peak is the larger of the two, not their sum.
-            let before_drain = r_buf.saturating_add(r_prog).saturating_add(o.fee_budget);
-            let after = r_pd.saturating_add(r_prog).saturating_add(o.fee_budget);
-            (
-                before_drain.max(after),
-                format!(
-                    "ProgramData {} + Program {} + fees {} (the {} SOL buffer is refunded into the ProgramData payment)",
-                    sol(r_pd),
-                    sol(r_prog),
-                    sol(o.fee_budget),
-                    sol(r_buf)
+            let pd = match held_lamports {
+                Some(l) => format!(
+                    "ProgramData {} still to add ({} of its {} is in the buffer already)",
+                    sol(r_pd.saturating_sub(l)),
+                    sol(l.min(r_pd)),
+                    sol(r_pd)
                 ),
+                None => format!("ProgramData {}", sol(r_pd)),
+            };
+            format!(
+                "{pd} + Program {} + {fees_for} (the buffer holds the ProgramData rent while the deploy runs; the final transaction moves it into the ProgramData)",
+                sol(r_prog)
             )
         }
         DeployMode::Upgrade => {
-            let grow = if PROGRAMDATA_HEADER_LEN + so.len > existing_len {
-                chain.rent(PROGRAMDATA_HEADER_LEN + so.len).await?.saturating_sub(existing_lamports)
-            } else {
-                0
+            let buf = match held_lamports {
+                Some(l) => format!("the buffer holds {} already (it returns to the deployer when the upgrade lands)", sol(l)),
+                None => format!("buffer {} (the rent of 45 + {} bytes; it returns to the deployer when the upgrade lands)", sol(r_buf), so.len),
             };
-            (
-                r_buf.saturating_add(grow).saturating_add(o.fee_budget),
-                format!("buffer {} (refunded after the upgrade) + ProgramData growth {} + fees {}", sol(r_buf), sol(grow), sol(o.fee_budget)),
-            )
+            format!("{buf} + ProgramData growth {} ({add} bytes) + {fees_for}", sol(grow))
         }
-        DeployMode::Buffer => (
-            r_buf.saturating_add(o.fee_budget),
-            format!("buffer {} (refunded to the spill account when the upgrade executes) + fees {}", sol(r_buf), sol(o.fee_budget)),
-        ),
+        DeployMode::Buffer => {
+            let buf = match held_lamports {
+                Some(l) => format!("the buffer holds {} already", sol(l)),
+                None => format!("buffer {} (the rent of 37 + {} bytes)", sol(r_buf), so.len),
+            };
+            format!("{buf} + {fees_for} (the rent stays in the buffer that is handed over, and goes to the spill account when that upgrade executes)")
+        }
     };
     let need = deploy_need.saturating_add(if o.mode == DeployMode::Fresh { init_need } else { 0 });
     let bal = chain.balance(&o.deployer).await?;
     r.add(St::Info, "rent", format!(
-        "ProgramData({}) {} SOL, Program {} SOL, buffer({}) {} SOL, Config {} SOL, Executor rent-exempt(0) {} SOL",
-        PROGRAMDATA_HEADER_LEN + o.max_len, sol(r_pd), sol(r_prog), BUFFER_HEADER_LEN + so.len, sol(r_buf), sol(r_cfg), sol(r0)
+        "ProgramData({}) {} SOL, Program {} SOL, a new buffer {} SOL (the rent of {} bytes, what the Solana CLI puts in for this mode), Config {} SOL, Executor rent-exempt(0) {} SOL",
+        PROGRAMDATA_HEADER_LEN + o.max_len, sol(r_pd), sol(r_prog), sol(r_buf), new_buffer_len, sol(r_cfg), sol(r0)
     ));
     r.add(St::Info, "deploy cost", format!("{} SOL: {peak_note}", sol(deploy_need)));
     if o.mode == DeployMode::Fresh {
@@ -783,25 +900,30 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
             ),
         );
     }
+    // The need above already leaves out what an existing buffer holds, so a shortfall never
+    // asks for SOL that is in the buffer.
+    let counted = held_lamports.map_or_else(String::new, |l| format!(" (the {} SOL in the buffer is counted, not asked for again)", sol(l)));
     if bal >= need {
-        r.add(St::Pass, "deployer balance", format!("{} holds {} SOL >= {} SOL needed", o.deployer, sol(bal), sol(need)));
+        r.add(St::Pass, "deployer balance", format!("{} holds {} SOL >= {} SOL needed{counted}", o.deployer, sol(bal), sol(need)));
     } else {
         r.add(
             St::Fail,
             "deployer balance",
-            format!("{} holds {} SOL < {} SOL needed: send at least {} SOL", o.deployer, sol(bal), sol(need), sol(need - bal)),
+            format!("{} holds {} SOL < {} SOL needed{counted}: send at least {} SOL", o.deployer, sol(bal), sol(need), sol(need - bal)),
         );
     }
     out.insert(
         "funding".into(),
         json!({
-            "rent": { "programdata": r_pd, "program": r_prog, "buffer": r_buf, "config": r_cfg, "executor_rent_exempt": r0 },
+            "rent": { "programdata": r_pd, "program": r_prog, "buffer": r_buf, "buffer_len": new_buffer_len, "config": r_cfg, "executor_rent_exempt": r0 },
             "deploy_need": deploy_need, "init_need": init_need, "executor_float_target": float, "executor_balance": exec_bal,
-            "fee_budget": o.fee_budget, "deployer": o.deployer.to_string(), "deployer_balance": bal, "deployer_need": need,
+            "fee_budget": fee_budget, "fee_budget_full": o.fee_budget, "buffer_lamports": held_lamports,
+            "chunks_total": chunks_total, "chunks_to_write": to_write,
+            "deployer": o.deployer.to_string(), "deployer_balance": bal, "deployer_need": need,
         }),
     );
 
-    // 8. ORE: the upgrade pin and the exact bytes.
+    // 9. ORE: the upgrade pin and the exact bytes.
     let pd_head = chain.rpc.get_account_slice(&PROGRAMDATA_ADDRESS, 0, 45).await.map_err(|e| anyhow!("ORE ProgramData: {e}"))?;
     let ore_slot = pd_head.as_ref().and_then(|a| hd_crank::ore::programdata_slot(&a.owner, &a.data));
     let ore_hash = match chain.data(&PROGRAMDATA_ADDRESS).await? {
@@ -832,7 +954,7 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
         }
     }
 
-    // 9. ORE account layouts (owner, exact size, discriminator, sanity).
+    // 10. ORE account layouts (owner, exact size, discriminator, sanity).
     let mut layout_fail = false;
     let board = match chain.data(&BOARD_ADDRESS).await? {
         Some((ow, d, _)) => match Board::decode(&ow, &d) {
@@ -904,7 +1026,7 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
         );
     }
 
-    // 10. heads_down itself.
+    // 11. heads_down itself.
     if o.executor_fee == 0 || o.crank_fee > o.executor_fee {
         r.add(
             St::Fail,
@@ -938,7 +1060,7 @@ pub async fn preflight(o: PreflightOpts) -> Result<bool> {
     }
     r.add(St::Info, "Executor PDA", format!("{} holds {} lamports", hdix::executor(), exec_bal));
 
-    // 11. The other keys the operator funds.
+    // 12. The other keys the operator funds.
     for k in &o.keys {
         let b = chain.balance(&k.pubkey).await?;
         let st = if b >= k.min { St::Pass } else { St::Warn };
@@ -1087,7 +1209,10 @@ pub async fn funding(o: FundingOpts) -> Result<()> {
     let (chain, _) = cluster::connect(o.cluster, &o.rpc).await?;
     let r_pd = chain.rent(PROGRAMDATA_HEADER_LEN + o.max_len).await?;
     let r_prog = chain.rent(PROGRAM_ACCOUNT_LEN).await?;
-    let r_buf = chain.rent(BUFFER_HEADER_LEN + o.so_len).await?;
+    // What the Solana CLI puts into the buffer of a later upgrade, and of a buffer written for
+    // a multisig proposal (`buffer_rent_len`); the first deploy's buffer holds `r_pd`.
+    let r_up = chain.rent(buffer_rent_len(DeployMode::Upgrade, o.so_len, o.max_len)).await?;
+    let r_buf = chain.rent(buffer_rent_len(DeployMode::Buffer, o.so_len, o.max_len)).await?;
     let r_cfg = chain.rent(CONFIG_LEN).await?;
     let r0 = chain.rent(0).await?;
     let float = o.executor_float.unwrap_or_else(|| default_float(r0, o.crank_fee, o.crank_reserve_digs));
@@ -1121,10 +1246,12 @@ pub async fn funding(o: FundingOpts) -> Result<()> {
     }
     println!("{:<14} {:<44} {:>14} {:>14}", "TOTAL", "", "", sol(total_need));
     println!(
-        "(rent from this cluster: ProgramData {} / buffer {} SOL for the {}-byte build, refunded at deploy; Config {}; rent-exempt(0) {})",
+        "(rent from this cluster: ProgramData {} SOL, which the buffer holds while the first deploy runs; \
+         the buffer of a later upgrade of the {}-byte build {} SOL, back in the deployer when the upgrade lands; \
+         Config {}; rent-exempt(0) {})",
         sol(r_pd),
-        sol(r_buf),
         o.so_len,
+        sol(r_up),
         sol(r_cfg),
         sol(r0)
     );
@@ -1133,7 +1260,7 @@ pub async fn funding(o: FundingOpts) -> Result<()> {
             p,
             &json!({
                 "schema": "heads-down/funding/v1", "cluster": o.cluster.name(), "rows": table, "total_shortfall": total_need,
-                "rent": { "programdata": r_pd, "program": r_prog, "buffer": r_buf, "config": r_cfg, "executor_rent_exempt": r0 },
+                "rent": { "programdata": r_pd, "program": r_prog, "upgrade_buffer": r_up, "buffer": r_buf, "config": r_cfg, "executor_rent_exempt": r0 },
                 "max_len": o.max_len, "so_len": o.so_len, "executor_float_target": float, "recorded_at": rfc3339(unix_now()),
             }),
         )?;
@@ -1167,6 +1294,11 @@ pub struct VerifyOpts {
     pub max_len: Option<u64>,
     /// Deployer balance before, for the cost line.
     pub balance_before: Option<u64>,
+    /// What `write-buffer` wrote down about its run (its `--json` file), copied into the receipt.
+    pub buffer_write: Option<PathBuf>,
+    /// Slot at which the Solana CLI was started: the fee payer's transactions after it are
+    /// counted into the receipt (`cli_phase`).
+    pub cli_since_slot: Option<u64>,
     /// `key=value` build facts (commit, toolchain, …).
     pub meta: Vec<(String, String)>,
     /// Receipt path.
@@ -1249,12 +1381,150 @@ pub async fn verify_deploy(o: VerifyOpts) -> Result<()> {
     if let Some(before) = o.balance_before {
         rec["fee_payer_spent_lamports"] = json!(before.saturating_sub(after));
     }
+    // How the bytes got there: what the paced writer did, and how many transactions the Solana
+    // CLI sent after it. Neither is needed for the checks above, so a failure here is reported
+    // and the receipt is still written.
+    if let Some(path) = &o.buffer_write {
+        match std::fs::read_to_string(path).map_err(anyhow::Error::from).and_then(|s| Ok(serde_json::from_str::<Value>(&s)?)) {
+            Ok(v) => rec["buffer_write"] = v,
+            Err(e) => println!("verify: could not read {} ({e:#}): the receipt has no buffer_write", path.display()),
+        }
+    }
+    if let Some(since) = o.cli_since_slot {
+        let since = since.max(rec["buffer_write"]["last_slot"].as_u64().unwrap_or(0));
+        match paid_settled(&chain, &o.deployer, since, o.signature.as_deref()).await {
+            Ok(paid) => {
+                println!("verify: after slot {since} the Solana CLI sent {} transaction(s), {} lamports of fees", paid.len(), fees_of(&paid));
+                rec["cli_phase"] = paid_json(since, &paid);
+            }
+            Err(e) => println!("verify: could not count the Solana CLI's transactions ({e:#}): the receipt has no cli_phase"),
+        }
+    }
     let now = unix_now();
     rec["unix_time"] = json!(now);
     rec["recorded_at"] = json!(rfc3339(now));
     write_json(&o.out, &rec)?;
     println!("verify: {holder} holds exactly {} ({} bytes, program hash {})", o.so.display(), n, so.program_hash);
     println!("verify: receipt {}", o.out.display());
+    Ok(())
+}
+
+// ---- fees (what an address paid for) ---------------------------------------------------------
+
+/// One transaction a fee payer paid for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaidTx {
+    /// Base58 signature.
+    pub signature: String,
+    /// Slot it landed in.
+    pub slot: u64,
+    /// Fee in lamports.
+    pub fee: u64,
+    /// It failed on-chain (the fee is paid all the same).
+    pub failed: bool,
+}
+
+fn fees_of(paid: &[PaidTx]) -> u64 {
+    paid.iter().map(|t| t.fee).sum()
+}
+
+fn paid_json(since_slot: u64, paid: &[PaidTx]) -> Value {
+    json!({
+        "since_slot": since_slot,
+        "transactions": paid.len(),
+        "failed": paid.iter().filter(|t| t.failed).count(),
+        "fees_lamports": fees_of(paid),
+    })
+}
+
+/// The transactions `payer` paid for in slots after `since_slot`, newest first (confirmed).
+/// Transactions that only mention the address (an airdrop to it) are left out.
+pub async fn paid_since(chain: &Chain, payer: &Address, since_slot: u64) -> Result<Vec<PaidTx>> {
+    let p = Patience::default();
+    let mut out = vec![];
+    let mut before: Option<String> = None;
+    loop {
+        let mut cfg = json!({ "limit": 1000, "commitment": "confirmed" });
+        if let Some(b) = &before {
+            cfg["before"] = json!(b);
+        }
+        let params = json!([payer.to_string(), cfg]);
+        let page = patiently(p, "getSignaturesForAddress", || chain.rpc.call("getSignaturesForAddress", params.clone())).await?;
+        let rows = page.as_array().cloned().unwrap_or_default();
+        let mut reached = rows.len() < 1000;
+        for row in &rows {
+            let slot = row["slot"].as_u64().unwrap_or(0);
+            if slot <= since_slot {
+                reached = true;
+                break;
+            }
+            let Some(sig) = row["signature"].as_str() else { continue };
+            let t = wait_for("getTransaction", Duration::from_secs(20), Duration::from_millis(300), || async {
+                chain.rpc.get_transaction_full(sig).await.map_err(|e| anyhow!("{sig}: {e}"))
+            })
+            .await?;
+            if t.fee_payer == Some(*payer) {
+                out.push(PaidTx { signature: sig.to_string(), slot, fee: t.fee, failed: t.err.is_some() });
+            }
+        }
+        if reached {
+            return Ok(out);
+        }
+        before = rows.last().and_then(|r| r["signature"].as_str()).map(str::to_string);
+    }
+}
+
+/// [`paid_since`], read until two reads half a second apart agree and `must_include` (a
+/// signature known to have landed) is among them: an RPC lists a transaction under its
+/// addresses a moment after it confirms it.
+pub async fn paid_settled(chain: &Chain, payer: &Address, since_slot: u64, must_include: Option<&str>) -> Result<Vec<PaidTx>> {
+    let mut last = paid_since(chain, payer, since_slot).await?;
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let now = paid_since(chain, payer, since_slot).await?;
+        let settled = now.len() == last.len() && must_include.is_none_or(|s| now.iter().any(|t| t.signature == s));
+        last = now;
+        if settled {
+            break;
+        }
+    }
+    Ok(last)
+}
+
+/// Options for [`fees`].
+pub struct FeesOpts {
+    /// Target cluster.
+    pub cluster: Cluster,
+    /// JSON-RPC URL.
+    pub rpc: String,
+    /// The fee payer.
+    pub payer: Address,
+    /// Count transactions in slots after this one.
+    pub since_slot: u64,
+    /// Write the count here (JSON).
+    pub json: Option<PathBuf>,
+}
+
+/// Read-only: how many transactions an address paid for after a slot, and their fees.
+pub async fn fees(o: FeesOpts) -> Result<()> {
+    let (chain, _) = cluster::connect(o.cluster, &o.rpc).await?;
+    let paid = paid_settled(&chain, &o.payer, o.since_slot, None).await?;
+    println!(
+        "fees: {} paid for {} transaction(s) after slot {} ({} failed): {} lamports",
+        o.payer,
+        paid.len(),
+        o.since_slot,
+        paid.iter().filter(|t| t.failed).count(),
+        fees_of(&paid)
+    );
+    if let Some(p) = &o.json {
+        let mut v = paid_json(o.since_slot, &paid);
+        v["schema"] = json!("heads-down/fees/v1");
+        v["cluster"] = json!(o.cluster.name());
+        v["payer"] = json!(o.payer.to_string());
+        v["balance"] = json!(chain.balance(&o.payer).await?);
+        write_json(p, &v)?;
+    }
     Ok(())
 }
 
@@ -1400,6 +1670,63 @@ mod tests {
         assert_eq!(default_float(890_880, 7_000, 100), 890_880 + 100_000 + 700_000);
         assert_eq!(CONFIG_LEN, 256);
         assert_eq!(TIMELOCK_SLOTS, 864_000);
+    }
+
+    #[test]
+    fn a_growing_upgrade_extends_by_the_loaders_minimum() {
+        let deployed = PROGRAMDATA_HEADER_LEN + 196_608;
+        // The build fits: nothing is added.
+        assert_eq!(extend_bytes(deployed, PROGRAMDATA_HEADER_LEN + 190_048), 0);
+        assert_eq!(extend_bytes(deployed, deployed), 0);
+        // One byte too large: the loader adds 10,240 bytes, not one.
+        assert_eq!(extend_bytes(deployed, deployed + 1), 10_240);
+        assert_eq!(extend_bytes(deployed, deployed + 10_240), 10_240);
+        assert_eq!(extend_bytes(deployed, deployed + 20_000), 20_000);
+        // At 5,080 lamports a byte (mainnet's rent on 2026-10-04) the smallest growth locks
+        // 52,019,200 lamports, where one byte's rent would be 5,080.
+        assert_eq!(extend_bytes(deployed, deployed + 1) * 5_080, 52_019_200);
+        // Within 10,240 bytes of the 10 MiB limit the loader takes exactly the room left.
+        assert_eq!(extend_bytes(MAX_PROGRAM_LEN - 100, MAX_PROGRAM_LEN - 50), 100);
+        assert_eq!(extend_bytes(MAX_PROGRAM_LEN - 100, MAX_PROGRAM_LEN), 100);
+    }
+
+    #[test]
+    fn a_buffer_that_exists_is_not_paid_for_twice() {
+        // Mainnet's figures for today's 190,048-byte build and --max-len 196,608: ProgramData,
+        // Program account, an upgrade's buffer (45 + build), a proposal's buffer (37 + build),
+        // the fee budget for max-len and the 145,000 lamports one transaction is budgeted at.
+        let (pd, prog, up, buf, full, per_tx) = (999_647_480, 833_120, 966_322_680, 966_282_040, 32_335_000, 145_000);
+        use DeployMode::{Buffer, Fresh, Upgrade};
+
+        // A first run needs the whole rent and the whole fee budget.
+        assert_eq!(fee_budget_for(full, Some(per_tx), false, 198), full);
+        assert_eq!(deploy_lamports(Fresh, pd, prog, pd, None, 0, full), 1_032_815_600);
+
+        // It stopped after 62 of 198 chunks: the buffer holds the rent and 136 chunks are left.
+        let fees = fee_budget_for(full, Some(per_tx), true, 136);
+        assert_eq!(fees, (136 + 4) * 145_000);
+        let resume = deploy_lamports(Fresh, pd, prog, pd, Some(pd), 0, fees);
+        assert_eq!(resume, 833_120 + 20_300_000);
+        // Of the 1.04 SOL sent, the buffer took the rent: what is left (less a million lamports
+        // of fees, far more than 63 transactions cost) covers the rest and init-config.
+        assert!(resume + 3_500_960 < 1_040_000_000 - pd - 1_000_000);
+        // A buffer that holds less than the ProgramData rent leaves the difference to add.
+        assert_eq!(deploy_lamports(Fresh, pd, prog, pd, Some(up), 0, fees), (pd - up) + 833_120 + fees);
+        assert_eq!(deploy_lamports(Fresh, pd, prog, pd, Some(pd + 5), 0, fees), 833_120 + fees);
+
+        // Nothing left to write: the four spare transactions. Never more than the full budget,
+        // and the full budget when no per-transaction figure is given.
+        assert_eq!(fee_budget_for(full, Some(per_tx), true, 0), 580_000);
+        assert_eq!(fee_budget_for(full, Some(per_tx), true, 5_000), full);
+        assert_eq!(fee_budget_for(full, None, true, 10), full);
+
+        // An upgrade: its buffer, then the same with a ProgramData that has to grow.
+        assert_eq!(deploy_lamports(Upgrade, pd, prog, up, None, 0, full), 998_657_680);
+        assert_eq!(deploy_lamports(Upgrade, pd, prog, up, None, 52_019_200, full), 1_050_676_880);
+        assert_eq!(deploy_lamports(Upgrade, pd, prog, up, Some(up), 0, fees), fees);
+        // A buffer for a multisig proposal.
+        assert_eq!(deploy_lamports(Buffer, pd, prog, buf, None, 0, full), 998_617_040);
+        assert_eq!(deploy_lamports(Buffer, pd, prog, buf, Some(buf), 0, 580_000), 580_000);
     }
 
     #[test]

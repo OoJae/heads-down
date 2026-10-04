@@ -2,6 +2,7 @@
 # Create (only if missing) and list the Heads Down operator keys. Idempotent; never overwrites.
 #
 #   scripts/mainnet/keys.sh [--cluster mainnet|localnet] [--keys-dir DIR] [--max-len N] [--no-funding]
+#                           [--public-rpc]
 #
 # Keys, under $HD_MAINNET_KEYS (default ~/.config/heads-down/mainnet; dir 700, files 600):
 #   deployer.json             fee payer of the deploy and the program's upgrade authority until it
@@ -11,7 +12,13 @@
 #   registrar.json            registrar Ed25519 voucher key = Config.registrar (`hd-registrar keygen`)
 #   registrar-session-secret  registrar HMAC key for SIWS sessions (HD_SESSION_SECRET)
 # Prints ONLY public keys, then the exact funding per key read from the cluster's rent
-# (read-only; mainnet uses helius.env if present, otherwise the public RPC).
+# (read-only; mainnet uses helius.env if present, otherwise the public RPC; --public-rpc uses
+# the public RPC although helius.env is there).
+#
+# For mainnet with the default key directory it stops, before any amount is printed, if
+# deployer.json, crank-payer.json or governance.json does not derive the address the funding
+# table in docs/DEPLOY.md names (lib.sh: HD_EXPECTED_DEPLOYER, HD_EXPECTED_CRANK_PAYER,
+# HD_EXPECTED_GOVERNANCE): SOL sent to that address could not be spent with the file at hand.
 HD_SCRIPT=keys
 source "$(dirname "$0")/lib.sh"
 
@@ -22,7 +29,8 @@ while [[ $# -gt 0 ]]; do
     --keys-dir) KEYS="$2"; shift 2 ;;
     --max-len) HD_MAX_LEN="$2"; shift 2 ;;
     --no-funding) FUNDING=0; shift ;;
-    -h | --help) sed -n '2,19p' "$0"; exit 0 ;;
+    --public-rpc) PUBLIC_RPC=1; shift ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -74,10 +82,15 @@ CRANK="$(pubkey_of "$K_CRANK")"
 GOVERNANCE="$(pubkey_of "$K_GOVERNANCE")"
 REGISTRAR="$(pubkey_of "$K_REGISTRAR")"
 PROGRAM="$(pubkey_of "$HD_PROGRAM_KEYPAIR")"
-if [[ "$CLUSTER" == mainnet && "$DEPLOYER" != "$HD_EXPECTED_DEPLOYER" ]]; then
-  warn "deployer.json is $DEPLOYER, not the expected $HD_EXPECTED_DEPLOYER (preflight will refuse it)"
-fi
 [[ "$PROGRAM" == "$HD_PROGRAM_ID" ]] || warn "$HD_PROGRAM_KEYPAIR is $PROGRAM, not $HD_PROGRAM_ID"
+# The funded addresses (mainnet, default key directory): collected here, reported after the table.
+WRONG=()
+if pins_apply; then
+  for k in "$K_DEPLOYER" "$K_CRANK" "$K_GOVERNANCE"; do
+    wrong="$(pin_mismatch "$k")"
+    if [[ -n "$wrong" ]]; then WRONG+=("$wrong"); fi
+  done
+fi
 
 echo
 bold "Heads Down $CLUSTER keys in $KEYS (dir 700, files 600; public keys only)"
@@ -96,10 +109,23 @@ cat <<EOF
   crank payer   hot key on Railway (HD_CRANK_KEYPAIR_JSON). Pays dig fees and its lookup-table rent;
                 each real dig reimburses crank_fee ($HD_CRANK_FEE lamports). Keep its balance small.
   governance    signs propose_config. paused=1 pauses dig immediately; everything else waits 72 h and
-                needs apply_config. Since v1.3 Config.governance can be rotated: propose_governance,
-                then accept_governance by the successor after the same 72 h (scripts/mainnet/governance.sh).
+                needs apply_config. The program (v1.3) can hand Config.governance to a successor
+                (propose_governance, then accept_governance by the successor after the same 72 h), but
+                no script here sends those instructions: scripts/mainnet/governance.sh has no command
+                for them. Until one exists, treat this key as the one that stays.
   registrar     signs attestation vouchers off-chain (never pays fees). Rotate via propose_config.
 EOF
+
+if [[ ${#WRONG[@]} -gt 0 ]]; then
+  echo >&2
+  for wrong in "${WRONG[@]}"; do printf '\033[31;1m[keys] STOP: %s.\033[0m\n' "$wrong" >&2; done
+  die "${#WRONG[@]} key file(s) do not derive the funded address: send nothing until this is cleared up"
+fi
+if pins_apply; then
+  log "deployer.json, crank-payer.json and governance.json derive the funded addresses"
+elif [[ "$CLUSTER" == mainnet ]]; then
+  log "funded addresses not checked: $KEYS is not the default mainnet key directory"
+fi
 
 if [[ $FUNDING == 1 ]]; then
   echo
@@ -115,7 +141,9 @@ if [[ $FUNDING == 1 ]]; then
   fi
   cat <<EOF
 
-  Later, not now: an upgrade needs a temporary buffer (the "buffer" rent above for a $SO_LEN-byte build,
-  refunded when the upgrade lands). Executor PDA top-ups: re-run init-config.sh (it only tops up).
+  Later, not now: an upgrade needs its buffer's rent (the figure above for a $SO_LEN-byte build) and the
+  same fee budget in the deployer while it runs; the rent returns when the upgrade lands. An upgrade
+  that outgrows --max-len also locks the rent of at least 10,240 more bytes (preflight shows it).
+  Executor PDA top-ups: re-run init-config.sh (it only tops up).
 EOF
 fi
