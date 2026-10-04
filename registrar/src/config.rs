@@ -458,7 +458,11 @@ mod tests {
         assert!(with(&[("HD_TRUST_REAL_IP", "true")]).unwrap().trust_real_ip);
         let hops = with(&[("HD_TRUST_REAL_IP", "false"), ("HD_TRUSTED_PROXY_HOPS", "1")]).unwrap();
         assert!(!hops.trust_real_ip && hops.trusted_proxy_hops == 1);
-        assert!(matches!(with(&[("HD_TRUST_REAL_IP", "yes")]), Err(ConfigError::Invalid("HD_TRUST_REAL_IP"))));
+        // Only `true` and `false` in lower case, as the settings files say.
+        for other in ["yes", "1", "TRUE", "True"] {
+            let refused = with(&[("HD_TRUST_REAL_IP", other)]);
+            assert!(matches!(refused, Err(ConfigError::Invalid("HD_TRUST_REAL_IP"))), "{other}");
+        }
         // Two different headers: the registrar does not guess which one the proxy writes.
         let both = with(&[("HD_TRUST_REAL_IP", "true"), ("HD_TRUSTED_PROXY_HOPS", "1")]);
         assert!(matches!(both, Err(ConfigError::Conflict(_))));
