@@ -388,6 +388,22 @@ async fn attest_routes_are_rate_limited() {
 }
 
 #[tokio::test]
+async fn limits_key_on_x_real_ip_only_when_it_is_trusted() {
+    // The default: the header is ignored, so a caller cannot pick a bucket by sending it.
+    let h = Harness::new(Opts { attest_burst: 1, ..Opts::default() });
+    let token = h.sign_in(&wallet(1)).await;
+    assert_eq!(h.get_from("203.0.113.1", "/attest/challenge", &token).await, StatusCode::OK);
+    assert_eq!(h.get_from("203.0.113.2", "/attest/challenge", &token).await, StatusCode::TOO_MANY_REQUESTS);
+
+    // HD_TRUST_REAL_IP=true: one bucket per address the proxy reports.
+    let h = Harness::new(Opts { attest_burst: 1, trust_real_ip: true, ..Opts::default() });
+    let token = h.sign_in(&wallet(1)).await;
+    assert_eq!(h.get_from("203.0.113.1", "/attest/challenge", &token).await, StatusCode::OK);
+    assert_eq!(h.get_from("203.0.113.1", "/attest/challenge", &token).await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(h.get_from("203.0.113.2", "/attest/challenge", &token).await, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn healthz_registrar_info_and_hygiene() {
     let h = Harness::new(Opts { max_body_bytes: 4096, ..Opts::default() });
     let (s, b, headers) = h.call(Method::GET, "/healthz", None, None).await;

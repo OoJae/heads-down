@@ -47,6 +47,11 @@ pub struct Opts {
     pub attest_burst: u32,
     pub debug_digest: bool,
     pub max_body_bytes: usize,
+    /// `HD_TRUST_REAL_IP=true`: key the rate limits on `X-Real-IP`.
+    pub trust_real_ip: bool,
+    /// `HD_SIWS_DOMAIN`, and `HD_SIWS_URI` when it is not the default `https://<domain>`.
+    pub siws_domain: &'static str,
+    pub siws_uri: Option<&'static str>,
 }
 
 impl Default for Opts {
@@ -59,6 +64,9 @@ impl Default for Opts {
             attest_burst: 1000,
             debug_digest: false,
             max_body_bytes: 64 * 1024,
+            trust_real_ip: false,
+            siws_domain: "headsdown.example",
+            siws_uri: None,
         }
     }
 }
@@ -78,7 +86,7 @@ impl Harness {
         let log_path = dir.path().join("attestations.jsonl");
         let mut env: HashMap<&str, String> = HashMap::from([
             ("HD_APP_RELEASE_CERT_SHA256", hex::encode(RELEASE_DIGEST)),
-            ("HD_SIWS_DOMAIN", "headsdown.example".into()),
+            ("HD_SIWS_DOMAIN", opts.siws_domain.into()),
             ("HD_TRANSPARENCY_LOG", log_path.display().to_string()),
             ("HD_RATE_LIMIT_PER_MIN", "100000".into()),
             ("HD_RATE_LIMIT_BURST", "100000".into()),
@@ -96,6 +104,12 @@ impl Harness {
         ]);
         if opts.debug_digest {
             env.insert("HD_APP_DEBUG_CERT_SHA256", hex::encode(DEBUG_DIGEST));
+        }
+        if opts.trust_real_ip {
+            env.insert("HD_TRUST_REAL_IP", "true".into());
+        }
+        if let Some(uri) = opts.siws_uri {
+            env.insert("HD_SIWS_URI", uri.into());
         }
         let config = Config::from_lookup(&|k| env.get(k).cloned()).unwrap();
         let registrar_seed = [0x42; 32];
@@ -167,6 +181,19 @@ impl Harness {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         (status, json, headers)
+    }
+
+    /// `GET path` with a session, carrying the `X-Real-IP` line a proxy would write for a
+    /// client at `real_ip`. Returns the status only.
+    pub async fn get_from(&self, real_ip: &str, path: &str, bearer: &str) -> StatusCode {
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .header("x-real-ip", real_ip)
+            .header("authorization", format!("Bearer {bearer}"))
+            .body(Body::empty())
+            .unwrap();
+        self.router.clone().oneshot(req).await.unwrap().status()
     }
 
     /// Builds the SIWS message the wallet would sign for a `/siws/nonce` response.

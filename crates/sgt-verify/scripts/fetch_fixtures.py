@@ -22,6 +22,10 @@ Usage:
     python3 scripts/fetch_fixtures.py [MINT ...]
     RPC_URL=https://... python3 scripts/fetch_fixtures.py
 
+The fixtures are tracked files, and a provider's RPC URL carries its API key (in the query
+string or in the path). So the fixtures record the RPC's host and nothing else of the URL.
+`python3 -m doctest scripts/fetch_fixtures.py` checks that.
+
 Only standard-library modules are used (Python 3.9+).
 """
 
@@ -32,9 +36,32 @@ import struct
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
+
+def rpc_label(url):
+    """The host of `url`, for the fixtures' `source` and `rpc` fields: never the URL itself.
+
+    >>> rpc_label("https://api.mainnet-beta.solana.com")
+    'api.mainnet-beta.solana.com'
+    >>> rpc_label("https://mainnet.helius-rpc.com/?api-key=SECRET")
+    'mainnet.helius-rpc.com'
+    >>> rpc_label("https://rpc.example.org:8899/v2/SECRET/")
+    'rpc.example.org'
+    >>> rpc_label("https://user:SECRET@rpc.example.org/")
+    'rpc.example.org'
+    >>> rpc_label("SECRET"), rpc_label("https://[SECRET"), rpc_label("")
+    ('rpc', 'rpc', 'rpc')
+    """
+    try:
+        return urllib.parse.urlsplit(url).hostname or "rpc"
+    except ValueError:
+        return "rpc"
+
+
 RPC_URL = os.environ.get("RPC_URL", "https://api.mainnet-beta.solana.com")
+RPC_LABEL = rpc_label(RPC_URL)
 TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 SGT_GROUP = "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te"
 
@@ -89,7 +116,7 @@ def get_account(address, encoding):
 def raw_fixture(address):
     slot, v = get_account(address, "base64")
     return {
-        "source": f"mainnet-beta getAccountInfo (finalized) via {RPC_URL}",
+        "source": f"mainnet-beta getAccountInfo (finalized) via {RPC_LABEL}",
         "slot": slot,
         "pubkey": address,
         "account": {
@@ -167,7 +194,7 @@ def write_json(path, obj):
 
 
 def main(mints):
-    manifest = {"rpc": RPC_URL, "group": SGT_GROUP, "sgts": []}
+    manifest = {"rpc": RPC_LABEL, "group": SGT_GROUP, "sgts": []}
 
     print(f"group {SGT_GROUP}")
     write_json(os.path.join(FIXTURES, "group.json"), raw_fixture(SGT_GROUP))

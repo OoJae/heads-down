@@ -3,10 +3,18 @@
 //! Two buckets: a general one for every API route, and a much tighter one for the routes that
 //! allocate attestation nonces or run chain verification (RSA-4096 and P-384 checks).
 //!
-//! The client IP is the TCP peer address. Behind a reverse proxy, set
-//! `HD_TRUSTED_PROXY_HOPS=n` to take the n-th address from the right of `X-Forwarded-For`
-//! (the one appended by the outermost trusted proxy). With the default of 0 the header is
-//! ignored, so a client cannot choose its own bucket by forging it.
+//! The client IP is the TCP peer address. Behind a reverse proxy, set one of two settings,
+//! whichever names the header that proxy writes:
+//! - `HD_TRUST_REAL_IP=true` takes the address from `X-Real-IP`, for an edge that sets it on
+//!   every request (Railway documents it as the client's remote address);
+//! - `HD_TRUSTED_PROXY_HOPS=n` takes the n-th address from the right of `X-Forwarded-For`
+//!   (the one appended by the outermost trusted proxy).
+//!
+//! With neither (the default) both headers are ignored, so a client cannot choose its own
+//! bucket by forging one. A header can arrive as several lines, and a client can only add
+//! lines before the proxy's: `X-Real-IP` is read from its last line, and the lines of
+//! `X-Forwarded-For` are read as one list. A missing header, an entry that is not an address
+//! or a line that cannot be read all fall back to the TCP peer.
 //!
 //! IPs are held only in the limiter's memory and are never logged.
 
@@ -30,6 +38,7 @@ pub struct RateLimiters {
     attest: DefaultKeyedRateLimiter<IpAddr>,
     clock: DefaultClock,
     trusted_proxy_hops: usize,
+    trust_real_ip: bool,
 }
 
 fn quota(per_min: u32, burst: u32) -> Quota {
@@ -39,12 +48,20 @@ fn quota(per_min: u32, burst: u32) -> Quota {
 }
 
 impl RateLimiters {
-    pub fn new(per_min: u32, burst: u32, attest_per_min: u32, attest_burst: u32, trusted_proxy_hops: usize) -> Self {
+    pub fn new(
+        per_min: u32,
+        burst: u32,
+        attest_per_min: u32,
+        attest_burst: u32,
+        trusted_proxy_hops: usize,
+        trust_real_ip: bool,
+    ) -> Self {
         Self {
             general: RateLimiter::keyed(quota(per_min, burst)),
             attest: RateLimiter::keyed(quota(attest_per_min, attest_burst)),
             clock: DefaultClock::default(),
             trusted_proxy_hops,
+            trust_real_ip,
         }
     }
 
@@ -60,15 +77,31 @@ impl RateLimiters {
         self.attest.shrink_to_fit();
     }
 
+    /// The address the limits are keyed on. A missing or malformed header falls back to the
+    /// TCP peer, never to a value the client chose.
     pub fn client_ip(&self, peer: Option<SocketAddr>, headers: &HeaderMap) -> IpAddr {
         let peer_ip = peer.map(|p| p.ip()).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        if self.trust_real_ip {
+            return headers
+                .get_all("x-real-ip")
+                .iter()
+                .next_back()
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse::<IpAddr>().ok())
+                .unwrap_or(peer_ip);
+        }
         if self.trusted_proxy_hops == 0 {
             return peer_ip;
         }
-        let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) else {
-            return peer_ip;
-        };
-        let hops: Vec<&str> = xff.split(',').map(str::trim).collect();
+        let mut hops: Vec<&str> = Vec::new();
+        for line in headers.get_all("x-forwarded-for") {
+            // A line that cannot be read is not skipped: skipping it would move the count from
+            // the right onto an entry of an earlier line, which the client may have sent.
+            let Ok(line) = line.to_str() else {
+                return peer_ip;
+            };
+            hops.extend(line.split(',').map(str::trim));
+        }
         hops.len()
             .checked_sub(self.trusted_proxy_hops)
             .and_then(|i| hops.get(i))
@@ -112,9 +145,13 @@ pub async fn attest_limit(State(app): State<Arc<App>>, req: Request, next: Next)
 mod tests {
     use super::*;
 
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn burst_then_block_per_ip() {
-        let l = RateLimiters::new(60, 2, 1, 1, 0);
+        let l = RateLimiters::new(60, 2, 1, 1, 0, false);
         let a: IpAddr = "10.0.0.1".parse().unwrap();
         let b: IpAddr = "10.0.0.2".parse().unwrap();
         assert!(l.check(&l.general, a).is_ok());
@@ -131,15 +168,64 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("x-forwarded-for", HeaderValue::from_static("1.1.1.1, 2.2.2.2, 3.3.3.3"));
         let peer: SocketAddr = "9.9.9.9:1234".parse().unwrap();
-        let untrusted = RateLimiters::new(1, 1, 1, 1, 0);
-        assert_eq!(untrusted.client_ip(Some(peer), &h), "9.9.9.9".parse::<IpAddr>().unwrap());
-        let one_hop = RateLimiters::new(1, 1, 1, 1, 1);
-        assert_eq!(one_hop.client_ip(Some(peer), &h), "3.3.3.3".parse::<IpAddr>().unwrap());
-        let two_hops = RateLimiters::new(1, 1, 1, 1, 2);
-        assert_eq!(two_hops.client_ip(Some(peer), &h), "2.2.2.2".parse::<IpAddr>().unwrap());
-        let too_many_hops = RateLimiters::new(1, 1, 1, 1, 9);
-        assert_eq!(too_many_hops.client_ip(Some(peer), &h), "9.9.9.9".parse::<IpAddr>().unwrap());
+        let untrusted = RateLimiters::new(1, 1, 1, 1, 0, false);
+        assert_eq!(untrusted.client_ip(Some(peer), &h), ip("9.9.9.9"));
+        let one_hop = RateLimiters::new(1, 1, 1, 1, 1, false);
+        assert_eq!(one_hop.client_ip(Some(peer), &h), ip("3.3.3.3"));
+        let two_hops = RateLimiters::new(1, 1, 1, 1, 2, false);
+        assert_eq!(two_hops.client_ip(Some(peer), &h), ip("2.2.2.2"));
+        let too_many_hops = RateLimiters::new(1, 1, 1, 1, 9, false);
+        assert_eq!(too_many_hops.client_ip(Some(peer), &h), ip("9.9.9.9"));
         h.insert("x-forwarded-for", HeaderValue::from_static("garbage"));
-        assert_eq!(one_hop.client_ip(Some(peer), &h), "9.9.9.9".parse::<IpAddr>().unwrap());
+        assert_eq!(one_hop.client_ip(Some(peer), &h), ip("9.9.9.9"));
+        // A proxy that adds a line of its own instead of extending the client's: the lines are
+        // one list, so the proxy's entry is still the rightmost one and the client's is not.
+        let mut lines = HeaderMap::new();
+        lines.append("x-forwarded-for", HeaderValue::from_static("6.6.6.6"));
+        lines.append("x-forwarded-for", HeaderValue::from_static("4.4.4.4, 5.5.5.5"));
+        assert_eq!(one_hop.client_ip(Some(peer), &lines), ip("5.5.5.5"));
+        assert_eq!(two_hops.client_ip(Some(peer), &lines), ip("4.4.4.4"));
+        assert_eq!(untrusted.client_ip(Some(peer), &lines), ip("9.9.9.9"));
+        // X-Real-IP is not read in this mode.
+        lines.append("x-real-ip", HeaderValue::from_static("7.7.7.7"));
+        assert_eq!(one_hop.client_ip(Some(peer), &lines), ip("5.5.5.5"));
+        assert_eq!(untrusted.client_ip(Some(peer), &lines), ip("9.9.9.9"));
+        // A line that cannot be read (a byte outside visible ASCII) is not skipped: the count
+        // from the right would land on an earlier line, here the client's own 6.6.6.6. With
+        // such a line anywhere in the header, the peer is used.
+        for unreadable in [&b"\xff, 5.5.5.5"[..], &b"5.5.5.5, \xff"[..], &b"\xff"[..]] {
+            let unreadable = HeaderValue::from_bytes(unreadable).unwrap();
+            let client_line = HeaderValue::from_static("6.6.6.6");
+            for (first, second) in [(&client_line, &unreadable), (&unreadable, &client_line)] {
+                let mut h = HeaderMap::new();
+                h.append("x-forwarded-for", first.clone());
+                h.append("x-forwarded-for", second.clone());
+                assert_eq!(one_hop.client_ip(Some(peer), &h), ip("9.9.9.9"));
+                assert_eq!(two_hops.client_ip(Some(peer), &h), ip("9.9.9.9"));
+            }
+        }
+    }
+
+    #[test]
+    fn real_ip_only_when_trusted_and_only_the_proxys_line() {
+        let peer: SocketAddr = "9.9.9.9:1234".parse().unwrap();
+        let real_ip = RateLimiters::new(1, 1, 1, 1, 0, true);
+        let mut h = HeaderMap::new();
+        // The client sent a line of its own; the proxy's is the last one.
+        h.append("x-real-ip", HeaderValue::from_static("198.51.100.66"));
+        h.append("x-real-ip", HeaderValue::from_static("203.0.113.9"));
+        h.append("x-forwarded-for", HeaderValue::from_static("198.51.100.67"));
+        assert_eq!(real_ip.client_ip(Some(peer), &h), ip("203.0.113.9"));
+        assert_eq!(RateLimiters::new(1, 1, 1, 1, 0, false).client_ip(Some(peer), &h), ip("9.9.9.9"), "off by default");
+        let mut v6 = HeaderMap::new();
+        v6.append("x-real-ip", HeaderValue::from_static("2001:db8::7"));
+        assert_eq!(real_ip.client_ip(Some(peer), &v6), ip("2001:db8::7"));
+        // A missing or malformed header falls back to the peer, never to an earlier line.
+        let mut bad = HeaderMap::new();
+        bad.append("x-real-ip", HeaderValue::from_static("203.0.113.9"));
+        bad.append("x-real-ip", HeaderValue::from_static("not-an-address"));
+        assert_eq!(real_ip.client_ip(Some(peer), &bad), ip("9.9.9.9"));
+        assert_eq!(real_ip.client_ip(Some(peer), &HeaderMap::new()), ip("9.9.9.9"));
+        assert_eq!(real_ip.client_ip(None, &HeaderMap::new()), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     }
 }

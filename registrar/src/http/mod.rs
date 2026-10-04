@@ -151,6 +151,7 @@ impl App {
             config.attest_rate_per_min,
             config.attest_rate_burst,
             config.trusted_proxy_hops,
+            config.trust_real_ip,
         );
         Ok(Self {
             attest_permits: Semaphore::new(config.max_concurrent_attest),

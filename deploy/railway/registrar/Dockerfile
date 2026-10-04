@@ -4,7 +4,8 @@
 # (same pinned Rust image, same two-step cached build, same runtime defaults); the differences
 # are the build context and the runtime:
 #   * context = the REPOSITORY ROOT (one Root Directory, "/", for every service), so paths below
-#     start with registrar/. Railway config file: /deploy/railway/registrar/railway.json.
+#     start with registrar/. This file's path is a setting of the service
+#     (deploy/railway/README.md); railway.json records it.
 #   * runtime = debian bookworm-slim instead of distroless, because the entrypoint (bash) writes
 #     HD_REGISTRAR_KEYPAIR_JSON to a 0600 file on tmpfs and hands the Railway volume (/data:
 #     nonce database + transparency log) to uid 10001 before dropping to it with setpriv.

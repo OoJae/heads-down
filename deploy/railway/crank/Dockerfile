@@ -3,8 +3,8 @@
 # hd-crank on Railway (docs/DEPLOY.md, "Railway").
 #
 # Build context: the REPOSITORY ROOT. The crank depends on crates/p256-introspect by path
-# (crank/Cargo.toml), so the service's Root Directory stays "/" and its config file is
-# /deploy/railway/crank/railway.json, which points at this Dockerfile. Locally:
+# (crank/Cargo.toml), so the service's Root Directory stays "/" and this file's path is a
+# setting of the service (deploy/railway/README.md); railway.json records it. Locally:
 #   docker build -f deploy/railway/crank/Dockerfile -t hd-crank .
 #
 # Runtime: debian bookworm-slim (the builder's glibc), no packages added. TLS roots are compiled

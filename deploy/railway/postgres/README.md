@@ -12,7 +12,15 @@ repo: Railway runs, backs up and upgrades it, and provides the connection variab
 3. In the **indexer** service set `DATABASE_URL=${{Postgres.DATABASE_URL}}`. The private URL
    stays on Railway's internal network (no egress cost, no TLS needed). Do not give the indexer
    the public URL.
-4. Nothing else: `node src/main.ts serve` applies `services/indexer/migrations/*.sql` on start
+4. Remove the database's public endpoint: Railway's PostgreSQL template comes with a TCP proxy
+   enabled (a public address like `shuttle.proxy.rlwy.net:15140`, per Railway's documentation),
+   and the indexer does not use it. The proxy is in the Postgres service's **Settings**, in the
+   **Networking** section; remove it there, or through the API. The credentials are ordinary
+   variables that anyone who can list the project's variables can read; without the proxy they
+   open nothing from outside Railway. Add a proxy again for the time you need your own `psql`.
+   (Railway's documentation describes adding a proxy in that section, not removing one, and
+   the removal was not tried when this step was written.)
+5. Nothing else: `node src/main.ts serve` applies `services/indexer/migrations/*.sql` on start
    (each once, in a transaction, recorded in `schema_migrations`).
 
 Sizing: the indexer stores events and accounts for one dataset, tens of MB at hackathon scale.
