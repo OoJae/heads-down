@@ -3,8 +3,9 @@
 # against the build, and write the public receipt to deploy/receipts/<cluster>/.
 #
 #   scripts/mainnet/deploy.sh [--cluster mainnet|localnet] [--keys-dir DIR] [--mode fresh|upgrade|buffer]
-#                             [--max-len N] [--cu-price MICRO_LAMPORTS] [--max-sign-attempts N]
-#                             [--buffer-authority PUBKEY] [--skip-build] [--allow-dirty] [--yes]
+#                             [--max-len N] [--cu-price MICRO_LAMPORTS] [--write-rate TX_PER_SECOND]
+#                             [--cli-only] [--max-sign-attempts N] [--buffer-authority PUBKEY]
+#                             [--public-rpc] [--skip-build] [--allow-dirty] [--yes]
 #
 # fresh    first deploy: `solana program deploy --program-id <program keypair> --upgrade-authority
 #          deployer.json --max-len N` (the program keypair only signs; it stays where it is)
@@ -12,13 +13,22 @@
 # buffer   write a fresh buffer (and hand it to --buffer-authority, e.g. the Squads vault) for a
 #          multisig upgrade proposal; nothing is upgraded here
 #
-# The buffer keypair is kept per commit in the key dir (buffer-<commit>.json), so a failed deploy
-# resumes by re-running this script, and the CLI never prints a recovery seed phrase.
+# The buffer is written in two steps. First `hd-devstack write-buffer` creates it as the Solana
+# CLI would and writes it at --write-rate transactions a second (default 1: Helius' free plan
+# allows one sendTransaction a second). Then the CLI runs as before with --buffer: it finds every
+# chunk written, sends no write, and sends only its final transaction. --cli-only skips the first
+# step and lets the CLI write the buffer itself: about 200 transactions 10 ms apart, which by
+# the CLI's source an RPC with that limit lets through a few at a time (not tried on mainnet).
+#
+# The buffer keypair is kept per commit in the key dir (buffer-<commit>.json), so a deploy that
+# stopped part way continues by re-running this script at the same commit: preflight counts the
+# rent and the chunks the buffer already holds, and the CLI never prints a recovery seed phrase.
+# --public-rpc (or HD_PUBLIC_RPC=1) uses the public mainnet RPC although helius.env is there.
 # --cluster localnet runs the same path against the dev stack (scripts/mainnet/dry-run.sh).
 HD_SCRIPT=deploy
 source "$(dirname "$0")/lib.sh"
 
-MODE=fresh SKIP_BUILD=0 ALLOW_DIRTY=0 BUFFER_AUTHORITY=""
+MODE=fresh SKIP_BUILD=0 ALLOW_DIRTY=0 BUFFER_AUTHORITY="" CLI_ONLY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cluster) set_cluster "$2"; shift 2 ;;
@@ -26,16 +36,25 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --max-len) HD_MAX_LEN="$2"; shift 2 ;;
     --cu-price) HD_CU_PRICE="$2"; shift 2 ;;
+    --write-rate) HD_WRITE_RATE="$2"; shift 2 ;;
+    --cli-only) CLI_ONLY=1; shift ;;
     --max-sign-attempts) HD_MAX_SIGN_ATTEMPTS="$2"; shift 2 ;;
     --buffer-authority) BUFFER_AUTHORITY="$2"; shift 2 ;;
+    --public-rpc) PUBLIC_RPC=1; shift ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --yes) YES=1; shift ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,27p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
 case "$MODE" in fresh | upgrade | buffer) ;; *) die "--mode must be fresh, upgrade or buffer" ;; esac
+[[ "$HD_WRITE_RATE" =~ ^[0-9]+([.][0-9]+)?$ && ! "$HD_WRITE_RATE" =~ ^0+([.]0+)?$ ]] \
+  || die "--write-rate must be a number of transactions a second above 0 (got '$HD_WRITE_RATE')"
+if [[ -n "$BUFFER_AUTHORITY" ]]; then
+  [[ "$MODE" == buffer ]] || die "--buffer-authority only applies to --mode buffer"
+  [[ "$BUFFER_AUTHORITY" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || die "--buffer-authority is not a base58 address: '$BUFFER_AUTHORITY'"
+fi
 default_keys
 need solana "install the Agave CLI 4.1 (~/.local/share/solana/install/active_release/bin)"
 need solana-keygen "install the Agave CLI 4.1"
@@ -70,20 +89,31 @@ SOLANA_VER="$(solana --version)"
 SBF_VER="$(cargo-build-sbf --version | tr '\n' ' ' | sed 's/ *$//')"
 log "built $SO_LEN bytes, sha256 $SO_SHA ($SBF_VER)"
 
-# ---- 3. preflight (read-only) ----------------------------------------------------------------------
-PREFLIGHT_JSON="$HD_STATE/preflight-$CLUSTER-$TS.json"
-# The fee budget preflight checks depends on the priority fee: hand it the one this deploy uses.
-HD_CU_PRICE="$HD_CU_PRICE" "$MAINNET_SCRIPTS/preflight.sh" --cluster "$CLUSTER" --keys-dir "$KEYS" --mode "$MODE" --max-len "$HD_MAX_LEN" \
-  --so "$HD_SO" --json "$PREFLIGHT_JSON" || die "preflight is NO-GO; nothing was sent"
-
-# ---- 4. plan and confirmation --------------------------------------------------------------------------
+# ---- 3. the per-commit buffer, then preflight (read-only) ----------------------------------------------
+# The buffer's address is fixed before preflight, so that a buffer left by a run that stopped part
+# way is found and counted: its rent is not needed again, and only the missing chunks are.
+key_ok "$K_DEPLOYER" || die "$K_DEPLOYER missing or not mode 600: run scripts/mainnet/keys.sh"
 DEPLOYER="$(pubkey_of "$K_DEPLOYER")"
-BUFFER_KP="$KEYS/buffer-${COMMIT:0:12}.json"
+BUFFER_KP="$(buffer_keypair "$KEYS" "$COMMIT")"
 if [[ ! -e "$BUFFER_KP" ]]; then
   (umask 077 && solana-keygen new --no-bip39-passphrase --silent --outfile "$BUFFER_KP" >/dev/null)
 fi
 chmod 600 "$BUFFER_KP"
 BUFFER="$(pubkey_of "$BUFFER_KP")"
+KEYS_HINT=""
+if [[ "$KEYS" != "$HD_MAINNET_KEYS" ]]; then KEYS_HINT=" --keys-dir $KEYS"; fi
+
+PREFLIGHT_JSON="$HD_STATE/preflight-$CLUSTER-$TS.json"
+# The fee budget preflight checks depends on the priority fee: hand it the one this deploy uses.
+HD_CU_PRICE="$HD_CU_PRICE" HD_PUBLIC_RPC="$PUBLIC_RPC" "$MAINNET_SCRIPTS/preflight.sh" --cluster "$CLUSTER" --keys-dir "$KEYS" --mode "$MODE" \
+  --max-len "$HD_MAX_LEN" --so "$HD_SO" --buffer "$BUFFER" --json "$PREFLIGHT_JSON" || die "preflight is NO-GO; nothing was sent"
+
+# ---- 4. plan and confirmation --------------------------------------------------------------------------
+if [[ $CLI_ONLY == 1 ]]; then
+  WRITER="the Solana CLI itself (--cli-only): its writes go out 10 ms apart, up to $HD_MAX_SIGN_ATTEMPTS signing rounds"
+else
+  WRITER="hd-devstack write-buffer, at most $HD_WRITE_RATE transaction(s) a second; it continues a buffer that is part written"
+fi
 echo
 bold "deploy plan ($CLUSTER, mode $MODE)"
 cat <<EOF
@@ -92,12 +122,25 @@ cat <<EOF
   upgrade authority  $DEPLOYER (moves to a Squads vault later: docs/DEPLOY.md)
   build              $SO_LEN bytes, sha256 $SO_SHA, commit $COMMIT (dirty=$DIRTY)
   max-len            $([[ $MODE == fresh ]] && echo "$HD_MAX_LEN bytes" || echo "n/a ($MODE)")
-  buffer             $BUFFER (buffer-${COMMIT:0:12}.json; resumable)
-  priority fee       $HD_CU_PRICE micro-lamports/CU, up to $HD_MAX_SIGN_ATTEMPTS signing rounds
+  buffer             $BUFFER (buffer-${COMMIT:0:12}.json; what it already holds is in the preflight above)
+  buffer written by  $WRITER
+  priority fee       $HD_CU_PRICE micro-lamports/CU
   RPC                $RPC_HOST
 EOF
-if [[ "$MODE" == buffer ]]; then echo "  buffer authority   ${BUFFER_AUTHORITY:-$DEPLOYER (unchanged)}"; fi
-confirm "deploy heads_down to mainnet" "this $MODE spends real SOL from $DEPLOYER"
+WHAT_SPENT="this $MODE spends real SOL from $DEPLOYER"
+if [[ "$MODE" == buffer && -n "$BUFFER_AUTHORITY" ]]; then
+  # What a wrong address would lose: the lamports the buffer holds, or will be created with
+  # (lib.sh: handover_plan, handover_confirm).
+  HANDED_SOL="$(python3 -c 'import json, sys
+f = json.load(open(sys.argv[1]))["funding"]
+l = f.get("buffer_lamports") or f["rent"]["buffer"]
+print("%d.%09d" % (l // 10**9, l % 10**9))' "$PREFLIGHT_JSON")"
+  handover_plan "$BUFFER_AUTHORITY" "$HANDED_SOL"
+  WHAT_SPENT="$(handover_confirm "$BUFFER_AUTHORITY" "$HANDED_SOL" "$DEPLOYER")"
+elif [[ "$MODE" == buffer ]]; then
+  echo "  buffer authority   $DEPLOYER (unchanged: the buffer stays the deployer's)"
+fi
+confirm "deploy heads_down to mainnet" "$WHAT_SPENT"
 
 # ---- 5. deploy ----------------------------------------------------------------------------------------
 solana_cfg "$K_DEPLOYER"
@@ -125,11 +168,42 @@ PY
 recover_hint() {
   cat >&2 <<EOF
 
-Nothing is lost. The buffer $BUFFER may hold rent from this attempt:
-  resume:  re-run this script at the same commit (it reuses buffer-${COMMIT:0:12}.json)
-  refund:  scripts/mainnet/solana.sh --cluster $CLUSTER -- program close $BUFFER --recipient $DEPLOYER
+Nothing is lost. If the buffer $BUFFER was created, it is the deployer's, and
+it keeps the chunks that were written and the rent that was put into it:
+  continue  re-run this script at the same commit (it reuses buffer-${COMMIT:0:12}.json). Preflight
+            counts what the buffer holds, so no more SOL is needed for it.
+  refund    scripts/mainnet/solana.sh --cluster $CLUSTER$KEYS_HINT -- program close $BUFFER --recipient $DEPLOYER
+  look      scripts/mainnet/preflight.sh --cluster $CLUSTER$KEYS_HINT --mode $MODE
+            (its "buffer" line says how many chunks are still to write)
+If the RPC key has no credits left, add --public-rpc to any of the three.
 EOF
 }
+
+# 5a. the buffer, written at a pace the RPC accepts (the default).
+VERIFY_EXTRA=()
+if [[ $CLI_ONLY == 0 ]]; then
+  WRITER_JSON="$HD_STATE/write-buffer-$CLUSTER-$TS.json"
+  WRITER_OUT="$HD_STATE/write-buffer-$CLUSTER-$TS.out"
+  set +e
+  tool write-buffer --so "$HD_SO" --buffer "$BUFFER_KP" --authority "$K_DEPLOYER" --mode "$MODE" --max-len "$HD_MAX_LEN" \
+    --rate "$HD_WRITE_RATE" --cu-price "$HD_CU_PRICE" --json "$WRITER_JSON" --yes | tee "$WRITER_OUT"
+  RC=${PIPESTATUS[0]}
+  set -e
+  if [[ $RC -ne 0 ]]; then
+    recover_hint
+    die "the buffer write stopped (exit $RC); log $WRITER_OUT"
+  fi
+  VERIFY_EXTRA+=(--buffer-write "$WRITER_JSON")
+fi
+
+# 5b. the Solana CLI: with the buffer written it sends its final transaction only. Its
+# transactions are counted from this slot on, into the receipt.
+CLI_SINCE="$(scli slot --commitment confirmed | awk 'NR==1{print $1}')" || true
+if [[ "$CLI_SINCE" =~ ^[0-9]+$ ]]; then
+  VERIFY_EXTRA+=(--cli-since-slot "$CLI_SINCE")
+else
+  warn "could not read the current slot: the receipt will not count the CLI's transactions"
+fi
 set +e
 case "$MODE" in
   fresh)
@@ -174,7 +248,9 @@ if [[ "$HD_SO" == "$REPO_ROOT"/* ]]; then SO_ARG="${HD_SO#"$REPO_ROOT"/}"; fi
 VERIFY=(--mode "$MODE" --so "$SO_ARG" --program-id "$HD_PROGRAM_ID" --deployer "$DEPLOYER" --balance-before "$BAL_BEFORE"
   --meta "git_commit=$COMMIT" --meta "git_dirty=$DIRTY" --meta "build_script=programs/heads-down/scripts/build.sh"
   --meta "cargo_features=mainnet" --meta "solana_cli=$SOLANA_VER" --meta "cargo_build_sbf=$SBF_VER"
-  --meta "cu_price_micro_lamports=$HD_CU_PRICE" --meta "preflight=GO" --out "$RECEIPT")
+  --meta "cu_price_micro_lamports=$HD_CU_PRICE" --meta "preflight=GO"
+  --meta "buffer_written_by=$([[ $CLI_ONLY == 1 ]] && echo solana-cli || echo hd-devstack-write-buffer)" --out "$RECEIPT")
+VERIFY+=(${VERIFY_EXTRA[@]+"${VERIFY_EXTRA[@]}"})
 if [[ -n "$SIG" ]]; then VERIFY+=(--signature "$SIG"); fi
 case "$MODE" in
   fresh) VERIFY+=(--max-len "$HD_MAX_LEN") ;;
@@ -187,7 +263,7 @@ echo
 bold "done: $MODE on $CLUSTER"
 echo "  receipt   ${RECEIPT#"$REPO_ROOT"/}"
 if [[ "$MODE" == fresh ]]; then
-  echo "  next      scripts/mainnet/init-config.sh --cluster $CLUSTER$([[ "$KEYS" != "$HD_MAINNET_KEYS" ]] && echo " --keys-dir $KEYS")"
+  echo "  next      scripts/mainnet/init-config.sh --cluster $CLUSTER$KEYS_HINT"
 elif [[ "$MODE" == buffer ]]; then
   echo "  next      propose the upgrade in Squads: program $HD_PROGRAM_ID, buffer $BUFFER, spill $DEPLOYER"
 fi
