@@ -54,15 +54,19 @@ built; the Stack and Gift screens are not yet.
 | [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
-**Not done yet, in plain words.** Nothing is deployed on mainnet. The app has not run on a
-physical phone. It does run on an Android 14 emulator against the local stack: a heartbeat signed
-in the emulator's Keystore dug a round on a fork of mainnet, and a pickup landed a BREAK
-(`scripts/devstack/emulator-smoke.sh`). With Solana Mobile's test wallet installed there, the
-wallet has signed its clock-in, clock-out, taking SOL back and closing the rig, and the amounts
-that came back matched the screen to the lamport. No production wallet has signed anything, and
-nothing has run on mainnet. The
-app has no screens yet for Stack or Gift, and its clock-out cannot buy ORE yet.
-There has been no third-party audit.
+**Not done yet, in plain words.** The program is not deployed on mainnet. The indexer, the
+[dashboard](https://dashboard-production-b80c.up.railway.app) and the registrar run on Railway
+against mainnet; with no program there they show ORE's own rounds and zeros, and the crank is not
+started. The app has not run on a physical phone. It does run on an Android 14 emulator against the
+local stack: a heartbeat signed in the emulator's Keystore dug a round on a fork of mainnet, and a
+pickup landed a BREAK (`scripts/devstack/emulator-smoke.sh`). With Solana Mobile's test wallet
+installed there, the wallet has signed its clock-in, clock-out, taking SOL back and closing the
+rig, and the amounts that came back matched the screen to the lamport. The same emulator has
+signed in to the live registrar through the test wallet, which showed the name and icon of the
+published identity page; the registrar refused the emulator's software key, as it should. No
+production wallet has signed anything, and no transaction of the program has run on mainnet. The
+app has no screens yet for Stack or Gift, and its clock-out cannot buy ORE yet. There has been no
+third-party audit.
 
 ## Security
 

@@ -866,18 +866,21 @@ vault holds the authority.
 
 | Item | Plan | Monthly |
 |---|---|---|
-| Railway | Hobby ($5 including $5 of usage) | about **$8-15**: crank ~0.1 GB RAM, registrar ~0.05 GB, indexer ~0.2 GB, dashboard ~0.05 GB, Postgres ~0.25 GB at $10/GB-month, light CPU at $20/vCPU-month, volumes ~3 GB at $0.15/GB |
-| Helius | Free to start | **$0**, and **$49** (Developer) once steady use outgrows 1M credits a month |
-| SOL: crank fees | | ~0: each real dig reimburses 7,000 against ~6,050-6,723 spent; failed attempts and congestion are the cost (budget 0.01-0.05 SOL a month) |
-| SOL: lookup tables | one-time | 0.0026 SOL + 0.00065 SOL per rig, recoverable by closing the tables |
-| SOL: Executor | | grows by 3,000 lamports per dig; top-ups only after late third-party checkpoints |
+| Railway | Hobby, billed by usage (the account's plan already; $5 a month that counts towards usage across all of the account's projects) | an estimate, not yet measured: about **$8-15** for five small services (crank ~0.1 GB RAM, registrar ~0.05 GB, indexer ~0.2 GB, dashboard ~0.05 GB, Postgres ~0.25 GB at $10 per GB-month; light CPU at $20 per vCPU-month; volumes at $0.15 per GB-month of storage used). Read the project's usage page after the first days and set a usage limit |
+| Helius | Free | **$0** while a month stays inside 1M credits (section 5); otherwise **$49** (Developer, 10M credits) plus $5 per further million |
+| SOL: crank fees | | about 0.001 to 0.003 SOL per phone-night (section 3); budget 0.01 to 0.05 SOL a month |
+| SOL: lookup tables | one-time, only when lookup tables are on | 0.00256 SOL + 0.00065 SOL per rig. It comes back only by hand, with the crank stopped: `scripts/mainnet/solana.sh --keypair <crank-payer.json> -- address-lookup-table deactivate <TABLE> --bypass-warning`, about 5 minutes later `… address-lookup-table close <TABLE> --recipient <ADDR>`. Keep the table's address (the crank logs `created lookup table`) |
+| SOL: Executor | | grows by 3,000 lamports per dig; nothing ever leaves it (section 9) |
+| SOL: an upgrade | per upgrade, temporary | about 0.964 SOL lent to the deployer for a few minutes; all but about 0.001 SOL of fees comes back (section 3) |
+| SOL: a larger build | only when a build outgrows max-len | 52,019,200 lamports per 10,240-byte extension, locked like the program's rent |
+| SOL: Squads | one-time, optional | 0.1 SOL per multisig, never returned (section 15) |
 | Domain (optional) | | ~$1 (not needed: the app identifies itself with the project's GitHub Pages address) |
-| **Total** | | **about $8-15/month** on the free Helius plan, about $60 with the Developer plan, plus small SOL top-ups |
+| **Total** | | **about $8-15 a month** on the free Helius plan, plus small SOL top-ups |
 
 One-time: the deploy and initialization, **1.10 SOL** across the three keys (section 3). Of it,
-0.9996 SOL of ProgramData rent stays locked while the program exists, about 0.005 SOL goes into
-the Program account, the Config, the Executor float and fees for good, and the rest stays in the
-keys it was sent to.
+0.9996 SOL of ProgramData rent stays locked while the program exists, 0.0053 SOL goes into the
+Program account, the Config, the Executor float and fees for good, and 0.095 SOL is liquid on day
+one: 0.035 in the deployer, and the crank's 0.05 and governance's 0.01, which are spent in use.
 
 ## 17. Files and secrets
 
