@@ -22,6 +22,12 @@
 #      wallet's balance to the lamport;
 #   7. a second clock-in, over the tombstone the closed rig left: it must arm shift 2.
 #
+# With --wallet the rig's price ceiling is the APK's build setting, and the fork carries mainnet's
+# ORE state: build the APK for this test with a ceiling above any cost,
+#   cd android && ./gradlew :app:assembleLocaldev \
+#     -Pheadsdown.policy.planMaxEvCost=2000000000 -Pheadsdown.policy.capMaxCost=2000000000
+# or the crank will, correctly, refuse to dig on a day when ORE's cost is above the default.
+#
 # Needs: the stack up (up.sh), `adb` with one device, and for step 3 an emulator: the sensor and
 # power commands are emulator console commands (`adb emu`). On a phone, do step 3 and 4 by hand
 # when asked. Start an emulator with, for example:
@@ -36,7 +42,7 @@ while [[ $# -gt 0 ]]; do
     --apk) APK="$2"; shift 2 ;;
     --keep-data) KEEP=1; shift ;;
     --wallet) WALLET_APK="$2"; shift 2 ;;
-    -h | --help) sed -n '2,28p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,35p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -176,7 +182,19 @@ else
 fi
 wait_metric hd_crank_heartbeats_accepted_total "$BEATS" 300
 step "the crank accepted a heartbeat signed by the device's Keystore key"
-wait_metric hd_crank_digs_landed_total "$DIGS" 420
+# A dig needs ORE's cost under the ceiling the rig was armed with. The fork carries mainnet's ORE
+# state, and with --wallet the ceiling is the APK's build setting: when the cost is above it the
+# crank skips the rig every round (reason cost_gate), which is the product working as designed
+# and not something to wait out.
+GATED="$(metric 'hd_crank_digs_skipped_total{reason="cost_gate"}')"
+t=0
+until [[ "$(metric hd_crank_digs_landed_total)" -gt "$DIGS" ]]; do
+  sleep 3; t=$((t + 3))
+  if [[ "$(( $(metric 'hd_crank_digs_skipped_total{reason="cost_gate"}') - GATED ))" -ge 6 ]]; then
+    die "the crank skipped the rig for cost_gate: ORE's cost on this fork ($(curl -fsS -m 5 "http://127.0.0.1:$HD_CRANK_PORT/healthz" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("ema_ev"))') lamports per ORE) is above the ceiling the rig was armed with. With --wallet that is the APK's: build it for this test with cd android && ./gradlew :app:assembleLocaldev -Pheadsdown.policy.planMaxEvCost=2000000000 -Pheadsdown.policy.capMaxCost=2000000000"
+  fi
+  [[ $t -lt 420 ]] || die "hd_crank_digs_landed_total did not move past $DIGS in 420 s (crank log: $LOGS/crank.log)"
+done
 SIG="$(sed 's/\x1b\[[0-9;]*m//g' "$LOGS/crank.log" | awk '/dig landed/ { for (i = 1; i <= NF; i++) if ($i ~ /^sig=/) s = substr($i, 5) } END { print s }')"
 step "DIG LANDED on-chain with that heartbeat: tx $SIG"
 
