@@ -22,9 +22,11 @@ In order. Until step 5 no transaction is signed by these keys.
 1. **Helius key.** Create a Helius account (the free plan is enough to start, section 5). Put one line in
    `~/.config/heads-down/mainnet/helius.env`: `HELIUS_API_KEY=<key>`, then
    `chmod 600 ~/.config/heads-down/mainnet/helius.env`. Never paste the key anywhere else.
-2. **Back up the keys.** `~/.config/heads-down/` holds the only copies (no seed phrases were
-   ever shown). Make an encrypted backup (for example an encrypted disk image or
-   `age`/`gpg`) of `heads_down-program-keypair.json` and `mainnet/` and store it offline.
+2. **Back up the keys, before any SOL is sent.** `~/.config/heads-down/` holds the only copies
+   (no seed phrases were ever shown), and `deployer.json` is the only way to get the program's
+   rent back (section 3). Make an encrypted backup (for example an encrypted disk image or
+   `age`/`gpg`) of `heads_down-program-keypair.json` and `mainnet/`, and keep a copy off this
+   machine.
 3. **Fund the keys** (section 3; amounts read from mainnet's rent on 2026-10-03):
 
    | Key | Public key | Send |
@@ -34,20 +36,24 @@ In order. Until step 5 no transaction is signed by these keys.
    | governance | `37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN` | **0.01 SOL** |
    | registrar | `9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo` | 0 (never pays fees) |
 
-   Total **1.10 SOL** of the ~2 SOL budget; keep the rest for the first upgrade's temporary
-   buffer (section 14) and top-ups. About 0.03 SOL of the deployer's share is never spent: the
-   Solana CLI only has to see it there (section 3), and it is still in the deployer afterwards.
+   Total **1.10 SOL**. About 0.03 SOL of the deployer's share is never spent: the Solana CLI
+   only has to see it there, and it is still in the deployer afterwards. Section 3 says what comes
+   back and what does not: 0.9996 SOL is locked in the program's rent and 0.0053 SOL is gone for
+   good. Two more amounts are not in the table: the **wallet on the phone** needs about 0.04 SOL
+   for a week of tests, and a **first upgrade** needs about 0.964 SOL lent to the deployer for a
+   few minutes, so the working budget is about 2.07 SOL if an upgrade must stay possible.
 4. **Preflight**: `scripts/mainnet/preflight.sh` must end with `GO`.
 5. **Deploy**: `scripts/mainnet/deploy.sh` (type the confirmation), then commit the receipt it
    writes under `deploy/receipts/mainnet/`.
 6. **Initialize**: `scripts/mainnet/init-config.sh` (type the confirmation), commit its receipt,
    and check `scripts/mainnet/governance.sh show`.
-7. **Railway**: create the project and the five services (section 10), in order: Postgres,
-   indexer, dashboard, registrar, crank. Set the variables from the matrix; attach volumes to
-   the crank and the registrar.
+7. **Railway** (section 10): Postgres, the indexer without `RPC_URL`, the dashboard and the
+   registrar can run before the deploy, and do. After step 6: set the indexer's `RPC_URL`, then
+   start the crank, last, with its fee payer funded.
 8. **Monitoring**: add the uptime checks and balance alerts of section 11.
-9. **Within the first week**: create the Squads multisig with a 72 h time lock and move the
-   upgrade authority to its vault (section 15). Decide how governance moves (section 15).
+9. **Decide about Squads** (section 15): a multisig with a 72 h time lock protects users against
+   a single key, costs 0.1 SOL that does not come back, and ends the one-signature way of
+   getting the program's rent back.
 10. **Identity page**: after steps 5 and 6, and again after the first run on a phone, update the
     dated status line in `site/index.html`, commit, and publish it again (section 10.7).
 
@@ -104,11 +110,13 @@ cannot move user funds; governance can pause, change `crank_fee` (≤ `executor_
 registrar and `bury_bps` after 72 h, and nothing else; the upgrade authority is the full
 program authority, which is why it moves to a time-locked multisig (section 15).
 
-**Governance is fixed at `initialize_config` in program v1.1.** `propose_config` changes the
-registrar, `crank_fee`, `bury_bps` and `paused`, but not `governance`. Either pass the Squads
-vault as `--governance` to `init-config.sh` (then every pause needs a multisig vote), or start
-with `governance.json` (an immediate pause from one laptop) and add a governance-rotation path
-in the first program upgrade (section 15).
+**`Config.governance` is set at `initialize_config`.** `propose_config` changes the registrar,
+`crank_fee`, `bury_bps` and `paused`, but not `governance`. Since v1.3 the program can rotate it
+(`propose_governance`, then `accept_governance` by the successor after 72 h), but **no script
+sends those instructions yet**: `governance.sh` knows `show`, `pause`, `unpause`, `propose` and
+`apply`, and the deploy tool has no rotation command. So start with `governance.json` (an
+immediate pause from one laptop); a rotation needs the commands added to the tool first
+(section 15).
 
 ## 3. Funding
 
@@ -119,7 +127,7 @@ scripts always read it from the cluster):
 | Key | Needs (lamports) | SOL | For |
 |---|---|---|---|
 | deployer | 1,036,316,560 | **1.036316560** | ProgramData for max-len 196,608 (0.999647480) + Program account (0.000833120) + Config (0.001950720) + Executor float (0.001450240) + fee budget (0.032435000, see below) |
-| crank fee payer | 50,000,000 | **0.050000000** | lookup-table rent (0.0026 SOL + 0.00065 per rig) and fee float; digs refund `crank_fee` |
+| crank fee payer | 50,000,000 | **0.050000000** | a fee float that is spent in use (below), and lookup-table rent (0.00256 SOL + 0.00065 per rig) when lookup tables are on |
 | governance | 10,000,000 | **0.010000000** | `propose_config` fees: a pause must never fail for lack of SOL |
 | registrar | 0 | 0 | signs off-chain only |
 | **Total** | 1,096,316,560 | **1.096316560** | |
@@ -136,26 +144,92 @@ earlier version of this page budgeted 0.005 SOL and asked for 1.01 SOL: with exa
 CLI stopped before sending anything ("insufficient funds for spend + fee"). `dry-run.sh --tight`
 now funds every key with exactly the amounts above, and it has to pass.
 
-The deploy also needs the program **buffer** (0.966282040 SOL for today's 190,048-byte build)
-for a few minutes: `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
-for the ProgramData, so the peak is the larger of the two, not their sum. `preflight.sh`
-checks the deployer's balance against exactly this. What stays out of the deployer for good:
-ProgramData rent (recoverable only by closing the program), the Program account, the Config,
-the Executor float and the fees.
+During a fresh deploy the SOL sits in the program **buffer** for a few minutes. The buffer is
+created holding the ProgramData rent for max-len (999,647,480 lamports, not the buffer's own rent
+of 966,282,040), and `DeployWithMaxDataLen` drains the buffer back into the payer before it pays
+for the ProgramData, so the peak is one ProgramData rent, not two. If a deploy stops half way,
+that SOL is in the buffer, whose authority is the deployer: section 7 says how the deploy is
+resumed or the buffer refunded.
 
-Later, not at launch: each upgrade needs a temporary buffer of `(37 + 128 + build size) x 5,080`
-lamports (0.97 SOL for today's build) plus the same fee budget, and the buffer's rent is
-refunded to the spill account when the upgrade executes.
-Today's build fills 97% of the 196,608-byte `--max-len`: an upgrade that grows the program by
-more than about 6.5 KB needs `solana program extend` first (5,080 lamports per added byte).
+**The first upgrade needs more SOL than a 2 SOL budget leaves.** An upgrade needs a temporary
+buffer holding the rent of 45 + build size bytes (966,322,680 lamports for today's 190,048-byte
+build) plus the fee budget: about 0.999 SOL in the deployer, which will hold about 0.035 SOL.
+That is a top-up of about **0.964 SOL**, and all of it but about 0.001 SOL of fees comes back
+when the upgrade executes (the buffer's rent goes to the spill account, the deployer). So the
+working budget is about **2.07 SOL** if a bug found on the phone must be fixable on-chain: the
+1.10 above, and 0.964 lent to the deployer for a few minutes per upgrade.
+
+Today's build fills 97% of the 196,608-byte `--max-len` (6,560 bytes of headroom). A build that
+outgrows it must extend the ProgramData, and mainnet enforces a minimum extension of 10,240 bytes:
+52,019,200 lamports, locked like the rest.
+
+### What comes back, and what does not
+
+Where the 1.10 SOL is the day after the deploy and `initialize_config` (1.04 SOL sent to the
+deployer; rents read from mainnet on 2026-10-04):
+
+| Where | Lamports | Does it come back? |
+|---|---|---|
+| ProgramData (45 + 196,608 bytes) | 999,647,480 | **only by closing the program for good** (below) |
+| Program account (36 bytes) | 833,120 | never: the loader cannot close a Program account |
+| Config (256 bytes) | 1,950,720 | never: no instruction closes it |
+| Executor float | 1,450,240 | never: nothing can be withdrawn from the Executor (section 9) |
+| deploy and init fees | 1,075,916 (measured in the dry run) | never |
+| left in the deployer | 35,042,524 | yes: a plain transfer |
+| crank fee payer | 50,000,000 | what is left of it: it is spent in use (below) |
+| governance | 10,000,000 | what is left of it: a pause or a proposal costs about 5,100 to 5,500 lamports |
+
+So of 1.10 SOL: **0.99965 SOL is locked** in the program's rent, **0.0053 SOL (5,309,996
+lamports) is gone for good**, and 0.095 SOL is still liquid on day one.
+
+**Getting the locked rent back means closing the program.**
+`scripts/mainnet/solana.sh -- program close HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p --bypass-warning --recipient <wallet>`,
+signed by the upgrade authority, returns all 999,647,480 lamports to the recipient. It is
+permanent: the program id can never be deployed or invoked again, and the app, the crank, the
+indexer and the registrar all pin that id. Everything the program owns is then stuck for ever:
+the Config, the Executor's balance, every Rig and tombstone, SeekerSeats, ShiftLogs (also those
+whose rent the crank paid), Stack tables and the SKR in their vaults, Focus Bonds and their SKR,
+gift escrows and the Bury lot. ORE's own Automations and Miners are untouched: users can still
+take their SOL back and claim in ORE. Three consequences:
+
+- The exit exists only while `deployer.json` is the upgrade authority. After a move to a Squads
+  vault it takes the multisig's threshold and its time lock; after `--final` it is gone
+  (section 15). Whoever holds `deployer.json` can also send the rent anywhere, so that file stays
+  offline and backed up.
+- Do it only before any outside user holds a rig, a bond, a seat or a gift. The program is
+  permissionless and a pause stops only digs, so closing would strand other people's accounts.
+- The order: stop the crank; from each wallet clock out, take the SOL back and close the rig;
+  close the ShiftLogs 30 days after the last shift and the crank's lookup tables (neither has
+  tooling yet); sweep the crank's and governance's balances; close the program last.
+
+**The crank's 0.05 SOL is a fee float, and one phone does not pay for itself.** A dig that
+carries one rig's fresh heartbeat costs the crank 10,047 lamports (one transaction signature, one
+secp256r1 signature, the priority fee) and the program reimburses `crank_fee` = 7,000: about 3,000
+lamports lost per dig, and the default caps allow at most 20 digs a shift. The reimbursement
+covers the fee only from three rigs per transaction up (crank/README.md). Never reimbursed: the
+heartbeat records on nights when the cost gate stays closed (about 10,000 lamports each, every
+third round: about 1,240,000 lamports over an 8-hour night for one rig), BREAK and FREEZE (about
+10,100 each), Stack check-ins, and the ShiftLog rent of a shift the crank seals (1,300,480
+lamports, which `close_shift_log` returns to the payer after 30 days; nothing sends that
+instruction yet). Expect roughly 0.001 to 0.003 SOL a night for one phone.
+
+**The wallet on the phone is a fourth key to fund.** The first clock-in with the default build
+moves about 0.029 SOL: 20,200,000 lamports into the wallet's own ORE Automation, and the rent of
+the Rig (2,600,960), of ORE's Automation (1,463,040) and of ORE's Miner (4,470,400), plus ORE's
+10,000 checkpoint reserve. Each sealed shift then costs 1,300,480 of ShiftLog rent. About 0.04 SOL
+covers a week of tests on one phone. What comes back: the Automation's balance and rent through
+"Take SOL back", and the Rig's rent less the 812,800 lamports that stay in the tombstone through
+"Close my rig". What does not: the tombstone, 10,000 lamports per dug round (7,000 to the crank,
+3,000 into the Executor), the SOL placed on squares that did not win, the fees, and the Miner's
+rent (ORE's account; whether ORE lets a wallet close it was not checked).
 
 ## 4. Parameters and why
 
 | Parameter | Value | Why |
 |---|---|---|
-| `--max-len` | **196,608** (192 KiB) | 1.76x the 111,600-byte v1.1 build: 85,008 bytes (76%) of headroom for the SKR instructions in development (Stack, Focus Bond, Gift, Bury) without an extend. Rent 0.9996 SOL. 2x (223,200) would cost 1.1347 SOL and 256 KiB 1.3326 SOL, leaving too little of the budget for the first upgrade's temporary buffer. If the SKR build outgrows it, `solana program deploy` extends the ProgramData automatically during the upgrade (the payer funds the extra rent). |
+| `--max-len` | **196,608** (192 KiB) | Chosen as 1.76x the 111,600-byte v1.1 build, to hold the SKR instructions without an extend. They are in now: today's v1.3 build is 190,048 bytes, which leaves 6,560 bytes (3%). Rent 0.9996 SOL. 2x (223,200) would cost 1.1347 SOL and 256 KiB 1.3326 SOL. If a later build outgrows it, `solana program deploy` extends the ProgramData during the upgrade, in steps of at least 10,240 bytes (52,019,200 lamports each, paid by the deployer and locked like the rest). |
 | `executor_fee` | **10,000** lamports | **Immutable** (no instruction changes it), and every rig's Automation must use exactly this Discretionary fee (`dig` skips any other value). It must cover the worst measured crank cost with room for congestion: crank/README.md measures 5,500 (v1, 11 rigs) to 7,550 (legacy, 2 rigs) lamports per fresh-heartbeat dig, 6,723 end to end; ORE's own executor charges 7,000 and a sampled third-party one 12,000. 10,000 is ECONOMICS.md's figure and lets `crank_fee` rise to 10,000 under congestion without touching user Automations. At 0.001 SOL per dig it is 1% of the per-round spend. |
-| `crank_fee` | **7,000** lamports | Covers a v0 + lookup-table batch (5 rigs: 5,000 secp256r1 + 1,000 signature share + priority ≈ 6,050-6,723). `crank_fee ≤ executor_fee` is enforced by the program. The 3,000 lamports per dig it leaves behind accrue in the Executor, which only ever pays ORE's CHECKPOINT_FEE top-ups and reimbursements, so the float grows with use. Raise it (timelocked) with `governance.sh propose --crank-fee N` if priority fees stay high. |
+| `crank_fee` | **7,000** lamports | Covers a v0 + lookup-table batch (5 rigs: 5,000 secp256r1 + 1,000 signature share + priority ≈ 6,050-6,723). `crank_fee ≤ executor_fee` is enforced by the program. The 3,000 lamports per dig it leaves behind accrue in the Executor, which only ever pays ORE's CHECKPOINT_FEE top-ups and reimbursements, so the float grows with use. With one rig per transaction the crank pays 10,047 and gets 7,000 back; the fee covers it from three rigs per transaction up (section 3). Raise it (timelocked) with `governance.sh propose --crank-fee N` if priority fees stay high. |
 | `bury_bps` | **0** | v1.1 has no bury path (`INTERFACE.md` §10). |
 | `ore_layout_hash` | `cc9b3521…48aa91` | `sha256(heads_down::ore::LAYOUT_PREIMAGE)`, computed by the program crate inside the tool; the program refuses any other value. |
 | Executor float | **rent-exempt(0) + 100,000 + 100 x crank_fee** = 1,450,240 lamports on mainnet | rent so the PDA exists, the program's own reserve (10 x CHECKPOINT_FEE, which reimbursements never touch), and 100 reimbursements of slack. A dig pays the Executor 10,000 before the program reimburses 7,000, so reimbursements are self-funding; the slack absorbs late third-party checkpoints that take 10,000 each. |
@@ -332,46 +406,111 @@ The instruction builder is tested byte for byte against the program's golden vec
   target, default 1,450,240; pass `--executor-float <lamports>` for more), or any plain
   transfer: `scripts/mainnet/solana.sh -- transfer By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge 0.01`.
   Anyone may top it up; nobody can withdraw from it.
+- **The float and every top-up are permanent.** No instruction moves lamports out of the Executor
+  except the two above, and the 3,000 lamports a dig leaves behind stay there (`Config.bury_bps`
+  is stored, but no instruction reads it). Running the crank yourself does not bring the float
+  back: the 7,000 it receives come out of the 10,000 the same dig paid in. Top up only what the
+  alert asks for.
 
 ## 10. Railway
 
-Five services in one Railway project ("heads-down"), all from the GitHub repo
-`OoJae/heads-down`, branch `main`. Every Dockerfile builds from the repository root.
+Five services in one Railway project, `heads-down` (Hobby plan). Four are built from the GitHub
+repo `OoJae/heads-down`, branch `main`, each from its own Dockerfile with the repository root as
+build context; Postgres is Railway's template. The project was created on 2026-10-04:
 
-### 10.1 Project and shared variable
+| Service | Address | Volume | Needs before it starts |
+|---|---|---|---|
+| `Postgres` | private network only: it has no public port | the template's own | nothing |
+| `indexer` | `https://indexer-production-88dc.up.railway.app` | - | Postgres. Runs without `RPC_URL` until the program is initialized |
+| `dashboard` | `https://dashboard-production-b80c.up.railway.app` | - | the indexer's address, at build time |
+| `registrar` | `https://registrar-production-71d0.up.railway.app` | `/data`, 1 GB | its key, its session secret, an app certificate digest |
+| `crank` | `https://crank-production-21c2.up.railway.app` | `/data`, 1 GB | **the deployed and initialized program, a funded fee payer, its key and the Helius key** |
 
-1. New project → **Empty project**, name it `heads-down`.
-2. Project **Settings → Shared Variables**: add `HELIUS_API_KEY` = your key, then **seal** it
-   (sealed values are never shown again and never leave Railway; they are not copied to PR
-   environments).
+### 10.1 How a service is created
 
-### 10.2 Postgres
+Railway does not read a `railway.json` for services created now (its documentation: "New services
+cannot opt into Config as Code"), and the repository root has nothing Railway could build by
+default. The four `deploy/railway/<service>/railway.json` files therefore only document the
+settings; the settings themselves are set on each service, in the dashboard or through Railway's
+API. In this order, because connecting the repository starts the first build at once:
 
-**+ New → Database → Add PostgreSQL**, keep the name `Postgres`. Details:
-[deploy/railway/postgres/README.md](../deploy/railway/postgres/README.md).
+1. Create an **empty** service with exactly the name in the table (variable references use it).
+2. **Variables**: the plain ones from the matrix below.
+3. **Settings** (Root Directory stays `/`; leave **Custom Start Command** empty, because a custom
+   one would replace the crank's and the registrar's entrypoint and their key would never reach
+   them):
 
-### 10.3 Each service
+   | Service | Dockerfile path | Healthcheck (timeout) | Draining | Watch paths |
+   |---|---|---|---|---|
+   | indexer | `deploy/railway/indexer/Dockerfile` | `/v1/health` (120 s) | 10 s | `/services/indexer/package.json`, `/services/indexer/pnpm-lock.yaml`, `/services/indexer/src/**`, `/services/indexer/migrations/**`, `/deploy/railway/indexer/**` |
+   | dashboard | `deploy/railway/dashboard/Dockerfile` | `/healthz` (60 s) | 5 s | `/dashboard/**`, `/deploy/railway/dashboard/**` |
+   | registrar | `deploy/railway/registrar/Dockerfile` | `/healthz` (60 s) | 15 s | `/registrar/Cargo.toml`, `/registrar/Cargo.lock`, `/registrar/src/**`, `/registrar/roots/**`, `/deploy/railway/registrar/**` |
+   | crank | `deploy/railway/crank/Dockerfile` | `/healthz` (120 s) | 20 s | `/crank/**`, `/crates/p256-introspect/**`, `/deploy/railway/crank/**` |
 
-For each of `indexer`, `dashboard`, `registrar`, `crank` (in that order):
+   Restart policy: on failure, 10 retries (Railway's default). The watch paths keep a push that
+   touches only other directories, a deploy receipt for example, from rebuilding the service.
+4. **Volume** (crank and registrar only): attach one at `/data`. On Railway both entrypoints refuse
+   to start without it: without the volume the crank would forget its lookup table and create a
+   new one on every deploy, and the registrar would lose its nonce database and its log.
+5. **Secrets** (section 10.3).
+6. **Connect the repository** `OoJae/heads-down`, branch `main`. This starts the first build.
+7. **Networking → Generate Domain** with the target port equal to the service's `PORT`.
 
-1. **+ New → GitHub Repo → `OoJae/heads-down`**. Rename the service (`indexer`, …).
-2. **Settings → Source**: Root Directory `/` (default). **Railway Config File:**
-   `/deploy/railway/<service>/railway.json` (an absolute path; it sets the builder, the
-   Dockerfile, the watch paths, the healthcheck and the restart policy). Leave **Custom Start
-   Command** empty: each image's ENTRYPOINT/CMD is the start command, and a custom one would
-   replace the crank's and registrar's entrypoint, so their key would never reach them.
-3. **Variables:** from `deploy/railway/<service>/.env.example` (matrix below). Add secrets as
-   **sealed**.
-4. **Volume** (crank and registrar only; `railway.json` refuses to deploy without it): right-click
-   the service → **Attach volume**, mount path `/data`, 1 GB.
-5. **Networking → Generate Domain** (target port = the service's `PORT`), or add your own domain.
-6. Deploy. The deployment turns healthy when the healthcheck answers 2xx: crank `/healthz`
-   (chain view fresh, breaker closed), registrar `/healthz`, indexer `/v1/health`, dashboard
-   `/healthz`.
+A deployment turns healthy when its healthcheck answers 2xx: crank `/healthz` (chain view fresh,
+ORE pins match, breaker closed), registrar `/healthz`, indexer `/v1/health`, dashboard `/healthz`.
 
-Order matters only because of references: the dashboard is built with the indexer's domain,
-the indexer needs Postgres, and the crank should start after the program is initialized (it
-runs without a Config but has nothing to dig).
+### 10.2 The order
+
+1. **Postgres**: Railway's PostgreSQL template, name `Postgres`
+   ([deploy/railway/postgres/README.md](../deploy/railway/postgres/README.md)). The indexer uses
+   its private address. If the template gives the database a public TCP proxy, delete the proxy
+   (the service's Networking settings): nothing needs it, and its password is an ordinary
+   variable.
+2. **indexer**, with no `RPC_URL` yet and its domain generated. Without `RPC_URL` it reads ORE's
+   rounds from api.ore.com and makes no RPC call at all.
+3. **dashboard**, after the indexer has its domain: the indexer's address is compiled into the
+   pages, so a later change needs a rebuild, not a restart. Open the site afterwards and check
+   that it shows data and not "This build has no API configured".
+4. **registrar**. It needs neither the RPC nor the program to start.
+5. Fund the keys; `preflight.sh`, `deploy.sh`, `init-config.sh` (sections 6 to 8), while nothing
+   else uses the Helius key.
+6. Set the indexer's `RPC_URL`.
+7. **crank, last.** Before the program is initialized it has nothing to dig and still polls; with
+   an empty fee payer it has nothing to pay its lookup table with. Re-run `preflight.sh` on the
+   day (the line "ORE upgrade slot"): if ORE has upgraded since the pin was set, the crank's
+   breaker trips at start and its first deployment fails the healthcheck, which is the design.
+   After its first start, compare the `cranker` in its first log line with `TEAM_CRANKERS`.
+
+### 10.3 Secrets
+
+| Variable | Service | From |
+|---|---|---|
+| `HD_REGISTRAR_KEYPAIR_JSON` | registrar | `~/.config/heads-down/mainnet/registrar.json` |
+| `HD_SESSION_SECRET` | registrar | `~/.config/heads-down/mainnet/registrar-session-secret` |
+| `HD_CRANK_KEYPAIR_JSON` | crank | `~/.config/heads-down/mainnet/crank-payer.json` |
+| `HELIUS_API_KEY` | crank | the key in `helius.env` |
+| `RPC_URL` | indexer | `https://mainnet.helius-rpc.com/?api-key=<key>` |
+
+Railway seals a variable only from its dashboard (the variable's three-dot menu → **Seal**); its
+API and its CLI cannot. A sealed value is given to builds and deployments and is never shown or
+returned again. So either paste each value in the dashboard and seal it, or send it from the file,
+so that it is never on a command line, on screen or in a chat, and seal it afterwards:
+
+```bash
+railway variable set HD_REGISTRAR_KEYPAIR_JSON --stdin --skip-deploys \
+  -p <project id> -e production -s registrar < ~/.config/heads-down/mainnet/registrar.json >/dev/null
+```
+
+Until a value is sealed, anything that lists the service's variables prints it: do not run
+`railway variable list`, `railway run`, `railway shell`, `railway ssh` or
+`railway config pull --include-variables` against these services, and do not let an agent do so.
+The indexer's `DATABASE_URL` is a reference to a variable Railway generates for Postgres and
+cannot be sealed away, so the same rule holds for the indexer and Postgres for good.
+
+Seal the variables that carry the Helius key themselves. Railway's documentation does not say
+whether a reference to a sealed shared variable is listed with its resolved value, so this
+deployment uses no shared variable: the crank gets the key, the indexer gets the full URL, and
+the registrar gets neither (it uses a keyless RPC, below).
 
 ### 10.4 Variable matrix
 
@@ -379,27 +518,31 @@ runs without a Config but has nothing to dig).
 
 | Variable | crank | registrar | indexer | dashboard | Value |
 |---|---|---|---|---|---|
-| `HELIUS_API_KEY` | R | | | | `${{shared.HELIUS_API_KEY}}` |
+| `HELIUS_API_KEY` | S | | | | the key |
 | `HD_CRANK_KEYPAIR_JSON` | S | | | | contents of `crank-payer.json` |
 | `PORT` | 8787 | 8080 | 8080 | 8080 | the domain's target port |
 | `RUST_LOG` | `info,hyper=warn,reqwest=warn` | `info` | | | |
 | `HD_REGISTRAR_KEYPAIR_JSON` | | S | | | contents of `registrar.json` |
 | `HD_SESSION_SECRET` | | S | | | contents of `registrar-session-secret` |
-| `HD_RPC_URL` | | S/R | | | `https://mainnet.helius-rpc.com/?api-key=${{shared.HELIUS_API_KEY}}` |
-| `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing cert (`apksigner verify --print-certs`) |
+| `HD_RPC_URL` | | - | | | `https://solana-rpc.publicnode.com`, a keyless public RPC: the registrar makes one cached `getSlot` per attestation, so it needs no key and does not depend on Helius credits. Do **not** leave it unset: the code's default, `api.mainnet-beta.solana.com`, refuses requests from Railway's servers. With it every attestation answered 503 `slot_unavailable` and the app registered a guest rig (found on 2026-10-04 by running the app on an emulator against the live service; `/healthz` stayed 200 throughout). A keyed Helius URL also works; it must then be sealed |
+| `HD_APP_DEBUG_CERT_SHA256` | | - | | | **today.** SHA-256 of the certificate that signs the debug build (`apksigner verify --print-certs app-debug.apk`), which is this Mac's Android debug key. The registrar then accepts that build, logs a warning and reports `debug_signers_accepted` on `/registrar`. Good for the founder's own phone only: remove it before anyone else installs the app |
+| `HD_APP_RELEASE_CERT_SHA256` | | - | | | SHA-256 of the release signing certificate, once a release key exists (none does). With both digest variables empty the registrar exits at start; with only a release digest it refuses a debug build (`wrong_signer`) and the app registers a guest rig |
 | `HD_SIWS_DOMAIN` | | - | | | **required, no default.** The host of the site the app identifies itself with: the host of the app build's `-Pheadsdown.identityUri` (default `oojae.github.io`). It must be a site the team controls |
 | `HD_SIWS_URI` | | - | | | that site's URL, `https://oojae.github.io/heads-down/`. The code's default is `https://<HD_SIWS_DOMAIN>` |
-| `HD_TRUSTED_PROXY_HOPS` | | `1` | | | Railway's edge appends the client to X-Forwarded-For |
+| `HD_TRUSTED_PROXY_HOPS` | | `0` | | | Railway's documentation lists `X-Real-IP` among the headers its edge sets, not `X-Forwarded-For`. With `0` every client shares one rate-limit bucket, which a client cannot choose; check the headers on the live service before raising it |
 | `HD_NONCE_STORE` / `HD_TRANSPARENCY_LOG` | | image defaults | | | `/data/nonces.db`, `/data/attestations.jsonl` |
 | `DATABASE_URL` | | | R | | `${{Postgres.DATABASE_URL}}` |
-| `RPC_URL` | | | S/R | | `https://mainnet.helius-rpc.com/?api-key=${{shared.HELIUS_API_KEY}}` |
+| `RPC_URL` | | | S | | unset until `initialize_config` has landed, then `https://mainnet.helius-rpc.com/?api-key=<key>` |
+| `INGEST_INTERVAL_S` | | | - | | `300` between test sessions, `30` to `60` while recording (section 5) |
 | `INDEXER_DATASET` | | | `mainnet` | | |
 | `TEAM_CRANKERS` | | | - | | `5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk` |
-| `CORS_ORIGIN` | | | - | | `https://<dashboard domain>` |
+| `CORS_ORIGIN` | | | `*` | | the API is public and read-only; or the dashboard's exact origin, with no trailing slash |
 | `HOST` | | | `0.0.0.0` | | |
-| `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | `https://${{indexer.RAILWAY_PUBLIC_DOMAIN}}` |
+| `NEXT_PUBLIC_HD_API_BASE` | | | | - (build) | the indexer's address, `https://indexer-production-88dc.up.railway.app` |
 
-The full lists, with every optional knob and its default, are the four `.env.example` files.
+The full lists, with every optional setting and its default, are the four `.env.example` files.
+`HD_FIXED_SLOT` and `HD_STATUS_LIST_FILE` are development overrides of the registrar and must
+stay unset.
 
 **The crank's client address.** `deploy/railway/crank/crank.toml` sets `trust_real_ip = true`:
 Railway's edge writes the client's address in `X-Real-IP`, and every per-address limit of the
@@ -417,7 +560,8 @@ be chosen by a client) and report it.
 **Gate-closed nights.** The same file sets `[record] gate_closed_rigs = true`: on a night when
 ORE's cost never drops under a rig's ceiling nothing is dug, and without a record the shift would
 seal with no dark round (no streak day; a Focus Bond would go to the Bury lot). The crank pays for
-those records itself, at most 1,000,000 lamports an hour.
+those records itself, at most 1,000,000 lamports an hour (about 1,240,000 lamports over an
+8-hour night for one rig).
 
 ### 10.5 How the keys reach the processes
 
@@ -675,7 +819,15 @@ match first.
 
 ## 15. Squads: upgrade authority and governance
 
-**Upgrade authority → Squads multisig with a time lock** (THREAT_MODEL K5):
+**Upgrade authority → Squads multisig with a time lock** (THREAT_MODEL K5).
+
+Two things to know before doing it. Squads charges a **0.1 SOL deployment fee** per multisig, plus
+network fees (0.0069 SOL to create the time lock): that is more SOL that never comes back than the
+whole deploy (0.0053 SOL). And while `deployer.json` is the upgrade authority, one signature can
+close the program and return its 0.9996 SOL of rent (section 3); after the move that takes the
+multisig's threshold and its 72 hours, and after `--final` it is impossible. So this step is a
+decision, not a formality: it trades the founder's cheap exit for the users' protection against a
+single key. Until it is done, the documents say plainly that one key can upgrade the program.
 
 1. Create a Squads v4 multisig at app.squads.so: members on separate devices (for example the
    founder's hardware wallet, a phone wallet, and a trusted co-signer), threshold 2-of-3, and
@@ -698,11 +850,12 @@ immediate, so governance does not move to the same vault as the upgrade authorit
 - Launch with `governance.json` (a single key the founder keeps offline except for an
   emergency): the pause is one command, and every other governance change already waits 72 h
   on-chain, which users can watch.
-- Since v1.3 `Config.governance` can be rotated (`propose_governance`, then `accept_governance`
-  by the successor after the same 72 h; `scripts/mainnet/governance.sh`). When there are
-  co-signers, move it to a **second** Squads multisig **without** a time lock (2-of-3): a pause
-  then takes two signatures but no waiting, and the program's own 72 h timelock still covers
-  every other change.
+- Since v1.3 the program can rotate `Config.governance` (`propose_governance`, then
+  `accept_governance` by the successor after the same 72 h). No script sends these yet: the two
+  commands have to be added to `hd-devstack` and `governance.sh` first. When there are
+  co-signers, move governance to a **second** Squads multisig **without** a time lock (2-of-3,
+  another 0.1 SOL): a pause then takes two signatures but no waiting, and the program's own 72 h
+  timelock still covers every other change.
 
 **Until the steps above are done, say so.** At launch the upgrade authority is one keypair and
 program upgrades have no delay. [THREAT_MODEL.md](THREAT_MODEL.md) ("As built") and
@@ -713,24 +866,27 @@ vault holds the authority.
 
 | Item | Plan | Monthly |
 |---|---|---|
-| Railway | Hobby ($5 including $5 of usage) | about **$8-15**: crank ~0.1 GB RAM, registrar ~0.05 GB, indexer ~0.2 GB, dashboard ~0.05 GB, Postgres ~0.25 GB at $10/GB-month, light CPU at $20/vCPU-month, volumes ~3 GB at $0.15/GB |
-| Helius | Free to start | **$0**, and **$49** (Developer) once steady use outgrows 1M credits a month |
-| SOL: crank fees | | ~0: each real dig reimburses 7,000 against ~6,050-6,723 spent; failed attempts and congestion are the cost (budget 0.01-0.05 SOL a month) |
-| SOL: lookup tables | one-time | 0.0026 SOL + 0.00065 SOL per rig, recoverable by closing the tables |
-| SOL: Executor | | grows by 3,000 lamports per dig; top-ups only after late third-party checkpoints |
+| Railway | Hobby, billed by usage (the account's plan already; $5 a month that counts towards usage across all of the account's projects) | an estimate, not yet measured: about **$8-15** for five small services (crank ~0.1 GB RAM, registrar ~0.05 GB, indexer ~0.2 GB, dashboard ~0.05 GB, Postgres ~0.25 GB at $10 per GB-month; light CPU at $20 per vCPU-month; volumes at $0.15 per GB-month of storage used). Read the project's usage page after the first days and set a usage limit |
+| Helius | Free | **$0** while a month stays inside 1M credits (section 5); otherwise **$49** (Developer, 10M credits) plus $5 per further million |
+| SOL: crank fees | | about 0.001 to 0.003 SOL per phone-night (section 3); budget 0.01 to 0.05 SOL a month |
+| SOL: lookup tables | one-time, only when lookup tables are on | 0.00256 SOL + 0.00065 SOL per rig. It comes back only by hand, with the crank stopped: `scripts/mainnet/solana.sh --keypair <crank-payer.json> -- address-lookup-table deactivate <TABLE> --bypass-warning`, about 5 minutes later `… address-lookup-table close <TABLE> --recipient <ADDR>`. Keep the table's address (the crank logs `created lookup table`) |
+| SOL: Executor | | grows by 3,000 lamports per dig; nothing ever leaves it (section 9) |
+| SOL: an upgrade | per upgrade, temporary | about 0.964 SOL lent to the deployer for a few minutes; all but about 0.001 SOL of fees comes back (section 3) |
+| SOL: a larger build | only when a build outgrows max-len | 52,019,200 lamports per 10,240-byte extension, locked like the program's rent |
+| SOL: Squads | one-time, optional | 0.1 SOL per multisig, never returned (section 15) |
 | Domain (optional) | | ~$1 (not needed: the app identifies itself with the project's GitHub Pages address) |
-| **Total** | | **about $8-15/month** on the free Helius plan, about $60 with the Developer plan, plus small SOL top-ups |
+| **Total** | | **about $8-15 a month** on the free Helius plan, plus small SOL top-ups |
 
 One-time: the deploy and initialization, **1.10 SOL** across the three keys (section 3). Of it,
-0.9996 SOL of ProgramData rent stays locked while the program exists, about 0.005 SOL goes into
-the Program account, the Config, the Executor float and fees for good, and the rest stays in the
-keys it was sent to.
+0.9996 SOL of ProgramData rent stays locked while the program exists, 0.0053 SOL goes into the
+Program account, the Config, the Executor float and fees for good, and 0.095 SOL is liquid on day
+one: 0.035 in the deployer, and the crank's 0.05 and governance's 0.01, which are spent in use.
 
 ## 17. Files and secrets
 
 | Path | Committed | Holds |
 |---|---|---|
-| `scripts/mainnet/*.sh` | yes | the runbook's scripts (no secrets; `.gitignore` refuses `*.json`, `*.env`) |
+| `scripts/mainnet/*.sh` | yes | the runbook's scripts (no secrets; `scripts/mainnet/.gitignore` refuses `*.json` and `*.env` there, and the root `.gitignore` refuses the key file names anywhere in the repository) |
 | `deploy/railway/<service>/` | yes | Dockerfile, `railway.json`, `.env.example` (names only), entrypoints, `crank.toml` (placeholders only) |
 | `deploy/receipts/mainnet/` | **yes, after each change** | public receipts |
 | `deploy/receipts/localnet/` | no (ignored) | dry-run receipts |
