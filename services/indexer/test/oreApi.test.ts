@@ -658,7 +658,8 @@ describe("api.ore.com rounds: whatever happens on the way", () => {
       const budget = 1 + upTo(6);
       api.refuse = () => (rnd() < 0.15 ? { status: rnd() < 0.5 ? 429 : 503 } : null);
       api.served = () => void (rnd() < 0.3 && api.add(1 + upTo(3)));
-      await pass(api, { since, maxPages: budget });
+      // Now and then a pass has a later bound, as after a restart; the passes after it have the first one again.
+      await pass(api, { since: rnd() < 0.2 ? since + 3600 * (1 + upTo(6)) : since, maxPages: budget });
       const asked = api.requests.splice(0);
       expect(asked.length).toBeLessThanOrEqual(budget);
       // No page that held rounds is asked for twice in one pass, and nothing is asked after a refusal.
