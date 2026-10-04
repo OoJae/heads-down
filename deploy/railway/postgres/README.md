@@ -18,8 +18,8 @@ repo: Railway runs, backs up and upgrades it, and provides the connection variab
    **Networking** section; remove it there, or through the API. The credentials are ordinary
    variables that anyone who can list the project's variables can read; without the proxy they
    open nothing from outside Railway. Add a proxy again for the time you need your own `psql`.
-   (Not done yet on a live project. Railway's documentation describes adding a proxy in that
-   section, not removing one.)
+   (Railway's documentation describes adding a proxy in that section, not removing one, and
+   the removal was not tried when this step was written.)
 5. Nothing else: `node src/main.ts serve` applies `services/indexer/migrations/*.sql` on start
    (each once, in a transaction, recorded in `schema_migrations`).
 

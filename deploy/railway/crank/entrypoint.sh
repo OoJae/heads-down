@@ -7,11 +7,14 @@
 # 2. Running as root (the default on Railway), the volume at /data is handed to uid 10001 and
 #    hd-crank is started as uid 10001 with setpriv --no-new-privs; root can read the key file,
 #    hd-crank can read it, nobody else can.
-# 3. hd-crank listens on $PORT, dual-stack ([::]) when the container has IPv6.
+# 3. hd-crank listens on 0.0.0.0:$PORT, or on [::]:$PORT (dual-stack) when /proc/net/if_inet6
+#    has a size. Files in /proc report size 0, so in the image expect 0.0.0.0 (not run on Linux
+#    here; the [::] branch is left as it was).
 # 4. hd-crank loads the key before it binds its port; once the port answers (or after 30 s),
 #    the key file is deleted. SIGTERM / SIGINT are forwarded as SIGINT (hd-crank's shutdown).
-#    If this script stops before that (a step fails, a signal arrives), the key directory is
-#    removed on the way out.
+#    If this script stops before that (a step fails, or SIGTERM arrives), the key directory is
+#    removed on the way out. SIGKILL cannot be caught: the file then stays until the container
+#    is gone.
 # 5. Shell tracing is refused (`bash -x`, SHELLOPTS=xtrace): it would print the key into the
 #    deploy log.
 # 6. On Railway it refuses to start unless a volume is mounted at /data: without one hd-crank
@@ -30,8 +33,9 @@ STATE_DIR=/data/hd-crank
 say() { printf '{"timestamp":"%s","level":"%s","source":"entrypoint","message":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >&2; }
 fail() { say ERROR "$1"; exit 1; }
 
-# The key directory, once it exists. Whatever ends this script takes it along: a step below can
-# fail after the key file is written, and a signal can arrive before hd-crank is up.
+# The key directory, once it exists. It is removed when this script ends early: a step below
+# can fail after the key file is written, and SIGTERM can arrive before hd-crank is up.
+# (SIGKILL cannot be caught.)
 key_dir=""
 trap 'if [[ -n "$key_dir" ]]; then rm -rf "$key_dir"; fi' EXIT
 

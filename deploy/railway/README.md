@@ -7,7 +7,7 @@ in [`docs/DEPLOY.md`](../../docs/DEPLOY.md#10-railway).
 | Service | Image | Port | Healthcheck | Volume | Variables to seal |
 |---|---|---|---|---|---|
 | `crank` | Rust build → debian slim; entrypoint drops to uid 10001 | 8787 | `/healthz` | `/data` (lookup-table state) | `HD_CRANK_KEYPAIR_JSON`, `HELIUS_API_KEY` |
-| `registrar` | Rust build → debian slim; entrypoint drops to uid 10001 | 8080 | `/healthz` | `/data` (nonces, transparency log) | `HD_REGISTRAR_KEYPAIR_JSON`, `HD_SESSION_SECRET`; `HD_RPC_URL` only if it is set to a URL with a key (it is optional, and unset is the advice) |
+| `registrar` | Rust build → debian slim; entrypoint drops to uid 10001 | 8080 | `/healthz` | `/data` (nonces, transparency log) | `HD_REGISTRAR_KEYPAIR_JSON`, `HD_SESSION_SECRET`; `HD_RPC_URL` only if it is set to a URL with a key |
 | `indexer` | node 26 alpine, production deps, `USER node` | 8080 | `/v1/health` | none (Postgres) | `RPC_URL` |
 | `dashboard` | Next static export → node 26 alpine + `server.mjs`, `USER node` | 8080 | `/healthz` | none | none (`NEXT_PUBLIC_HD_API_BASE` is public, build time) |
 | `Postgres` | Railway's PostgreSQL template ([postgres/README.md](postgres/README.md)) | 5432 (private) | Railway | Railway-managed | none of ours: Railway generates its credentials |
@@ -43,8 +43,9 @@ The keypair JSON arrives as a sealed variable. The entrypoint checks its shape w
 printing it, writes it to a `0600` file in a private `0700` directory on tmpfs (`/dev/shm`),
 unsets the variable, starts the service as uid 10001 with `setpriv --no-new-privs`, and deletes
 the file as soon as the service listens (it loads the key before it binds). If the entrypoint
-stops before that, because a step failed or a signal arrived, it removes the key directory on
-its way out.
+stops before that, because a step failed or SIGTERM arrived, it removes the key directory on
+its way out. SIGKILL cannot be caught: the file then stays until the container, and with it
+the tmpfs, is gone.
 
 Besides a missing or malformed key, two things make it refuse to start:
 
@@ -67,6 +68,14 @@ key file removed; hd-crank (pid 7, uid 10001) on 0.0.0.0:8787
 not, or could not be read. This replaces looking with `ps` in a shell (the images have no `ps`).
 The uid is the owner of `/proc/<pid>`; that part has not run on Linux yet (on macOS, which has
 no `/proc`, the line says `unknown`).
+
+The registrar leaves a second line to read, about its RPC. It asks `HD_RPC_URL` for the slot
+once at start and logs `slot source answered`, or the warning `slot source gave no slot` with
+the step that failed (the HTTP status, if there was one). `/healthz` makes no network call and
+stays 200 either way, while without a slot every attestation answers 503 `slot_unavailable`.
+The code's default is the public mainnet RPC;
+[registrar/.env.example](registrar/.env.example) says why that default is not to be counted
+on from Railway.
 
 **Do not open a Railway shell (`railway ssh`) on crank or registrar.** The service does not
 have the keypair JSON in its environment, but the entrypoint, which stays process 1, was started
