@@ -3,8 +3,8 @@
 # Heads Down indexer on Railway (docs/DEPLOY.md, "Railway"): the public read API behind the
 # dashboard, ingesting mainnet into Railway Postgres (DATABASE_URL).
 #
-# Build context: the REPOSITORY ROOT (Root Directory "/"); config file
-# /deploy/railway/indexer/railway.json. Locally:
+# Build context: the REPOSITORY ROOT (Root Directory "/"). This file's path is a setting of the
+# service (deploy/railway/README.md); railway.json records it. Locally:
 #   docker build -f deploy/railway/indexer/Dockerfile -t hd-indexer .
 #
 # Node 26 runs the TypeScript sources directly (type stripping), so there is no build step:

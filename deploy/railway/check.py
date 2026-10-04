@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Static checks for deploy/railway (and registrar/Dockerfile), runnable without Docker.
+"""Checks for deploy/railway (and registrar/Dockerfile), runnable without Docker. All of them
+read files, except one: the dashboard's build guard is also run.
 
     python3 deploy/railway/check.py            # exit 1 on any failure
 
@@ -11,6 +12,16 @@ Per service (crank, registrar, indexer, dashboard):
     dockerfilePath exists, numReplicas 1, a healthcheck path that the service really serves;
   * .env.example: secret-bearing variables have no value;
   * hadolint and shellcheck, when they are installed (or HADOLINT / SHELLCHECK point at them).
+
+The entrypoints (crank, registrar): the xtrace guard, the EXIT trap and the Railway volume
+guard are there, and come before the first line that names a secret; the 'key file removed'
+log line carries the uid. What they do when they run is test_entrypoints.py's job.
+
+The dashboard Dockerfile: the guard on NEXT_PUBLIC_HD_API_BASE is the first thing in the RUN
+that builds the site, and it is run here, on its own, under the local `sh` (and `dash` when
+installed) against values it must accept and values it must refuse.
+
+README.md: its link into docs/DEPLOY.md points at a heading that exists.
 """
 from __future__ import annotations
 
@@ -20,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -42,6 +54,42 @@ SCHEMA_KEYS = {
 }
 SECRET = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD|KEYPAIR|_JSON|_B58|DATABASE_URL|RPC_URL)$")
 DIGEST = re.compile(r"^[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")
+# What an entrypoint must carry before its first line that names a secret.
+ENTRYPOINT_GUARDS = {
+    "the xtrace guard": re.compile(r"case \$- in\s+\*x\*\)[^\n]*\bexit 2\b"),
+    "the EXIT trap that removes the key directory": re.compile(r"""trap '[^'\n]*rm -rf "\$key_dir"[^'\n]*' EXIT"""),
+    "the Railway volume guard": re.compile(r"RAILWAY_SERVICE_NAME[^\n]*\n[^\n]*RAILWAY_VOLUME_MOUNT_PATH[^\n]*\n[^\n]*== /data \]\] \|\| fail "),
+}
+# NEXT_PUBLIC_HD_API_BASE values the dashboard build must accept, and values it must refuse.
+# `0123abcd-dummy` stands for a key: it must never come back in a message.
+API_BASE_ACCEPTED = [
+    "https://indexer-production-1a2b.up.railway.app",
+    "https://indexer-production-1a2b.up.railway.app/",
+    "https://indexer.example.org",
+    "https://indexer.example.org:8443",
+]
+API_BASE_REFUSED = [
+    "",
+    "https://",
+    "https:///",
+    "https://.example.org",
+    "http://indexer.example.org",
+    "HTTPS://indexer.example.org",
+    "indexer.example.org",
+    "https://mainnet.helius-rpc.com/?api-key=0123abcd-dummy",
+    "https://indexer.example.org?token=0123abcd-dummy",
+    "https://user:0123abcd-dummy@indexer.example.org",
+    "https://indexer.example.org/API-KEY/0123abcd-dummy",
+    "https://api-key.example.org",
+    "https://rpc.example.org/v2/0123abcd-dummy",
+    "https://indexer.example.org/v1",
+    "https://indexer.example.org//",
+    "https://indexer.example.org#0123abcd-dummy",
+    "https://indexer.example.org/ ",
+    " https://indexer.example.org",
+    "https://indexer.example.org\nhttps://other.example.org",
+    "https://${{indexer.RAILWAY_PUBLIC_DOMAIN}}",
+]
 
 failures: list[str] = []
 
@@ -177,6 +225,79 @@ def check_env_example(svc: str) -> None:
     ok(f"{svc}: .env.example lists {len(names)} variables, secrets empty")
 
 
+def check_entrypoint(svc: str, entrypoint: Path) -> None:
+    """The guards are there, and nothing that names a secret comes before them."""
+    code = "\n".join(line for line in entrypoint.read_text().splitlines() if not line.lstrip().startswith("#"))
+    first_secret = re.search(r"KEYPAIR|SECRET", code)
+    for what, pattern in ENTRYPOINT_GUARDS.items():
+        m = pattern.search(code)
+        if m and first_secret and m.end() < first_secret.start():
+            ok(f"{svc}: entrypoint.sh has {what}, before the first line that names a secret")
+        else:
+            fail(f"{svc}: entrypoint.sh lacks {what}, or a line that names a secret comes before it")
+    line = f'key file removed; hd-{svc} (pid $child, uid $(stat -c %u "/proc/$child" 2>/dev/null || echo unknown))'
+    if line in code:
+        ok(f"{svc}: the 'key file removed' log line carries the uid of the service")
+    else:
+        fail(f"{svc}: the 'key file removed' log line does not carry the uid of the service")
+
+
+def check_dashboard_guard() -> None:
+    """The guard on NEXT_PUBLIC_HD_API_BASE gates the build, and behaves under POSIX shells."""
+    runs = [rest for word, rest in instructions(RAILWAY / "dashboard" / "Dockerfile") if word == "RUN" and "pnpm build" in rest]
+    m = re.match(r'(case "\$NEXT_PUBLIC_HD_API_BASE" in .*? esac) +&& pnpm build\b', runs[0]) if len(runs) == 1 else None
+    if not m:
+        fail("dashboard: the RUN that builds the site does not start with the NEXT_PUBLIC_HD_API_BASE guard")
+        return
+    ok("dashboard: the NEXT_PUBLIC_HD_API_BASE guard comes before pnpm build in the same RUN")
+    cases = [(v, True) for v in API_BASE_ACCEPTED] + [(v, False) for v in API_BASE_REFUSED]
+    shells = [s for s in ("sh", "dash") if shutil.which(s)]
+    for shell in shells:
+        wrong = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for value, accepted in cases:
+                r = subprocess.run(
+                    [shutil.which(shell), "-c", m.group(1)],
+                    env={"PATH": "/usr/bin:/bin", "NEXT_PUBLIC_HD_API_BASE": value},
+                    cwd=tmp, capture_output=True, text=True, timeout=30,
+                )
+                said = r.stdout + r.stderr
+                if accepted:
+                    good = r.returncode == 0 and not said
+                else:
+                    # Refused with a message that names the variable and never shows its value.
+                    good = r.returncode == 1 and not r.stdout and r.stderr.startswith("NEXT_PUBLIC_HD_API_BASE ")
+                    good = good and "0123abcd-dummy" not in said and not (len(value) > len("https://") and value in said)
+                if not good:
+                    wrong.append(value)
+        if wrong:
+            fail(f"dashboard: the guard, run under {shell}, is wrong about {wrong}")
+        else:
+            ok(f"dashboard: the guard, run under {shell}, accepts {len(API_BASE_ACCEPTED)} values and refuses {len(API_BASE_REFUSED)} without showing them")
+    for shell in ("sh", "dash"):
+        if shell not in shells:
+            print(f"SKIP  dashboard: {shell} not installed, the guard was not run under it")
+
+
+def check_readme_links() -> None:
+    """Links from README.md into docs/ name a file and a heading that exist."""
+    links = re.findall(r"\]\(((?:\.\./)+docs/[A-Za-z0-9_./-]+\.md)#([^)\s]+)\)", (RAILWAY / "README.md").read_text())
+    if not links:
+        fail("README.md: no link into docs/ with a heading anchor (the setup is in docs/DEPLOY.md)")
+    for target, anchor in links:
+        doc = (RAILWAY / target).resolve()
+        if not doc.is_file():
+            fail(f"README.md: {target} does not exist")
+            continue
+        headings = [h.strip() for h in re.findall(r"^#{1,6} +(.+)$", doc.read_text(), re.M)]
+        # GitHub's anchor: lower case, punctuation dropped, spaces to hyphens.
+        anchors = {re.sub(r"[^\w\- ]", "", h.lower()).replace(" ", "-") for h in headings}
+        if anchor in anchors:
+            ok(f"README.md: {target}#{anchor} is a heading there")
+        else:
+            fail(f"README.md: {target} has no heading with the anchor #{anchor}")
+
+
 def main() -> int:
     for svc in SERVICES:
         print(f"\n== {svc} ==")
@@ -185,14 +306,19 @@ def main() -> int:
         check_railway_json(svc)
         check_env_example(svc)
         if ep.exists():
+            check_entrypoint(svc, ep)
             sc = os.environ.get("SHELLCHECK") or shutil.which("shellcheck")
             if sc:
                 r = subprocess.run([sc, str(ep)], capture_output=True, text=True)
                 ok(f"{svc}: shellcheck entrypoint.sh clean") if r.returncode == 0 else fail(f"{svc}: shellcheck\n{r.stdout}")
             else:
                 print(f"SKIP  {svc}: shellcheck not installed")
+        if svc == "dashboard":
+            check_dashboard_guard()
     print("\n== registrar/Dockerfile (standalone image, context registrar/) ==")
     check_dockerfile("registrar/Dockerfile", REPO / "registrar" / "Dockerfile", REPO / "registrar", None)
+    print("\n== README.md ==")
+    check_readme_links()
     print()
     if failures:
         print(f"{len(failures)} failure(s)")
