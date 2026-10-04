@@ -152,7 +152,9 @@ kept as `up.sh --engine surfpool`, but it is not the default. Here is what was m
 
 Surfpool would probably be usable with a keyed RPC
 (`HD_MAINNET_RPC=https://<provider>/?api-key=… up.sh --engine surfpool`, never committed).
-That was not tested here, because no keyed RPC is configured on this machine. The
+That was not tested here. Do not use the project's Helius key for it: unlike the mainnet
+scripts, the dev-stack scripts pass the RPC URL to `solana`, `solana-test-validator` and `surfpool`
+on their command lines, where `ps` and shell history can see it. The
 test-validator path needs the network only to dump fixtures and to copy mainnet's feature set
 (`--clone-feature-set`). It is deterministic, and it is the one the smoke passes on.
 

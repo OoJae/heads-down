@@ -1,7 +1,7 @@
 # Clock In (Solana Mobile Hackathon #3): Champion Project "Heads Down"
 
 ## Context
-You want to win 1st place at Solana Mobile x Radiants **Clock In** ($30k + Seekers). The ORE matched prize (up to +$30k) and the $10k SKR prize should stack on top only where they fit naturally. You asked for research within the rules, 5 ideas, and one champion chosen after weighing everything, with the deadline ignored and nothing underscoped. The project folder `/Users/oluwademilade/Desktop/Solana mobile` is empty (greenfield). You are solo with AI agents and have no stack preference. The site showed your timezone as WAT; Nigeria and the rest of West Africa are on the USDC-eligible list, and prizes require KYC via Sumsub.
+You want to win 1st place at Solana Mobile x Radiants **Clock In** ($30k + Seekers). The ORE matched prize (up to +$30k) and the $10k SKR prize should stack on top only where they fit naturally. You asked for research within the rules, 5 ideas, and one champion chosen after weighing everything, with the deadline ignored and nothing underscoped. The project folder is empty (greenfield). You are solo with AI agents and have no stack preference. The site showed your timezone as WAT; Nigeria and the rest of West Africa are on the USDC-eligible list, and prizes require KYC via Sumsub.
 
 **Device constraint (confirmed): no Seeker at any point. Build, test and film on a Redmi 14C, end to end.**
 - **Redmi 14C:** HyperOS on Android 14, Helio G81 Ultra, **no gyroscope**, a **virtual proximity sensor**, an accelerometer, a side fingerprint reader, and aggressive HyperOS background killing.
