@@ -4,7 +4,7 @@
 #   docker build -t hd-registrar registrar/
 # Run (registrar key mounted read-only, state on a volume):
 #   docker run -p 8080:8080 \
-#     -e HD_SESSION_SECRET=... -e HD_APP_RELEASE_CERT_SHA256=... \
+#     -e HD_SESSION_SECRET=... -e HD_APP_RELEASE_CERT_SHA256=... -e HD_SIWS_DOMAIN=... \
 #     -e HD_REGISTRAR_KEYPAIR=/run/secrets/registrar-keypair.json \
 #     -v "$PWD/registrar-keypair.json:/run/secrets/registrar-keypair.json:ro" \
 #     -v hd-registrar-data:/data hd-registrar

@@ -113,6 +113,30 @@ async fn wrong_domain_is_rejected() {
     assert_eq!((s, b["error"].as_str().unwrap()), (StatusCode::UNAUTHORIZED, "uri_mismatch"));
 }
 
+/// The URI of a site under a path, as in the settings files: the trailing slash is part of it.
+#[tokio::test]
+async fn the_uri_is_matched_exactly_trailing_slash_included() {
+    let h = Harness::new(Opts {
+        siws_domain: "oojae.github.io",
+        siws_uri: Some("https://oojae.github.io/heads-down/"),
+        ..Opts::default()
+    });
+    let w = wallet(1);
+    let n = h.new_nonce().await;
+    assert_eq!(n["domain"], "oojae.github.io");
+    assert_eq!(n["uri"], "https://oojae.github.io/heads-down/");
+    let (s, body) = verify(&h, Harness::signed_body(&h.siws_message(&n, &w), &w)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    // The same page without the slash is another URI, and so is the bare host.
+    for other in ["https://oojae.github.io/heads-down", "https://oojae.github.io"] {
+        let n = h.new_nonce().await;
+        let mut msg = h.siws_message(&n, &w);
+        msg.uri = Some(other.into());
+        let (s, b) = verify(&h, Harness::signed_body(&msg, &w)).await;
+        assert_eq!((s, b["error"].as_str().unwrap()), (StatusCode::UNAUTHORIZED, "uri_mismatch"), "{other}");
+    }
+}
+
 #[tokio::test]
 async fn wrong_chain_is_rejected() {
     let h = Harness::new(Opts::default());
