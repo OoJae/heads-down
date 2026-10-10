@@ -12,8 +12,11 @@ import androidx.core.app.NotificationCompat
  * - Android 16+ (Seeker if updated, stock Android 16): `NotificationCompat.ProgressStyle` +
  *   `setRequestPromotedOngoing(true)` + `setShortCriticalText` make it a Live Update with a
  *   status-bar chip and AOD presence (user must not have revoked promotion).
- * - Android 14/15 (the Redmi 14C on HyperOS): androidx.core falls back to a standard
- *   ongoing notification with a classic progress bar; the promotion extra is ignored.
+ * - Android 14/15: androidx.core falls back to a standard ongoing notification with a
+ *   classic progress bar; the promotion extra is ignored.
+ *
+ * The Redmi 14C this was built on runs Android 16 under HyperOS 3, so it takes the first
+ * path; what HyperOS shows for a promoted notification there has not been recorded.
  */
 class ShiftNotificationFactory(private val context: Context) {
 
