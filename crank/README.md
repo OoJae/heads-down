@@ -800,7 +800,10 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   priority floor of 20,000 in `deploy/railway/crank/crank.toml` come from six rounds with one rig on
   10 October 2026, through Helius' free plan from Railway. Not known: how they hold at another hour, with
   another RPC, with a batch of rigs, or with the floor at the code's default of 1,000; and what deploying in
-  the last third of a round, not the last twelfth, costs a rig in squares that fill up after its dig.
+  the last third of a round, not the last twelfth, costs a rig in squares that fill up after its dig. The
+  retry gap has little room to spare: the slowest first attempt of that evening landed 31 slots after its
+  window opened, and a dig that is not on chain when the second pass reads, 40 slots after the first, is
+  signed again, as it was with 6.
 - `min_slots_left = 3` still lets a pass start with 3 slots to go, after a restart or a stalled stream. The
   fastest landing seen on mainnet was 3 slots after the window opened, the slowest 31, so such a pass can pay
   for a dig that lands after the round. It was not changed.
@@ -810,7 +813,8 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   one the seat cannot get back. Not tested with these values: Stack is off on the running service and nobody
   is seated at a table.
 - `tests/e2e_validator.rs` sets its own 160-slot window and takes the default retry gap; it was not run again
-  after the defaults changed (it starts a validator).
+  after the defaults changed (it starts a validator). Neither were the local stack's two smokes
+  (`scripts/devstack/smoke.sh` and `scripts/devstack/emulator-smoke.sh`), whose crank runs with the defaults.
 - `hd_crank_fees_lamports_total`, `hd_crank_signal_fees_lamports_total` and `hd_crank_record_fees_lamports_total`
   read the fee from `getTransaction` after the landing (5 tries, about 4 s), so they can lag the landed counters
   and miss a transaction the RPC never returns. The lamport budgets are unaffected: they are debited with the

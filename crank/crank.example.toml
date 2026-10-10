@@ -28,7 +28,8 @@ tx_format = "v0"                   # "v0" (with lookup tables), "v1" (4096 bytes
 # the first dig on mainnet then landed 5 slots after its round had ended, and was a
 # RoundNotActive skip that the crank paid for and nothing reimbursed:
 # 3Komo8wsU2WcCwPzEQmjq7EriciqucYeXBKtRUDD9Mu6cr3giq1g9m6YchaaR7QDCy6hkURHGxPfh8W6LByf8KJu
-# With 80 the next four digs landed 49 to 77 slots before their round's end (README, "Deploy timing").
+# The dig after it, still with 20, landed 11 slots before its round's end. With 80 the four digs
+# that followed landed 49 to 77 slots before theirs (README, "Deploy timing").
 deploy_margin_slots = 80
 min_slots_left = 3                 # no dig pass starts, and no dig is sent again, with fewer than 3 slots left
 # Re-plan and re-sign a dig that is still unconfirmed after 40 slots. Also the gap between two
