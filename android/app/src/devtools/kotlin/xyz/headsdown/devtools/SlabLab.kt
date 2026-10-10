@@ -108,6 +108,9 @@ internal class SlabLabModel {
     /** The page's scroll, as a fraction of the hero's height. */
     var scroll by mutableFloatStateOf(0f)
     var heroHeightPx by mutableFloatStateOf(0f)
+
+    /** A timed run owns the frame meter and the readout until it ends. */
+    var running by mutableStateOf(false)
     var readout by mutableStateOf("No run yet. \"Run 10 s\" is the worst case: underside, five rows, orbiting.")
     val debug = SlabDebug()
 
@@ -218,6 +221,17 @@ class FrameMeter(private val window: Window) {
         )
     }
 
+    /** The same, short, for the once-a-second readout. */
+    fun brief(refreshHz: Float): String = synchronized(lock) {
+        if (count == 0) return "0 frames"
+        val t = total.copyOf(count).also { it.sort() }
+        val janky = t.count { it > 1e9f / refreshHz }
+        "%d frames at %.0f Hz, janky %d, p50 %.1f p95 %.1f max %.1f ms".format(
+            Locale.ROOT, count, refreshHz, janky,
+            t[(count - 1) / 2] / 1e6f, t[((count - 1) * 0.95f).roundToInt()] / 1e6f, t.last() / 1e6f,
+        )
+    }
+
     companion object {
         const val PASS_JANKY_PERCENT = 1f
         const val PASS_P95_MILLIS = 12f
@@ -303,6 +317,17 @@ private fun SlabLabScreen(
         }
     }
 
+    // The live readout, once a second, ONLY while the orbit is already drawing every frame: at
+    // rest a readout that updated itself would be the only thing drawing, and would be measured.
+    LaunchedEffect(model.pose, model.running) {
+        if (model.pose != LabPose.Orbit || model.running) return@LaunchedEffect
+        while (true) {
+            frames.reset()
+            delay(1_000)
+            model.readout = "LIVE ${model.renderer} x${debug.passes}, last second: " + frames.brief(refreshHz())
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(palette.pit)) {
         CompositionLocalProvider(
             LocalSlabConfig provides SlabConfig(model.renderer, model.motion),
@@ -344,6 +369,8 @@ private fun SlabLabScreen(
                         chip("Run 10 s", false) {
                             scope.launch {
                                 // The worst case, whatever was on screen.
+                                if (model.running) return@launch
+                                model.running = true
                                 model.state = SlabState.Hot
                                 model.heat = 5
                                 model.pose = LabPose.Orbit
@@ -351,11 +378,16 @@ private fun SlabLabScreen(
                                 delay(1_500)
                                 frames.reset()
                                 delay(10_000)
-                                model.readout = "ORBIT ${model.renderer} x${debug.passes}: " + frames.summary(10f, refreshHz())
+                                model.readout = "ORBIT ${model.renderer} x${debug.passes} " + frames.summary(10f, refreshHz())
+                                // Back to rest, so the result is not overwritten by the live readout.
+                                model.pose = LabPose.Rest
+                                model.running = false
                             }
                         }
                         chip("Rest 5 s", false) {
                             scope.launch {
+                                if (model.running) return@launch
+                                model.running = true
                                 if (model.pose == LabPose.Orbit) model.pose = LabPose.Rest
                                 // Let the chip's own ripple and this line finish drawing first.
                                 model.readout = "Counting frames at rest for 5 s: hands off…"
@@ -365,6 +397,7 @@ private fun SlabLabScreen(
                                 val n = frames.frames()
                                 val verdict = if (n <= 2) "PASS" else "FAIL"
                                 model.readout = "REST ${model.pose} $verdict: $n frames in 5 s. Pass: at most 2."
+                                model.running = false
                             }
                         }
                         chip("Enter", false) { model.enterKey++ }
