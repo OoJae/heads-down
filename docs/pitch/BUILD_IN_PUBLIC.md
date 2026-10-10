@@ -36,6 +36,9 @@
   cross-check on solana-test-validator 4.1.2 (9/9)
 - **Proof:** `spikes/secp256r1/README.md` (16/16 LiteSVM, 9/9 validator, 477 CU)
 - **Attach:** the attack table from the README.
+- **Since 2026-10-10:** the "Next" of the last sentence has happened. The Redmi's own Keystore
+  key, in its TEE, signed heartbeats that dug five rounds on mainnet. Reword that sentence if this
+  goes out after that date.
 
 > The phone signs, the chain checks. P-256 signatures made the way Android Keystore makes them now
 > verify on-chain via the secp256r1 precompile. 16/16 attack tests in LiteSVM, 9/9 on a real
@@ -106,7 +109,9 @@
   feat(tile): non-exported translucent MWA trampoline; `219a696` feat(app): wire the tile ->
   trampoline -> MWA clock-in to the real chain layer
 - **Proof:** `android/README.md` (clock-in), `android/INTERFACE-NOTES.md` §3
-- **Attach:** a screen recording of the tile, once filmed on the Redmi `[TBD after device test]`.
+- **Attach:** a screen recording of the tile, once filmed on the Redmi `[TBD]`. The phone's first
+  clock-in on mainnet was on 2026-10-10, signed in Jupiter Mobile; whether it began from the tile
+  was not recorded.
 
 > Clock-in is a Quick Settings tile next to Do Not Disturb. Tap, one wallet approval, phone
 > face-down. That one transaction sets up your ORE Automation, registers the rig, sets caps and
@@ -137,6 +142,10 @@
 
 ---
 
-**Next posts, once they are real:** the first dig from the Redmi's own Keystore
-`[TBD after device test]`, the mainnet deploy `[TBD]`, and the first night of real rigs on the
-dashboard `[TBD after launch]`.
+**Next posts.** Two of the three that were waiting are real since 10 October 2026 and can be
+written from [MAINNET.md](../MAINNET.md): the mainnet deploy (program
+`HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`, slot 455,359,196) and
+[the first dig from the Redmi's own Keystore key](https://solscan.io/tx/25nBRCP6GExrKG4EDszGrKfWN9yYgJMopgnawTGi2Z9XNGj6UCtZgE6HFJN7rJXvu2C3VMjhh7bpXZnQg8DVzovY).
+Say what it was: one rig, the founder's own phone, one short shift of five digs of 0.001 SOL, on a
+debug build with the cost ceiling raised, and no ORE won. The third is not real: a night of rigs
+on the dashboard that are not the founder's. There are no users.

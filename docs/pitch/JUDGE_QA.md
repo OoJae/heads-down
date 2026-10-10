@@ -1,7 +1,9 @@
 # Judge Q&A: the 20 hardest questions
 
-Prep for the founder, written 2026-09-29. Each answer is short, honest and linked to the file that
-backs it. Where the honest answer is "not built yet" or "not tested yet", it says so.
+Prep for the founder, written 2026-09-29; the answers that the mainnet deploy and the first shift
+on a phone changed were rewritten on 2026-10-10 ([MAINNET.md](../MAINNET.md) is the record). Each
+answer is short, honest and linked to the file that backs it. Where the honest answer is "not
+built yet" or "not tested yet", it says so.
 
 **Personas** (`docs/research/judges-preferences.md`):
 
@@ -33,7 +35,10 @@ We published that ourselves. Spread over every round, 0.02 to 0.05 SOL a night c
 than buying. The design that ships digs 0.001 SOL chunks only when the on-chain Motherlode-aware
 gate opens, then buys the rest. That came out 1.4 to 3.0% cheaper than buying when claimed each
 morning, and 2.9 to 5.5% when the ORE is kept unrefined (at the smallest budget that interval
-includes zero). At the 2026-09-29 snapshot the gate was shut. It's a modest edge. The product's value is the ritual and the trustless gate, and the price
+includes zero). At the 2026-09-29 snapshot the gate was shut. It was shut again on 10 October 2026,
+the evening of the first shift on mainnet: ORE's cost figure was 0.690 to 0.704 SOL per ORE against
+a default ceiling of 0.53, and that shift dug only because its build raised the ceiling. It's a
+modest edge. The product's value is the ritual and the trustless gate, and the price
 paid is shown, not hidden.
 
 *Evidence:* `ml/forecaster/RESULTS.md` (TL;DR, §3), `docs/ECONOMICS.md` (Summary, §5).
@@ -97,7 +102,8 @@ when to submit a heartbeat, while the program chooses amount and squares and ver
 heartbeat. Anyone can run `hd-crank`, and the program reimburses a fixed fee only out of the fee
 that same dig brought in. A measured run (against the interface mock of the program; the crank
 also runs against the real program on the fork): 3 rigs cost 20,168 lamports in fees and were
-reimbursed 21,000. Honest gaps: only the team's crank runs today; the Nostr heartbeat mirror and
+reimbursed 21,000. On mainnet on 10 October 2026, with one rig and so one rig per transaction, it
+ran at a loss: 95,473 lamports in fees over nine transactions, 35,000 reimbursed. Honest gaps: only the team's crank runs today; the Nostr heartbeat mirror and
 the LaserStream source are stubs (the WebSocket source works); and bonded SKR is more than a
 liveness matter. If none of a rig's heartbeats land in a night, its Focus Bond or its Stack seat is
 lost although the phone was down.
@@ -127,8 +133,10 @@ are off. RPC is HTTPS-only, the crank uplink WSS-only, and the build refuses URL
 string or user-info. The MWA auth token is AES-GCM-encrypted with a Keystore key. Success shows only
 after confirmation with `err == null`. The site the wallet shows for the app, and the sign-in domain, are build
 settings that must name a site we control; a mainnet build fails without them. The amounts a
-clock-in can move are bounded whatever the RPC answers, and shown before the wallet opens. Not
-yet: on-device testing, certificate pinning, and a run of the AlignAI MWA fixtures `[TBD]`.
+clock-in can move are bounded whatever the RPC answers, and shown before the wallet opens. On a
+device so far: one short shift on a Redmi 14C on mainnet, on 10 October 2026, with a debug build.
+Not yet: a release build on a device, a whole night, certificate pinning, and a run of the
+AlignAI MWA fixtures `[TBD]`.
 
 *Evidence:* `android/README.md` (Security notes), `docs/THREAT_MODEL.md` §8.
 
@@ -160,14 +168,18 @@ on Seeker. Remote Seeker testers are the plan `[TBD]`.
 It uses clientlib-ktx 2.2.0 in one session: authorize, `get_capabilities` (v0 if supported, else
 legacy), build, sign and send. The registrar issues single-use, 10-minute SIWS nonces. The auth
 token sits in a Keystore AES-GCM vault. A confirmation poller handles blockheight expiry, and
-success requires `err == null`. Honest: it has not run against a real wallet on the Redmi
-`[TBD after device test]`. The three joins are closed in tests: the app's instructions match the
-program's golden vectors byte for byte, its heartbeat frames follow the crank's contract, and its
-SIWS payload the registrar's.
+success requires `err == null`. It has run against one real wallet: on 10 October 2026, on the
+Redmi and on mainnet, Jupiter Mobile signed the sign-in and four transactions (two clock-ins, a
+clock-out and taking the unplaced SOL back). Honest: Jupiter showed "Could not verify request" on
+its connect prompt, because a wallet cannot verify the app's identity yet, and Solflare, Phantom
+and Seed Vault have not been tried. The three joins are closed in tests: the app's instructions
+match the program's golden vectors byte for byte, its heartbeat frames follow the crank's
+contract, and its SIWS payload the registrar's.
 
 *Evidence:* `android/README.md`, `registrar/README.md`,
 `android/core/chain/src/test/kotlin/xyz/headsdown/core/chain/ix/GoldenInstructionsTest.kt`,
-`docs/DEVSTACK.md` (the end-to-end run).
+`docs/DEVSTACK.md` (the end-to-end run), [MAINNET.md](../MAINNET.md#the-first-shift-10-october-2026)
+(the transactions).
 
 ### 13. "Most Seekers are second phones. Success here is a phone nobody touches. How does that help Solana Mobile?" (Akshay, Chase)
 
@@ -184,13 +196,14 @@ Activity Tracking. That's an open question for Solana Mobile.
 
 The shift hangs on bedtime, the charger and the alarm, which people already do every day.
 Focus-only shifts count on nights with no SOL. There is no token, no points, no emissions, no paid
-testers and no referral bounties. Retention: `[TBD after launch]`. D1/D7/D14 cohorts are computed
+testers and no referral bounties. Retention: nothing to report. There are no users: one rig, my
+own phone, has run one short shift, on 10 October 2026. D1/D7/D14 cohorts are computed
 from on-chain rows only.
 
 *Evidence:* `docs/SPEC.md` (CORE_LOOP, TRACTION_AND_LAUNCH_PLAN), `docs/ECONOMICS.md` §7,
 `services/indexer/README.md`.
-*If pressed:* the morning reveal, the part of the loop that changes night to night, is a stub
-today.
+*If pressed:* the morning reveal, the part of the loop that changes night to night, is built and
+has not yet run at an alarm on a phone.
 
 ### 15. "Aren't the Motherlode and the Stack forfeits just wagering?" (Toly, Seeker owners)
 
@@ -205,7 +218,8 @@ the program and tested; its screens in the app are not built yet.
 
 ### 16. "Doze, HyperOS killing apps, foreground-service rules: will a shift survive the night?" (Beeman, EthelSec)
 
-Not yet known on the Redmi `[TBD after device test: 8 h with and without Autostart]`. The design
+Not yet known. The one shift that has run on the Redmi lasted about nine minutes; a whole night
+under HyperOS has not been run `[TBD: 8 h with and without Autostart]`. The design
 fails safe: a `specialUse` foreground service with `START_NOT_STICKY`, so if the OS kills it, there
 are no heartbeats, no digs and nothing spent. The HyperOS/MIUI onboarding deep-links Autostart and
 "No restrictions", and a morning check reports a killed shift. Leases of up to 3 rounds tolerate
@@ -245,7 +259,8 @@ In miners, yes; in SOL, deliberately little. ORE has 165 to 172 miners per round
 for at least 15% of unique miners per round from 00:00 to 06:00 in one region (about 25 concurrent
 rigs), and the stretch is 25% in two regions (about 42). Every metric can be recomputed from ORE's
 own `DeployEvent`s where the signer is the Executor PDA. The morning buy leg and ORE burned through
-the Bury auction add to it, but neither is built yet.
+the Bury auction would add to it, but neither has happened: the app does not offer the buy leg,
+and no Bury auction has run on mainnet. Today the count is one rig, my own, and five digs.
 
 *Evidence:* `docs/ORE.md` §1 and §9, `services/indexer/README.md` (metric definitions).
 
@@ -258,7 +273,9 @@ users so far, and are retrained on recordings from the phone before their number
 SKR, built: Stack, Focus Bond, Gift a Rig and the Bury auction are in the program (13
 instructions, tested on a fork of live ORE with ORE's real `bury`), the crank runs them, and the
 dashboard reports them. In the app the Focus Bond is on the home screen; the Stack and Gift
-screens are next. Nothing is deployed on mainnet yet `[update at submission]`.
+screens are next. The program has been deployed on mainnet since 10 October 2026. One phone, my
+own, has run one short shift there; no SKR instruction has run on mainnet and no model has been
+retrained on a recording from the phone `[re-check at submission]`.
 
 *Evidence:* `ml/foreman/README.md`, `ml/forecaster/MODEL_CARD.md`, `docs/SKR.md`,
 `programs/heads-down/INTERFACE.md` §11, `crates/sgt-verify/README.md`.
