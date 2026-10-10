@@ -5,7 +5,9 @@
 //! exists so the crank does not **pay** for duplicates: a rig goes into a new transaction
 //! for a round only if its previous one can no longer land (blockhash expired), failed,
 //! or has gone unconfirmed for `retry_after_slots` (a deliberate retry, bounded by
-//! `max_attempts`; if both land, the program skips the second).
+//! `max_attempts`; if both land, the program skips the second and the crank has paid for
+//! it: with 6 slots that happened in two of the first three rounds on mainnet, see
+//! `DigConfig::default`).
 
 use std::collections::HashMap;
 
@@ -41,8 +43,10 @@ pub struct RetryPolicy {
 }
 
 impl Default for RetryPolicy {
+    /// The values of `DigConfig::default()` (`dig.retry_after_slots`, `dig.max_attempts_per_round`),
+    /// which is where the running crank takes its policy from.
     fn default() -> Self {
-        RetryPolicy { retry_after_slots: 6, max_attempts: 2 }
+        RetryPolicy { retry_after_slots: 40, max_attempts: 2 }
     }
 }
 

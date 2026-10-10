@@ -23,13 +23,28 @@ chain_poll_secs = 5                # HTTP re-read of the slot and ORE's accounts
 [dig]
 enabled = true
 tx_format = "v0"                   # "v0" (with lookup tables), "v1" (4096 bytes, no tables) or "legacy"
-deploy_margin_slots = 20           # submit when end_slot - slot <= 20 (deploy late in the round)
-min_slots_left = 3                 # ...and stop when fewer than 3 slots remain
-retry_after_slots = 6              # re-plan and re-sign if still unconfirmed after 6 slots
+# The dig window: submit when end_slot - slot <= 80, the last third of a 240-slot round. ORE
+# takes a deploy only before end_slot. It was 20 (sized on the local fork) until 2026-10-10:
+# the first dig on mainnet then landed 5 slots after its round had ended, and was a
+# RoundNotActive skip that the crank paid for and nothing reimbursed:
+# 3Komo8wsU2WcCwPzEQmjq7EriciqucYeXBKtRUDD9Mu6cr3giq1g9m6YchaaR7QDCy6hkURHGxPfh8W6LByf8KJu
+# With 80 the next four digs landed 49 to 77 slots before their round's end (README, "Deploy timing").
+deploy_margin_slots = 80
+min_slots_left = 3                 # no dig pass starts, and no dig is sent again, with fewer than 3 slots left
+# Re-plan and re-sign a dig that is still unconfirmed after 40 slots. Also the gap between two
+# dig passes of a round: with these values there are two, 80 and 40 slots before the end. It
+# was 6 until 2026-10-10: on mainnet the second attempt went out while the first was still
+# unconfirmed, both landed, and the program refused the second (StaleHeartbeat) at the crank's cost:
+# 4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM
+# baNzqcBzu49Rer1rnjcMugBHdPHp7F6wSLQTUUH22hyGSddQZaVLR57eUZNjhi2fCEzdYjZZcrUka4GTcGCbfeo
+retry_after_slots = 40
 max_attempts_per_round = 2         # per (rig, round); the program skips a duplicate anyway
 max_rigs_per_tx = 16
 max_account_locks = 64
-cu_price_micro_lamports = 1000     # priority fee
+# The priority fee, and the floor of the dynamic one. 1,000 is what the fork suites were
+# measured with. On mainnet on 2026-10-10 the four digs sent with the 80-slot window all paid
+# 20,000 (deploy/railway/crank/crank.toml): 80 slots at 1,000 was never observed.
+cu_price_micro_lamports = 1000
 dynamic_priority_fee = false       # true: percentile of getRecentPrioritizationFees on Board + Round
 priority_fee_percentile = 75
 max_cu_price_micro_lamports = 200000

@@ -1,7 +1,8 @@
 //! When a dig pass may skip its chain reads.
 //!
 //! A dig pass reads every Armed, Down and Cooling rig (three `getProgramAccounts` scans), then
-//! their ORE accounts and the block height, up to three times per ORE round. While no phone
+//! their ORE accounts and the block height, on every pass of an ORE round's dig window (two
+//! with the default settings, 80 and 40 slots before the round's end). While no phone
 //! is heartbeating that finds nothing, round after round. [`IdleTracker`] decides from what
 //! the crank already knows whether a pass can leave the chain alone. It can when all of
 //! these hold:
