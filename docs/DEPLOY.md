@@ -94,11 +94,11 @@ still to do**.
     *The line was changed in the repository twice for 10 October 2026: for the deploy, and for
     the first shift a phone ran that evening. This page does not record that either version was
     published.*
-11. **Seal the crank's key variable.** `HD_CRANK_KEYPAIR_JSON` was set on the Railway service on
-    10 October 2026 from the key file, through the CLI's standard input, and its sealing was
-    asked for. Check in the Railway dashboard that it is sealed, and seal it if it is not
-    (section 10.3). Until then anything that lists the crank's variables prints the fee payer's
-    key.
+11. **Seal the crank's key variable.** *Done on 10 October 2026.* `HD_CRANK_KEYPAIR_JSON` was set
+    on the Railway service from the key file, through the CLI's standard input, and sealed in the
+    dashboard the same evening (section 10.3). Checked afterwards: the CLI's variable listing gives
+    no value for it. An unsealed key variable is printed by anything that lists the service's
+    variables.
     *To do.*
 
 ## 1. What runs where
@@ -786,8 +786,8 @@ the registrar gets neither (it uses a keyless RPC, below).
 Where the five stand on 10 October 2026: the founder sealed `HD_REGISTRAR_KEYPAIR_JSON`,
 `HD_SESSION_SECRET`, the crank's `HELIUS_API_KEY` and the indexer's `RPC_URL`.
 `HD_CRANK_KEYPAIR_JSON` was set from the key file through the CLI's standard input, as in the
-command above, and its sealing was asked for. This page does not record that it was sealed:
-founder checklist, step 11.
+command above, and the founder sealed it the same evening. Checked afterwards for all five: the
+CLI's variable listing gives no value for a sealed variable, and gave none.
 
 ### 10.4 Variable matrix
 

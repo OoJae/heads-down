@@ -106,10 +106,11 @@ Four services on Railway, all against mainnet, and a Postgres with no public por
 - After the first shift the indexer's `/v1/summary` showed one rig in total, a guest rig, with the
   `RigRegistered` transaction as its evidence. At 20:47 it still did, and the crank's `/healthz`
   answered `"status":"ok"`.
-- Sealed on Railway by the founder: `HD_REGISTRAR_KEYPAIR_JSON` and `HD_SESSION_SECRET` on the
-  registrar, `HELIUS_API_KEY` on the crank, `RPC_URL` on the indexer. `HD_CRANK_KEYPAIR_JSON` was
-  set from the key file through the Railway CLI's standard input, and its sealing was asked for.
-  This page does not record that it was done.
+- Sealed on Railway by the founder on 10 October 2026: `HD_REGISTRAR_KEYPAIR_JSON` and
+  `HD_SESSION_SECRET` on the registrar, `HELIUS_API_KEY` and `HD_CRANK_KEYPAIR_JSON` on the crank
+  (the key was set from the key file through the Railway CLI's standard input and sealed the same
+  evening), `RPC_URL` on the indexer. Checked afterwards: the CLI's variable listing gives no value
+  for any of the five.
 - No uptime check and no balance alert is set up yet
   ([DEPLOY.md, section 11](DEPLOY.md#11-monitoring-and-alerts)).
 
