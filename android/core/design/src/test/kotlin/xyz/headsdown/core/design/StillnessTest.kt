@@ -7,8 +7,9 @@ import java.io.File
 
 /**
  * A still screen draws nothing. No source of this module, of the app or of the reveal asks for an
- * animation that never ends, and nothing in this module can reach a shader, a sensor, a motor or
- * the log: its components are composed in unit tests and previews with nothing behind them.
+ * animation that never ends (two known places excepted, each named below with the stage that
+ * removes it), and nothing in this module can reach a shader, a sensor, a motor or the log: its
+ * components are composed in unit tests and previews with nothing behind them.
  */
 class StillnessTest {
 
@@ -32,6 +33,20 @@ class StillnessTest {
     /** The board replay is driven by `withFrameNanos` and stops when the night has been replayed. */
     private val frameLoopAllowed = setOf("feature/reveal/src/main/kotlin/xyz/headsdown/feature/reveal/ui/RevealBoard.kt")
 
+    /**
+     * Material's progress and loading indicators. Without a `progress` they run an infinite
+     * transition of their own, which no search for `rememberInfiniteTransition` in our sources
+     * finds (AtRestTest shows one never coming to rest).
+     */
+    private val spinners = listOf("ProgressIndicator", "LoadingIndicator")
+
+    /**
+     * KNOWN EXCEPTION, for the stage that rebuilds the reveal: while the night's haul is being
+     * read, the reveal shows Material's indeterminate `CircularProgressIndicator`. A still
+     * `SkeletonBlock` and a sentence replace it; then this entry goes, as above.
+     */
+    private val spinnerExceptions = setOf("feature/reveal/src/main/kotlin/xyz/headsdown/feature/reveal/ui/RevealScreen.kt")
+
     private fun mainSources(): List<File> = listOf(design, app, reveal).flatMap(SourceTree::mainKotlin)
 
     private fun filesNaming(words: List<String>): Set<String> =
@@ -49,8 +64,13 @@ class StillnessTest {
     }
 
     @Test
+    fun `no spinner turns while a screen waits, except the one known place`() {
+        assertEquals(spinnerExceptions, filesNaming(spinners))
+    }
+
+    @Test
     fun `the design module names no endless animation at all`() {
-        val offenders = SourceTree.mainKotlin(design).filter { file -> (endless + frameLoop).any { it in code(file) } }
+        val offenders = SourceTree.mainKotlin(design).filter { file -> (endless + frameLoop + spinners).any { it in code(file) } }
         assertEquals(emptyList<File>(), offenders)
     }
 

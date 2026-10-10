@@ -95,7 +95,7 @@ object HdPalette {
 /**
  * The palette as plain ARGB integers, for what Compose does not draw: the notification accent,
  * the share image, RemoteViews. The top level is the dark palette, which is the brand's own;
- * [Day] is the light one. `res/values/colors.xml` repeats the values for XML, and PaletteXmlTest
+ * [Day] is the light one. `res/values/colors.xml` repeats the values for XML, and SingleSourceTest
  * keeps the two equal.
  */
 object HdArgb {
