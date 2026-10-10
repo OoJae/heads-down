@@ -39,8 +39,9 @@ tx_format = "v0"                   # v0 + the crank's own lookup table: 5 fresh 
 #   11,042 lamports for nothing.
 #   4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM
 #   baNzqcBzu49Rer1rnjcMugBHdPHp7F6wSLQTUUH22hyGSddQZaVLR57eUZNjhi2fCEzdYjZZcrUka4GTcGCbfeo
-# With 80 slots the next four digs landed 49 to 77 slots before their round's end, and with 40
-# no second attempt landed in the three rounds that followed. Six rounds are a small sample.
+# The second dig, still with 20 slots, landed 11 slots before its round's end. With 80 slots the
+# four digs after it landed 49 to 77 slots before theirs, and with 40 no second attempt landed in
+# the last three of those rounds. Six rounds are a small sample.
 deploy_margin_slots = 80
 min_slots_left = 3
 retry_after_slots = 40
@@ -48,7 +49,7 @@ max_attempts_per_round = 2
 max_rigs_per_tx = 16
 # The priority floor. It was 1,000, and the dynamic fee below had settled on it when the first
 # dig missed its round. 20,000 was set in the same restart as the 80-slot window, so which of
-# the two made the next four digs land in time is not known: 80 slots at 1,000 was never
+# the two made the four digs sent after it land in time is not known: 80 slots at 1,000 was never
 # observed. At 20,000 a transaction that carries one rig cost 11,028 to 11,082 lamports that
 # evening (two signatures and 1,028 to 1,082 of priority) against crank_fee = 7,000: this fee
 # payer lost 4,028 to 4,082 lamports on each of the four digs it landed at that price.
