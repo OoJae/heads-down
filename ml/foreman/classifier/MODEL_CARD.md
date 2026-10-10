@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Trained on synthetic data only.** No real Redmi 14C recording exists yet (the phone has not been connected). The numbers below validate the pipeline and the physics model. They do **not** measure real-world accuracy. Retrain with the protocol at the end before relying on it. |
+| **Status** | **Trained on synthetic data only.** No real Redmi 14C recording exists yet (the phone ran its first short shift on 10 October 2026, and no sensor session from it has been added here). The numbers below validate the pipeline and the physics model. They do **not** measure real-world accuracy. Retrain with the protocol at the end before relying on it. |
 | **Selected model** | Logistic regression on 39 window features: `model/pickup_model.json` (3.5 KB), also exported as `model/pickup_model.tflite` (2.1 KB, float32 LiteRT). |
 | **Also trained** | HistGradientBoosting (`pickup_gbdt.json`) and a 1.8k-parameter 1D-CNN (`pickup_cnn.json`, `pickup_cnn.tflite`, 11 KB). The rule below picked logistic. |
 | **Runs on** | The phone, in pure Kotlin (`android/ml`, `xyz.headsdown.ml.pickup`). LiteRT is optional, behind the same interface. Accelerometer only: the Redmi 14C has no gyroscope and a virtual proximity sensor. |

@@ -10,7 +10,7 @@ A fourth, **SKR fuel** (paying for a refuel in SKR), is a client-side swap, not 
 
 None of it is staking. Heads Down emits no SKR, pays nothing for holding it, and none of it flows to the team.
 
-> **Status (2026-10-01).** Built and tested: the program side of Stack, Focus Bond, Gift a Rig and the Bury auction, as INTERFACE.md v1.2 §11 ([`programs/heads-down/INTERFACE.md`](../programs/heads-down/INTERFACE.md)), with golden vectors executed on a fork of live mainnet ORE, including ORE's real `bury` path. Not yet done: a mainnet deploy, the Android screens, the crank's check-in loop and the indexer's decoders for these events. Checks and their tests are in [THREAT_MODEL.md](THREAT_MODEL.md), section 7.
+> **Status (2026-10-10).** Built and tested: the program side of Stack, Focus Bond, Gift a Rig and the Bury auction, as INTERFACE.md v1.2 §11 ([`programs/heads-down/INTERFACE.md`](../programs/heads-down/INTERFACE.md)), with golden vectors executed on a fork of live mainnet ORE, including ORE's real `bury` path. The crank can land Stack check-ins and settlement (that loop is switched off on the running service), and the indexer and the dashboard report every SKR event. The program has been deployed on mainnet since 10 October 2026 ([MAINNET.md](MAINNET.md)), and **no SKR instruction has been sent there**: `init_bury_vault` has not run, so the BuryVault account does not exist on mainnet, and every SKR counter of the indexer reads 0. In the app only the Focus Bond chooser is built, and it has not run on a phone; the Stack and Gift screens are not built. Checks and their tests are in [THREAT_MODEL.md](THREAT_MODEL.md), section 7.
 
 **SKR facts used here** (`docs/research/skr-and-ore.md`):
 - Mint `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3`, a classic SPL Token (not Token-2022) with 6 decimals and no freeze authority. The program refuses any SKR account that is not owned by the classic SPL Token program.
@@ -193,15 +193,17 @@ SKR fuel volume is a client-side swap and appears only in the user's own transac
 
 ## 8. Draft of the submission's `skrIntegration` field
 
-Matches the code as built (945 characters, at most 950; no word from the ECONOMICS.md section 4 lists). It claims what the program does, not that it is live on mainnet.
+These are versions A and B of [pitch/SUBMISSION.md](pitch/SUBMISSION.md), word for word. Both were rewritten on 2026-10-10 so that every clause is true of mainnet that evening: the program is deployed, no SKR instruction has been sent there, and the app has only the Focus Bond chooser. Neither uses a word from the ECONOMICS.md section 4 lists.
 
-> SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program. Stack: players bond SKR on keeping their phones face-down for a window of ORE rounds, at a table in person or remotely (Seekers only, SGT re-checked on-chain). A seat counts a round only if its phone's Keystore-key heartbeat, verified by Solana's secp256r1 precompile, landed in that round; a recorded pickup breaks it. Anyone can settle: finishers get their bond back plus 80% of forfeits, and 20% goes to a no-oracle Dutch auction where buyers pay ORE that the program sends through ORE's own bury instruction. Focus Bond: SKR locked on one shift comes back if the shift completes, else it goes to that auction. Gift a Rig: SOL, which the sender can swap from SKR in the same transaction, is escrowed for a wallet or a Seeker Genesis Token that only its current holder can claim. Heads Down emits no SKR, pays nothing for holding it and keeps none.
+**Version A (939 characters, at most 950):**
 
-**Short version (280 characters):**
+> SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program, deployed on mainnet on 10 October 2026. No SKR instruction has run there yet, and the app has only the Focus Bond chooser. In tests on a fork of mainnet: Stack: players bond SKR on keeping their phones face-down for a window of ORE rounds. A seat counts a round only if its phone's Keystore-key heartbeat, verified by the secp256r1 precompile, landed in that round. Finishers get their bond back plus 80% of forfeits; 20% goes to a no-oracle Dutch auction whose buyers pay ORE that goes through ORE's own bury instruction. Focus Bond: SKR locked on one shift comes back if the shift completes, else it goes to that auction. Gift a Rig: SOL is escrowed for a wallet or a Seeker Genesis Token that only its current holder can claim; paying in SKR needs a swap not yet wired in. Heads Down emits no SKR, pays nothing for holding it and keeps none.
 
-> SKR is Heads Down's bond and gift currency. Players bond SKR on keeping their phones face-down, settled on-chain from Keystore-key heartbeats; forfeits go to finishers and to a Dutch auction whose ORE is buried by ORE itself. Gift a Rig escrows SOL for a wallet or a Seeker's SGT.
+**Version B, the short one (518 characters):**
 
-If these replace versions A and B in [pitch/SUBMISSION.md](pitch/SUBMISSION.md), run `python3 docs/pitch/check_pitch.py` again.
+> SKR is Heads Down's commitment collateral and gifting currency. Four roles are in its Solana program, deployed on mainnet on 10 October 2026 and tested on a fork of mainnet: Stack bonds, the Focus Bond, Gift a Rig, and a no-oracle auction that sells forfeited SKR for ORE and sends that ORE through ORE's own bury instruction. No SKR instruction has run on mainnet yet. In the app the Focus Bond chooser is built; the Stack and Gift screens are not. Heads Down emits no SKR, pays nothing for holding it and keeps none.
+
+If either text changes, change it in both files and run `python3 docs/pitch/check_pitch.py` again. The sentence "No SKR instruction has run on mainnet yet" stops being true with the first one that lands.
 
 ---
 

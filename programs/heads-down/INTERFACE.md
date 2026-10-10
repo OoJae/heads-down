@@ -1884,7 +1884,7 @@ something a client can observe differently:
 
 | Instruction | Before | v1.3 |
 |---|---|---|
-| `close_rig` (14) | the Rig PDA returns to System; every lamport goes to the authority | a rig that armed a shift or accepted a P-256 message becomes a 32-byte RigTombstone that keeps its own rent (1,113,600 lamports at today's rent); the authority gets the rest. Any other rig closes as before |
+| `close_rig` (14) | the Rig PDA returns to System; every lamport goes to the authority | a rig that armed a shift or accepted a P-256 message becomes a 32-byte RigTombstone that keeps its own rent (1,113,600 lamports at the test suite's rent; 812,800 at mainnet's rent on 10 October 2026); the authority gets the rest. Any other rig closes as before |
 | `register_rig` (1) | the Rig PDA must be System-owned and empty; `shift_id` and `hb_counter` start at 0 | it also accepts a RigTombstone, and then the new Rig starts at the tombstone's `shift_id`, `hb_counter` and `last_dug_round` |
 | `end_shift` (11) | ShiftLog bytes 112..128 are zero | they hold the first 16 bytes of the caller's address |
 | `stack_checkin` (17) | attestation is checked at `join_stack` only | at an attested-only table the seat's result is 36 while the rig's attestation is not live |
@@ -2065,7 +2065,8 @@ A tombstone is not a Rig: every instruction that takes a Rig refuses it
   `register_rig`, which breaks both instructions for every existing client.
   The Rig PDA is already per wallet and already in both account lists.
 
-**Cost.** The tombstone keeps the rent of 32 bytes (1,113,600 lamports today)
+**Cost.** The tombstone keeps the rent of 32 bytes (1,113,600 lamports at the
+test suite's rent; 812,800 at mainnet's rent on 10 October 2026)
 until the wallet registers again, when it counts towards the new Rig's rent;
 lamports sent to a tombstone are returned by the next `close_rig`. Rigs closed
 by an earlier build left no tombstone.

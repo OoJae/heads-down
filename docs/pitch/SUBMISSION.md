@@ -1,7 +1,8 @@
 # Heads Down: Align submission form, draft answers
 
-Draft for the founder, written 2026-09-29 and brought up to the state of `main` on 2026-10-03.
-Paste only the text inside the quote blocks. Everything
+Draft for the founder, written 2026-09-29, brought up to the state of `main` on 2026-10-03 and to
+the mainnet deploy and the first shift on a phone on 2026-10-10
+([MAINNET.md](../MAINNET.md)). Paste only the text inside the quote blocks. Everything
 outside them is a note for the founder. Form fields are listed in
 `docs/research/judges-preferences.md` (submission form finding). Submissions close on Monday
 2026-10-12 at 23:59 UTC (the organisers extended the deadline).
@@ -33,13 +34,24 @@ outside them is a note for the founder. Form fields are listed in
 > ORE. So the program digs 0.001 SOL chunks only when a Motherlode-aware gate, computed on-chain from
 > ORE's own Board and Treasury, says mining is the cheaper route, and the rest of the budget buys
 > ORE at clock-out. In the backtest that was 1.4 to 3.0% cheaper than buying. The clock-out buy leg
-> is `[live / in progress]`.
+> is built and tested, and the app does not offer it yet.
 >
 > Trust: user SOL never leaves ORE's own Automation account. Any crank can submit digs, but only
 > the program chooses amounts and squares. Every key has a written worst case (docs/THREAT_MODEL.md).
 > The SGT verifier and the secp256r1 introspection library are standalone open-source crates.
 >
-> Status: `[update before submitting, from section 4]`.
+> Status on 10 October 2026: the heads_down program is deployed on Solana mainnet
+> (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p), and the crank, the registrar, the indexer and
+> the dashboard run against it. One rig, the founder's own phone (a Redmi 14C, with Jupiter Mobile
+> as its wallet), has run one short shift: five digs of 0.001 SOL, each one gated by a heartbeat
+> signed by a key in the phone's secure hardware, then a BREAK when the phone was unlocked, a
+> clock-out, and the SOL left in its ORE Automation taken back. That shift ran on a debug build with the cost
+> ceiling raised; the default build would not have dug that evening. No ORE has been won. There are no
+> users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
+> has been no third-party audit.
+
+The Status paragraph is the line of section 4. Read it again on the day you submit and change
+whatever is no longer true.
 
 ---
 
@@ -52,42 +64,41 @@ outside them is a note for the founder. Form fields are listed in
 | `previousHackathonWin` | `[founder to answer]` | not in the repo |
 | `portingFeatures` | "No. All code was written in this repository for this project." | `[founder to confirm]` |
 | `newMobileDevelopment` | "Yes. A native Android app in Kotlin and Jetpack Compose (minSdk 31, targetSdk 36), written in this repository: a Quick Settings tile, a foreground shift service, Android Keystore P-256 signing and Mobile Wallet Adapter 2.2.0. It is not a PWA or WebView wrapper." | `android/README.md` |
-| `skrIntegration` | Version A or B below (at most 950 characters) | `docs/SKR.md` |
+| `skrIntegration` | Version A below (at most 950 characters); B is a shorter text that is also true | `docs/SKR.md` §8 |
 | Deck URL | `[TBD: deck URL]` | built from `docs/pitch/DECK.md` |
 | Video URL | `[TBD: video URL]` | filmed from `docs/pitch/DEMO_SCRIPT.md` |
 | Repositories | `https://github.com/OoJae/heads-down` | public since 2026-10-01 |
-| APK URL | `[TBD: APK URL]` | must install from a clean state on the Redmi 14C |
+| APK URL | `[TBD: APK URL]` | Still to do. No APK is hosted. Needed: a release signing key (none exists; the build that ran on the phone is debug-signed), the registrar set to accept that key's certificate (today it accepts only the founder's debug certificate, `docs/DEPLOY.md` §10.4), a place to host the file, and one install from a clean state on the Redmi 14C |
 
 ### `skrIntegration`
 
-Both describe the code as built (`docs/SKR.md` §8). Use **A** only if the program is deployed on
-mainnet when you submit. Otherwise use **B**, which says it is not. Character counts are checked
-by the command in section 5.
+Both were rewritten on 2026-10-10 so that every clause is true of mainnet that evening: the program
+is deployed, no SKR instruction has been sent there, and the app has only the Focus Bond chooser
+(`docs/SKR.md` §8 carries the same two texts). **Use A.** B is the same statement in fewer words,
+for a field that turns out shorter. Read the one you paste again on the day: its second sentence
+stops being true as soon as an SKR instruction lands on mainnet. Character counts are checked by
+the command in section 5.
 
 <!-- skr-A:start -->
-> SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program.
-> Stack: players bond SKR on keeping their phones face-down for a window of ORE rounds, at a table
-> in person or remotely (Seekers only, SGT re-checked on-chain). A seat counts a round only if its
-> phone's Keystore-key heartbeat, verified by Solana's secp256r1 precompile, landed in that round;
-> a recorded pickup breaks it. Anyone can settle: finishers get their bond back plus 80% of
-> forfeits, and 20% goes to a no-oracle Dutch auction where buyers pay ORE that the program sends
-> through ORE's own bury instruction. Focus Bond: SKR locked on one shift comes back if the shift
-> completes, else it goes to that auction. Gift a Rig: SOL, which the sender can swap from SKR in
-> the same transaction, is escrowed for a wallet or a Seeker Genesis Token that only its current
-> holder can claim. Heads Down emits no SKR, pays nothing for holding it and keeps none.
+> SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program,
+> deployed on mainnet on 10 October 2026. No SKR instruction has run there yet, and the app has
+> only the Focus Bond chooser. In tests on a fork of mainnet: Stack: players bond SKR on keeping
+> their phones face-down for a window of ORE rounds. A seat counts a round only if its phone's
+> Keystore-key heartbeat, verified by the secp256r1 precompile, landed in that round. Finishers
+> get their bond back plus 80% of forfeits; 20% goes to a no-oracle Dutch auction whose buyers
+> pay ORE that goes through ORE's own bury instruction. Focus Bond: SKR locked on one shift comes
+> back if the shift completes, else it goes to that auction. Gift a Rig: SOL is escrowed for a
+> wallet or a Seeker Genesis Token that only its current holder can claim; paying in SKR needs a
+> swap not yet wired in. Heads Down emits no SKR, pays nothing for holding it and keeps none.
 <!-- skr-A:end -->
 
 <!-- skr-B:start -->
-> SKR is Heads Down's commitment collateral and gifting currency. It is built into the Solana
-> program and tested on a fork of mainnet; the program is not deployed on mainnet yet. Stack:
-> players bond SKR on keeping their phones face-down for a window of ORE rounds. A seat counts a
-> round only if its phone's Keystore-key heartbeat, verified by Solana's secp256r1 precompile,
-> landed in that round. Finishers get their bond back plus 80% of forfeits; 20% goes to a
-> no-oracle Dutch auction where buyers pay ORE that goes through ORE's own bury instruction. Focus
-> Bond: SKR locked on one shift, chosen on the app's home screen, comes back if the shift
-> completes, else it goes to that auction. Gift a Rig: SOL, which the sender can swap from SKR, is
-> escrowed for a wallet or a Seeker Genesis Token that only its current holder can claim. Heads
-> Down emits no SKR, pays nothing for holding it and keeps none.
+> SKR is Heads Down's commitment collateral and gifting currency. Four roles are in its Solana
+> program, deployed on mainnet on 10 October 2026 and tested on a fork of mainnet: Stack bonds,
+> the Focus Bond, Gift a Rig, and a no-oracle auction that sells forfeited SKR for ORE and sends
+> that ORE through ORE's own bury instruction. No SKR instruction has run on mainnet yet. In the
+> app the Focus Bond chooser is built; the Stack and Gift screens are not. Heads Down emits no
+> SKR, pays nothing for holding it and keeps none.
 <!-- skr-B:end -->
 
 ---
@@ -137,38 +148,52 @@ code with passing tests in the repo. **Designed** means specified, not built. **
   `android/core/chain/src/main/kotlin/xyz/headsdown/core/chain/ix/SkrInstructions.kt`
 - **Built:** the in-program SGT verifier that Seeker-only tables and SGT-escrowed gifts rely on.
   `crates/sgt-verify/README.md`
-- **Status:** tested on a fork of mainnet; not deployed on mainnet yet `[update at submission]`.
+- **Status (10 October 2026):** the program that carries them is deployed on mainnet. No SKR
+  instruction has been sent there, and the BuryVault account is not created. All four are tested
+  on a fork of mainnet only. `[re-check at submission]`
 
 ### UX (Align 15, public 25)
 
-- **On an emulator:** clock-in is one Quick Settings tile tap and one wallet approval (run with
-  Solana Mobile's test wallet; no production wallet yet). The
-  one transaction bundles ORE `automate`, rig registration, caps and arming (it fits one legacy packet).
+- **On a phone, on mainnet (10 October 2026):** clock-in is one wallet approval. On a Redmi 14C
+  with Jupiter Mobile, one transaction carried ORE `automate`, the registrar's voucher, rig
+  registration, caps and arming
+  ([transaction](https://solscan.io/tx/4DvPBhh4UiEhezYPmjcJvHeqSGGfCAj9prnKEFPMGaGRe9sGg7r9A2SMPVTo4UYXjeEkHUc1WCA7VRdznZuPaQht)).
+  The Quick Settings tile as the way in has run on an emulator, with Solana Mobile's test
+  wallet; whether the phone's clock-in started from the tile was not recorded.
   `android/INTERFACE-NOTES.md` §4
-- **On an emulator:** heartbeats need no wallet prompt. The rig key signs with the screen
-  off, and on-chain caps bound what it can do. In the real app on an Android 14 emulator, a
-  Keystore-signed heartbeat dug a round on a fork of mainnet (`scripts/devstack/emulator-smoke.sh`). `crates/p256-introspect/README.md`,
-  `android/README.md`
-- **Built, not on a device:** fail-safe. If the OS kills the shift service, the rig goes cold and
-  nothing is spent, and a health check reports it. `android/README.md`,
-  `android/feature/oem-keepalive`
-- **Built:** success is shown only after confirmation with `err == null`. `android/README.md`
+- **On a phone, on mainnet (10 October 2026):** heartbeats need no wallet prompt. The rig key
+  signs them, and on-chain caps bound what it can do. Heartbeats signed by the key in the Redmi's
+  TEE dug five ORE rounds
+  ([the first](https://solscan.io/tx/25nBRCP6GExrKG4EDszGrKfWN9yYgJMopgnawTGi2Z9XNGj6UCtZgE6HFJN7rJXvu2C3VMjhh7bpXZnQg8DVzovY)).
+  Before that, the real app on an Android 14 emulator had a Keystore-signed heartbeat dig a
+  round on a fork of mainnet (`scripts/devstack/emulator-smoke.sh`).
+  `crates/p256-introspect/README.md`, `android/README.md`
+- **Built, not tried on a device:** fail-safe. If the OS kills the shift service, the rig goes
+  cold and nothing is spent, and a health check reports it. No whole night has run under HyperOS
+  yet. `android/README.md`, `android/feature/oem-keepalive`
+- **Built, and seen on the phone:** success is shown only after confirmation with `err == null`.
+  The clock-out read "Confirmed on-chain. Shift sealed as ended early." and the take-back
+  "Confirmed on-chain. 0.00502704 SOL back in your wallet from the ORE Automation.", which is
+  what the chain shows to the lamport. `android/README.md`
 
 ### UI (Align 15)
 
 - **Built:** one night-shift palette (charcoal, ember orange for a hot rig, ORE gold for hauls)
   across the app theme and the dashboard. Dashboard chart colours pass contrast and
   colour-vision checks in both themes. `dashboard/README.md`
-- **Built, not on a device:** an Android 16 Live Update notification with an Android 14/15
-  fallback, and no countdowns. `android/README.md`,
+- **Built; its look on a device not recorded:** an Android 16 Live Update notification with an
+  Android 14/15 fallback, and no countdowns. The Redmi runs Android 16 under HyperOS 3; what
+  HyperOS shows for it was not written down during the first shift. `android/README.md`,
   `android/surface/notification/src/main/kotlin/xyz/headsdown/surface/notification/RigNotificationCopy.kt`
 - **Built, not on a device:** the exact-alarm, full-screen morning haul reveal, replayed round by
   round from the indexer's haul API. `android/README.md`
 
 ### Innovation (Align 15, public 25)
 
-- **Built:** an ORE Automation executor that signs only for an on-chain-verified phone heartbeat,
-  proven on a fork of the live ORE binary (spike 5/5; program 171 tests). Our own search found no public
+- **Built, and run on mainnet:** an ORE Automation executor that signs only for an
+  on-chain-verified phone heartbeat, proven on a fork of the live ORE binary (spike 5/5; program
+  171 tests) and, on 10 October 2026, on mainnet: five digs from one phone, each with the
+  secp256r1 check, the `dig` and ORE's `deploy` in one transaction. Our own search found no public
   repo or store app that gates ORE mining on phone state. `spikes/ore-executor/README.md`,
   `programs/heads-down/README.md`, `buildplan.md`
 - **Built:** an SGT check anchored on Token-2022 group membership. It rejects a mint, forged with the
@@ -184,7 +209,9 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - **Built:** usage metrics ORE can recompute from its own `DeployEvent`s (signer = Executor PDA) and
   `ResetEvent`s, with CSV exports. `services/indexer/README.md`, `docs/ORE.md` §9
 - **Built:** a permissionless crank anyone can run. Measured crank cost is about 6,040 lamports per
-  rig-dig (v0 with a lookup table). `crank/README.md`
+  rig-dig (v0 with a lookup table, five rigs in one transaction). On mainnet with one rig, on 10
+  October 2026, each dig's transaction cost the crank 10,053 to 11,082 lamports and the program
+  reimbursed 7,000; over the evening it paid 95,473 in fees and got 35,000 back. `crank/README.md`
 - **Finding:** ORE stores `max_production_cost` but `deploy` never reads it; documented for ORE.
   `docs/ORE.md` §9
 - **Designed:** ORE milestones M1 to M3 with verifiable targets. `docs/ORE.md` §9
@@ -195,12 +222,17 @@ code with passing tests in the repo. **Designed** means specified, not built. **
   daily. Focus-only shifts count on nights with no SOL. `docs/SPEC.md` (CORE_LOOP)
 - **Built:** D1/D7/D14 cohort metrics computed from on-chain rows only.
   `services/indexer/README.md`
-- Traction: `[TBD after launch]`.
+- Traction: none. There are no users. One rig, the founder's own phone, has run one short shift
+  on mainnet (five digs, 0.005 SOL, 10 October 2026).
 
 ### Presentation & Demo (public 25)
 
 - The demo shows a replayed heartbeat skipped with `StaleHeartbeat` and a fresh one digging, on a
-  block explorer. `docs/pitch/DEMO_SCRIPT.md` §4
+  block explorer. The video is still `[TBD]` (section 2). The skip itself has happened on mainnet
+  without being staged: twice on 10 October 2026 the crank's own second attempt with a heartbeat that had
+  already landed was skipped with error 7
+  ([one of the two](https://solscan.io/tx/4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM)).
+  `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 213, registrar 116, `p256-introspect` 30, `sgt-verify` host 69,
   indexer 477, dashboard 48, Android 855. `docs/pitch/DECK.md` slide 14
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
@@ -210,15 +242,24 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 
 ## 4. Status line for the long description
 
-Pick the true one when you submit, and delete the rest.
+**Use this one.** It was true on the evening of 10 October 2026, and it is the Status paragraph of
+the long description in section 1. Check it again on the day you submit, clause by clause, and
+change what has moved: another shift, another wallet, an SKR instruction on mainnet, a user who is
+not the founder, a change of the upgrade key. The record to check it against is
+[MAINNET.md](../MAINNET.md).
 
-- "Live on mainnet with tiny caps; SKR flows `[live / specified]`."
-- "The heads_down program, crank, registrar and indexer are built and tested on a fork of mainnet;
-  the program is not deployed on mainnet yet. The indexer, the dashboard and the registrar run
-  against mainnet; the crank is not started. The Android app is built and unit-tested. It has run
-  on an Android 14 emulator with Solana Mobile's test wallet, and on a Redmi 14C, where it made a
-  hardware-backed rig key that the live registrar attested and signed in through Jupiter's wallet.
-  No physical phone has sent a transaction yet."
+- "Status on 10 October 2026: the heads_down program is deployed on Solana mainnet
+  (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p), and the crank, the registrar, the indexer and
+  the dashboard run against it. One rig, the founder's own phone (a Redmi 14C, with Jupiter Mobile
+  as its wallet), has run one short shift: five digs of 0.001 SOL, each one gated by a heartbeat
+  signed by a key in the phone's secure hardware, then a BREAK when the phone was unlocked, a
+  clock-out, and the SOL left in its ORE Automation taken back. That shift ran on a debug build with the cost
+  ceiling raised; the default build would not have dug that evening. No ORE has been won. There are no
+  users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
+  has been no third-party audit."
+
+The two earlier options are gone: one claimed live SKR flows, which do not exist, and the other
+described the state before the deploy.
 
 ---
 
@@ -227,19 +268,28 @@ Pick the true one when you submit, and delete the rest.
 - [ ] Every `[TBD]` replaced with a measured value and its source, or the claim removed.
 - [x] The app's instruction layouts, heartbeat JSON and SIWS payload match the program, crank and
       registrar (checked 2026-10-03: the app's builders against the program's golden vectors, and
-      the phone-less end-to-end run on a local fork of mainnet, `docs/DEVSTACK.md`).
+      the phone-less end-to-end run on a local fork of mainnet, `docs/DEVSTACK.md`; and on
+      2026-10-10 on mainnet, where the deployed program, the live crank and the live registrar
+      accepted what the app on the Redmi sent).
 - [ ] Numbers re-run: `cd crank && cargo test`, `cd registrar && cargo test`,
       `cd crates/p256-introspect && cargo test --release --all-features`,
       `cd crates/sgt-verify && cargo test --features std`,
       `cd programs/heads-down && bash scripts/test.sh`, `cd android && ./gradlew test`.
-- [ ] `skrIntegration` A or B chosen by what is live.
+- [x] `skrIntegration` chosen by what is live: A, rewritten on 2026-10-10 for a deployed program
+      on which no SKR instruction has run. Read it once more on the day.
+- [x] The heads_down program is deployed on mainnet and one shift has run on the Redmi
+      (2026-10-10; [MAINNET.md](../MAINNET.md)).
 - [ ] `python3 docs/pitch/check_pitch.py` passes. It checks the wording against `docs/ECONOMICS.md`
       §4, text addressed to the people or tools scoring the submission, every repo path cited,
       both `skrIntegration` lengths (at most 950), slide, question and post counts, and the VO
-      length. Last run 2026-10-03: PASS (the script prints both lengths).
+      length. Last run 2026-10-10: PASS (the script prints both lengths). Run it again after the
+      last edit.
 - [ ] The final deck file and the video's own transcript scanned for the same wording by hand;
       the script only sees these drafts.
 - [x] Repo public (`https://github.com/OoJae/heads-down`).
-- [ ] APK installs from a clean state on the Redmi. The dashboard shows real data, or its
-      SIMULATED banner.
+- [ ] APK installs from a clean state on the Redmi. Not possible yet: no APK is hosted and no
+      release signing key exists (see the APK row in section 2).
+- [x] The dashboard's data is real. The indexer it reads serves the dataset `mainnet`, not the
+      simulator (read 2026-10-10 20:44 UTC: 1 rig, 5 rounds dug, 5,000,000 lamports deployed,
+      0 ORE mined). Look at the page itself once before filming.
 - [ ] Radiants security audit run on the public repo, and its findings fixed.

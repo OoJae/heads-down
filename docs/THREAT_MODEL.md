@@ -2,6 +2,8 @@
 
 > **Status.** This document states the security requirements and the bound on each key; the section "As built" below says which of its mitigations exist today. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.3](../programs/heads-down/INTERFACE.md); 171 tests, 138 of them on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
 >
+> The program has been deployed on mainnet since 10 October 2026, at `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`, and one key (`9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW`) can upgrade it at once. What has run there, and what has not, is in [MAINNET.md](MAINNET.md); the "As built" table says for each row which it is.
+>
 > ORE facts are cited as `file:line` at ORE commit `b92c5043`. The program deployed since 2026-10-02 is commit `48c203bd` (verify.osec.io), which differs from it in one constant of `wrap.rs`; no cited line changed ([ORE.md](ORE.md), section 1).
 
 
@@ -10,22 +12,25 @@
 This document was written as the list of requirements, before the code. Most of it is now built
 and tested; some of the mitigations it names are not. This table is the truth about today's
 code, and the rest of the document should be read with it. The review that produced it is in
-[SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+[SECURITY_REVIEW.md](SECURITY_REVIEW.md). Since 10 October 2026 the table also says what has run
+on mainnet. "Tested" means the suites named in the status note. "Run on mainnet" means the one
+evening recorded in [MAINNET.md](MAINNET.md): one rig, the founder's own phone, one short shift.
 
 | Named below | Today |
 |---|---|
-| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 171 tests, 138 of them on a fork of live mainnet ORE) |
-| Crank, registrar, indexer, dashboard | **Built** |
-| Freeze from the phone, Unfreeze with the wallet | **Built.** A frozen rig's next clock-in carries `unfreeze_rig`, signed by the wallet |
-| Claim ORE in the app | **Built.** The clock-out screen sends ORE's `claim_ore` to the wallet, or leaves the ORE in the user's Miner |
-| Revoke and Close rig in the app | **Built.** "Take SOL back" sends ORE's `automate` with no executor, which closes the Automation and returns every lamport; it is never refused and needs no rig bound to the phone. Close rig is offered only with no open shift and no Focus Bond still locked |
+| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 171 tests, 138 of them on a fork of live mainnet ORE) **and deployed on mainnet on 10 October 2026.** Run on mainnet: the heartbeat gate (five digs, each on a heartbeat signed by a key in a phone's TEE and verified by the secp256r1 precompile in the same transaction; the same heartbeat sent a second time was skipped with `StaleHeartbeat`, twice; a dig that landed after its round was skipped with `RoundNotActive`), the registrar's voucher checked at registration (attestation level 1 on the Rig), five digs inside the caps the wallet signed, and a phone-signed BREAK. Those caps were a demo build's, with the cost ceiling raised to 1.2 SOL per ORE and the plan to 1.0: with the default build nothing would have dug that evening. Not run on mainnet, so tested only: a dig refused by the cost gate or by a cap (after the shift's 0.005 SOL budget was placed the crank sent nothing more for the rig), SGT verification, Stack, Focus Bond, Gift and Bury. The BuryVault account has not been created there |
+| Crank, registrar, indexer, dashboard | **Built, and running on Railway against mainnet** (the crank since 10 October 2026) |
+| Freeze from the phone, Unfreeze with the wallet | **Built.** A frozen rig's next clock-in carries `unfreeze_rig`, signed by the wallet. Neither has been sent on mainnet or run on a phone |
+| Claim ORE in the app | **Built.** The clock-out screen sends ORE's `claim_ore` to the wallet, or leaves the ORE in the user's Miner. Not run on mainnet or on a phone: the one rig's Miner showed no ORE when it was read on 10 October 2026 |
+| Revoke and Close rig in the app | **Built.** "Take SOL back" sends ORE's `automate` with no executor, which closes the Automation and returns every lamport; it is never refused and needs no rig bound to the phone. Close rig is offered only with no open shift and no Focus Bond still locked. Revoke has run on mainnet from a phone, signed in Jupiter Mobile, and returned the amount the screen stated to the lamport. Close rig has run only on an emulator against a local fork |
 | Competing cranks | **Possible, not present.** The crank is open source and permissionless; the team's is the only one running |
 | Heartbeats mirrored to a public Nostr relay | **Not built** (a hook only) |
 | Phones posting their own heartbeats to the chain | **Not built.** The phone sends them to one crank |
 | Kora fee relayer (K4b) | **Not built** |
 | Push and presence (FCM), rooms | **Not built** |
 | Jupiter quote proxy and the buy leg | **Partly.** The buy leg's transactions are built and tested against recorded Jupiter quotes; the quote proxy is not built and the app does not offer the leg |
-| Upgrade authority: Squads multisig behind a 72 h timelock | **Not so.** One keypair held by the founder, no delay on program upgrades. Config changes and governance rotation are behind a 72 h on-chain timelock (INTERFACE §12.3); pausing is immediate |
+| Upgrade authority: Squads multisig behind a 72 h timelock | **Not so.** One keypair held by the founder, no delay on program upgrades. On mainnet since the deploy of 10 October 2026 that key is `9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW`. Config changes and governance rotation are behind a 72 h on-chain timelock (INTERFACE §12.3); pausing is immediate |
+| Verified builds: anyone can compare a pending buffer, or the deployed program, with the source | **Not so.** Anyone can compare the chain with the deploy's receipt, which holds the hash of the file that was deployed. Rebuilding the source gives that hash only in the directory of the first build: on 10 October 2026 three other directories of the same machine gave three other hashes. No build in a pinned container exists ([MAINNET.md](MAINNET.md#check-it-yourself)) |
 | In-app banner for a pending upgrade or config change | **Not built** |
 | Published attestation transcripts | **Partly.** The registrar keeps an append-only log file; nothing yet lets a third party check it against the chain |
 | API domain pinned to its CA | **Not built.** TLS with the system trust store |

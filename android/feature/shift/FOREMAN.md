@@ -6,15 +6,18 @@ they are allowed to do, and what is still untested. Package
 
 | Piece | What it does | State |
 |---|---|---|
-| `PickupWatch` | Feeds the accelerometer to the motion-window collector and asks the pickup classifier about a window | **Live in the shift service.** Never run on a real phone yet |
+| `PickupWatch` | Feeds the accelerometer to the motion-window collector and asks the pickup classifier about a window | **Live in the shift service.** That service has run one short shift on a real phone (10 October 2026); what the watch saw in it was not recorded |
 | `ShiftEvent.PickupDetected` | The classifier's one effect: a DOWN rig breaks as LIFTED (BREAK reason 1) | Live |
 | `RhythmRecorder`, `PlannerLog` | Write the Shift Planner's log from the service's receivers, in app-private storage | Live |
 | `PlannerRepository` | Runs the planner, publishes `TonightPlan` (window, week's budget split, signable plan) as a `StateFlow` | Live; nothing shows it yet |
 | `AutoArmPolicy`, `PlanArmer`, `ForemanSettings.autoArmEnabled` | Decide when a phone on its charger may arm a shift by itself | **Groundwork only. Off by default, and nothing calls it** |
 | `PickupBenchmark` (debug), `ForemanDiagnostics` | Time the classifier on the device; show what the watch saw in the last shift (counts and the delivered sample rate) | Sensor lab screen, debug and localdev builds only |
 
-Everything below was verified with JVM unit tests only. The Redmi 14C was not connected, so no
-part of this has run on a phone: see [the device checklist](#device-checklist).
+Everything below was verified with JVM unit tests only. Since it was written the app has run
+one short shift on the Redmi 14C, on mainnet on 10 October 2026
+([docs/MAINNET.md](../../../docs/MAINNET.md)). The shift service, which carries the pickup
+watch and the planner log, ran on the phone then; no result for anything below was recorded
+from it: see [the device checklist](#device-checklist).
 
 ## 1. Pickup classifier
 
@@ -222,7 +225,8 @@ Every line must hold. Anything unknown is a reason to hold.
 
 ## Device checklist
 
-Not done: the Redmi 14C was not connected.
+Not done. The Redmi 14C ran one short shift on 10 October 2026, and no result for any item
+below was recorded from it.
 
 The sensor lab screen (debug and localdev builds) shows a "Last shift" line after every shift
 that ran since the app started: the model, the sample rate the accelerometer really delivered,

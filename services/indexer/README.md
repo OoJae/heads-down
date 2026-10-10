@@ -20,7 +20,9 @@ verifiable traction API behind the [dashboard](../../dashboard).
 - **ORE rounds** (`ResetEvent`) from api.ore.com, a few pages per pass. Each row keeps its reset
   transaction signature, and a sample of rows is re-read from chain on every poll.
 
-Because heads_down is not deployed yet, a **deterministic simulation mode** generates realistic
+heads_down is on mainnet since 10 October 2026, and one rig has run one short shift there
+([docs/MAINNET.md](../../docs/MAINNET.md)): the real dataset is one rig, two sealed shifts and
+five digs. A **deterministic simulation mode** generates realistic
 data for development and demos. That data is labelled and cannot mix with real data (see
 [Simulation](#simulation-mode)).
 
@@ -47,7 +49,7 @@ pnpm migrate
 pnpm simulate -- --seed demo --rigs 120 --nights 28     # fills ONLY the simulated dataset
 INDEXER_DATASET=simulated pnpm start
 
-# Real data (once the program is deployed)
+# Real data (the program is on mainnet since 2026-10-10)
 INDEXER_DATASET=mainnet RPC_URL=https://... pnpm ingest -- --once   # or `pnpm start` (API + background polling)
 ```
 
@@ -201,7 +203,7 @@ finds new digs and takes one snapshot: about 5,000 for the same night. Both are 
 code, not measured.
 
 The call counts themselves were measured on 2026-10-04 through a counting proxy in front of the
-public mainnet RPC (program not deployed yet, api.ore.com off, 5 s interval, 63 s): 10 passes and
+public mainnet RPC (the program was not deployed then; api.ore.com off, 5 s interval, 63 s): 10 passes and
 the start of an 11th made 21 `getSignaturesForAddress` calls, the 4 scans of the first poll and
 one `getGenesisHash`. The code before made 18 `getSignaturesForAddress`, 36 `getProgramAccounts`
 and 9 `getMultipleAccounts` calls in 9 passes.

@@ -184,7 +184,7 @@ export default function MethodPage() {
       <section className="card section">
         <h2>Simulated data</h2>
         <p style={{ margin: 0, color: "var(--text-2)" }}>
-          Until the program is live on mainnet, a demo can run against the indexer&apos;s deterministic simulator. Its API marks every
+          A demo can run against the indexer&apos;s deterministic simulator instead of the chain. Its API then marks every
           response <span className="mono">simulated: true</span>, and this site then shows a striped SIMULATED banner and a SIM
           badge on every tile, and links no explorer. A site build pinned to one dataset refuses responses from any other.
           The API reference is in the footer. <Link href="/">Back to the overview</Link>.

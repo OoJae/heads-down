@@ -289,8 +289,11 @@ The published signature is rejected by the precompile, and the normalized one is
 accepted. Both facts are asserted: in `tests/client.rs` against p256, and in
 `spikes/secp256r1` against the real Agave precompile (OpenSSL) in LiteSVM.
 
-Real Keystore vectors from the Redmi 14C are pending: no device was connected when this
-was built. The Kotlin above is the recipe to capture them.
+Real Keystore vectors from the Redmi 14C are still pending. No device was connected when
+this was built. On 10 October 2026 a key in that phone's TEE signed heartbeats that
+passed the precompile on mainnet ([docs/MAINNET.md](../../docs/MAINNET.md)), but no
+vector from it has been exported into these tests. The Kotlin above is the recipe to
+capture them.
 
 ## Tests
 

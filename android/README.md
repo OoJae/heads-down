@@ -2,9 +2,14 @@
 
 Native Kotlin + Jetpack Compose. Package `xyz.headsdown`. minSdk 31, targetSdk 36, compileSdk 37.
 Built for a Redmi 14C (HyperOS, no gyroscope, virtual proximity) and for stock Android 16
-(Seeker). It has run on an Android 14 emulator and, since 10 October 2026, on a Redmi 14C with
-Android 16 (HyperOS 3): setup, a rig key in the phone's TEE that the live registrar attested, and
-a sign-in in Jupiter's wallet. That phone has not sent a transaction yet.
+(Seeker). It has run on an Android 14 emulator and, on 10 October 2026, on one Redmi 14C with
+Android 16 (HyperOS 3), on mainnet: setup, a rig key in the phone's TEE that the live registrar
+attested, a sign-in, two clock-ins, a clock-out and "Take it back" signed in Jupiter Mobile,
+heartbeats that dug five ORE rounds, and a BREAK after the phone was unlocked
+([docs/MAINNET.md](../docs/MAINNET.md#the-first-shift-10-october-2026)). That was one short shift
+on a debug build with the demo policy below. Not run on a phone: a whole night under HyperOS, the
+haul reveal at the alarm, a dig while the cost gate is shut, Close rig, Unfreeze, Claim, the Focus
+Bond, the Seeker tier, and Solflare, Phantom or Seed Vault.
 
 The on-chain contract is `programs/heads-down/INTERFACE.md` **v1.3** and its machine-checked
 vectors in `programs/heads-down/vectors/`. The app's builders are tested byte for byte against
@@ -50,7 +55,9 @@ build, never in source:
 
 `identityUri` is the site the app names to the wallet as its identity (Mobile Wallet Adapter).
 Solana Mobile's test wallet shows it on the connect and sign-in prompts, not on the transaction
-prompt; other wallets are untested. Its host is the Sign In With Solana domain
+prompt. Jupiter Mobile, on the Redmi 14C on 10 October 2026, showed "Could not verify request" on
+its connect prompt, then connected, signed the sign-in and signed four transactions. Solflare,
+Phantom and Seed Vault have not been tried. Its host is the Sign In With Solana domain
 (`-Pheadsdown.siwsDomain` overrides it; the registrar's `HD_SIWS_DOMAIN` must be the same). A
 wallet cannot verify the identity yet ([docs/DEPLOY.md](../docs/DEPLOY.md), section 10.7),
 so it has to be a site the team controls: whoever controls it can present itself to wallets as
@@ -79,6 +86,12 @@ on 4 split tiles, a 0.53 SOL/ORE plan under a 0.67 SOL/ORE wallet ceiling, lease
 
 Gradle checks the ranges (lease 1..3, plan ≤ cap, dig ≥ 0.001 SOL, 1..25 tiles, budgets that
 cover a dig); the app and the program check them again. `mode=day` sets `plan_flags` bit1.
+
+The build that ran the first shift on mainnet (10 October 2026) was a debug build with
+`planMaxEvCost=1000000000`, `capMaxCost=1200000000`, `shiftBudgetLamports=5000000` and
+`weeklyBudgetLamports=35000000` (docs/DEPLOY.md, section 10.7), and the default 0.001 SOL digs on
+4 tiles with lease 1. ORE's cost figure was 0.690 to 0.704 SOL per ORE during that shift, so the
+default policy above would have dug nothing.
 
 ## Modules
 
@@ -210,7 +223,8 @@ message goes to a local JSON-lines log and to the crank's WebSocket intake (`/ws
 refusal (`bad_signature`, `stale_counter`, `unknown_rig`, `rate_limited`, `malformed`,
 `lease_invalid`) is shown on the rig card and debug-logged as a counter and a code. No uplink
 means no digs, never a crash. The uplink reconnects with jittered backoff and closes 5 s after the
-shift ends.
+shift ends. On the first shift on mainnet the crank was restarted twice; the phone reconnected by
+itself each time and its heartbeats were accepted again within the next round.
 
 ## Morning haul (contract B)
 
@@ -258,6 +272,11 @@ fresh read:
   phone's shift service.
 - Not offered yet: "buy the rest at market". Its transactions are built and tested
   (`ClockOutService`, `SwapLegBuilder`), but no swap provider is wired into the app.
+- **Where it has run.** On the Redmi 14C on mainnet on 10 October 2026 the clock-out sealed a
+  shift that an unlock had already broken, signed in Jupiter Mobile. After confirmation the
+  screen read "Confirmed on-chain. Shift sealed as ended early." The wallet paid 1,305,480
+  lamports: the ShiftLog's rent of 1,300,480 and the 5,000-lamport fee. `claim_ore`,
+  `claim_sol` and `release_focus_bond` have not run on a phone.
 
 ## Taking SOL back and closing the rig (one wallet approval)
 
@@ -279,6 +298,14 @@ Automation and its Rig, says what each holds, and offers two choices. Neither is
   the phone from the rig.
 - Success is shown only when the signature is confirmed with `err == null`, and a wallet other
   than the one the screen was read for is refused before anything is built.
+- **Where each has run.** "Take it back" ran on the Redmi 14C on mainnet on 10 October 2026,
+  signed in Jupiter Mobile. The screen read "Your ORE Automation holds 0.00502704 SOL: 0.003564
+  SOL not yet placed, and the account's rent" and afterwards "Confirmed on-chain. 0.00502704 SOL
+  back in your wallet from the ORE Automation."; the Automation gave up 5,027,040 lamports and
+  the wallet, which paid the 5,000-lamport fee, gained 5,022,040. "Close my rig" has run only on
+  the emulator. On the phone its screen read "Your rig can be closed: 0.00178816 SOL of account
+  rent comes back", and it was not sent: of the Rig's 2,600,960 lamports, 812,800 would stay as
+  the rent of the 32-byte tombstone.
 
 ## Local devstack (`localdev` build type)
 
@@ -349,8 +376,12 @@ tests to prove no lab class is compiled into release.
 
 ## Still stubbed
 
-- The crank, registrar and indexer URLs are build properties with no default. The registrar and
-  the indexer run on Railway; the crank is not started (docs/DEPLOY.md, section 10).
+- The crank, registrar and indexer URLs are build properties with no default. All three run on
+  Railway against mainnet (docs/MAINNET.md, "Services"); a build reaches them only when it is
+  given their URLs (docs/DEPLOY.md, section 10).
+- No release signing key exists. Release builds are unsigned, the one build that has run on a
+  phone is a debug build, and the registrar accepts only that build's signing certificate
+  (docs/DEPLOY.md, section 10.4).
 - `ClockInPolicy`: build-time budgets and cost ceilings until the plan screen and price feed exist.
 - "Buy the rest at market" (the Jupiter leg) and the nightly ORE target.
 - `StubOreRoundSource` remains for tests only.
