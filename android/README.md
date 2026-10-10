@@ -321,11 +321,13 @@ scripts/devstack/phone.sh          # adb reverse 8899, 8900, 8787, 8788, 8790 (a
 `core/design` is the one module that may write a colour, name a font file or draw the mark.
 `SingleSourceTest` fails if a palette literal appears in the app, the reveal or a surface, or if the
 tile icon or the notification icon stops carrying the canonical glyph; `StillnessTest` fails if
-anything asks for an animation that never ends (one known exception: the home screen's ember breath,
-to be removed with the old home screen). The screens from before the redesign still read
-`MaterialTheme` and their old colour names (`HdColors`, `RevealColors`, `WidgetPalette`): those are
-shims over the new palette now, kept until each screen is rebuilt on the components. `HdCompat` holds
-the three colours the new system has no role for (the frozen blue, the cooling orange, a dim ember).
+anything asks for an animation that never ends (two known exceptions, each to go when its screen is
+rebuilt: the home screen's ember breath and the reveal's loading spinner). The screens from before
+the redesign still read `MaterialTheme` and their old colour names (`HdColors`, `RevealColors`,
+`WidgetPalette`): those are shims over the new palette now, kept until each screen is rebuilt on the
+components; their outlined buttons take `HdMaterial.controlBorder()`, because Material draws that
+border with the hairline. `HdCompat` holds the three colours the new system has no role for (the
+frozen blue, the cooling orange, a dim ember).
 
 ## Surfaces
 

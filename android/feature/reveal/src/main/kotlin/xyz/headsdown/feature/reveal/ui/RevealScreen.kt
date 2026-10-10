@@ -43,6 +43,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import xyz.headsdown.core.design.BrandGlyph
 import xyz.headsdown.core.design.HdArgb
+import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.feature.reveal.board.BoardReplay
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
@@ -197,7 +198,7 @@ fun RevealScreen(
         OutlinedButton(
             onClick = onShare,
             modifier = Modifier.fillMaxWidth().testTag(RevealTags.SHARE),
-            border = BorderStroke(1.dp, RevealColors.CharcoalOutline),
+            border = HdMaterial.controlBorder(),
         ) { Text(copy.shareButton, color = RevealColors.Ash) }
 
         Text(copy.solPlacedNote, color = RevealColors.AshMuted, style = MaterialTheme.typography.bodySmall)

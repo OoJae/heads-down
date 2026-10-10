@@ -1,6 +1,7 @@
 package xyz.headsdown.core.design
 
 import android.animation.ValueAnimator
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -85,6 +87,27 @@ class ThemeTest {
         rule.waitForIdle()
         assertEquals(Triple(HdPalette.Dark, HdPalette.Dark.pit, HdPalette.Dark.seam), seen.first())
         assertEquals(Triple(HdPalette.Light, HdPalette.Light.pit, HdPalette.Light.seam), seen.last())
+    }
+
+    @Test
+    fun `a Material outlined button is given an outline that can be seen`() {
+        var dark by mutableStateOf(true)
+        val seen = mutableListOf<Triple<BorderStroke, BorderStroke, Color>>()
+        rule.setContent {
+            HeadsDownTheme(darkTheme = dark) {
+                seen += Triple(HdMaterial.controlBorder(), HdMaterial.controlBorder(enabled = false), MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+        rule.waitForIdle()
+        dark = false
+        rule.waitForIdle()
+        for ((palette, triple) in listOf(HdPalette.Dark to seen.first(), HdPalette.Light to seen.last())) {
+            val (enabled, disabled, materialDefault) = triple
+            // What Material 3 would draw the border with: the hairline, which is decoration.
+            assertEquals(palette.hairline, materialDefault)
+            assertEquals(BorderStroke(1.dp, palette.ash), enabled)
+            assertEquals(BorderStroke(1.dp, palette.hairline), disabled)
+        }
     }
 
     @Test

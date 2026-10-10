@@ -1,5 +1,6 @@
 package xyz.headsdown.core.design
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
@@ -116,6 +117,20 @@ object HdMaterial {
 
     val DarkColors: ColorScheme = colorScheme(HdPalette.Dark)
     val LightColors: ColorScheme = colorScheme(HdPalette.Light)
+
+    /**
+     * The border of a Material control that is only an outline. Material 3 draws an
+     * `OutlinedButton`'s border with `outlineVariant`, which here is the hairline: decoration,
+     * about 1.3:1, so the button would be a word with no edge. Pass this as its `border` and it
+     * keeps an outline that can be seen: ash, or the hairline while it cannot be used.
+     *
+     * For the buttons from before the redesign; it leaves with the last of them (`BarButton`
+     * with `BarButtonStyle.Secondary` draws the same outline itself).
+     */
+    @Composable
+    @ReadOnlyComposable
+    fun controlBorder(enabled: Boolean = true): BorderStroke =
+        BorderStroke(HdDimens.Hairline, if (enabled) Hd.colors.ash else Hd.colors.hairline)
 
     /**
      * Body text is 16sp on a 24sp line in all three Material sizes ("body never below 16").

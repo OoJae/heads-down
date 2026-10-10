@@ -43,6 +43,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import xyz.headsdown.core.design.BrandGlyph
+import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.core.design.components.HeatPixels as DesignHeatPixels
 import xyz.headsdown.rig.FocusBondSetting
 import xyz.headsdown.feature.oemkeepalive.ExitCause
@@ -250,8 +251,8 @@ private fun RigCard(
                     }
                 }
                 is ShiftState.Armed, is ShiftState.Down, is ShiftState.Cooling -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = onEndShift, modifier = Modifier.weight(1f)) { Text("End shift") }
-                    OutlinedButton(onClick = onFreeze, modifier = Modifier.weight(1f)) { Text("Freeze") }
+                    OutlinedButton(onClick = onEndShift, modifier = Modifier.weight(1f), border = HdMaterial.controlBorder()) { Text("End shift") }
+                    OutlinedButton(onClick = onFreeze, modifier = Modifier.weight(1f), border = HdMaterial.controlBorder()) { Text("Freeze") }
                 }
                 is ShiftState.Frozen -> {
                     Button(
@@ -310,7 +311,7 @@ private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
                             colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
                         ) { Text(label, maxLines = 1, softWrap = false) }
                     } else {
-                        OutlinedButton(onClick = { onBondChange(choice) }, modifier = tag) { Text(label, maxLines = 1, softWrap = false) }
+                        OutlinedButton(onClick = { onBondChange(choice) }, modifier = tag, border = HdMaterial.controlBorder()) { Text(label, maxLines = 1, softWrap = false) }
                     }
                 }
             }
@@ -333,7 +334,7 @@ private fun HaulCard(onPreviewReveal: () -> Unit, onClockOut: (() -> Unit)?) {
                 Text("Open the morning reveal", color = HdColors.OreGold)
             }
             if (onClockOut != null) {
-                OutlinedButton(onClick = onClockOut, modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_OUT)) {
+                OutlinedButton(onClick = onClockOut, modifier = Modifier.fillMaxWidth().testTag(HomeTags.CLOCK_OUT), border = HdMaterial.controlBorder()) {
                     Text("Clock out: seal the shift, see your ORE")
                 }
             }
@@ -351,7 +352,7 @@ private fun WidgetCard(onAddWidget: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("HOME SCREEN", style = PixelLabel, color = HdColors.AshMuted)
             Text("Rig heat and a shift clock that ticks by itself, on your home screen.", color = HdColors.Ash)
-            OutlinedButton(onClick = onAddWidget, modifier = Modifier.testTag(HomeTags.ADD_WIDGET)) { Text("Add the Rig widget") }
+            OutlinedButton(onClick = onAddWidget, modifier = Modifier.testTag(HomeTags.ADD_WIDGET), border = HdMaterial.controlBorder()) { Text("Add the Rig widget") }
         }
     }
 }

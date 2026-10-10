@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import xyz.headsdown.core.chain.registrar.AttestationOutcome
+import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.core.keys.KeySecurityLevel
 import xyz.headsdown.feature.oemkeepalive.KeepAliveGuide
 import xyz.headsdown.feature.oemkeepalive.KeepAliveStep
@@ -107,7 +108,7 @@ fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -
                         Text(guide.title, style = MaterialTheme.typography.titleMedium)
                         Text(guide.detail, color = HdColors.AshMuted, style = MaterialTheme.typography.bodyMedium)
                         guide.action?.let { action ->
-                            OutlinedButton(onClick = { vm.openKeepAlive(action) }, modifier = Modifier.padding(top = 6.dp)) {
+                            OutlinedButton(onClick = { vm.openKeepAlive(action) }, modifier = Modifier.padding(top = 6.dp), border = HdMaterial.controlBorder()) {
                                 Text(if (action == KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS) "Allow background running" else "Open settings")
                             }
                         }
