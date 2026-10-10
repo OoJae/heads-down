@@ -109,9 +109,9 @@ internal class PolygonSlabDrawer : SlabDrawer {
             // The shader's falloff is a cube of the distance; these stops follow it.
             brush = Brush.radialGradient(
                 0f to keyed,
-                0.62f to keyed,
-                0.75f to keyed.copy(alpha = alpha * 0.5f),
-                0.88f to keyed.copy(alpha = alpha * 0.14f),
+                0.55f to keyed,
+                0.7f to keyed.copy(alpha = alpha * 0.4f),
+                0.85f to keyed.copy(alpha = alpha * 0.1f),
                 1f to keyed.copy(alpha = 0f),
                 center = Offset.Zero,
                 radius = 1f,

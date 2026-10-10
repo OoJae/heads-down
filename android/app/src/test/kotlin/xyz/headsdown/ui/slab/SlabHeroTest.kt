@@ -7,7 +7,7 @@ import android.hardware.SensorManager
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -205,11 +205,9 @@ class SlabHeroTest {
     fun `a tap is a knock, a horizontal drag turns the slab, a vertical drag scrolls the page`() {
         var knocks = 0
         var flips = 0
-        var scrolled = 0
+        val scroll = ScrollState(0)
         rule.setContent {
             CompositionLocalProvider(LocalSlabConfig provides SlabConfig(SlabRenderer.Polygon, SlabMotion.Live)) {
-                val scroll = rememberScrollState()
-                scrolled = scroll.value
                 Box(Modifier.size(320.dp, 400.dp).verticalScroll(scroll)) {
                     Box(Modifier.size(320.dp, 1200.dp)) {
                         SlabHero(
@@ -241,7 +239,7 @@ class SlabHeroTest {
         rule.waitForIdle()
         assertEquals("a drag is not a knock", 1, knocks)
         assertEquals("the drag showed the underside once", 1, flips)
-        assertEquals("a horizontal-first drag moved the page", 0, scrolled)
+        assertEquals("a horizontal-first drag moved the page", 0, rule.runOnIdle { scroll.value })
 
         // Vertical first: the page's, and the slab reports nothing.
         rule.onNodeWithTag("hero").performTouchInput {
@@ -250,7 +248,7 @@ class SlabHeroTest {
             up()
         }
         rule.waitForIdle()
-        assertTrue("a vertical drag did not scroll the page", scrolled > 0)
+        assertTrue("a vertical drag did not scroll the page", rule.runOnIdle { scroll.value } > 0)
         assertEquals(1, knocks)
         assertEquals(1, flips)
     }

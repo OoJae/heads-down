@@ -199,6 +199,10 @@ internal class SlabMotionState(enter: Boolean) {
     val launchDrop = Animatable(if (enter) 1f else 0f)
 
     suspend fun launch() = coroutineScope {
+        // The first frame is the one that compiles the shader's pipeline and replaces the splash:
+        // the launch starts on the frame after it, so its beginning is seen and not skipped.
+        withFrameNanos { }
+        withFrameNanos { }
         launch {
             launchPitch.animateTo(0f, spring(SlabMotionSpec.LAUNCH_TILT_DAMPING, SlabMotionSpec.LAUNCH_TILT_STIFFNESS, 0.05f))
         }
@@ -260,7 +264,8 @@ internal class SlabMotionState(enter: Boolean) {
             launch {
                 val rows = abs(target.lit - lit.value)
                 if (rows > 0f) {
-                    lit.animateTo(target.lit, tween((rows * SlabMotionSpec.ROW_MILLIS).roundToInt().coerceAtLeast(1), easing = LinearEasing))
+                    val millis = (rows * SlabMotionSpec.ROW_MILLIS).roundToInt().coerceAtLeast(1)
+                    lit.animateTo(target.lit, tween(millis, easing = LinearEasing))
                 }
             }
             blend.animateTo(1f, tween(SlabMotionSpec.CROSSFADE_MILLIS, easing = LinearEasing))

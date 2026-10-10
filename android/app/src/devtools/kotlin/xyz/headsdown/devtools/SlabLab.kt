@@ -43,6 +43,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -65,6 +66,8 @@ import xyz.headsdown.ui.slab.SlabMotion
 import xyz.headsdown.ui.slab.SlabPalette
 import xyz.headsdown.ui.slab.SlabRenderer
 import xyz.headsdown.ui.slab.SlabState
+import xyz.headsdown.ui.slab.SlabWindow
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -101,6 +104,10 @@ internal class SlabLabModel {
     var controls by mutableStateOf(true)
     var accelerometerOnly by mutableStateOf(false)
     var enterKey by mutableIntStateOf(0)
+
+    /** The page's scroll, as a fraction of the hero's height. */
+    var scroll by mutableFloatStateOf(0f)
+    var heroHeightPx by mutableFloatStateOf(0f)
     var readout by mutableStateOf("No run yet. \"Run 10 s\" is the worst case: underside, five rows, orbiting.")
     val debug = SlabDebug()
 
@@ -136,6 +143,7 @@ internal class SlabLabModel {
         if (intent.hasExtra("passes")) debug.passes = intent.getIntExtra("passes", 1).coerceIn(1, 4)
         if (intent.hasExtra("halo")) debug.glowFraction = intent.getFloatExtra("halo", SlabLook.GLOW_FRACTION)
         if (intent.hasExtra("width")) debug.widthFraction = intent.getFloatExtra("width", SlabGeometry.WIDTH_FRACTION)
+        if (intent.hasExtra("scroll")) scroll = intent.getFloatExtra("scroll", 0f).coerceIn(0f, 1f)
         if (intent.hasExtra("grain")) debug.grain = if (intent.getBooleanExtra("grain", true)) 1f else 0f
         if (intent.hasExtra("emboss")) debug.emboss = if (intent.getBooleanExtra("emboss", true)) 1f else 0f
         if (intent.hasExtra("squared")) debug.squared = intent.getBooleanExtra("squared", true)
@@ -185,17 +193,34 @@ class FrameMeter(private val window: Window) {
 
     /** One line of numbers for the frames since [reset], measured over [seconds] at [refreshHz]. */
     fun summary(seconds: Float, refreshHz: Float): String = synchronized(lock) {
-        if (count == 0) return "0 frames in ${"%.1f".format(seconds)} s"
+        if (count == 0) return "0 frames in %.1f s: nothing was drawn".format(Locale.ROOT, seconds)
         val t = total.copyOf(count).also { it.sort() }
         val g = gpu.copyOf(count).also { it.sort() }
+        // Janky: the frame took longer than one refresh from its intended vsync to its last buffer swap.
         val periodNanos = 1e9f / refreshHz
         val janky = t.count { it > periodNanos }
         fun ms(sorted: LongArray, q: Float) = sorted[((sorted.size - 1) * q).roundToInt()] / 1e6f
         val expected = (seconds * refreshHz).roundToInt()
-        "%d frames in %.1f s (%d expected at %.0f Hz), janky %.1f%% (%d), total p50 %.1f p95 %.1f p99 %.1f max %.1f ms, gpu p95 %.1f ms, unreported %d".format(
-            count, seconds, expected, refreshHz, 100f * janky / count, janky,
-            ms(t, 0.5f), ms(t, 0.95f), ms(t, 0.99f), t.last() / 1e6f, ms(g, 0.95f), dropped,
+        val jankyPercent = 100f * janky / count
+        val p95 = ms(t, 0.95f)
+        // The pass mark assumes 60 Hz; at another rate the numbers stand but the verdict does not.
+        val verdict = when {
+            refreshHz !in 59f..61f -> "NO VERDICT (not 60 Hz)"
+            jankyPercent <= PASS_JANKY_PERCENT && p95 <= PASS_P95_MILLIS && count >= expected * 0.97f -> "PASS"
+            else -> "FAIL"
+        }
+        val pattern = "%s: %d frames in %.1f s (%d expected at %.0f Hz), janky %.1f%% (%d), " +
+            "total p50 %.1f p95 %.1f p99 %.1f max %.1f ms, gpu p95 %.1f ms, unreported %d. " +
+            "Pass: janky at most 1%%, p95 at most 12 ms."
+        pattern.format(
+            Locale.ROOT, verdict, count, seconds, expected, refreshHz, jankyPercent, janky,
+            ms(t, 0.5f), p95, ms(t, 0.99f), t.last() / 1e6f, ms(g, 0.95f), dropped,
         )
+    }
+
+    companion object {
+        const val PASS_JANKY_PERCENT = 1f
+        const val PASS_P95_MILLIS = 12f
     }
 }
 
@@ -213,10 +238,10 @@ class SlabLabActivity : ComponentActivity() {
         model.apply(intent)
         val frames = FrameMeter(window).also { it.start() }
         meter = frames
-        val refreshHz = display?.refreshRate ?: 60f
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                SlabLabScreen(model, frames, refreshHz) { SensorTiltSource(this, preferGravity = !it) }
+                // The rate is read when a run ends: the 60 Hz pin below takes a moment to apply.
+                SlabLabScreen(model, frames, { display?.refreshRate ?: 60f }) { SensorTiltSource(this, preferGravity = !it) }
             }
         }
     }
@@ -224,6 +249,17 @@ class SlabLabActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         model.apply(intent)
+    }
+
+    // What MainActivity will do while a live slab is on screen: the shader is budgeted for 60 Hz.
+    override fun onResume() {
+        super.onResume()
+        SlabWindow.pinSixtyHertz(window)
+    }
+
+    override fun onPause() {
+        SlabWindow.unpin(window)
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -237,7 +273,7 @@ class SlabLabActivity : ComponentActivity() {
 private fun SlabLabScreen(
     model: SlabLabModel,
     frames: FrameMeter,
-    refreshHz: Float,
+    refreshHz: () -> Float,
     sensor: (accelerometerOnly: Boolean) -> SensorTiltSource,
 ) {
     val palette = if (model.light) SlabPalette.Light else SlabPalette.Dark
@@ -277,8 +313,10 @@ private fun SlabLabScreen(
                 SlabHero(
                     state = model.state,
                     heat = model.heat,
-                    modifier = Modifier.fillMaxSize().testTag(SlabLabTags.HERO),
+                    modifier = Modifier.fillMaxSize().testTag(SlabLabTags.HERO)
+                        .onSizeChanged { model.heroHeightPx = it.height.toFloat() },
                     palette = palette,
+                    scrollPx = { model.scroll * model.heroHeightPx },
                     interactive = model.interactive,
                     enter = model.enterKey > 0,
                     contentDescription = "The slab",
@@ -313,7 +351,7 @@ private fun SlabLabScreen(
                                 delay(1_500)
                                 frames.reset()
                                 delay(10_000)
-                                model.readout = "ORBIT ${model.renderer} x${debug.passes}: " + frames.summary(10f, refreshHz)
+                                model.readout = "ORBIT ${model.renderer} x${debug.passes}: " + frames.summary(10f, refreshHz())
                             }
                         }
                         chip("Rest 5 s", false) {
@@ -325,7 +363,8 @@ private fun SlabLabScreen(
                                 frames.reset()
                                 delay(5_000)
                                 val n = frames.frames()
-                                model.readout = "REST ${model.pose}: $n frames in 5 s (pass: at most 2)"
+                                val verdict = if (n <= 2) "PASS" else "FAIL"
+                                model.readout = "REST ${model.pose} $verdict: $n frames in 5 s. Pass: at most 2."
                             }
                         }
                         chip("Enter", false) { model.enterKey++ }
@@ -361,6 +400,11 @@ private fun SlabLabScreen(
                         (1..4).forEach { n -> chip("x$n", debug.passes == n) { debug.passes = n } }
                         listOf(0f, 0.08f, SlabLook.GLOW_FRACTION, 0.26f).forEach { f ->
                             chip("halo ${(f * 100).roundToInt()}", debug.glowFraction == f) { debug.glowFraction = f }
+                        }
+                    }
+                    Choices("scroll", ink) {
+                        listOf(0f, 0.15f, 0.3f, 0.45f, 0.6f, 0.8f, 1f).forEach { f ->
+                            chip("${(f * 100).roundToInt()}%", model.scroll == f) { model.scroll = f }
                         }
                     }
                     Choices("quality", ink) {

@@ -101,12 +101,26 @@ half4 main(float2 p) {
         bool onY = !onZ && tn.y >= tn.x;
         bool isUnder = onZ && uRo.z < 0.0;
 
+        // The footprint of one pixel on the hit face, per slab axis: the derivative of the hit
+        // point with respect to the pixel, exactly, with no screen-space derivative.
+        float3 am = onZ ? float3(0.0, 0.0, 1.0) : (onY ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0));
+        float ra = dot(rd, am);
+        ra = (ra < 0.0 ? -1.0 : 1.0) * max(abs(ra), 1.0e-3 * uF);
+        float3 ex = uV2O[0];
+        float3 ey = -uV2O[1];
+        float3 fp = abs(t * (ex - rd * (dot(ex, am) / ra))) + abs(t * (ey - rd * (dot(ey, am) / ra)));
+
         // Rounded-box normal on the flat box: the face normal, turning toward the neighbouring
-        // face inside the bevel band.
+        // face inside the bevel band. A band seen so obliquely that it is thinner than a pixel
+        // and a half is widened to that, and dimmed by as much, or it would break into dashes.
         float3 sq = step(float3(0.0), q) * 2.0 - 1.0;
-        float3 e3 = max(abs(q) - (uH - float3(uBevel)), float3(0.0));
+        float3 bw3 = min(max(float3(uBevel), 1.6 * fp), uH);
+        float3 e3 = max(abs(q) - (uH - bw3), float3(0.0)) / bw3;
         float3 n = normalize(e3 * sq + float3(1.0e-6));
-        float bm = clamp((e3.x + e3.y + e3.z) / uBevel - 1.0, 0.0, 1.0);
+        float bm = clamp(e3.x + e3.y + e3.z - 1.0, 0.0, 1.0);
+        float3 eo = e3 * (float3(1.0) - am);
+        float thin = (dot(eo, float3(uBevel) / bw3) + 1.0e-4) / (eo.x + eo.y + eo.z + 1.0e-4);
+        bm *= mix(0.3, 1.0, thin);
 
         float3 v = normalize(uRo - q);
         float3 l = uL;
@@ -131,25 +145,29 @@ half4 main(float2 p) {
 
         if (!onZ) {
             // A side face: light leaking up from the lower rim, and the seam line on it.
+            // The seam is never thinner than a pixel and a third on screen, however the face leans;
+            // widened, it dims, so a face seen edge-on carries a glow and not a dashed line.
             float zz = q.z + uH.z;
-            float sw = max(0.0045, 1.3 * t);
-            float seam = uSeam * (1.0 - smoothstep(sw * 0.4, sw * 1.4, abs(zz - uBevel * 1.15)));
-            float leak = uHeat * exp(-zz * 24.0) * 0.5;
+            float sw = max(0.0045, 1.3 * fp.z);
+            float seam = uSeam * (1.0 - smoothstep(sw * 0.4, sw * 1.4, abs(zz - uBevel * 1.15))) * max(0.0045 / sw, 0.4);
+            // Interior edges are antialiased by nothing but continuity: the seam is out before
+            // the rim, and the leak meets the underside's own rim glow there and is out by the top.
+            seam *= clamp(zz / (1.2 * fp.z + 1.0e-6), 0.0, 1.0);
+            float top = 1.0 - zz / (2.0 * uH.z);
+            float leak = uHeat * exp(-zz * 24.0) * 0.5 * top * top;
             c += emit * (seam * 1.05 + leak);
         }
 
         if (isUnder) {
-            // The 5x5 board. The footprint of one pixel on the face is analytic: the derivative
-            // of the hit point with respect to the pixel, in tile units.
+            // The same leak as on the side faces, carried round the lower rim onto the frame.
+            float de = min(uH.x - abs(q.x), uH.y - abs(q.y));
+            c += emit * (uHeat * exp(-de * 40.0) * 0.5);
+
+            // The 5x5 board, with the pixel's footprint in tile units.
             float2 cuv = (q.xy / uGrid + 0.5) * 5.0;
             float2 cell = floor(cuv);
             float2 f = cuv - cell;
-            float rz = sg.z * max(abs(rd.z), 1.0e-4);
-            float3 ex = uV2O[0];
-            float3 ey = -uV2O[1];
-            float3 dqx = t * (ex - rd * (ex.z / rz));
-            float3 dqy = t * (ey - rd * (ey.z / rz));
-            float2 fw = (abs(dqx.xy) + abs(dqy.xy)) * (5.0 / uGrid) + float2(1.0e-5);
+            float2 fw = fp.xy * (5.0 / uGrid) + float2(1.0e-5);
 
             float2 ed = min(f, 1.0 - f);
             float2 m2 = clamp((ed - GAP) / fw + 0.5, 0.0, 1.0);
