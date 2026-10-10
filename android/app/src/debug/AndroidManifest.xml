@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    DEBUG BUILD TYPE ONLY: the rig debug screen (src/devtools) for scripts/devstack/clock-in.sh.
-    Not exported. Release has no such activity (src/release has only a stub entry point).
+    DEBUG BUILD TYPE ONLY: the rig debug screen (src/devtools) for scripts/devstack/clock-in.sh,
+    and the slab lab it opens. Not exported. Release has no such activity (src/release has only a
+    stub entry point for the rig debug screen, and nothing at all for the lab).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -10,6 +11,15 @@
             android:name="xyz.headsdown.devtools.RigDebugActivity"
             android:exported="false"
             android:label="Rig debug"
+            android:theme="@style/Theme.HeadsDown" />
+
+        <!-- Reached from the rig debug screen only. Portrait: the slab reads the phone's own tilt. -->
+        <activity
+            android:name="xyz.headsdown.devtools.SlabLabActivity"
+            android:exported="false"
+            android:label="Slab lab"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.HeadsDown" />
     </application>
 

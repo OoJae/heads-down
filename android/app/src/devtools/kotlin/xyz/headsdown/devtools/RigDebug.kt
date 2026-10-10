@@ -68,6 +68,7 @@ object RigDebugTags {
     const val KEY_HEX = "rig-debug-key-hex"
     const val RIG = "rig-debug-rig"
     const val ATTACH = "rig-debug-attach"
+    const val SLAB_LAB = "rig-debug-slab-lab"
 }
 
 /** Everything the devstack needs from this phone, on one screen. Public data only. */
@@ -119,6 +120,7 @@ class RigDebugActivity : ComponentActivity() {
                         attachResult = attachResult,
                         onCopy = ::copy,
                         onAttach = ::attach,
+                        onOpenSlabLab = { startActivity(SlabLab.intent(this)) },
                     )
                 }
             }
@@ -196,6 +198,7 @@ private fun RigDebugScreen(
     attachResult: String?,
     onCopy: (String, String) -> Unit,
     onAttach: (String) -> Unit,
+    onOpenSlabLab: () -> Unit,
 ) {
     var authority by rememberSaveable { mutableStateOf("") }
     Column(
@@ -204,6 +207,8 @@ private fun RigDebugScreen(
     ) {
         Text("RIG DEBUG · DEVSTACK", style = PixelLabel, color = HdColors.Cooling)
         Text("Rig key and devstack", style = MaterialTheme.typography.headlineSmall)
+        // The slab lab: renderer, states and the frame-time readout, on this phone's own GPU.
+        OutlinedButton(onClick = onOpenSlabLab, modifier = Modifier.testTag(RigDebugTags.SLAB_LAB)) { Text("Slab lab") }
         if (info == null) {
             Text("Reading…", color = HdColors.AshMuted)
             return@Column
