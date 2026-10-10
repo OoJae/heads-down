@@ -281,8 +281,8 @@ describe("serve turned away by api.ore.com half way through a pass", () => {
     expect(passes.every((l) => (l.pages as number) <= 3)).toBe(true);
     expect(requests.map((q) => q.page)).toEqual([0, 1, 0, 1, 2, 0, 3, 4]);
     expect(requests.filter((q) => q.status === 200)).toHaveLength(passes.reduce((n, l) => n + (l.pages as number), 0));
-    // Retry-After: 3 was honoured. The clock counts whole seconds, so the next request is more than 2 s after the refusal.
-    expect(requests[2]!.at - requests[1]!.at).toBeGreaterThan(2000);
+    // Retry-After: 3 was honoured: the next request is no less than 3 s after the refusal.
+    expect(requests[2]!.at - requests[1]!.at).toBeGreaterThanOrEqual(3000);
     // Two pages of one pass are a second apart.
     expect(requests[4]!.at - requests[3]!.at).toBeGreaterThanOrEqual(990);
     // Nothing went wrong, and nothing was written as if it had: every line is an info line on stdout.

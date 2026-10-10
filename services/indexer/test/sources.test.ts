@@ -411,7 +411,7 @@ describe("api.ore.com rounds", () => {
     const rpc = new RpcClient("https://rpc.example", { fetchImpl: fakeRpcFetch(chain), sleep: noSleep });
     const res = await pollOreRounds(ctx, { since: 0, maxPages: 3, verifySample: 5, fetchImpl: apiFetch(page), sleep: noSleep }, rpc);
     // The recorded page's two rounds, and page 1, which is empty: the whole list.
-    expect(res).toEqual({ stored: 2, verified: 1, mismatches: 0, pages: 2, newest: "422680", backTo: "2026-09-29T18:56:07.000Z", backfill: "done" });
+    expect(res).toEqual({ stored: 2, verified: 1, mismatches: 0, pages: 2, newest: "422680", backTo: "2026-09-29T18:56:07.000Z", backfill: "done", listEnd: "422679" });
     const rounds = (await ctx.store.loadMetricsInput()).rounds;
     expect(rounds.map((r) => r.roundId)).toContain(422_680n);
     // Second poll: nothing it has not read.

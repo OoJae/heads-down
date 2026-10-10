@@ -12,6 +12,7 @@ import { EXECUTOR_PDA, HEADS_DOWN_PROGRAM_ID } from "../src/constants.ts";
 import type { IngestContext } from "../src/ingest.ts";
 import type { LogLevel } from "../src/log.ts";
 import {
+  ORE_API_END_RECHECK_S,
   ORE_API_MAX_RETRY_AFTER_S,
   ORE_API_PAGE_PAUSE_MS,
   parseJsonBig,
@@ -160,9 +161,10 @@ describe("api.ore.com rounds: a pass", () => {
     // The round below the last one stored would be the first of page 3, and page 3 is empty. That alone does
     // not say where the list ends (rounds may have moved since the pages before it were read): the pass reads
     // page 2, and then page 3 again.
-    expect(await pass(api)).toMatchObject({ stored: 0, pages: 4, backfill: "done" });
+    expect(await pass(api)).toMatchObject({ stored: 0, pages: 4, backfill: "done", listEnd: String(N - 299) });
     expect(api.takePages()).toEqual([0, 3, 2, 3]);
-    expect(await ctx.store.getCursor("ore-api", "covered")).toBe(JSON.stringify({ ranges: [[String(N), String(N - 299)]], floor: [String(N - 300), -1] }));
+    // The note of it: nothing listed at or below round N-300, seen at this time.
+    expect(await ctx.store.getCursor("ore-api", "covered")).toBe(JSON.stringify({ ranges: [[String(N), String(N - 299)]], floor: null, end: [String(N - 300), clock] }));
     expect(await pass(api)).toMatchObject({ stored: 0, pages: 1, backfill: "done" });
   });
 
@@ -309,10 +311,14 @@ describe("api.ore.com rounds: the list moves", () => {
     expect(await pass(api, { since })).toMatchObject({ pages: 7, backfill: "done" });
     expect(api.takePages()).toEqual([0, ...pages(10, 15)]);
     expect(await storedIds()).toEqual(ids(N, N - 1499));
-    // A note this code did not write reads as nothing read.
-    await ctx.store.setCursor("ore-api", "covered", "page 12");
-    expect(await pass(api, { since })).toMatchObject({ pages: 10, backfill: "running" });
-    expect(await storedIds()).toEqual(ids(N, N - 1499));
+    // A note this code did not write reads as nothing read: the list is read again from the newest page.
+    for (const notWritten of ["page 12", ""]) {
+      api.takePages();
+      await ctx.store.setCursor("ore-api", "covered", notWritten);
+      expect(await pass(api, { since })).toMatchObject({ pages: 10, backfill: "running" });
+      expect(api.takePages()).toEqual(pages(0, 9));
+      expect(await storedIds()).toEqual(ids(N, N - 1499));
+    }
   });
 
   it("takes over a database written before pages were stored one by one", async () => {
@@ -330,6 +336,166 @@ describe("api.ore.com rounds: the list moves", () => {
     await ctx.store.setCursor("ore-api", "newest-round", String(N - 50));
     expect(await pass(api, { maxPages: 2 })).toMatchObject({ stored: 200 });
     expect(api.takePages()).toEqual([0, 1]);
+  });
+});
+
+// An empty page is what the real API gives past the end of its list (seen on 2026-10-10 for page 1,000,000).
+// Whether it ever gives one where rounds are is not known; these tests make the stand-in do it.
+describe("api.ore.com rounds: where the list ends", () => {
+  const note = () => ctx.store.getCursor("ore-api", "covered");
+
+  it("believes an empty page for an hour only, and goes on with the backfill when the place holds rounds after all", async () => {
+    const api = new OreStandIn(N, 3000, T0);
+    api.cutTo = (_page, nth) => (nth === 5 ? 0 : null); // the sixth request: an empty list, although page 5 holds rounds
+    const first = await pass(api);
+    expect(api.takePages()).toEqual(pages(0, 5));
+    // The log line says why it is done: at the end of the list, not at `since`.
+    expect(first).toEqual({ stored: 500, verified: 0, mismatches: 0, pages: 6, newest: String(N), backTo: iso(tsOf(api, N - 499)), backfill: "done", listEnd: String(N - 499) });
+    // The note of it: nothing listed at or below round N-500, seen at this time.
+    expect(await note()).toBe(JSON.stringify({ ranges: [[String(N), String(N - 499)]], floor: null, end: [String(N - 500), clock] }));
+
+    // Within the hour nothing is asked below it.
+    api.cutTo = () => null;
+    clock += ORE_API_END_RECHECK_S - 1;
+    expect(await pass(api)).toMatchObject({ stored: 0, pages: 1, backfill: "done", listEnd: String(N - 499) });
+    expect(api.takePages()).toEqual([0]);
+
+    // The hour is over: the place is asked for again, it holds rounds, and the backfill goes on from there.
+    clock += 1;
+    const again = await pass(api);
+    expect(api.takePages()).toEqual([0, ...pages(5, 13)]);
+    expect(again).toMatchObject({ stored: 900, pages: 10, backfill: "running" });
+    expect(again.listEnd).toBeUndefined();
+    expect(await note()).toBe(JSON.stringify({ ranges: [[String(N), String(N - 1399)]], floor: null }));
+    expect(await storedIds()).toEqual(ids(N, N - 1399));
+  });
+
+  it("does not call the backfill done when a page comes back empty above rounds it has read, and closes that gap an hour later", async () => {
+    const api = new OreStandIn(N, 2000, T0);
+    expect(await pass(api, { maxPages: 3 })).toMatchObject({ stored: 300, backfill: "running" });
+    api.takePages();
+
+    // The indexer was away: 450 new rounds. The third request of the pass after gets an empty list.
+    api.add(450);
+    api.cutTo = (_page, nth) => (nth === 2 ? 0 : null);
+    const first = await pass(api, { maxPages: 6 });
+    expect(api.takePages()).toEqual([0, 1, 2]);
+    // 250 rounds lie between what this pass read and what was stored before: the range is open, and the pass says so.
+    expect(first).toMatchObject({ stored: 200, pages: 3, backfill: "running", gaps: 1 });
+    expect(first.listEnd).toBeUndefined();
+    expect(await storedIds()).toEqual([...ids(N, N - 299), ...ids(N + 450, N + 251)]);
+
+    // Within the hour the place is not asked for, and the gap stays reported.
+    api.cutTo = () => null;
+    expect(await pass(api, { maxPages: 6 })).toMatchObject({ stored: 0, pages: 1, backfill: "running", gaps: 1 });
+    api.takePages();
+
+    clock += ORE_API_END_RECHECK_S;
+    const closed = await pass(api, { maxPages: 6 });
+    // Pages 2 to 4 close the gap, and the backfill goes on below the rounds stored first.
+    expect(api.takePages()).toEqual([0, 2, 3, 4, 7, 8]);
+    expect(closed).toMatchObject({ stored: 250 + 50 + 100, pages: 6, backfill: "running" });
+    expect(closed.gaps).toBeUndefined();
+    expect(await storedIds()).toEqual(ids(N + 450, N - 449));
+  });
+
+  it("asks for the end of a list that does end once an hour: the last page and the one after it", async () => {
+    const api = new OreStandIn(N, 250, T0);
+    expect(await pass(api)).toMatchObject({ stored: 250, pages: 4, backfill: "done", listEnd: String(N - 249) });
+    api.takePages();
+    expect(await note()).toBe(JSON.stringify({ ranges: [[String(N), String(N - 249)]], floor: null, end: [String(N - 250), clock] }));
+
+    // Passes five minutes apart. Eleven read the newest page only. The twelfth, an hour after the empty page, also
+    // reads the last page (its rounds are stored) and the page after it, which is empty again. And so every hour.
+    for (let hour = 0; hour < 3; hour++) {
+      for (let i = 0; i < 11; i++) {
+        clock += 300;
+        expect(await pass(api)).toMatchObject({ stored: 0, pages: 1, backfill: "done", listEnd: String(N - 249) });
+      }
+      expect(api.takePages()).toEqual(Array.from({ length: 11 }, () => 0));
+      clock += 300;
+      expect(await pass(api)).toMatchObject({ stored: 0, pages: 3, backfill: "done", listEnd: String(N - 249) });
+      expect(api.takePages()).toEqual([0, 2, 3]);
+      expect(await note()).toBe(JSON.stringify({ ranges: [[String(N), String(N - 249)]], floor: null, end: [String(N - 250), clock] }));
+    }
+  });
+
+  it("finds the rounds of a last page that was cut short, an hour later", async () => {
+    const api = new OreStandIn(N, 250, T0);
+    api.cutTo = (page) => (page === 2 ? 20 : null); // the last page gives 20 of its 50 rounds, and the page after it is empty
+    expect(await pass(api)).toMatchObject({ stored: 220, pages: 4, backfill: "done", listEnd: String(N - 219) });
+    api.cutTo = () => null;
+    api.takePages();
+
+    clock += ORE_API_END_RECHECK_S;
+    // The page holds 30 rounds below the place the list was said to end at, and the page after it is empty: the end is noted further down.
+    expect(await pass(api)).toMatchObject({ stored: 30, pages: 3, backfill: "done", listEnd: String(N - 249) });
+    expect(api.takePages()).toEqual([0, 2, 3]);
+    expect(await note()).toBe(JSON.stringify({ ranges: [[String(N), String(N - 249)]], floor: null, end: [String(N - 250), clock] }));
+    expect(await storedIds()).toEqual(ids(N, N - 249));
+  });
+
+  it("tries once an hour, not at every pass, when it has too few requests to reach the page after the last", async () => {
+    const api = new OreStandIn(N, 250, T0);
+    await pass(api);
+    api.takePages();
+
+    clock += ORE_API_END_RECHECK_S;
+    // Two requests: the newest page and the last one. None is left for the page after it.
+    expect(await pass(api, { maxPages: 2 })).toMatchObject({ stored: 0, pages: 2, backfill: "done", listEnd: String(N - 249) });
+    expect(api.takePages()).toEqual([0, 2]);
+    expect(await note()).toBe(JSON.stringify({ ranges: [[String(N), String(N - 249)]], floor: null, end: [String(N - 250), clock] }));
+    clock += 300;
+    await pass(api, { maxPages: 2 });
+    expect(api.takePages()).toEqual([0]);
+    // An hour after that try: again.
+    clock += ORE_API_END_RECHECK_S - 300;
+    await pass(api, { maxPages: 2 });
+    expect(api.takePages()).toEqual([0, 2]);
+  });
+
+  it("does not believe an empty page for longer when the clock is set back", async () => {
+    const api = new OreStandIn(N, 250, T0);
+    await pass(api);
+    api.takePages();
+    // A day back: the time in the note is now a day ahead of the clock.
+    clock -= 86_400;
+    expect(await pass(api)).toMatchObject({ pages: 3, backfill: "done", listEnd: String(N - 249) });
+    expect(api.takePages()).toEqual([0, 2, 3]);
+    expect(await note()).toContain(`"end":["${N - 250}",${clock}]`);
+  });
+
+  it("asks a few pages an hour, not at every pass, of a list that has lost its oldest rounds", async () => {
+    // Not something the real API was seen to do: page 2,000 held rounds of April 2026.
+    const api = new OreStandIn(N, 1250, T0);
+    await pass(api);
+    expect(await pass(api)).toMatchObject({ backfill: "done", listEnd: String(N - 1249) });
+    api.takePages();
+
+    // An hour later the list holds 47 new rounds and no longer the 430 oldest: it ends on page 8 now.
+    api.rounds.splice(0, 430);
+    api.add(47);
+    clock += ORE_API_END_RECHECK_S;
+    // The place of round N-1250 would be on page 12. Empty pages, back to the last one that holds rounds.
+    expect(await pass(api)).toMatchObject({ stored: 47, pages: 6, backfill: "done" });
+    expect(api.takePages()).toEqual([0, 12, 11, 10, 9, 8]);
+    for (let i = 0; i < 3; i++) {
+      clock += 300;
+      await pass(api);
+    }
+    expect(api.takePages()).toEqual([0, 0, 0]);
+    // Nothing that was stored is lost, and the note stays where it was, with the time of that try.
+    expect(await storedIds()).toEqual(ids(N + 47, N - 1249));
+    expect(await note()).toContain(`"end":["${N - 1250}",${clock - 900}]`);
+  });
+
+  it("asks again for an end of the list that was noted without a time", async () => {
+    const api = new OreStandIn(N, 3000, T0);
+    await ctx.store.upsertRounds(ids(N, N - 499).map((id) => stored(id, tsOf(api, id))), "ore-api");
+    // The note as it was first written: a floor with the time -1, believed for good after one empty page.
+    await ctx.store.setCursor("ore-api", "covered", JSON.stringify({ ranges: [[String(N), String(N - 499)]], floor: [String(N - 500), -1] }));
+    expect(await pass(api)).toMatchObject({ stored: 900, pages: 10, backfill: "running" });
+    expect(api.takePages()).toEqual([0, ...pages(5, 13)]);
   });
 });
 
@@ -386,9 +552,10 @@ describe("api.ore.com rounds: turned away", () => {
     expect(first).toMatchObject({ stored: 200, pages: 2, stopped: `HTTP 429 at page 2, asking for round ${N - 200}`, retryAfterS: 120, stalledPasses: 1 });
     expect(api.takePages()).toEqual([0, 1, 2]);
 
-    // 119 seconds later: no request at all, and the pass says how long is left.
+    // 120 seconds later by the clock, which counts whole seconds: the answer may have come at the end of its
+    // second, so 120 s may not have passed yet. No request at all, and the pass says how long is left.
     api.refuse = () => null;
-    clock += 119;
+    clock += 120;
     expect(await pass(api)).toEqual({
       stored: 0, verified: 0, mismatches: 0, pages: 0, newest: null, backTo: iso(tsOf(api, N - 199)), backfill: "running",
       stopped: first.stopped, retryAfterS: 1, stalledPasses: 1, waiting: true,
@@ -417,16 +584,26 @@ describe("api.ore.com rounds: turned away", () => {
     const api = new OreStandIn(N, 500, T0);
     api.refuse = () => ({ status: 503, headers: { "retry-after": new Date((clock + 45) * 1000).toUTCString() } });
     expect(await pass(api)).toMatchObject({ stopped: "HTTP 503 at page 0, asking for the newest rounds", retryAfterS: 45 });
-    clock += 45;
+    clock += 46;
     api.refuse = () => ({ status: 429, headers: { "retry-after": "86400" } });
     expect(await pass(api)).toMatchObject({ retryAfterS: ORE_API_MAX_RETRY_AFTER_S, stalledPasses: 2 });
     api.refuse = () => null;
     api.takePages();
-    clock += ORE_API_MAX_RETRY_AFTER_S - 1;
+    clock += ORE_API_MAX_RETRY_AFTER_S;
     expect(await pass(api)).toMatchObject({ waiting: true, retryAfterS: 1 });
     clock += 1;
     expect(await pass(api)).toMatchObject({ stored: 500 });
     expect(api.takePages().slice(0, 2)).toEqual([0, 1]);
+  });
+
+  it("does not keep a wait that is longer than any it writes", async () => {
+    const api = new OreStandIn(N, 500, T0);
+    // What is left when the clock is set back a day after a refusal: a time to wait until that is a day and an hour away.
+    await ctx.store.setCursor("ore-api", "busy", JSON.stringify({ at: "newest", passes: 1, until: clock + 86_400 + ORE_API_MAX_RETRY_AFTER_S, why: "HTTP 429 at page 0, asking for the newest rounds" }));
+    expect(await pass(api, { maxPages: 1 })).toEqual({ stored: 100, verified: 0, mismatches: 0, pages: 1, newest: String(N), backTo: iso(tsOf(api, N - 99)), backfill: "running" });
+    // The longest wait it writes is kept: an hour, and the second that makes up for a clock of whole seconds.
+    await ctx.store.setCursor("ore-api", "busy", JSON.stringify({ at: "newest", passes: 1, until: clock + ORE_API_MAX_RETRY_AFTER_S + 1, why: "HTTP 429 at page 0, asking for the newest rounds" }));
+    expect(await pass(api, { maxPages: 1 })).toMatchObject({ pages: 0, waiting: true, retryAfterS: ORE_API_MAX_RETRY_AFTER_S + 1 });
   });
 
   // What the live indexer met on 2026-10-04: an API that answers only so many requests in a stretch of time,
@@ -498,6 +675,89 @@ describe("api.ore.com rounds: what the list does not give", () => {
     expect(await problems()).toEqual([{ subject: `ore-api round ${N - 150}`, location: "reset item", code: "BAD_FIELD" }]);
     expect(logged).toEqual([]);
     // The round counts as read: the next pass reads the newest page only.
+    api.takePages();
+    expect(await pass(api)).toMatchObject({ stored: 0, pages: 1, backfill: "done" });
+    expect(api.takePages()).toEqual([0]);
+    expect(await problems()).toHaveLength(1);
+  });
+
+  /** An item as the stand-in serves it, with its event changed. */
+  const changed = (item: unknown, change: (event: Record<string, unknown>) => Record<string, unknown>) => {
+    const [signature, event] = item as [number[], Record<string, unknown>];
+    return [signature, change(event)];
+  };
+  /** The event without `rng`: it does not decode, and its round id stays readable. */
+  const withoutRng = ({ rng: _rng, ...rest }: Record<string, unknown>) => rest;
+
+  it("takes a page of which no item decodes for an error, notes nothing of it as read, and reads it once it decodes", async () => {
+    const api = new OreStandIn(N, 300, T0);
+    expect(await pass(api, { maxPages: 1 })).toMatchObject({ stored: 100 });
+    const before = await ctx.store.getCursor("ore-api", "covered");
+    api.takePages();
+
+    // Every item of every page lacks a field, as after a change of the API's items. Three new rounds have arrived.
+    api.rewrite = (items) => items.map((it) => changed(it, withoutRng));
+    api.add(3);
+    for (let i = 0; i < 2; i++) await expect(pass(api)).rejects.toThrow("api.ore.com /events/reset page 0: none of its 100 items decodes (BAD_FIELD: rng is not a u64)");
+    // One request a pass, nothing stored and nothing noted as read; one problem for the page, however often it is read.
+    expect(api.takePages()).toEqual([0, 0]);
+    expect(await storedIds()).toEqual(ids(N, N - 99));
+    expect(await ctx.store.getCursor("ore-api", "covered")).toBe(before);
+    expect(await problems()).toEqual([{ subject: "ore-api page 0", location: "reset item", code: "BAD_FIELD" }]);
+
+    // The items decode again: the three rounds and the rest of the list are read as if nothing had happened.
+    api.rewrite = (items) => items;
+    expect(await pass(api)).toMatchObject({ stored: 3 + 200, backfill: "done" });
+    expect(await storedIds()).toEqual(ids(N + 3, N - 299));
+  });
+
+  it("stops at a page of which no item decodes half way, and keeps the pages before it", async () => {
+    const api = new OreStandIn(N, 1000, T0);
+    api.rewrite = (items, page) => (page === 2 ? items.map((it) => changed(it, withoutRng)) : items);
+    await expect(pass(api)).rejects.toThrow("api.ore.com /events/reset page 2: none of its 100 items decodes");
+    expect(api.takePages()).toEqual([0, 1, 2]);
+    expect(await storedIds()).toEqual(ids(N, N - 199));
+    api.rewrite = (items) => items;
+    expect(await pass(api, { maxPages: 4 })).toMatchObject({ stored: 300, backfill: "running" });
+    expect(api.takePages()).toEqual([0, 2, 3, 4]);
+  });
+
+  it("does not take the round id of an item that does not decode for the page's place in the list", async () => {
+    const api = new OreStandIn(N, 1000, T0);
+    // The last item of page 1 does not decode, and says it is round 7.
+    api.rewrite = (items, page) => (page === 1 ? items.map((it, i) => (i === 99 ? changed(it, (e) => withoutRng({ ...e, round_id: 7 })) : it)) : items);
+    const first = await pass(api, { maxPages: 3 });
+    expect(api.takePages()).toEqual([0, 1, 2]);
+    // Its own round, N-199, is not read; nothing between it and round 7 is taken for read or for missing.
+    expect(first).toMatchObject({ stored: 299, backfill: "running", gaps: 1 });
+    expect(await storedIds()).toEqual(ids(N, N - 299).filter((id) => id !== N - 199));
+    expect(await problems()).toEqual([{ subject: "ore-api round 7", location: "reset item", code: "BAD_FIELD" }]);
+    expect(logged).toEqual([]);
+
+    // The item is served whole in the next pass: the round is stored and the backfill goes on.
+    api.rewrite = (items) => items;
+    const second = await pass(api, { maxPages: 3 });
+    expect(api.takePages()).toEqual([0, 1, 3]);
+    expect(second).toMatchObject({ stored: 1 + 100, backfill: "running" });
+    expect(second.gaps).toBeUndefined();
+    expect(await storedIds()).toEqual(ids(N, N - 399));
+  });
+
+  it("leaves an item that does not decode at the edge of a page open until the list has moved it inside one", async () => {
+    const api = new OreStandIn(N, 300, T0);
+    api.broken.add(N - 99); // the last item of page 0
+    expect(await pass(api)).toMatchObject({ stored: 299, pages: 4, backfill: "running", gaps: 1 });
+    expect(await problems()).toEqual([{ subject: `ore-api round ${N - 99}`, location: "reset item", code: "BAD_FIELD" }]);
+    api.takePages();
+    // One new round: it is now the first item of page 1, with a round that decodes on either side in the list,
+    // but not on this page. A second new round puts it between two of them.
+    api.add(1);
+    expect(await pass(api)).toMatchObject({ stored: 1, backfill: "running", gaps: 1 });
+    api.add(1);
+    const settled = await pass(api);
+    expect(settled).toMatchObject({ stored: 1, backfill: "done" });
+    expect(settled.gaps).toBeUndefined();
+    expect(await storedIds()).toEqual(ids(N + 2, N - 299).filter((id) => id !== N - 99));
     api.takePages();
     expect(await pass(api)).toMatchObject({ stored: 0, pages: 1, backfill: "done" });
     expect(api.takePages()).toEqual([0]);
@@ -636,8 +896,10 @@ describe("api.ore.com rounds: whatever happens on the way", () => {
     };
   }
 
-  // 25 passes in which the list moves between and during passes, requests are refused, the budget
-  // changes, rounds are missing and items are broken; then the trouble stops. The seeds are fixed.
+  // 25 passes in which the list moves between and during passes, requests are refused (some with a
+  // Retry-After), pages come back cut short, empty although they hold rounds, or with no item that
+  // decodes, the budget changes, rounds are missing and items are broken; then the trouble stops.
+  // The seeds are fixed.
   it.each(Array.from({ length: 24 }, (_, i) => i + 1))("ends with every round the list holds above `since`, each once (run %i)", { timeout: 180_000 }, async (seed) => {
     const rnd = seeded(seed);
     const upTo = (n: number) => Math.floor(rnd() * n);
@@ -652,14 +914,31 @@ describe("api.ore.com rounds: whatever happens on the way", () => {
     }
     api.broken.add(N - upTo(count - 10));
     api.junk.add(N - upTo(count - 10));
+    api.junk.add(N - upTo(count - 10));
+    // Half of the time a junk item is served as one that does not decode and gives a round id that is not its own.
+    const strayId = rnd() < 0.5 ? 7 : N + 1_000_000;
+    const withStray = (items: unknown[]) => items.map((it) => (it === "junk" && rnd() < 0.5 ? [resetItem(1, 0)[0], { round_id: strayId }] : it));
+    /** An answer of which no item decodes: every event is cut down to its round id. */
+    const noneDecodes = (items: unknown[]) => items.map((it) => (Array.isArray(it) ? [it[0], { round_id: (it[1] as { round_id: number }).round_id }] : it));
     const since = T0 - (count - 6 - upTo(200)) * 77;
 
     for (let p = 0; p < 25; p++) {
       const budget = 1 + upTo(6);
-      api.refuse = () => (rnd() < 0.15 ? { status: rnd() < 0.5 ? 429 : 503 } : null);
+      api.refuse = () => {
+        if (rnd() >= 0.15) return null;
+        const status = rnd() < 0.5 ? 429 : 503;
+        // Three refusals in ten name a time to wait, up to a few passes long.
+        return rnd() < 0.3 ? { status, headers: { "retry-after": String(1 + upTo(400)) } } : { status };
+      };
+      // One answer in twelve holds fewer rounds than its page does; a third of those, past the newest page, hold none.
+      api.cutTo = (page) => (rnd() < 0.08 ? (page > 0 && rnd() < 0.35 ? 0 : 1 + upTo(99)) : null);
+      // One answer in thirty has no item that decodes (every round id stays readable).
+      api.rewrite = (items) => (rnd() < 0.033 ? noneDecodes(items) : withStray(items));
       api.served = () => void (rnd() < 0.3 && api.add(1 + upTo(3)));
       // Now and then a pass has a later bound, as after a restart; the passes after it have the first one again.
-      await pass(api, { since: rnd() < 0.2 ? since + 3600 * (1 + upTo(6)) : since, maxPages: budget });
+      const failed = await pass(api, { since: rnd() < 0.2 ? since + 3600 * (1 + upTo(6)) : since, maxPages: budget }).then(() => null, (e: Error) => e.message);
+      // The one error there is: a page of which nothing decodes.
+      if (failed !== null) expect(failed).toMatch(/^api\.ore\.com \/events\/reset page \d+: none of its \d+ items decodes/);
       const asked = api.requests.splice(0);
       expect(asked.length).toBeLessThanOrEqual(budget);
       // No page that held rounds is asked for twice in one pass, and nothing is asked after a refusal.
@@ -667,11 +946,17 @@ describe("api.ore.com rounds: whatever happens on the way", () => {
       expect(new Set(held).size).toBe(held.length);
       expect(asked.findIndex((q) => q.status !== 200)).toBeOneOf([-1, asked.length - 1]);
       api.add(upTo(4) === 0 ? 100 + upTo(150) : upTo(6));
+      clock += 30 + upTo(270);
     }
 
-    // Calm: nothing is refused, and one new round per pass (which moves a round that sat between two pages inside one).
+    // Calm, an hour later: nothing is refused, cut short or served whole without decoding, and one new round per
+    // pass (which moves a round that sat between two pages inside one). An empty page that was taken for the end
+    // of the list is asked for again.
     api.refuse = () => null;
+    api.cutTo = () => null;
+    api.rewrite = withStray;
     api.served = () => undefined;
+    clock += ORE_API_END_RECHECK_S;
     const readable = (x: { id: number }) => !api.missing.has(x.id) && !api.junk.has(x.id) && !api.broken.has(x.id);
     const have = new Set(await storedIds());
     const stillToStore = api.rounds.filter((x) => x.ts >= since && readable(x) && !have.has(x.id)).length;
@@ -708,14 +993,16 @@ describe("api.ore.com rounds: whatever happens on the way", () => {
 describe("api.ore.com rounds: a first start", () => {
   // The numbers the README and the .env.example files give. With a round every 77 s (what the list
   // showed on 2026-10-04) about four new ones arrive between two passes at INGEST_INTERVAL_S=300 and
-  // about one at 30. Over August and September 2026 a round took 72 s on average (ml/forecaster/RESULTS.md).
+  // about one at 30. Over August and September 2026 a round took 72 s on average (ml/forecaster/RESULTS.md),
+  // and the newest page of 2026-10-10 showed one every 64 s.
   it.each([
     { days: 14, roundS: 77, arriving: 4, rounds: 15_710, perPass: [...Array.from({ length: 17 }, () => 10), 5] }, // 18 passes, 175 requests
     { days: 14, roundS: 77, arriving: 1, rounds: 15_710, perPass: [...Array.from({ length: 17 }, () => 10), 5] },
     { days: 14, roundS: 72, arriving: 4, rounds: 16_801, perPass: [...Array.from({ length: 18 }, () => 10), 7] }, // 19 passes, 187 requests
+    { days: 14, roundS: 64, arriving: 5, rounds: 18_901, perPass: [...Array.from({ length: 21 }, () => 10), 2] }, // 22 passes, 212 requests
     { days: 1, roundS: 77, arriving: 4, rounds: 1_123, perPass: [10, 3] }, // 2 passes, 13 requests
   ])("backfills $days days of $roundS s rounds in passes of at most ten pages ($arriving new rounds between two passes)", { timeout: 180_000 }, async ({ days, roundS, arriving, rounds, perPass }) => {
-    const api = new OreStandIn(N, 18_000, T0, roundS);
+    const api = new OreStandIn(N, 20_000, T0, roundS);
     const since = T0 - days * 86_400;
     const asked: number[] = [];
     let r = await pass(api, { since });

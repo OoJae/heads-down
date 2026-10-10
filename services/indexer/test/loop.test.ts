@@ -334,8 +334,11 @@ describe("ingest loop: the two steps of a pass", () => {
       [1, 2, 3].map((n) => ({ msg: "ore rounds", level: "info", stored: 0, verified: 0, mismatches: 0, pages: 0, newest: null, backTo: null, backfill: "running", stopped, stalledPasses: n })),
     );
     expect(r.logs[3]).toEqual({ msg: "ingest error", level: "error", step: "ore-api", error: `api.ore.com: ${stopped}; 3 passes in a row without progress` });
-    // The pass after: everything the list holds, and no trace of the refusals.
-    expect(oreLines(r)[3]).toEqual({ msg: "ore rounds", level: "info", stored: 300, verified: 0, mismatches: 0, pages: 4, newest: String(N), backTo: new Date((T0 - 299 * 77) * 1000).toISOString(), backfill: "done" });
+    // The pass after: everything the list holds (it is done at the end of the list), and no trace of the refusals.
+    expect(oreLines(r)[3]).toEqual({
+      msg: "ore rounds", level: "info", stored: 300, verified: 0, mismatches: 0, pages: 4, newest: String(N), backTo: new Date((T0 - 299 * 77) * 1000).toISOString(),
+      backfill: "done", listEnd: String(N - 299),
+    });
     expect(await rounds(r)).toBe(300);
   });
 
@@ -359,9 +362,10 @@ describe("ingest loop: the two steps of a pass", () => {
     let t = 1_800_000_000;
     const { sleep } = stopAfter(4, () => void (t += 30)); // a pass every 30 s
     await expect(ingestLoop(r.ctx, r.cfg, null, { once: false, sleep, now: () => t, oreFetch: api.fetch, orePause: noPause })).rejects.toBe(STOP);
-    // Turned away at 0 s; nothing asked at 30 s and at 60 s; asked again at 90 s.
+    // Turned away at 0 s; nothing asked at 30 s and at 60 s; asked again at 90 s. The wait is the 70 s and one more,
+    // for a clock that counts whole seconds.
     expect(api.requests.map((q) => q.status)).toEqual([429, 200, 200, 200, 200]);
-    expect(oreLines(r).map((l) => [l.pages, l.waiting ?? false, l.retryAfterS ?? null])).toEqual([[0, false, 70], [0, true, 40], [0, true, 10], [4, false, null]]);
+    expect(oreLines(r).map((l) => [l.pages, l.waiting ?? false, l.retryAfterS ?? null])).toEqual([[0, false, 70], [0, true, 41], [0, true, 11], [4, false, null]]);
     expect(r.logs.every((l) => l.level === "info")).toBe(true);
     expect(await r.ctx.store.health()).toMatchObject({ lastPollOk: true });
   });

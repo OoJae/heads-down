@@ -33,6 +33,11 @@ export const ORE_API_PAGE_PAUSE_MS = 1000;
 export const ORE_API_MAX_RETRY_AFTER_S = 3600;
 /** Passes in a row that api.ore.com may turn away, none getting further than the one before, until the pass counts as failed. */
 export const ORE_API_STALLED_PASSES = 3;
+/**
+ * How long an empty page is taken for the end of the list. After that the place is asked for
+ * again: no answer ends the backfill for good.
+ */
+export const ORE_API_END_RECHECK_S = 3600;
 
 /** JSON.parse that turns every integer literal into a BigInt (exact u64). */
 export function parseJsonBig(text: string): unknown {
@@ -109,11 +114,14 @@ interface Covered {
    * as a problem), or is missing from the list (recorded as ORE_API_GAP).
    */
   ranges: Range[];
-  /**
-   * Nothing at or below `id` is wanted: the newest round found to be older than `since` (`ts` is
-   * its time), or the end of the list (`ts` -1).
-   */
+  /** Nothing at or below `id` is wanted: the newest round found to be older than `since` (`ts` is its time). */
   floor: { id: bigint; ts: number } | null;
+  /**
+   * Where the list was seen to end: a page came back empty when round `id` was asked for, at unix
+   * time `at`. An API in trouble may give that answer for a page that holds rounds, so it is
+   * believed for ORE_API_END_RECHECK_S only, and then the place is asked for again.
+   */
+  end: { id: bigint; at: number } | null;
 }
 
 function addRange(ranges: Range[], hi: bigint, lo: bigint): Range[] {
@@ -135,25 +143,44 @@ const covers = (ranges: Range[], id: bigint) => ranges.some(([h, l]) => id <= h 
 /** The floor while it holds: one found under an earlier `since` holds as long as its round is older than the present one. */
 const floorOf = (c: Covered, since: number) => (c.floor !== null && c.floor.ts < since ? c.floor : null);
 
+/**
+ * The note of the list's end while it holds: within ORE_API_END_RECHECK_S of the time it was
+ * written (a clock that was set back does not make it hold longer). The clock is read only when
+ * there is a note.
+ */
+const endOf = (c: Covered, now: () => number) => (c.end !== null && Math.abs(now() - c.end.at) < ORE_API_END_RECHECK_S ? c.end : null);
+
+const nothingCovered = (): Covered => ({ ranges: [], floor: null, end: null });
+
 /** A value this code did not write reads as nothing covered: those rounds are asked for again. */
 function parseCovered(raw: string | null): Covered {
-  if (raw === null) return { ranges: [], floor: null };
+  if (raw === null) return nothingCovered();
   try {
-    const v = JSON.parse(raw) as { ranges: [string, string][]; floor: [string, number] | null };
+    const v = JSON.parse(raw) as { ranges: [string, string][]; floor: [string, number] | null; end?: [string, number] | null };
     let ranges: Range[] = [];
     for (const [hi, lo] of v.ranges) {
       if (BigInt(lo) < 0n || BigInt(lo) > BigInt(hi)) throw new Error("not a range");
       ranges = addRange(ranges, BigInt(hi), BigInt(lo));
     }
     if (v.floor !== null && !Number.isSafeInteger(v.floor[1])) throw new Error("not a floor");
-    return { ranges, floor: v.floor === null ? null : { id: BigInt(v.floor[0]), ts: v.floor[1] } };
+    const floor = v.floor === null ? null : { id: BigInt(v.floor[0]), ts: v.floor[1] };
+    // A floor with a time below zero is the end of the list as this note was first written (believed for good
+    // after one empty page). It is not taken over: the place is asked for again.
+    if (floor !== null && floor.ts < 0) return { ranges, floor: null, end: null };
+    if (v.end === undefined || v.end === null) return { ranges, floor, end: null };
+    if (!Number.isSafeInteger(v.end[1])) throw new Error("not an end");
+    return { ranges, floor, end: { id: BigInt(v.end[0]), at: v.end[1] } };
   } catch {
-    return { ranges: [], floor: null };
+    return nothingCovered();
   }
 }
 
 const formatCovered = (c: Covered) =>
-  JSON.stringify({ ranges: c.ranges.map(([hi, lo]) => [hi.toString(), lo.toString()]), floor: c.floor === null ? null : [c.floor.id.toString(), c.floor.ts] });
+  JSON.stringify({
+    ranges: c.ranges.map(([hi, lo]) => [hi.toString(), lo.toString()]),
+    floor: c.floor === null ? null : [c.floor.id.toString(), c.floor.ts],
+    ...(c.end === null ? {} : { end: [c.end.id.toString(), c.end.at] }),
+  });
 
 /**
  * The stored note. A database from before pages were stored one by one has none, only the cursor
@@ -164,10 +191,10 @@ async function loadCovered(store: Store): Promise<Covered> {
   const raw = await store.getCursor("ore-api", "covered");
   if (raw !== null) return parseCovered(raw);
   const old = await store.getCursor("ore-api", "newest-round");
-  if (old === null || !/^\d{1,20}$/.test(old)) return { ranges: [], floor: null };
+  if (old === null || !/^\d{1,20}$/.test(old)) return nothingCovered();
   const lo = await store.oreRunBottom(BigInt(old));
-  if (lo === null) return { ranges: [], floor: null };
-  const c: Covered = { ranges: [[BigInt(old), lo]], floor: null };
+  if (lo === null) return nothingCovered();
+  const c: Covered = { ranges: [[BigInt(old), lo]], floor: null, end: null };
   await store.setCursor("ore-api", "covered", formatCovered(c));
   return c;
 }
@@ -288,7 +315,7 @@ export interface OreApiOptions {
   fetchImpl?: typeof fetch;
   /** The pause between two requests (default: a real wait of ORE_API_PAGE_PAUSE_MS). */
   sleep?: (ms: number) => Promise<void>;
-  /** Unix seconds; only looked at when `Retry-After` is in play. */
+  /** Unix seconds; only looked at when `Retry-After` or a note of the list's end is in play. */
   now?: () => number;
 }
 
@@ -303,8 +330,14 @@ export interface OreRoundsResult {
   newest: string | null;
   /** Time of the oldest round of the unbroken run that ends at the newest round read so far; null before the first. */
   backTo: string | null;
-  /** "done" when that run reaches `since` or the end of the list. */
+  /** "done" when that run reaches `since` or the end of the list, and no range is open. */
   backfill: "done" | "running";
+  /**
+   * The oldest round of that run, when the backfill is done because the list was seen to end there
+   * (a page came back empty) and not because `since` was reached. That is believed for
+   * ORE_API_END_RECHECK_S; then a pass asks for the place again, and may find rounds below it.
+   */
+  listEnd?: string;
   /** Open ranges inside what has been read, left by a pass that ran out of pages or was turned away. Later passes close them. */
   gaps?: number;
   /** What api.ore.com turned the pass away with, and where. */
@@ -340,11 +373,20 @@ const floorDiv = (a: bigint, b: bigint) => (a % b !== 0n && a < 0n ? a / b - 1n 
  * each other; it is then recorded (ORE_API_GAP) and not asked for again. A round that should sit
  * between two pages stays open: once new rounds have moved it inside a page, a later pass settles it.
  *
+ * The list is taken to end where a page comes back empty right after the page before it was read.
+ * That answer is believed for ORE_API_END_RECHECK_S and no longer: an API in trouble may answer
+ * with an empty page where rounds are, and a note kept for good would then end the backfill there,
+ * or leave a hole between stored rounds, without a word. After that time a pass asks for the place
+ * again (the last page and the one after it); a round there removes the note. While the note
+ * stands with a range open below it, the result says `running` and counts the gap; `listEnd` in
+ * the result says that the backfill is done at the end of the list and not at `since`.
+ *
  * HTTP 429, a 5xx, a timeout or a connection that fails end the pass here without an error. The
  * result says where (`stopped`); `Retry-After` is kept, up to ORE_API_MAX_RETRY_AFTER_S, and
  * nothing is asked before it has passed. `stalledPasses` counts the passes in a row that were
  * turned away without getting further: the ingest loop reports ORE_API_STALLED_PASSES of them as a
- * failed pass. Any other answer (a 4xx, a body that is not the list) is an error, as before.
+ * failed pass. Any other answer (a 4xx, a body that is not the list, a page of which no item
+ * decodes) is an error, and a page that failed so is not noted as read.
  */
 export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc: RpcClient | null): Promise<OreRoundsResult> {
   const base = opts.baseUrl ?? ORE_API;
@@ -355,24 +397,33 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
   const count = { stored: 0, verified: 0, mismatches: 0, pages: 0 };
   const busy = parseBusy(await store.getCursor("ore-api", "busy"));
   let covered = await loadCovered(store);
+  /** The note of the list's end, when its time has run out: this pass asks for that place again. */
+  const due = endOf(covered, now) === null ? covered.end : null;
 
   /** How far back the stored rounds reach, from what is covered now. */
   const standing = async () => {
     const floor = floorOf(covered, opts.since);
+    const end = endOf(covered, now);
     const top = covered.ranges[0];
-    const done = top === undefined ? floor !== null : top[1] === 0n || (floor !== null && top[1] - 1n <= floor.id);
     const gaps = covered.ranges.filter(([hi], i) => i > 0 && (floor === null || hi > floor.id)).length;
+    const atFloor = top === undefined ? floor !== null : top[1] === 0n || (floor !== null && top[1] - 1n <= floor.id);
+    // The end of the list counts with nothing open only: a range below it was read from where the list was said to have ended.
+    const atEnd = !atFloor && top !== undefined && end !== null && top[1] - 1n <= end.id && gaps === 0;
     const ts = top === undefined ? null : await store.oreRoundTime(top[1]);
     return {
       backTo: ts === null ? null : new Date(ts * 1000).toISOString(),
-      backfill: done ? ("done" as const) : ("running" as const),
+      backfill: atFloor || atEnd ? ("done" as const) : ("running" as const),
+      ...(atEnd ? { listEnd: top[1].toString() } : {}),
       ...(gaps > 0 ? { gaps } : {}),
     };
   };
 
-  // Told to wait, and the time has not come: nothing is asked.
+  // Told to wait, and the time has not come: nothing is asked. A wait longer than any this code writes comes from a
+  // clock that was set back since: it is not kept.
   const wait = busy.until > 0 ? busy.until - now() : 0;
-  if (wait > 0) return { ...count, newest: null, ...(await standing()), stopped: busy.why, retryAfterS: wait, stalledPasses: busy.passes, waiting: true };
+  if (wait > 0 && wait <= ORE_API_MAX_RETRY_AFTER_S + 1) {
+    return { ...count, newest: null, ...(await standing()), stopped: busy.why, retryAfterS: wait, stalledPasses: busy.passes, waiting: true };
+  }
 
   /** Pages read in this pass that held rounds: none is asked for twice. */
   const seen = new Set<number>();
@@ -390,8 +441,10 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
   let turnedAway: { what: string; page: number; want: bigint | null; retryAfterS: number | null } | null = null;
 
   /** Stores what a page brought, with the note of what has now been read. */
-  const keep = async (rows: ResetItem[], range: Range | null, floor: Covered["floor"]) => {
-    const next: Covered = { ranges: range === null ? covered.ranges : addRange(covered.ranges, range[0], range[1]), floor: floor ?? covered.floor };
+  const keep = async (rows: ResetItem[], range: Range | null, note: { floor?: Covered["floor"]; end?: Covered["end"] } = {}) => {
+    // A range that reaches the place where the list was said to end, or goes below it: the list does not end there.
+    const end = note.end !== undefined ? note.end : covered.end !== null && range !== null && range[1] <= covered.end.id ? null : covered.end;
+    const next: Covered = { ranges: range === null ? covered.ranges : addRange(covered.ranges, range[0], range[1]), floor: note.floor ?? covered.floor, end };
     await store.storeOreApiPage(rows, formatCovered(next));
     covered = next;
     progressed = true;
@@ -401,9 +454,10 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
   const pick = (): { page: number; want: bigint } | null => {
     if (last === null) return null;
     const floor = floorOf(covered, opts.since);
+    const end = endOf(covered, now);
     for (const [, lo] of covered.ranges) {
       const want = lo - 1n;
-      if (want < 0n || (floor !== null && want <= floor.id)) return null;
+      if (want < 0n || (floor !== null && want <= floor.id) || (end !== null && want <= end.id)) return null;
       if (deferred.has(want)) continue;
       // Right below the page read last: the next page. Anywhere else: as many pages on as its id is rounds away.
       let page = want === last.lo - 1n ? last.page + 1 : last.page + Number(floorDiv(last.first - want, perPage));
@@ -433,8 +487,10 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
     count.pages++;
     if (items.length === 0) {
       if (page === 0) break; // the list is empty
-      // The list ends before this page. When the page before it was read first, that page's oldest round is the oldest there is.
-      if (last !== null && last.page === page - 1) await keep([], null, { id: last.lo - 1n, ts: -1 });
+      // The list ends before this page, as far as this answer goes. When the page before it was read first, that
+      // page's oldest round is the oldest there is: noted, and believed for ORE_API_END_RECHECK_S.
+      const before: { page: number; lo: bigint } | null = last;
+      if (before !== null && before.page === page - 1) await keep([], null, { end: { id: before.lo - 1n, at: now() } });
       emptyFrom = emptyFrom === null ? page : Math.min(emptyFrom, page);
       next = pick();
       continue;
@@ -443,6 +499,7 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
 
     const rounds: ResetItem[] = [];
     const ids: bigint[] = [];
+    const undecoded: { id: bigint | null; why: DecodeError }[] = [];
     for (const it of items) {
       try {
         const r = parseResetItem(it);
@@ -450,13 +507,24 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
         ids.push(r.event.roundId);
       } catch (e) {
         if (!(e instanceof DecodeError)) throw e;
-        // With its round id readable the round counts as read: it is not asked for again.
-        const id = roundIdOf(it);
-        if (id !== null) ids.push(id);
-        await store.recordProblem(id === null ? `ore-api page ${page}` : `ore-api round ${id}`, "reset item", e.code, e.message);
+        undecoded.push({ id: roundIdOf(it), why: e });
       }
     }
-    if (ids.length === 0) break; // nothing on this page says where in the list it is
+    if (rounds.length === 0) {
+      // Not one item of the page decodes: the API's items have changed shape, or this is not the list. An error, and
+      // nothing of the page is noted as read: once its rounds can be decoded they are asked for again.
+      const { why } = undecoded[0]!;
+      await store.recordProblem(`ore-api page ${page}`, "reset item", why.code, why.message);
+      throw new Error(`api.ore.com /events/reset page ${page}: none of its ${items.length} items decodes (${why.message})`);
+    }
+    ids.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+    const [above, below] = [ids[0]!, ids[ids.length - 1]!];
+    for (const { id, why } of undecoded) {
+      // Between rounds that decode, one that does not counts as read when its round id is readable: it is not asked
+      // for again. Its id alone, above or below every round the page decodes, is not taken for the page's place in the list.
+      if (id !== null && id < above && id > below) ids.push(id);
+      await store.recordProblem(id === null ? `ore-api page ${page}` : `ore-api round ${id}`, "reset item", why.code, why.message);
+    }
     ids.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
     // The rounds of the page before it under another page number: the API is not paging, and asking on would lead nowhere.
     if (last !== null && last.first === ids[0] && last.lo === ids[ids.length - 1]) throw new Error(`api.ore.com /events/reset page ${page}: the same rounds as page ${last.page}`);
@@ -501,12 +569,16 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
     // What this page has read: from its newest wanted round down to its oldest, or down to `cut` when it shows a round at or below it.
     const range: Range | null = wanted.length === 0 ? null : [wanted[0]!, last.lo <= limit ? limit + 1n : wanted[wanted.length - 1]!];
     const known = range === null || have.some(([h, l]) => h >= range[0] && l <= range[1]);
-    if (fresh.length > 0 || !known || cut !== floor) await keep(fresh, range, cut === floor ? null : cut);
+    if (fresh.length > 0 || !known || cut !== floor) await keep(fresh, range, cut === floor ? {} : { floor: cut });
     count.stored += fresh.length;
     next = pick();
   }
 
   if (turnedAway === null) {
+    // The place where the list was said to end was due to be asked for again, and this pass got past the newest
+    // page without an answer about it (too few requests left, or the list no longer ends where it did): the
+    // next try is ORE_API_END_RECHECK_S from now, not at every pass.
+    if (due !== null && covered.end === due && count.pages > 1) await keep([], null, { end: { ...due, at: now() } });
     if (busy.passes > 0 || busy.until > 0) await store.setCursor("ore-api", "busy", "{}");
     return { ...count, newest, ...(await standing()) };
   }
@@ -514,7 +586,9 @@ export async function pollOreRounds(ctx: IngestContext, opts: OreApiOptions, rpc
   const passes = busy.at === at || !progressed ? busy.passes + 1 : 1;
   const retryAfterS = turnedAway.retryAfterS === null ? null : Math.min(turnedAway.retryAfterS, ORE_API_MAX_RETRY_AFTER_S);
   const why = `${turnedAway.what} at page ${turnedAway.page}, asking for ${turnedAway.want === null ? "the newest rounds" : `round ${turnedAway.want}`}`;
-  await store.setCursor("ore-api", "busy", JSON.stringify({ at, passes, until: retryAfterS === null ? 0 : now() + retryAfterS, why } satisfies Busy));
+  // `now()` counts whole seconds and the answer may have come at the end of one: a second more, so that the next request is never early.
+  const until = retryAfterS === null ? 0 : now() + retryAfterS + 1;
+  await store.setCursor("ore-api", "busy", JSON.stringify({ at, passes, until, why } satisfies Busy));
   return { ...count, newest, ...(await standing()), stopped: why, ...(retryAfterS === null ? {} : { retryAfterS }), stalledPasses: passes };
 }
 
