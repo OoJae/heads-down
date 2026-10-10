@@ -1,5 +1,6 @@
 package xyz.headsdown.surface.haptics
 
+import android.os.VibrationEffect
 import android.os.VibrationEffect.Composition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -91,6 +92,74 @@ class HapticPlannerTest {
         }
         // Only the thunk is ever audible.
         assertEquals(listOf(HapticCue.ARM_THUNK), HapticCue.entries.filter { HapticScripts.of(it).audibleFallback })
+    }
+
+    @Test
+    fun `UI cues take the motor's own predefined effect when there are no primitives`() {
+        // The Redmi 14C: no primitives, no amplitude control. A 10 ms on/off pattern barely
+        // starts such a motor; the driver's tuned tick does.
+        val redmi = FakeDevice(hasAmplitudeControl = false, supported = emptySet())
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_TICK), HapticPlanner.plan(HapticCue.UI_KNOCK, redmi, loud))
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_CLICK), HapticPlanner.plan(HapticCue.UI_SNAP, redmi, loud))
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_HEAVY_CLICK), HapticPlanner.plan(HapticCue.UI_CONFIRM, redmi, loud))
+        // The tier sits between composed and waveform: amplitude control alone does not skip it.
+        val noPrimitives = FakeDevice(hasAmplitudeControl = true, supported = emptySet())
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_TICK), HapticPlanner.plan(HapticCue.UI_KNOCK, noPrimitives, loud))
+        // One primitive of two missing is still "not composed".
+        val clickOnly = FakeDevice(supported = setOf(Composition.PRIMITIVE_CLICK))
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_HEAVY_CLICK), HapticPlanner.plan(HapticCue.UI_CONFIRM, clickOnly, loud))
+        assertEquals(
+            HapticPlan.Composed(listOf(PrimitiveStep(Composition.PRIMITIVE_CLICK, 0.5f))),
+            HapticPlanner.plan(HapticCue.UI_SNAP, clickOnly, loud),
+        )
+        // Never a sound, and nothing at all without a motor.
+        listOf(HapticCue.UI_KNOCK, HapticCue.UI_SNAP, HapticCue.UI_CONFIRM).forEach { cue ->
+            assertFalse("$cue", HapticPlanner.plan(cue, redmi, loud).withSound)
+            assertEquals("$cue", HapticPlan.Silent, HapticPlanner.plan(cue, FakeDevice(hasVibrator = false), loud))
+        }
+    }
+
+    @Test
+    fun `only the UI cues declare a predefined effect, so no other cue's plan has changed`() {
+        assertEquals(
+            listOf(HapticCue.UI_KNOCK, HapticCue.UI_SNAP, HapticCue.UI_CONFIRM),
+            HapticCue.entries.filter { HapticScripts.of(it).predefined != null },
+        )
+        assertEquals(listOf(HapticCue.UI_KNOCK, HapticCue.UI_SNAP, HapticCue.UI_CONFIRM), HapticCue.entries.filter { it.isUi })
+        val redmi = FakeDevice(hasAmplitudeControl = false, supported = emptySet())
+        val waveform = FakeDevice(hasAmplitudeControl = true, supported = emptySet())
+        HapticCue.entries.filterNot { it.isUi }.forEach { cue ->
+            val script = HapticScripts.of(cue)
+            val sound = script.audibleFallback
+            assertEquals("$cue", HapticPlan.OnOffWaveform(script.onOff, withSound = sound), HapticPlanner.plan(cue, redmi, loud))
+            assertEquals(
+                "$cue",
+                HapticPlan.AmplitudeWaveform(script.timings, script.amplitudes, withSound = sound),
+                HapticPlanner.plan(cue, waveform, loud),
+            )
+        }
+    }
+
+    @Test
+    fun `the UI scripts are the ones the design names`() {
+        val knock = HapticScripts.of(HapticCue.UI_KNOCK)
+        assertEquals(listOf(PrimitiveStep(Composition.PRIMITIVE_TICK, 0.6f)), knock.primitives)
+        assertEquals(listOf(0L, 10L), knock.onOff)
+        val snap = HapticScripts.of(HapticCue.UI_SNAP)
+        assertEquals(listOf(PrimitiveStep(Composition.PRIMITIVE_CLICK, 0.5f)), snap.primitives)
+        assertEquals(listOf(0L, 12L), snap.onOff)
+        val confirm = HapticScripts.of(HapticCue.UI_CONFIRM)
+        assertEquals(
+            listOf(PrimitiveStep(Composition.PRIMITIVE_CLICK, 0.7f), PrimitiveStep(Composition.PRIMITIVE_TICK, 0.4f, delayMillis = 60)),
+            confirm.primitives,
+        )
+        assertEquals(listOf(0L, 18L), confirm.onOff)
+        // Every UI cue is over in under a tenth of a second on any motor.
+        listOf(knock, snap, confirm).forEach { script ->
+            assertTrue(script.waveformMillis <= 100)
+            assertTrue(script.onOff.sum() <= 20)
+            assertTrue(script.predefined in HapticScript.PREDEFINED)
+        }
     }
 
     @Test
