@@ -44,32 +44,65 @@ built; the Stack and Gift screens are not yet.
 
 | Part | State |
 |---|---|
-| [`programs/heads-down`](programs/heads-down/README.md) | The on-chain program (Pinocchio, `no_std`). 32 instructions. 171 tests, 138 of them on a fork of live mainnet ORE with the real secp256r1 precompile. Contract: [INTERFACE.md](programs/heads-down/INTERFACE.md) v1.3 with machine-checked golden vectors |
+| [`programs/heads-down`](programs/heads-down/README.md) | The on-chain program (Pinocchio, `no_std`). 32 instructions. 171 tests, 138 of them on a fork of live mainnet ORE with the real secp256r1 precompile. Contract: [INTERFACE.md](programs/heads-down/INTERFACE.md) v1.3 with machine-checked golden vectors. Deployed on mainnet on 10 October 2026 |
 | [`crates/sgt-verify`](crates/sgt-verify/README.md) | In-program Seeker Genesis Token verifier, tested on real mainnet SGTs and on a forgery that passes weaker checks |
 | [`crates/p256-introspect`](crates/p256-introspect/README.md) | secp256r1 precompile introspection and Android Keystore signature helpers |
-| [`crank`](crank/README.md) | The permissionless crank: takes the phones' heartbeats, lands digs, BREAK and FREEZE, Stack check-ins. 213 tests, plus 14 against the real program on the fork and one end to end on a local validator |
-| [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains |
-| [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 477 tests |
-| [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain |
-| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests |
+| [`crank`](crank/README.md) | The permissionless crank: takes the phones' heartbeats, lands digs, BREAK and FREEZE, Stack check-ins. 213 tests, plus 14 against the real program on the fork and one end to end on a local validator. Running on Railway against mainnet since 10 October 2026 |
+| [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains. Running on Railway against mainnet |
+| [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 477 tests. Running on Railway against mainnet |
+| [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain. [Running on Railway](https://dashboard-production-b80c.up.railway.app) on the indexer's mainnet data |
+| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests. One short shift on one physical phone, on mainnet, on 10 October 2026 |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
-**Not done yet, in plain words.** The program is not deployed on mainnet. The indexer, the
-[dashboard](https://dashboard-production-b80c.up.railway.app) and the registrar run on Railway
-against mainnet; with no program there they show ORE's own rounds and zeros, and the crank is not
-started. On 10 October 2026 the app ran on a physical phone for the first time, a Redmi 14C
-(Android 16, HyperOS 3): it made its rig key in the phone's secure hardware, and the live
-registrar accepted that key's attestation and a sign-in signed in Jupiter's wallet. That phone has
-not sent a transaction yet. Everything on-chain has run on an Android 14 emulator against the
-local stack: a heartbeat signed in the emulator's Keystore dug a round on a fork of mainnet, and a
-pickup landed a BREAK (`scripts/devstack/emulator-smoke.sh`). With Solana Mobile's test wallet
-installed there, the wallet has signed its clock-in, clock-out, taking SOL back and closing the
-rig, and the amounts that came back matched the screen to the lamport. The same emulator has
-signed in to the live registrar through the test wallet, which showed the name and icon of the
-published identity page; the registrar refused the emulator's software key, as it should. No
-production wallet has signed a transaction, and no transaction of the program has run on mainnet. The
-app has no screens yet for Stack or Gift, and its clock-out cannot buy ORE yet. There has been no
-third-party audit.
+**Live on mainnet since 10 October 2026.** The program is deployed at
+[`HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`](https://solscan.io/account/HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)
+(slot 455,359,196, built from commit `d67a1a40c2a0`; the 190,048 bytes on-chain are exactly that
+build). Its Config is initialized and its Executor PDA holds its float. The crank, the registrar,
+the indexer and the dashboard run on Railway against it. [docs/MAINNET.md](docs/MAINNET.md) is the
+record: every address and transaction, what it cost, what went wrong and how to check each
+statement yourself; the deploy's receipts are in [deploy/receipts/mainnet/](deploy/receipts/mainnet/).
+One key, held by the founder, can upgrade the program at once: no multisig and no delay. There
+has been no third-party audit.
+
+**What one phone did.** The same evening one rig, the founder's own phone, ran one short shift. The
+phone is a Redmi 14C (Android 16, HyperOS 3, accelerometer only); its rig key lives in the phone's
+TEE and was attested by the live registrar, and every wallet step was signed in Jupiter Mobile.
+[The first dig](https://solscan.io/tx/25nBRCP6GExrKG4EDszGrKfWN9yYgJMopgnawTGi2Z9XNGj6UCtZgE6HFJN7rJXvu2C3VMjhh7bpXZnQg8DVzovY)
+is one transaction: the phone's P-256 heartbeat checked by the secp256r1 precompile, `heads_down`'s
+`dig`, and ORE's `deploy` inside it. Five rounds were dug at 0.001 SOL each, which was the shift's
+whole budget of 0.005 SOL. Twice the crank sent a heartbeat a second time, and both times the
+program skipped the rig with `StaleHeartbeat`. Unlocking the phone landed a phone-signed BREAK, the
+clock-out sealed the shift, and "Take it back" returned 0.00502704 SOL from the ORE Automation,
+the amount the screen had stated, to the lamport.
+
+What that run was not: it was a debug build with a demo policy that raised the cost ceiling to
+1.0 SOL per ORE. ORE's own cost figure was 0.690 to 0.704 SOL per ORE during the shift, above the
+app's default of 0.53, so the default build would have dug nothing. No ORE was won in the five
+rounds. The first clock-in armed a shift that a second clock-in sealed about five minutes later
+with no round dug in it: the crank had accepted no heartbeat yet, and why that shift ended before
+a heartbeat reached the crank was not investigated. The crank's first dig landed after its round
+had ended and was skipped; three of the crank's settings were changed on the running service that
+evening ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found)).
+
+**Not done yet, in plain words.** There are no users: the one rig on mainnet is the founder's.
+Not run on a phone: a whole night under HyperOS, the haul reveal at the alarm, a dig refused
+because the cost gate is shut, Close rig, Unfreeze, Claim, the Focus Bond, the Seeker tier, and
+any wallet other than Jupiter's (Solflare, Phantom and Seed Vault have not been tried). Close rig
+and a clock-in over the tombstone it leaves have run only on an Android 14 emulator against a
+local fork of mainnet, signed in Solana Mobile's test wallet
+(`scripts/devstack/emulator-smoke.sh --wallet`), where the amounts that came back matched the
+screen to the lamport. On that emulator the test wallet showed the name and icon of the published
+identity page; on the phone, Jupiter's wallet showed "Could not verify request" on its connect
+prompt and still connected and signed. No SKR instruction has been sent on mainnet, and the
+BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift, and its
+clock-out cannot buy ORE yet. There is no release signing key and no APK to download: the
+registrar accepts only the founder's debug-signed build. With one rig the crank pays more in fees
+than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports and each
+skipped attempt its whole fee, 60,473 lamports net over nine transactions. Whether the 4,480,400
+lamports that ORE holds in the wallet's Miner account can ever be taken back is not known. The
+last round dug, 435,228, had not been checkpointed at 20:44 UTC on 10 October, so what it returns
+is not known either; ORE forfeits what a round returns if nobody checkpoints it within about a
+day ([docs/ORE.md](docs/ORE.md), F8; [docs/MAINNET.md](docs/MAINNET.md#what-it-cost)).
 
 ## Security
 
@@ -105,6 +138,7 @@ the local stack and [docs/DEPLOY.md](docs/DEPLOY.md) the mainnet runbook.
 
 ## More
 
+- [docs/MAINNET.md](docs/MAINNET.md): what is deployed on mainnet, the first shift on a phone, what it cost and how to check it
 - [docs/SPEC.md](docs/SPEC.md): the product and technical spec
 - [docs/ECONOMICS.md](docs/ECONOMICS.md): what mining costs, and the wording we hold ourselves to
 - [docs/ORE.md](docs/ORE.md): how the integration with ORE works, with source references

@@ -22,9 +22,20 @@ Rig, and a no-oracle Bury auction that sells SKR forfeits for ORE that ORE's own
 - Executor PDA: `By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge` (bump 249).
 - Config PDA: `inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW` (bump 253).
 - BuryVault PDA: `6i46qfoKvAQssmf9A6yJ8rihGfP5XvUQfgrHsSzEm9ZS` (bump 255).
+- **Deployed on mainnet on 10 October 2026**, at slot 455,359,196, from commit
+  `d67a1a40c2a0`: 190,048 bytes, SBPF v3, program hash
+  `0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58`, in ProgramData
+  `3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ`. The Config is initialized and the
+  Executor PDA is funded; `init_bury_vault` has not been sent, so the BuryVault does
+  not exist there yet. The upgrade authority is one key,
+  `9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW`, with no multisig and no delay. There
+  has been no third-party audit. The receipts are in
+  [`deploy/receipts/mainnet/`](../../deploy/receipts/mainnet/) and the record of what
+  has run is [`docs/MAINNET.md`](../../docs/MAINNET.md).
 - Pinocchio 0.11, `no_std`, no allocator. There is **one** `unsafe` block, the
-  `sol_log_data` syscall in `events.rs`. The build is about 180 KB (SBPF v0, the
-  default) or 177 KB with `--arch v3` (see "SBPFv3" below).
+  `sol_log_data` syscall in `events.rs`. `scripts/build.sh` builds SBPF v3 by default
+  (`HD_SBF_ARCH=v0` for the fallback). The sizes under "SBPFv3" below (177 KB and
+  180 KB) are from an earlier build; the build deployed on mainnet is 190,048 bytes.
 - Contract: [`INTERFACE.md`](INTERFACE.md) **v1.3**: the v1.1 core (§0 to §10),
   frozen from this code (every instruction's data and account list, every event,
   errors 0..31, the Rig field usage, the dig budget, pause and state-machine
@@ -108,7 +119,8 @@ solana program deploy -u devnet --program-id "$KP" target/deploy-devnet/heads_do
 #    ore_layout_hash = sha256(ore::LAYOUT_PREIMAGE) (see heads_down::ore::layout_hash()).
 #    tests/src/lib.rs::ix_initialize_config builds the instruction.
 # 4. Fund the Executor PDA float: a plain SOL transfer to By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge.
-# 5. Before mainnet: move the upgrade authority to the Squads vault (72 h timelock), then revoke.
+# 5. Planned before mainnet and not done: move the upgrade authority to the Squads vault
+#    (72 h timelock), then revoke. The mainnet deploy of 10 October 2026 left it with one key.
 ```
 
 The ORE addresses are pinned to **mainnet** ORE (`oreV3EG1…`, Board `BrcSxdp1…`, and
@@ -117,7 +129,8 @@ so on). On devnet the registration, SGT, caps, arming, signals, heartbeats and
 against a mainnet fork: this LiteSVM suite, or Surfpool with the same fixtures. The
 v1.2 SKR paths likewise pin the mainnet SKR and ORE mints, so they too run on a
 mainnet fork (the devstack's `solana-test-validator` clones, or this suite); after a
-deploy, run `init_bury_vault` once (anyone may) and create its two ATAs.
+deploy, run `init_bury_vault` once (anyone may) and create its two ATAs. On mainnet
+that has not been done as of 10 October 2026, and no SKR instruction has been sent there.
 
 ## SKR features (v1.2)
 
@@ -285,10 +298,10 @@ failed cleanly with `Custom(0)`.
 **Mainnet feature gates (queried 2026-10-01):** SBPFv3 deployment and execution
 (SIMD-0178/0189/0377, `5cC3foj7…`) is **active** since epoch 993; SIMD-0500 (no more
 v0/v1/v2 deploys, `B8JJXCy5…`) is **inactive**. So heads_down can be deployed to
-mainnet as SBPFv3 today, and once SIMD-0500 activates the v0 build will no longer
-deploy. `scripts/build.sh` still builds v0 by default (the devstack clones mainnet's
-feature set and deploys that build); switching the mainnet deploy to `--arch v3` is
-recommended.
+mainnet as SBPFv3, and once SIMD-0500 activates the v0 build will no longer
+deploy. `scripts/build.sh` now builds v3 by default, and the program deployed on
+mainnet on 10 October 2026 is that build (`"sbpf": "v3"` in its receipt,
+`deploy/receipts/mainnet/`).
 
 ## Security
 
@@ -368,8 +381,9 @@ check by check, with their tests, in
 - **Governance.** It can change the registrar, `crank_fee` (≤ `executor_fee`) or
   `bury_bps` after 72 h, and pause immediately. It cannot move funds or change
   `executor_fee`.
-- **Upgrade authority (beta).** This is the full program authority. Mitigate it with a
-  Squads vault behind a 72 h timelock, then revoke it.
+- **Upgrade authority (beta).** This is the full program authority. The plan is a
+  Squads vault behind a 72 h timelock, then revoking it. On mainnet today it is one
+  key with neither.
 
 ## Known limitations
 
@@ -387,5 +401,9 @@ constants are compile-time constants; SKR fuel is a client-side swap). Also:
   were still on v1.1; they are resolved. The app has screens for the Focus Bond,
   Unfreeze, the clock-out (`end_shift`, `release_focus_bond`, ORE's claim), Revoke and
   `close_rig`; none yet for Stack or Gift.
-- No physical device was available. Keystore signatures are simulated with p256 in
-  Keystore's format (DER, then low-S raw).
+- The suite has no signature from a physical device: its Keystore signatures are
+  simulated with p256 in Keystore's format (DER, then low-S raw). Outside the suite,
+  on 10 October 2026, a key in one phone's TEE signed the heartbeats of five digs and
+  a BREAK that the deployed program accepted on mainnet
+  ([`docs/MAINNET.md`](../../docs/MAINNET.md#the-first-shift-10-october-2026)); none
+  of those signatures has been added as a test vector.

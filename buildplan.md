@@ -4,7 +4,7 @@
 You want to win 1st place at Solana Mobile x Radiants **Clock In** ($30k + Seekers). The ORE matched prize (up to +$30k) and the $10k SKR prize should stack on top only where they fit naturally. You asked for research within the rules, 5 ideas, and one champion chosen after weighing everything, with the deadline ignored and nothing underscoped. The project folder is empty (greenfield). You are solo with AI agents and have no stack preference. The site showed your timezone as WAT; Nigeria and the rest of West Africa are on the USDC-eligible list, and prizes require KYC via Sumsub.
 
 **Device constraint (confirmed): no Seeker at any point. Build, test and film on a Redmi 14C, end to end.**
-- **Redmi 14C:** HyperOS on Android 14, Helio G81 Ultra, **no gyroscope**, a **virtual proximity sensor**, an accelerometer, a side fingerprint reader, and aggressive HyperOS background killing.
+- **Redmi 14C:** HyperOS 3 on Android 16 (read from the device on 10 October 2026; this plan first assumed Android 14), Helio G81 Ultra, **no gyroscope**, a **virtual proximity sensor**, an accelerometer, a side fingerprint reader, and aggressive HyperOS background killing.
 - The rules allow this ("You can build and test your APK on an Android emulator or any Android device"; the app must run on a real device, and the Redmi counts).
 - Seeker-only features are tested on a mainnet-fork simulation and by remote Seeker beta testers.
 
@@ -85,7 +85,7 @@ You want to win 1st place at Solana Mobile x Radiants **Clock In** ($30k + Seeke
    - A circuit breaker on ORE layout changes.
 2. **Ritual.**
    - QS tile, flip-to-arm, and AI auto-arm.
-   - A promoted ongoing notification (the Android 14/15 path on the Redmi), upgraded to an Android 16 Live Update/AOD chip where available, with no tickers or countdowns.
+   - A promoted ongoing notification (the Android 14/15 path), upgraded to an Android 16 Live Update/AOD chip where available, with no tickers or countdowns. The Redmi turned out to run Android 16; what HyperOS 3 shows for a Live Update there has not been recorded.
    - Exact-alarm full-screen reveal, composed haptics with an audible fallback (no per-round buzzing at night), and Glance widgets.
    - Optional DND automation, App Shortcuts, a forgiving streak (2 automatic freezes a month), and cosmetics that level with hours, never with spend.
    - **Per-OEM keep-alive onboarding** (HyperOS/MIUI Autostart + "No restrictions" battery, Samsung and others, following dontkillmyapp) with a health check that warns if the OS killed last night's shift.

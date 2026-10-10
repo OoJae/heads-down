@@ -11,7 +11,7 @@ fit in one transaction?
 |---|---|
 | On-chain verification (`crates/p256-introspect` + this program), LiteSVM 0.17 with the real Agave precompile | **PASS**: 16/16 end-to-end tests, 3/3 measurement tests |
 | Same program on a real validator (`solana-test-validator` 4.1.2), signed by Node's OpenSSL | **PASS**: 9/9 |
-| Signing on the Redmi 14C's Keystore (TEE level, attestation, sign latency) | **NOT RUN**: no device was connected. The Kotlin recipe is in [`crates/p256-introspect/README.md`](../../crates/p256-introspect/README.md#android-keystore-recipe-kotlin); see "Still to do on the device" below |
+| Signing on the Redmi 14C's Keystore (TEE level, attestation, sign latency) | **NOT RUN in this spike**: no device was connected. Outside it, on 10 October 2026, the app on a Redmi 14C signed with a key in the phone's TEE, the live registrar accepted that key's attestation, and its signatures passed the precompile on mainnet in five digs and a BREAK ([docs/MAINNET.md](../../docs/MAINNET.md)). Sign latency was not measured and no vector was exported. The Kotlin recipe is in [`crates/p256-introspect/README.md`](../../crates/p256-introspect/README.md#android-keystore-recipe-kotlin); see "Still to do on the device" below |
 
 ## Layout
 
@@ -132,7 +132,12 @@ a >1232-byte v1 transaction. That is spike 1(d).
 
 ## Still to do on the device (Redmi 14C)
 
-No phone was attached, so none of these are claimed:
+No phone was attached to this spike, so it claims none of these. The app's first shift
+on the Redmi 14C (10 October 2026, [docs/MAINNET.md](../../docs/MAINNET.md)) answers the
+first in practice: the rig key is in the TEE, with attestation level 1 on its Rig on
+mainnet. The others are still open as far as this repository records: no captured
+chain, no latency figure, no exported vector, and no separate record of signing with
+the screen off and the device locked.
 
 - Generate the key with the Kotlin recipe and record `KeyInfo.securityLevel`. Expected:
   TEE, since StrongBox is unlikely on a Helio G81.
