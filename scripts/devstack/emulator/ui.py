@@ -47,9 +47,18 @@ def matches(text, exact):
     return [n for n in nodes() if (n[0] == text if exact else text.lower() in n[0].lower())]
 
 
+def screen():
+    """(width, height) in pixels: the override if one is set, else the physical size."""
+    sizes = re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size"))
+    return tuple(map(int, sizes[-1])) if sizes else (1080, 2400)
+
+
 def swipe(direction):
-    a, b = ("1900", "800") if direction == "up" else ("800", "1900")
-    adb("shell", "input", "swipe", "540", a, "540", b, "250")
+    # Relative to the screen: a 720x1640 phone has no pixel at the y an emulator's 2400 has.
+    w, h = screen()
+    low, high = str(h * 78 // 100), str(h * 33 // 100)
+    a, b = (low, high) if direction == "up" else (high, low)
+    adb("shell", "input", "swipe", str(w // 2), a, str(w // 2), b, "250")
     time.sleep(0.8)
 
 
