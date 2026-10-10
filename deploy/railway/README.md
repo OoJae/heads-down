@@ -65,8 +65,10 @@ key file removed; hd-crank (pid 7, uid 10001) on 0.0.0.0:8787
 
 `uid 10001` says the drop from root happened; `uid 0` or `uid unknown` on Railway means it did
 not, or could not be read. This replaces looking with `ps` in a shell (the images have no `ps`).
-The uid is the owner of `/proc/<pid>`; that part has not run on Linux yet (on macOS, which has
-no `/proc`, the line says `unknown`).
+The uid is the owner of `/proc/<pid>` (on macOS, which has no `/proc`, the line says `unknown`).
+On Linux it was first read on 2026-10-10, at the crank's first start on Railway:
+`key file removed; hd-crank (pid 13, uid 10001) on 0.0.0.0:8787`. The registrar's first deploy,
+on 2026-10-04, predates the uid in the line, and its uid has not been recorded since.
 
 The registrar leaves a second line to read, about its RPC. It asks `HD_RPC_URL` for the slot
 once at start and logs `slot source answered`, or the warning `slot source gave no slot` with

@@ -89,7 +89,9 @@ preimage, then DER to low-S `r||s`.
    least-crowded split tiles, lease 1).
 2. The "phone" streams one heartbeat per ORE round to the crank's WebSocket intake, in the JSON
    of `crank/INTERFACE-NOTES.md` A6, reading `Board.round_id` from the chain like a phone would.
-3. The real `hd-crank` digs late in the round (20 slots before `end_slot`): the secp256r1
+3. The real `hd-crank` digs late in the round, in its dig window before `end_slot`
+   (`dig.deploy_margin_slots`; the local stack takes the crank's default, which
+   `crank/README.md` gives): the secp256r1
    precompile verifies the heartbeat, and heads_down CPIs ORE `deploy` through the Executor PDA.
    The smoke finds the transaction and its `RigDug` event, and checks the rig state and the
    Automation debit.
@@ -133,8 +135,9 @@ The smoke passed on all three runs made on 2026-09-29:
 - runs 2 and 3 as one command from a stopped stack: `up.sh` in about 60 s (builds cached),
   then the smoke in 260-275 s, then `down.sh`.
 
-The timing depends on where in the ORE round the rig arms. The crank digs 20 slots before the
-round's end, and the lifted round must run to its end.
+The timing depends on where in the ORE round the rig arms. The crank digs in its window before
+the round's end, and the lifted round must run to its end. In the runs above that window was
+20 slots.
 
 ## Fork engine: solana-test-validator (Surfpool evaluated)
 
@@ -400,12 +403,12 @@ build also submits the signed transaction itself, where a release build lets the
 | Round ids | continue from the dumped round (Surfpool: +10,000,000) | live |
 | Clock | fresh ledger at slot 0, 400 ms slots; unix time = wall clock | slot ~451M |
 | Runtime features | copied from mainnet at start (`--clone-feature-set`) | live |
-| ORE ProgramData pin | the crank's `ore_programdata_slot = 0` (disabled): genesis programs have no mainnet upgrade slot | 450,496,378 |
-| Crank | single rigs per tx, local fees, no priority market; lookup tables are created locally | batched, Helius, real fees |
+| ORE ProgramData pin | the crank's `ore_programdata_slot = 0` (disabled): genesis programs have no mainnet upgrade slot | 452,682,055 (ORE's upgrade of 2026-10-02) |
+| Crank | single rigs per tx, local fees, no priority market; lookup tables are created locally | Helius, real fees and a priority market; built to batch rigs, and so far one rig in one transaction, without a lookup table ([MAINNET.md](MAINNET.md)) |
 | Indexer | `localnet` dataset, no genesis-hash check, `ORE_API_ENABLED=0` (no api.ore.com rounds) | `mainnet` dataset, genesis-hash checked |
 | SGT | the `mainnet` build's real anchors, but no SGT accounts exist locally, so Seeker verification cannot run here (guest rigs only) | real SGTs |
-| Registrar | debug-keystore cert digest, sample revocation list file, `solana:localnet` | release cert, live Google status list |
-| heads_down upgrade authority | a local dev key | Squads vault → revoked |
+| Registrar | debug-keystore cert digest, sample revocation list file, `solana:localnet` | live Google status list; the certificate it accepts today is the debug one of the founder's build, because no release key exists yet (DEPLOY.md, section 10.4) |
+| heads_down upgrade authority | a local dev key | one key, the deployer's, since the deploy on 2026-10-10. A Squads vault and then no authority are the plan, not done and not decided (DEPLOY.md, section 15) |
 
 ## Files and secrets
 

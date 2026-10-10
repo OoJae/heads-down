@@ -43,9 +43,21 @@ Local dry runs write to `localnet/`, which is git-ignored.
 ```bash
 solana program show HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p -um   # authority, last deploy slot, data length
 solana-verify get-program-hash HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p -um   # = onchain.program_hash
-git checkout <build.git_commit> && bash programs/heads-down/scripts/build.sh
-sha256sum programs/heads-down/target/deploy/heads_down.so                       # = so.sha256 (same toolchain)
+solana program dump HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p /tmp/heads_down.onchain.so -um
+head -c <so.len> /tmp/heads_down.onchain.so | shasum -a 256                       # = so.sha256
 ```
+
+Those compare the chain with the receipt. They do not compare either with the source: the build
+is not reproducible across directories. `git checkout <build.git_commit>` and
+`bash programs/heads-down/scripts/build.sh` gave `so.sha256` only in the checkout the deployed
+file was built in. On 10 October 2026 the same sources and toolchain gave two other hashes in
+two other directories of the same machine, each for a file of the same 190,048 bytes
+([docs/MAINNET.md](../../docs/MAINNET.md#check-it-yourself)). No build in a pinned container
+has been set up.
+
+Two receipts are committed, both of 10 October 2026: the first deploy
+(`mainnet/20261010T184116Z-fresh-d67a1a40c2a0.json`) and `initialize_config` with the Executor
+float (`mainnet/20261010T184715Z-init.json`).
 
 The init receipt (`heads-down/init-receipt/v1`) records the Config parameters
 (`governance`, `registrar`, `executor_fee`, `crank_fee`, `bury_bps`, `ore_layout_hash`), the
