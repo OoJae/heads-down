@@ -3,11 +3,9 @@ package xyz.headsdown.core.design.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.FirstBaseline
@@ -15,7 +13,6 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import xyz.headsdown.core.design.Hd
@@ -39,7 +36,11 @@ fun StatBlock(
 
 /**
  * A fact as a row: its [label] on the left in body text, its [value] on the right in mono.
- * One node to a screen reader. The value keeps its width; a long label wraps beside it.
+ * One node to a screen reader.
+ *
+ * It is a [LedgerRow] without a note, and lays out the same way: a short value keeps its width
+ * and a long label wraps beside it; a value too long to share the line (an address) drops under
+ * the label instead of squeezing it to nothing.
  */
 @Composable
 fun StatRow(
@@ -48,14 +49,7 @@ fun StatRow(
     modifier: Modifier = Modifier,
     valueColor: Color = Hd.colors.chalk,
 ) {
-    Row(
-        modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        BasicText(label, Modifier.weight(1f).alignByBaseline(), style = Hd.type.body.copy(color = Hd.colors.ash))
-        BasicText(value, Modifier.alignByBaseline(), style = Hd.type.figure.copy(color = valueColor, textAlign = TextAlign.End))
-    }
+    LedgerRow(label, modifier, figure = value, figureColor = valueColor)
 }
 
 /**

@@ -347,6 +347,29 @@ class TextAndPlatesTest {
     }
 
     @Test
+    fun `the default hero is a drawing - no text, no node under it, no action, in every state`() {
+        rule.setContent {
+            HeadsDownTheme {
+                Column {
+                    for (state in SlabState.entries) {
+                        Hero(HeroSpec(state, heat = 3, interactive = true, enter = true), Modifier.testTag(state.name), contentDescription = "Slab ${state.name}")
+                    }
+                    Hero(HeroSpec(SlabState.Hot, heat = 5), Modifier.testTag("decoration"))
+                }
+            }
+        }
+        // The unmerged tree, as the screen tests walk it: the stand-in composes nothing but a canvas.
+        for (state in SlabState.entries) {
+            val node = rule.onNodeWithTag(state.name, useUnmergedTree = true).fetchSemanticsNode()
+            assertTrue("${state.name}: no node under the hero", node.children.isEmpty())
+            assertEquals(setOf(SemanticsProperties.ContentDescription, SemanticsProperties.TestTag), node.config.map { it.key }.toSet())
+        }
+        val decoration = rule.onNodeWithTag("decoration", useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals(setOf<Any>(SemanticsProperties.TestTag), decoration.config.map { it.key }.toSet())
+        assertEquals(SlabState.entries.map { "Slab ${it.name}" }, allTexts())
+    }
+
+    @Test
     fun `a hero spec clamps heat and defaults to a still, untouchable slab`() {
         val spec = HeroSpec(SlabState.Cooling, heat = -3)
         assertEquals(0, spec.heat)

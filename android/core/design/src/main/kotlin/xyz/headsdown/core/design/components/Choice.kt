@@ -40,7 +40,9 @@ import xyz.headsdown.core.design.HdDimens
  * checkbox, a smaller square for a radio), a heavier outline around the row.
  *
  * [compact] draws a 48dp chip for a row of short options ("Off", "10 SKR"): filled when chosen,
- * outlined when not, the label on one line.
+ * outlined when not, the label on one line. A chip is as wide as its label and does not wrap it,
+ * so lay chips out in a `FlowRow`: in a plain `Row` the last ones are squeezed and cut at a large
+ * font scale.
  *
  * [onClick] is called on every tap, including a tap on the option already chosen: the caller
  * decides whether that takes the choice back.

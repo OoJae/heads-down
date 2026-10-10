@@ -1,5 +1,6 @@
 package xyz.headsdown.core.design
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
@@ -157,6 +158,13 @@ class PaletteContrastTest {
         assertEquals(HdShapes.Default.chip, HdMaterial.Shapes.extraSmall)
         assertEquals(HdShapes.Default.plate, HdMaterial.Shapes.small)
         assertEquals(HdShapes.Default.plate, HdMaterial.Shapes.medium)
+        // In dp: 4 on chips, 6 on plates and bars, 14 on a sheet's top corners and on Material's largest shape.
+        assertEquals(RoundedCornerShape(4.dp), HdShapes.Default.chip)
+        assertEquals(RoundedCornerShape(6.dp), HdShapes.Default.plate)
+        assertEquals(RoundedCornerShape(6.dp), HdShapes.Default.bar)
+        assertEquals(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp), HdShapes.Default.sheet)
+        assertEquals(RoundedCornerShape(14.dp), HdMaterial.Shapes.extraLarge)
+        assertEquals(1.dp, HdDimens.Hairline)
         assertEquals(56.dp, HdDimens.Bar)
         assertEquals(48.dp, HdDimens.Touch)
         assertEquals(20.dp, HdDimens.Margin)

@@ -3,6 +3,9 @@ package xyz.headsdown.core.design.components
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -236,6 +239,44 @@ class ControlsTest {
         assertTrue("an enabled vertical scroll", dock.contains(SemanticsActions.ScrollBy))
         val range = dock[SemanticsProperties.VerticalScrollAxisRange]
         assertEquals("with nothing to scroll", 0f, range.maxValue(), 0f)
+    }
+
+    @Test
+    fun `a dock left inside a scrolling column takes the height of its content and does not throw`() {
+        // A vertical scroll measured in unbounded height throws, and the dock has one of its own.
+        // A page whose buttons moved into a dock before the page was split must still compose.
+        var clicks = 0
+        var inPage by mutableStateOf(false)
+        rule.setContent {
+            HeadsDownTheme {
+                val dock = @Composable {
+                    ActionDock(Modifier.testTag("dock")) {
+                        BarButton("Clock out", onClick = { clicks++ }, modifier = Modifier.testTag("confirm"))
+                        TextAction("Close", onClick = {})
+                    }
+                }
+                if (inPage) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        repeat(30) { BarButton("Row $it", onClick = {}) }
+                        dock()
+                    }
+                } else {
+                    Column { dock() }
+                }
+            }
+        }
+        val pinned = rule.onNodeWithTag("dock").getUnclippedBoundsInRoot().height
+        assertTrue("a bar, an action and the padding: $pinned", pinned >= 56.dp + 48.dp + 24.dp)
+
+        inPage = true
+        rule.waitForIdle()
+        // The page scrolls the dock into view; the dock itself has nothing to scroll.
+        rule.onNodeWithTag("dock").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithTag("confirm").performScrollTo().assertIsDisplayed().performClick()
+        assertEquals(1, clicks)
+        val dock = rule.onNodeWithTag("dock")
+        assertEquals("the same height as when it is pinned", pinned, dock.getUnclippedBoundsInRoot().height)
+        assertEquals(0f, dock.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue(), 0f)
     }
 
     @Test

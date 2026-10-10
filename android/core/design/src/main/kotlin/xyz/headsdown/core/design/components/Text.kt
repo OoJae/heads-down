@@ -4,6 +4,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -14,6 +15,7 @@ import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -83,7 +85,9 @@ fun Label(
 
 /**
  * The one number on a screen: a single line in the display face, as large as fits between 56sp
- * and the hero size (112sp), growing with the system font scale up to 1.3x and no further.
+ * and the hero size (112sp), growing with the system font scale up to 1.3x and no further. A
+ * value that does not fit even at 56sp is cut with an ellipsis, never silently; a screen reader
+ * always gets the whole of it.
  *
  * The face has no tabular figures, so a changing number changes width: keep it left-aligned and
  * do not count it up frame by frame.
@@ -97,24 +101,41 @@ fun HeroNumerals(
     val hero = Hd.type.hero
     val density = LocalDensity.current
     val cap = HdType.DISPLAY_SCALE_CAP
-    val (smallest, largest) = remember(density, hero) {
+    val sizes = remember(density, hero) {
         with(density) {
-            val largest = minOf(hero.fontSize.toDp(), hero.fontSize.value.dp * cap).toSp()
-            val smallest = minOf(HERO_MIN.toDp(), HERO_MIN.value.dp * cap).toSp()
-            smallest to largest
+            val largest = minOf(hero.fontSize.toDp(), hero.fontSize.value.dp * cap)
+            val smallest = minOf(HERO_MIN.toDp(), HERO_MIN.value.dp * cap).coerceAtMost(largest)
+            // The sizes tried are the smallest plus whole steps, so the step is cut from the real
+            // range. The system enlarges small sizes more than large ones, and with a fixed 2sp
+            // step the last one stopped short of the largest size: the number was drawn smaller
+            // the larger the system font (by 2.6% at 2.0). A hair under an exact division, so
+            // that rounding cannot put the last step past the largest size.
+            val step = ((largest - smallest) / HERO_STEPS * 0.9999f).coerceAtLeast(0.1.dp)
+            TextAutoSize.StepBased(minFontSize = smallest.toSp(), maxFontSize = largest.toSp(), stepSize = step.toSp())
         }
     }
-    BasicText(
-        text = value,
-        modifier = modifier,
-        style = hero.copy(color = color),
-        maxLines = 1,
-        softWrap = false,
-        autoSize = TextAutoSize.StepBased(minFontSize = smallest, maxFontSize = largest, stepSize = 2.sp),
-    )
+    // Keyed on the sizes: a text that is already composed does not take a new `autoSize` when
+    // nothing else about it changes (foundation 1.12 leaves it out of the comparison), so a
+    // font scale that changes under a live screen would keep the old range.
+    key(sizes) {
+        BasicText(
+            text = value,
+            modifier = modifier,
+            style = hero.copy(color = color),
+            // A value too long for the line even at the smallest size ends in an ellipsis.
+            // Clipped between two digits it would read as another, smaller number.
+            overflow = TextOverflow.Ellipsis,
+            maxLines = 1,
+            softWrap = false,
+            autoSize = sizes,
+        )
+    }
 }
 
 private val HERO_MIN = 56.sp
+
+/** From 56sp to 112sp in 2sp steps, at the normal font scale. */
+private const val HERO_STEPS = 28
 
 /**
  * Replaces the semantics of the text this is applied to with [original]: what is drawn may be in

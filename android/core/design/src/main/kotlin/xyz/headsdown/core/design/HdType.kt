@@ -34,10 +34,25 @@ object HdFonts {
 }
 
 /**
+ * The glyphs centred in a line of exactly the line height, the first and the last line included.
+ * Without it Compose trims a block of text to its glyphs, and one line of 16/24 body text measures
+ * 19sp. (Top level, not in the companion: `HdType.Default` is built while the companion is.)
+ */
+private val FullLine = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
+
+/**
  * The type scale, in sp. The styles carry no colour: the component that draws them picks the ink.
  *
  * [hero] and [display] are drawn through `HeroNumerals` and `DisplayText`, which stop them growing
  * past 1.3x with the system font scale. Body text is never below 16sp.
+ *
+ * Line heights:
+ * - The platform and mono styles fill their line: one line of [body] is 24sp tall, not the 19sp of
+ *   its glyphs, so a block of text is a whole number of lines whatever its length. It is the rule
+ *   Material's own styles follow (centred in the line, nothing trimmed).
+ * - The display face is set tighter than its own metrics (1.0 to 1.1em against 1.2em). Compose
+ *   never cuts into the first ascent or the last descent, so the tight leading shows between the
+ *   lines of a wrapped statement; a single line is still about 1.2em tall.
  */
 @Immutable
 class HdType internal constructor() {
@@ -51,13 +66,16 @@ class HdType internal constructor() {
     val title: TextStyle = displayFace(30, lineHeightEm = 1.1f)
 
     /** 19sp semibold. A heading inside a screen. */
-    val headline: TextStyle = TextStyle(fontFamily = HdFonts.Body, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 24.sp)
+    val headline: TextStyle =
+        TextStyle(fontFamily = HdFonts.Body, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 24.sp, lineHeightStyle = FullLine)
 
     /** 16sp on a 24sp line. Sentences. */
-    val body: TextStyle = TextStyle(fontFamily = HdFonts.Body, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp)
+    val body: TextStyle =
+        TextStyle(fontFamily = HdFonts.Body, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, lineHeightStyle = FullLine)
 
     /** 16sp semibold on a 20sp line. The label of a bar, a choice, a link. */
-    val button: TextStyle = TextStyle(fontFamily = HdFonts.Body, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 20.sp)
+    val button: TextStyle =
+        TextStyle(fontFamily = HdFonts.Body, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 20.sp, lineHeightStyle = FullLine)
 
     /** 13sp mono, tracked +0.08em. Drawn in capitals by `Label`. */
     val label: TextStyle = TextStyle(
@@ -66,6 +84,7 @@ class HdType internal constructor() {
         fontSynthesis = FontSynthesis.None,
         fontSize = 13.sp,
         lineHeight = 18.sp,
+        lineHeightStyle = FullLine,
         letterSpacing = 0.08.em,
     )
 
@@ -76,6 +95,7 @@ class HdType internal constructor() {
         fontSynthesis = FontSynthesis.None,
         fontSize = 12.sp,
         lineHeight = 16.sp,
+        lineHeightStyle = FullLine,
     )
 
     /** 16sp mono. An amount, an address, a round number: every digit the same width. */
@@ -85,6 +105,7 @@ class HdType internal constructor() {
         fontSynthesis = FontSynthesis.None,
         fontSize = 16.sp,
         lineHeight = 24.sp,
+        lineHeightStyle = FullLine,
     )
 
     companion object {
