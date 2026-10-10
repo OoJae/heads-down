@@ -244,8 +244,10 @@ digs at 20,000. So a dig that carried one rig cost the crank 10,053 lamports at 
 and 11,028 to 11,082 at the second: after the 7,000 back, a loss of 3,053 and of 4,028 to 4,082 a
 dig. The missed round and the two refused second attempts cost 10,038, 10,053 and 11,042 with
 nothing back, and the BREAK 10,100. One rig in a transaction does not pay for itself. The
-figures for batches of rigs were measured on the fork, not on mainnet; they are in
-[`crank/README.md`](../crank/README.md) ("Operating costs").
+figures for batches of rigs were measured on the fork, not on mainnet, and at a price of 1,000;
+they are in [`crank/README.md`](../crank/README.md) ("Operating costs"). At the 20,000 the
+service runs with now, only a full batch of five would about break even
+([DEPLOY.md, section 3](DEPLOY.md#3-funding); computed, not measured).
 
 **ORE.** Of each settled round's 1,000,000 lamports ORE kept 109,000.
 
