@@ -1001,6 +1001,7 @@ describe("api.ore.com rounds: a first start", () => {
     { days: 14, roundS: 72, arriving: 4, rounds: 16_801, perPass: [...Array.from({ length: 18 }, () => 10), 7] }, // 19 passes, 187 requests
     { days: 14, roundS: 64, arriving: 5, rounds: 18_901, perPass: [...Array.from({ length: 21 }, () => 10), 2] }, // 22 passes, 212 requests
     { days: 1, roundS: 77, arriving: 4, rounds: 1_123, perPass: [10, 3] }, // 2 passes, 13 requests
+    { days: 1, roundS: 64, arriving: 5, rounds: 1_351, perPass: [10, 5] }, // 2 passes, 15 requests
   ])("backfills $days days of $roundS s rounds in passes of at most ten pages ($arriving new rounds between two passes)", { timeout: 180_000 }, async ({ days, roundS, arriving, rounds, perPass }) => {
     const api = new OreStandIn(N, 20_000, T0, roundS);
     const since = T0 - days * 86_400;

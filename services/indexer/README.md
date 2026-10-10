@@ -29,7 +29,7 @@ data for development and demos. That data is labelled and cannot mix with real d
 ```bash
 cd services/indexer
 pnpm install
-pnpm test            # 476 tests: golden bytes, metrics math, cohorts, haul, store, sources, ORE's round list, ingest loop, API
+pnpm test            # 477 tests: golden bytes, metrics math, cohorts, haul, store, sources, ORE's round list, ingest loop, API
 pnpm typecheck
 pnpm demo            # in-memory Postgres + simulated dataset + API on http://127.0.0.1:8787
 curl -s localhost:8787/v1/summary | jq .data.rigs
@@ -257,8 +257,8 @@ twenty minutes: the intervals between the passes plus the passes themselves (ten
 second apart, plus the time the API takes to answer). The pass and request counts are tested
 (`oreApi.test.ts`, "a first start"); the times are computed, not measured against the real API.
 After the backfill a pass asks for the newest page only. `ORE_ROUNDS_SINCE` narrows it: one day
-back is 13 requests in two passes. Moving it back later reads the rounds between; moving it forward
-reads nothing more and deletes nothing.
+back is 13 to 15 requests in two passes. Moving it back later reads the rounds between; moving it
+forward reads nothing more and deletes nothing.
 
 **Turned away.** HTTP 429, a 5xx, a timeout or a connection that fails end the ORE step of that
 pass. That is not an ingest error: what the pass stored stays, its log line says where it stopped
