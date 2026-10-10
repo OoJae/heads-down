@@ -29,7 +29,7 @@ data for development and demos. That data is labelled and cannot mix with real d
 ```bash
 cd services/indexer
 pnpm install
-pnpm test            # 462 tests: golden bytes, metrics math, cohorts, haul, store, sources, ORE's round list, ingest loop, API
+pnpm test            # 476 tests: golden bytes, metrics math, cohorts, haul, store, sources, ORE's round list, ingest loop, API
 pnpm typecheck
 pnpm demo            # in-memory Postgres + simulated dataset + API on http://127.0.0.1:8787
 curl -s localhost:8787/v1/summary | jq .data.rigs
@@ -225,7 +225,7 @@ deployment is the first run against one.
 
 ### ORE rounds from api.ore.com
 
-`/events/reset` lists ORE's rounds newest first, 100 to a page: a little over two hours of rounds.
+`/events/reset` lists ORE's rounds newest first, 100 to a page: about two hours of rounds.
 The API is ORE's, and it answers HTTP 429 to a client that asks for many pages in a row. On
 2026-10-04 the live indexer asked for the pages of its whole 14-day backfill in one pass, was
 turned away past page 100, stored nothing, and started again at page 0 five minutes later. A pass
@@ -247,37 +247,55 @@ now asks for a few pages and keeps them (`src/sources/oreApi.ts`):
   (`gaps` in its log line) and the next passes close it before they go further back.
 
 **What a first start on an empty database asks of ORE's API.** The first pass reads the 10 newest
-pages; every later pass reads the newest page and 9 older ones. The default 14 days are about
-16,000 rounds: 18 passes and 175 requests when a round takes 77 s (the list on 2026-10-04), 19
-passes and 187 requests at 72 s (the average from 2026-08-11 to 2026-09-29, worked out from the
-round ids and dates in `ml/forecaster/RESULTS.md`).
-At `INGEST_INTERVAL_S=300` that is about an hour and a half, at 30 about a quarter of an hour: the
-intervals between the passes plus the passes themselves (ten requests, a second apart, plus the
-time the API takes to answer). The pass and request counts are tested (`oreApi.test.ts`, "a first
-start"); the times are computed, not measured against the real API. After the backfill a pass asks
-for the newest page only. `ORE_ROUNDS_SINCE` narrows it: one day back is 13 requests in two
-passes. Moving it back later reads the rounds between; moving it forward reads nothing more and
-deletes nothing.
+pages; every later pass reads the newest page and 9 older ones. The default 14 days are 16,000 to
+19,000 rounds, by how long a round takes: 18 passes and 175 requests at 77 s (the list on
+2026-10-04), 19 passes and 187 requests at 72 s (the average from 2026-08-11 to 2026-09-29, worked
+out from the round ids and dates in `ml/forecaster/RESULTS.md`), 22 passes and 212 requests at
+64 s (the newest page on 2026-10-10).
+At `INGEST_INTERVAL_S=300` that is an hour and a half to two hours, at 30 a quarter of an hour to
+twenty minutes: the intervals between the passes plus the passes themselves (ten requests, a
+second apart, plus the time the API takes to answer). The pass and request counts are tested
+(`oreApi.test.ts`, "a first start"); the times are computed, not measured against the real API.
+After the backfill a pass asks for the newest page only. `ORE_ROUNDS_SINCE` narrows it: one day
+back is 13 requests in two passes. Moving it back later reads the rounds between; moving it forward
+reads nothing more and deletes nothing.
 
 **Turned away.** HTTP 429, a 5xx, a timeout or a connection that fails end the ORE step of that
 pass. That is not an ingest error: what the pass stored stays, its log line says where it stopped
 (`stopped`), and the next pass goes on from there. A `Retry-After` in the answer is kept, up to an
-hour, and no request is made before it has passed (`waiting` in the log line). Only when
+hour, and no request is made before it has passed (`waiting` in the log line). The wait is one
+second longer than the answer asks for, because the clock it is compared with counts whole
+seconds. A wait of more than an hour found in the database, as a clock that was set back would
+leave one, is not kept. Only when
 api.ore.com turns away three passes in a row, and none gets further than the one before, is the
 pass failed: `ingest error` and `lastPollOk: false`, until a pass gets through. Three passes span
 ten minutes at `INGEST_INTERVAL_S=300` and one minute at 30, so at a short interval a limit that
 holds for longer than that shows as failed passes until it lifts; the backfill then goes on
 (`oreApi.test.ts`, "finishes a 14-day backfill against an API with a request limit"). Any other
-answer (a 4xx, a body that is not the list) is an error at once. Without a `Retry-After` the
-indexer asks again at the next pass, starting with the newest page: one request if it is still
-turned away.
+answer (a 4xx, a body that is not the list, a page of which no item decodes) is an error at once.
+Without a `Retry-After` the indexer asks again at the next pass, starting with the newest page: one
+request if it is still turned away.
 
 **What the list does not give.** A round that one page skips between two neighbours is recorded as
 `ORE_API_GAP` in `/v1/health`'s problems, logged as `ore rounds: not listed by api.ore.com`, and not
-asked for again; an item that does not decode is recorded too. `ml/forecaster/RESULTS.md` counts 18
-rounds missing from the list in 8 gaps between 2026-08-11 and 2026-09-29. A round that should sit
-exactly between two pages stays open until new rounds have moved it inside a page. A round a rig
-dug in does not depend on any of this: the resolver reads it from chain.
+asked for again. An item that does not decode is recorded too (`BAD_FIELD`); its round counts as
+read when its round id is readable and lies between rounds of the same page that do decode, and
+the id of such an item is never taken for the page's place in the list. A page of which no item
+decodes is another matter: the API's items have changed shape, or the answer is not the list. That
+is an `ingest error` at once and nothing of the page is noted as read, so its rounds are read once
+they decode again. `ml/forecaster/RESULTS.md` counts 18 rounds missing from the list in 8 gaps
+between 2026-08-11 and 2026-09-29. A round that should sit exactly between two pages stays open
+until new rounds have moved it inside a page. A round a rig dug in does not depend on any of this:
+the resolver reads it from chain.
+
+**Where the list ends.** A page that comes back empty right after the last page was read is taken
+for the end of the list: the pass says `backfill: done` with `listEnd`, the oldest round it has.
+ORE's list reaches much further back than 14 days (its page 2,000 held rounds of April 2026 on
+2026-10-10), so with the default `ORE_ROUNDS_SINCE` a `listEnd` in the log means that the API gave
+an empty page where rounds are. That answer is believed for an hour and not for good: then a pass
+asks for the place again, and goes on with the backfill when it holds rounds. While it is believed
+with stored rounds below it, the pass says `running` and counts the gap. A list that does end is
+asked again every hour, the last page and the page after it.
 
 **The `ore rounds` log line**, one per pass:
 
@@ -288,7 +306,8 @@ dug in does not depend on any of this: the resolver reads it from chain.
 | `pages` | pages api.ore.com answered in this pass |
 | `newest` | the newest round id it listed |
 | `backTo` | reset time of the oldest round of the unbroken run that ends at the newest |
-| `backfill` | `running`, or `done` once that run reaches `ORE_ROUNDS_SINCE` |
+| `backfill` | `running`, or `done` once that run reaches `ORE_ROUNDS_SINCE` or the end of the list |
+| `listEnd` | only when it is `done` at the end of the list and not at `ORE_ROUNDS_SINCE`: the oldest round it has. Believed for an hour, then asked for again |
 | `gaps` | open ranges inside what has been read; left out when there is none |
 | `stopped`, `retryAfterS`, `stalledPasses`, `waiting` | only when api.ore.com turned the pass away: what it answered and where, the seconds until it is asked again, how many passes in a row that makes, and whether this pass asked nothing at all |
 
@@ -297,10 +316,16 @@ process and, for the real `serve` command, over HTTP (the service has no setting
 address; the test starts it with `--import test/redirectOreApi.ts`, which sends its requests for
 api.ore.com to the stand-in): the budget, a 429 half way and the pass after it, the list moving
 between and during passes, a head gap larger than the budget, the `since` bound, `Retry-After`,
-items that do not decode, rounds left out, and 24 seeded runs that mix all of these.
-The real API was asked twice by hand on 2026-10-04: pages 0 and 60 held 100 rounds each with
-consecutive ids, and page 60 began exactly 6,000 ids below page 0. Not known: how many requests it
-allows in what time, and whether its 429 carries a `Retry-After`. A database written by the code
+items that do not decode, a page of which none does, rounds left out, an empty or a short page
+where rounds are, and 24 seeded runs that mix all of these.
+The real API was asked by hand on two days, a few pages each. On 2026-10-04 pages 0 and 60 held
+100 rounds each with consecutive ids, and page 60 began exactly 6,000 ids below page 0. On
+2026-10-10 (three requests, three seconds apart) page 0 held 100 consecutive rounds, 64 s apart on
+average; page 2,000 held 100 rounds of April 2026 and began 28 ids further down than 200,000 below
+page 0; page 1,000,000 was answered with HTTP 200 and an empty list. Not known: how many requests
+it allows in what time, whether its 429 carries a `Retry-After`, and whether it ever answers with
+an empty or a short page where rounds are (the stand-in is made to; the real API was not seen
+to). A database written by the code
 before this (cursor `ore-api`/`newest-round`) is taken over: the unbroken run of stored rounds that
 ends at that cursor counts as read. One process per dataset is assumed to read api.ore.com. A
 second one would cost requests, not rounds: each rereads what the other's note leaves out (tested
@@ -436,8 +461,9 @@ pnpm typecheck   # tsc --noEmit, strict
   chain override, webhook.
 - `oreApi.test.ts`: reading ORE's round list against a stand-in for api.ore.com (`oreStandIn.ts`): the page budget and
   the pause, a refusal half way and the pass after it, the list moving between and during passes, a head gap larger than
-  the budget, rounds that come twice, the `since` bound, `Retry-After`, items that do not decode, rounds the list leaves
-  out, the spot check, 24 seeded runs that mix these, and the passes and requests of a first start.
+  the budget, rounds that come twice, the `since` bound, `Retry-After`, items that do not decode, a page of which none
+  does, rounds the list leaves out, the end of the list and an empty page where rounds are, the spot check, 24 seeded
+  runs that mix these, and the passes and requests of a first start.
 - `loop.test.ts`: the ingest loop against a fake RPC and a fake api.ore.com: the genesis-hash check is retried, nothing
   is read from the RPC before it passes, a wrong cluster never ingests, a failed pass does not end the loop, `--once`
   still fails; a step that fails does not keep the other from running, and a pass that api.ore.com turns away is failed
@@ -468,4 +494,13 @@ pnpm typecheck   # tsc --noEmit, strict
   all, are stored without the on-chain spot check, and no later pass checks them.
 - How far the ORE backfill has come is in the `ore rounds` log line only. `/v1/health` does not
   show it, and `/v1/share-by-hour` counts the rounds that have arrived so far (its `rounds` field).
+- An item of ORE's list that does not decode among items that do, and a round the list leaves out,
+  are recorded once and not asked for again: if the API served that round whole later, it would
+  not be read. A value of the cursor `ore-api`/`covered` that this code did not write (an empty
+  text, say) reads as nothing read: the indexer then reads the list again from the newest page, at
+  its page budget, and keeps the rounds it has.
+- The cursor `ore-api`/`newest-round` of the code before the page budget is no longer written. A
+  deployment rolled back to that code would walk the list in one pass from page 0 down to where
+  that cursor stood, or back to `ORE_ROUNDS_SINCE` on a database that never had it: the burst of
+  2026-10-04 again. This is read from that code, not tested.
 - The contract gaps and the choices made for them are in [INTERFACE-NOTES.md](INTERFACE-NOTES.md).

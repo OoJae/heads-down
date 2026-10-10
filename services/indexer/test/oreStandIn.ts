@@ -6,8 +6,8 @@
  * and changes what an answer's items say. It answers a `fetch` in process and, for the tests that
  * run the real commands, over HTTP on a loopback port.
  *
- * It is what the tests believe about the real API, checked against it by hand. On 2026-10-04, two
- * requests: pages 0 and 60 each held 100 rounds with consecutive ids, and page 60 began exactly
+ * It is what the tests believe about the real API, checked against it by hand on two days. On
+ * 2026-10-04 pages 0 and 60 each held 100 rounds with consecutive ids, and page 60 began exactly
  * 6,000 ids below page 0. On 2026-10-10, three requests, three seconds apart: page 0 held rounds
  * 435,113 down to 435,014, consecutive, 64 s apart on average; page 2,000 held 100 consecutive
  * rounds of April 2026 and began 28 ids further down than 200,000 below page 0, so the list leaves
