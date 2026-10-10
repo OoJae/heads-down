@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
+import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.ui.theme.HdColors
 import xyz.headsdown.ui.theme.HeadsDownTheme
@@ -126,7 +127,7 @@ fun WithdrawScreen(
             }
             is WithdrawState.Unavailable -> {
                 Text(state.message, color = HdColors.Cooling, modifier = Modifier.testTag(WithdrawTags.MESSAGE))
-                OutlinedButton(onClick = onRetry, modifier = Modifier.testTag(WithdrawTags.RETRY)) { Text("Try again") }
+                OutlinedButton(onClick = onRetry, modifier = Modifier.testTag(WithdrawTags.RETRY), border = HdMaterial.controlBorder()) { Text("Try again") }
             }
             is WithdrawState.Done -> Text(state.message, color = HdColors.OreGold, modifier = Modifier.testTag(WithdrawTags.MESSAGE))
             is WithdrawState.Ready -> Ready(state, onRevoke, onCloseRig, onConfirm)
@@ -176,6 +177,6 @@ private fun Choice(label: String, selected: Boolean, tag: String, enabled: Boole
             colors = ButtonDefaults.buttonColors(containerColor = HdColors.OreGold, contentColor = HdColors.Charcoal),
         ) { Text(label) }
     } else {
-        OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier) { Text(label) }
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier, border = HdMaterial.controlBorder(enabled)) { Text(label) }
     }
 }

@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
+import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.ui.theme.HdColors
 import xyz.headsdown.ui.theme.HeadsDownTheme
@@ -122,7 +123,7 @@ fun ClockOutScreen(
             )
             is ClockOutState.Unavailable -> {
                 Text(state.message, color = HdColors.Cooling, modifier = Modifier.testTag(ClockOutTags.MESSAGE))
-                OutlinedButton(onClick = onRetry, modifier = Modifier.testTag(ClockOutTags.RETRY)) { Text("Try again") }
+                OutlinedButton(onClick = onRetry, modifier = Modifier.testTag(ClockOutTags.RETRY), border = HdMaterial.controlBorder()) { Text("Try again") }
             }
             is ClockOutState.Done -> Text(state.message, color = HdColors.OreGold, modifier = Modifier.testTag(ClockOutTags.MESSAGE))
             is ClockOutState.Ready -> Ready(state, onClaimAll, onEndEarly, onConfirm)
@@ -193,6 +194,6 @@ private fun Choice(label: String, selected: Boolean, tag: String, enabled: Boole
             colors = ButtonDefaults.buttonColors(containerColor = HdColors.OreGold, contentColor = HdColors.Charcoal),
         ) { Text(label) }
     } else {
-        OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier) { Text(label) }
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier, border = HdMaterial.controlBorder(enabled)) { Text(label) }
     }
 }

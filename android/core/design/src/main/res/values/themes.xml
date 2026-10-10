@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Compose draws everything; the window only needs the pit behind it (no flash of another
+        colour) and the system splash.
+
+        These are the dark values. Theme.HeadsDown inherits Base.Theme.HeadsDown and adds nothing,
+        so a later stage can switch the light palette on by giving the colours (or this base
+        style) a night-qualified variant without touching any manifest.
+
+        Splash (the platform's, minSdk 31): the pit, and the slab over its gold line. The mark is
+        the launcher icon's geometry, inside the 192dp circle the system shows of the 288dp
+        canvas. windowSplashScreenIconBackgroundColor, windowSplashScreenBrandingImage and
+        windowSplashScreenBehavior are left unset on purpose.
+    -->
+    <style name="Base.Theme.HeadsDown" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/hd_pit</item>
+        <item name="android:colorAccent">@color/hd_chalk</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">@color/hd_pit</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_slab</item>
+    </style>
+
+    <style name="Theme.HeadsDown" parent="Base.Theme.HeadsDown" />
+</resources>

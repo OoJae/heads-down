@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import androidx.core.app.NotificationCompat
+import xyz.headsdown.core.design.HdArgb
 
 /**
  * Builds the ongoing shift notification.
@@ -63,7 +64,7 @@ class ShiftNotificationFactory(private val context: Context) {
     companion object {
         const val SHIFT_NOTIFICATION_ID = 0x4844 // "HD"
 
-        /** Ember orange: "rig hot". */
-        const val EMBER: Int = 0xFFFF6A1A.toInt()
+        /** The notification's accent: the design system's ember (:core:design). */
+        const val EMBER: Int = HdArgb.EMBER
     }
 }

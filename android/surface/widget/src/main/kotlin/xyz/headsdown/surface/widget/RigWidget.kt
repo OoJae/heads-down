@@ -68,7 +68,8 @@ class RigWidget : GlanceAppWidget() {
     }
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        val mode = WidgetColorPolicy.mode(Build.VERSION.SDK_INT)
+        // The picker shows the widget as it will be drawn: brand unless that was turned off.
+        val mode = WidgetColorPolicy.mode(Build.VERSION.SDK_INT, WidgetStateStore.get(context).preferBrandColors)
         provideContent {
             GlanceTheme(colors = WidgetColors.providers(mode)) {
                 RigWidgetContent(RigWidgetCopy.render(PREVIEW_STATE), mode, open = null, previewNowWallMillis = PREVIEW_NOW)

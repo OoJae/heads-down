@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The splash mark (android:windowSplashScreenAnimatedIcon): the launcher icon's slab and seam on
+    the 288dp canvas the system gives an icon without a background. The system shows the central
+    192dp circle of it. The mark keeps the launcher's 108-unit grid, so its farthest corner is
+    30.8 units = 82dp from the centre, inside the 96dp radius. Still: it does not animate.
+    Path data: HdGlyph.LAUNCHER_* (SingleSourceTest).
+
+    VectorRaster is ignored on purpose: lint advises against vectors over 200dp because they are
+    not cached as a bitmap and are redrawn every frame. This one is four flat shapes, drawn for the
+    one moment the splash is up, and 288dp is the size the platform defines for it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108"
+    tools:ignore="VectorRaster">
+    <path
+        android:fillColor="@color/hd_icon_face"
+        android:pathData="M29,36h50v10h-50z" />
+    <!-- the top edge, catching a little light -->
+    <path
+        android:fillColor="@color/hd_icon_edge"
+        android:pathData="M29,36h50v1h-50z" />
+    <path android:pathData="M29,46h50l-7,10h-36z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endColor="@color/hd_icon_seam"
+                android:endX="54"
+                android:endY="56"
+                android:startColor="@color/hd_icon_underside_shadow"
+                android:startX="54"
+                android:startY="46"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="@color/hd_icon_seam"
+        android:pathData="M34,66h40v5h-40z" />
+</vector>

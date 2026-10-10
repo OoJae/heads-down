@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -37,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import xyz.headsdown.core.chain.registrar.AttestationOutcome
+import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.core.keys.KeySecurityLevel
 import xyz.headsdown.feature.oemkeepalive.KeepAliveGuide
 import xyz.headsdown.feature.oemkeepalive.KeepAliveStep
@@ -108,7 +108,7 @@ fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -
                         Text(guide.title, style = MaterialTheme.typography.titleMedium)
                         Text(guide.detail, color = HdColors.AshMuted, style = MaterialTheme.typography.bodyMedium)
                         guide.action?.let { action ->
-                            OutlinedButton(onClick = { vm.openKeepAlive(action) }, modifier = Modifier.padding(top = 6.dp)) {
+                            OutlinedButton(onClick = { vm.openKeepAlive(action) }, modifier = Modifier.padding(top = 6.dp), border = HdMaterial.controlBorder()) {
                                 Text(if (action == KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS) "Allow background running" else "Open settings")
                             }
                         }
@@ -189,7 +189,7 @@ internal fun rigKeyLine(status: RigKeyStatus): String = when (status) {
 @Composable
 private fun StepCard(index: Int, title: String, subtitle: String, done: Boolean, actions: @Composable () -> Unit) {
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, if (done) HdColors.EmberDim else HdColors.CharcoalOutline),
     ) {

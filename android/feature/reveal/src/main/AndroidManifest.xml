@@ -17,7 +17,7 @@
             android:launchMode="singleTask"
             android:showWhenLocked="true"
             android:taskAffinity="xyz.headsdown.reveal"
-            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:theme="@style/Theme.HeadsDown"
             android:turnScreenOn="true" />
 
         <receiver

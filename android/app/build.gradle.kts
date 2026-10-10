@@ -131,7 +131,7 @@ android {
 
     defaultConfig {
         applicationId = "xyz.headsdown"
-        versionCode = 1
+        versionCode = 2
         versionName = "0.1.0"
         buildConfigField("String", "SOLANA_CHAIN", "\"solana:$cluster\"")
         buildConfigField("String", "SOLANA_RPC_URL", "\"$rpcUrl\"")
@@ -220,6 +220,7 @@ dependencies {
     implementation(projects.core.keys)
     implementation(projects.core.wallet)
     implementation(projects.core.chain)
+    implementation(projects.core.design)
     implementation(projects.feature.shift)
     implementation(projects.feature.reveal)
     implementation(projects.feature.oemKeepalive)

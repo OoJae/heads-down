@@ -10,6 +10,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.core.content.FileProvider
 import androidx.core.graphics.createBitmap
+import xyz.headsdown.core.design.HdArgb
 import xyz.headsdown.feature.reveal.haul.Board
 import java.io.File
 
@@ -18,12 +19,13 @@ object ShareGridImage {
     const val WIDTH = 1080
     const val HEIGHT = 1350
 
-    private const val CHARCOAL = 0xFF121314.toInt()
-    private const val CHARCOAL_RAISED = 0xFF1C1D20.toInt()
-    private const val EMBER = 0xFFFF6A1A.toInt()
-    private const val GOLD = 0xFFF2B233.toInt()
-    private const val ASH = 0xFFECE7E1.toInt()
-    private const val ASH_MUTED = 0xFF9A948D.toInt()
+    // The palette of "The Underside" (:core:design), by the names this drawing has always used.
+    private const val CHARCOAL = HdArgb.PIT
+    private const val CHARCOAL_RAISED = HdArgb.SLAB
+    private const val EMBER = HdArgb.EMBER
+    private const val GOLD = HdArgb.SEAM_LIGHT
+    private const val ASH = HdArgb.CHALK
+    private const val ASH_MUTED = HdArgb.ASH
 
     fun levelColor(level: Int): Int = when (level) {
         0 -> CHARCOAL_RAISED

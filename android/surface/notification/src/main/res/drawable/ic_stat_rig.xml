@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status-bar icon: a phone lying face-down with a heartbeat pulse. Monochrome (alpha only). -->
+<!-- Status-bar icon: the slab over its seam, a bar over a line (the canonical glyph, HdGlyph in
+     :core:design; SingleSourceTest compares the path data). Monochrome (alpha only). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -7,12 +8,8 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M3,15h18a1,1 0,0 1,1 1v2a1,1 0,0 1,-1 1H3a1,1 0,0 1,-1 -1v-2a1,1 0,0 1,1 -1z" />
+        android:pathData="M2,5h20v4l-3,4h-14l-3,-4z" />
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M2,9h5l1.5,-3 3,6 2,-4 1.5,1h7" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,17h16v2h-16z" />
 </vector>

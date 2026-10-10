@@ -11,6 +11,8 @@ android {
 }
 
 dependencies {
+    // Tokens, the theme, the brand glyph, and Theme.HeadsDown for the activity's window.
+    implementation(projects.core.design)
     implementation(projects.surface.notification)
     implementation(projects.surface.haptics)
     implementation(libs.androidx.core.ktx)
