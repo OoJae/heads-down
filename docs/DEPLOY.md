@@ -201,7 +201,7 @@ compute-unit maximum (it simulates the real limit only afterwards). For today's 
 estimate is 0.02901 SOL. The scripts budget the same sum for a program of `--max-len`:
 `(ceil(196,608 / 900) + 4) x (5,000 + 1,400,000 x 0.1)` = 0.032335 SOL, plus 0.0001 SOL for
 `init-config`. A deploy and init actually spend about **0.0011 SOL** in fees (1,076,055 lamports
-in the dry run, section 12, and 1,076,054 on mainnet on 10 October 2026), so about **0.031 SOL is
+in the dry run, section 12, and 1,076,054 by the receipts of 10 October 2026), so about **0.031 SOL is
 still in the deployer afterwards** (36,005,387 lamports on mainnet, where 1.040963 SOL had been
 sent). An
 earlier version of this page budgeted 0.005 SOL and asked for 1.01 SOL: with exactly that, the
@@ -1222,8 +1222,11 @@ terminal. The deploy of 10 October 2026 showed the first two once each: Helius' 
 its preflight, before anything was sent (sections 6 and 7). The prompt was not used: that run
 passed `--yes`.
 
-The fees on mainnet were 1,076,054 lamports for the fresh deploy and `init-config`, one lamport
-less than the rehearsal's 1,076,055 (section 3 has the whole account).
+The receipts of the mainnet run give 1,076,054 lamports of fees for the fresh deploy and
+`init-config`, one lamport less than the rehearsal's 1,076,055 (section 3 has the whole account).
+The receipt's figure for the buffer is a difference of the deployer's balances. Added up from
+the transactions, the buffer's fees come to one lamport more, which is the rehearsal's total
+([MAINNET.md](MAINNET.md#what-is-deployed) has the sum and what was not read).
 
 ### Docker-free checks of the Railway images (2026-10-01)
 

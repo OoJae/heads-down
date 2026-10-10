@@ -68,10 +68,15 @@ run, minutes later, went through on Helius' free plan:
 
 Where the deployer's 1,040,963,000 lamports are now: 999,647,480 in the ProgramData, 833,120 in
 the Program account, 1,950,720 in the Config, 1,450,240 in the Executor, 1,076,054 paid in fees
-(1,053,286 + 10,297 + 7,335 + 5,136), and 36,005,387 still in the deployer. That is one lamport
-more than the sum allows. The receipt's 999,647,481 lamports in the buffer are one more than the
-999,647,480 its creating transaction put in, and the deploy handed the buffer's balance back to
-the deployer. Where that lamport came from was not looked up.
+by the receipts (1,053,286 + 10,297 + 7,335 + 5,136), and 36,005,387 still in the deployer. That
+is one lamport more than the sum allows. The receipt's 999,647,481 lamports in the buffer are one
+more than the 999,647,480 its creating transaction put in, and the deploy handed the buffer's
+balance back to the deployer. Where that lamport came from was not looked up. The receipt's
+1,053,286 is itself a difference of the deployer's balances, not a sum of fees. The creating
+transaction paid 10,421 (read from the chain), and 198 writes at 5,267 each (one signature and
+267 of priority, computed from the receipt's compute-unit limit and price) are 1,042,866:
+together 1,053,287. If the writes cost that, a second lamport reached the deployer while they
+ran. Its other transactions were not read.
 
 **The Helius key.** Earlier the same day, before the deploy, the Helius key first used here ran
 out of monthly credits (`max usage reached`): it was shared with another project. It was
