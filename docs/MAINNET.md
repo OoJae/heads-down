@@ -60,7 +60,7 @@ run, minutes later, went through on Helius' free plan:
 
 | Step | Transaction | From the receipts |
 |---|---|---|
-| The buffer is created | [`4oMZLT6g…`](https://solscan.io/tx/4oMZLT6gapW44Kaz46aB5ALW8XWeCx5gFcGpf8zGyZy3HrKo3jjz3Jf9XShkYnJTMxQCNRt8UiM7vKTcwAxEeSZC) | buffer [`26iQMRCb…`](https://solscan.io/account/26iQMRCbUqtVBm2XC5SztLtJc8PPxgqiNMDrSqyGpxiZ) with 999,647,480 lamports |
+| The buffer is created | [`4oMZLT6g…`](https://solscan.io/tx/4oMZLT6gapW44Kaz46aB5ALW8XWeCx5gFcGpf8zGyZy3HrKo3jjz3Jf9XShkYnJTMxQCNRt8UiM7vKTcwAxEeSZC) | buffer [`26iQMRCb…`](https://solscan.io/account/26iQMRCbUqtVBm2XC5SztLtJc8PPxgqiNMDrSqyGpxiZ); the receipt records 999,647,481 lamports in it |
 | The buffer is written | 198 writes, one a second | 198 sent, 198 confirmed, 0 signed again, 0 slow-downs, 288 s; 1,053,286 lamports of fees with the creation |
 | The program is deployed | [`4naPfgTX…`](https://solscan.io/tx/4naPfgTXDKRxG7NhunoNKVBWkCwuvdJoyBGytmebCpuDzdrP6Gm4UwxNYm5r5zzUu8vuZKgYiaFp1BzrTwH2Pae2) | slot 455,359,196; one transaction by the Solana CLI, 10,297 lamports |
 | `initialize_config` | [`3R4UnCec…`](https://solscan.io/tx/3R4UnCecw7BuzAvLZURtktLRnh6iEboPE6CpX35NdX7sKzjJcL4g84i1uxQdwwWHPioyEVcG3uBp4cfAhQFzJzUs) | slot 455,359,343; 7,335 lamports |
@@ -69,9 +69,9 @@ run, minutes later, went through on Helius' free plan:
 Where the deployer's 1,040,963,000 lamports are now: 999,647,480 in the ProgramData, 833,120 in
 the Program account, 1,950,720 in the Config, 1,450,240 in the Executor, 1,076,054 paid in fees
 (1,053,286 + 10,297 + 7,335 + 5,136), and 36,005,387 still in the deployer. That is one lamport
-more than the sum allows. The receipt records 999,647,481 lamports in the buffer, one more than
-the transaction that created it put in, and the deploy handed the buffer's balance back to the
-deployer. Where that lamport came from was not looked up.
+more than the sum allows. The receipt's 999,647,481 lamports in the buffer are one more than the
+999,647,480 its creating transaction put in, and the deploy handed the buffer's balance back to
+the deployer. Where that lamport came from was not looked up.
 
 **The Helius key.** Earlier the same day, before the deploy, the Helius key first used here ran
 out of monthly credits (`max usage reached`): it was shared with another project. It was

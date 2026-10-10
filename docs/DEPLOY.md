@@ -7,8 +7,8 @@ services, monitoring, rollback, upgrades, the move to a Squads multisig, and wha
 **It has been run once.** On 10 October 2026 the program was deployed and initialized on
 mainnet, the Executor was funded, and the crank was started. [MAINNET.md](MAINNET.md) is the
 record of that day: every address and transaction, the first shift a phone ran, what it cost
-and what it found. This page stays the runbook for the next deploy or upgrade. Each section says
-what the first run showed, with figures from the two receipts in `deploy/receipts/mainnet/`.
+and what it found. This page stays the runbook for the next deploy or upgrade. The sections that
+run touched say what it showed, with figures from the two receipts in `deploy/receipts/mainnet/`.
 
 Before that, the deploy path (keys, funding, preflight, a deploy that is stopped and continued,
 `initialize_config`, the Executor float, upgrades, a buffer for a multisig, the pause) was
@@ -105,7 +105,7 @@ still to do**.
 
 | Piece | Where | Controlled by |
 |---|---|---|
-| `heads_down` program `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p` | mainnet, upgradeable loader | upgrade authority: `deployer.json`, then a Squads vault, then none |
+| `heads_down` program `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p` | mainnet, upgradeable loader, since 2026-10-10 | upgrade authority: `deployer.json` today; a Squads vault, then none, is the plan (section 15) |
 | Config PDA `inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW` | mainnet | `Config.governance` (`governance.json`): pause at once, other changes after 72 h |
 | Executor PDA `By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge` | mainnet, System-owned, no data | nobody: the program pays ORE's CHECKPOINT_FEE and crank reimbursements from it; no withdraw path |
 | `hd-crank` | Railway, `deploy/railway/crank` | `crank-payer.json` (fees only; liveness only) |
@@ -535,7 +535,7 @@ scripts/mainnet/deploy.sh               # fresh deploy, max-len 196608
 | Step | What happened |
 |---|---|
 | preflight | the first run stopped here on a network error, before anything was sent (section 6); the second run answered GO |
-| buffer | `26iQMRCbUqtVBm2XC5SztLtJc8PPxgqiNMDrSqyGpxiZ` created with 999,647,480 lamports |
+| buffer | `26iQMRCbUqtVBm2XC5SztLtJc8PPxgqiNMDrSqyGpxiZ` created; the receipt records 999,647,481 lamports in it, one more than the ProgramData rent its creating transaction put in (section 3) |
 | writes | 198 sent, 198 confirmed, 0 signed again, 0 slow-downs, at one a second with a compute-unit limit of 2,670; 288 s; 1,053,286 lamports of fees with the creation |
 | deploy | one transaction by the Solana CLI (`solana-cli 4.1.2`), 10,297 lamports, slot 455,359,196 |
 | verify | the ProgramData holds the build byte for byte: 190,048 bytes, program hash `0154706c…891b58`; the upgrade authority is the deployer |
