@@ -678,7 +678,7 @@ the registrar gets neither (it uses a keyless RPC, below).
 | `RPC_URL` | | | S | | unset until `initialize_config` has landed, then `https://mainnet.helius-rpc.com/?api-key=<key>` |
 | `INGEST_INTERVAL_S` | | | - | | `300` between test sessions, `30` to `60` while recording (section 5); the code's default is 30 |
 | `SNAPSHOT_EVERY_N_POLLS` | | | - | | default `20`. The indexer scans the program's accounts when a poll finds a new transaction, and otherwise every Nth poll as a safety net (100 minutes at an interval of 300 s) |
-| `ORE_ROUNDS_SINCE` | | | - | | a unix time. Set it to about a day back on a new database: the default, 14 days, needs about 160 pages from api.ore.com in one poll, which ORE's API rate-limits (HTTP 429), and a poll that fails stores nothing (found on the live service on 2026-10-04) |
+| `ORE_ROUNDS_SINCE` | | | - | | a unix time; optional. It narrows how far back ORE's rounds are read (default 14 days). On 2026-10-04 the first read asked api.ore.com for all 14 days in one poll, got HTTP 429 and stored nothing; since 2026-10-10 the indexer reads `ORE_API_PAGES_PER_PASS` pages a pass (default 10), keeps each page, and takes a 429 as "later", so a first start finishes in about 22 passes (up to two hours at `INGEST_INTERVAL_S=300`; computed, not measured against the real API) |
 | `INDEXER_DATASET` | | | `mainnet` | | |
 | `TEAM_CRANKERS` | | | - | | `5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk` |
 | `CORS_ORIGIN` | | | `*` | | the API is public and read-only; or the dashboard's exact origin, with no trailing slash |

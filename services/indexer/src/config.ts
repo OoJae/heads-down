@@ -30,6 +30,11 @@ export interface Config {
   rpcMaxBackfill: number;
   oreApiEnabled: boolean;
   oreRoundsSince: number;
+  /**
+   * Requests to api.ore.com in one pass, the newest page included; 1 = the newest page only, which
+   * backfills nothing. ORE's API answers HTTP 429 to a client that asks for many pages in a row.
+   */
+  oreApiPagesPerPass: number;
   oreApiVerifySample: number;
   /** Market price sources for the haul, tried in order ([] = none). */
   marketSources: string[];
@@ -92,6 +97,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     rpcMaxBackfill: int(env, "RPC_MAX_BACKFILL", 5000, 0, 1_000_000),
     oreApiEnabled: env.ORE_API_ENABLED !== "0",
     oreRoundsSince: int(env, "ORE_ROUNDS_SINCE", Math.floor(Date.now() / 1000) - 14 * 86_400, 0, 4_102_444_800),
+    oreApiPagesPerPass: int(env, "ORE_API_PAGES_PER_PASS", 10, 1, 100),
     oreApiVerifySample: int(env, "ORE_API_VERIFY_SAMPLE", 3, 0, 100),
     marketSources: parseSources(env.MARKET_PRICE_SOURCES),
     resolveRounds: env.RESOLVE_ROUNDS !== "0",
@@ -122,6 +128,7 @@ export function describeConfig(c: Config): Record<string, unknown> {
     ingestIntervalS: c.ingestIntervalS,
     snapshotEveryPolls: c.snapshotEveryPolls,
     oreApi: c.oreApiEnabled,
+    oreApiPagesPerPass: c.oreApiPagesPerPass,
     marketSources: c.marketSources,
     roundResolver: c.resolveRounds,
   };

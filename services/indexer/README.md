@@ -17,8 +17,8 @@ verifiable traction API behind the [dashboard](../../dashboard).
   `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`, bump 249). ORE can recompute these from its own logs.
 - **heads_down accounts** (Rig, SeekerSeat, ShiftLog, Config) from `getProgramAccounts`. Each one is
   owner-checked and its address re-derived from its own contents with the canonical bump.
-- **ORE rounds** (`ResetEvent`) from api.ore.com. Each row keeps its reset transaction signature,
-  and a sample of rows is re-read from chain on every poll.
+- **ORE rounds** (`ResetEvent`) from api.ore.com, a few pages per pass. Each row keeps its reset
+  transaction signature, and a sample of rows is re-read from chain on every poll.
 
 Because heads_down is not deployed yet, a **deterministic simulation mode** generates realistic
 data for development and demos. That data is labelled and cannot mix with real data (see
@@ -29,7 +29,7 @@ data for development and demos. That data is labelled and cannot mix with real d
 ```bash
 cd services/indexer
 pnpm install
-pnpm test            # 385 tests: golden bytes, metrics math, cohorts, haul, store, sources, ingest loop, API
+pnpm test            # 477 tests: golden bytes, metrics math, cohorts, haul, store, sources, ORE's round list, ingest loop, API
 pnpm typecheck
 pnpm demo            # in-memory Postgres + simulated dataset + API on http://127.0.0.1:8787
 curl -s localhost:8787/v1/summary | jq .data.rigs
@@ -107,7 +107,7 @@ second implementation of the contract.
 | Simulated and real data never mix | `store/store.ts` binds one dataset; `(dataset, …)` primary keys; `runSimulation` refuses real datasets; the API is bound to one dataset | `store.test.ts` "isolates datasets", `simulate.test.ts` "refuses to write into a real dataset" |
 | A mainnet dataset cannot be fed from a devnet RPC | `loop.ts` genesis-hash check: before the first poll, and before the webhook stores anything | `loop.test.ts` "never ingests from an RPC on another cluster", `api.test.ts` "webhook stores nothing until the RPC's cluster is verified", `serve.test.ts` "stores nothing, by the poller or by the webhook, until the RPC shows the right cluster" (the real command) |
 | Only `finalized` commitment, so a fork cannot leave phantom digs | `sources/rpc.ts` | fake-RPC tests |
-| api.ore.com is spot-checked against the chain, and the chain wins | `sources/oreApi.ts` | "chain wins when api.ore.com disagrees" |
+| api.ore.com is spot-checked against the chain, and the chain wins (a pass whose RPC step failed stores its rounds unchecked) | `sources/oreApi.ts` | "chain wins when api.ore.com disagrees"; `oreApi.test.ts` "re-reads the newest new rounds of the pass from chain before they are stored…" |
 | Webhook: constant-time secret check, 5 MB cap, payload re-fetched from RPC | `sources/helius.ts`, `api/server.ts` | `sources.test.ts`, `api.test.ts` |
 | Secrets (RPC key, DB password) never logged or returned | `config.ts` `describeConfig`, `RpcError`; a provider's own error text is scrubbed of the URL, of any `api-key=` value and of the URL's keys (`sources/rpc.ts` `scrubRpcText`) | "never leaks the URL's API key", "scrubs a provider's error text…", "scrubs a key that sits in the URL's path" |
 | CSV formula injection is neutralised | `api/csv.ts` | `api.test.ts` |
@@ -115,28 +115,34 @@ second implementation of the contract.
 
 ### Ingest loop and RPC use
 
-`serve` and `ingest` run one pass every `INGEST_INTERVAL_S` (`src/loop.ts`):
+`serve` and `ingest` run one pass every `INGEST_INTERVAL_S` (`src/loop.ts`). A pass has two steps:
+the RPC's (1 to 4 below) and api.ore.com's (5).
 
 1. **Cluster check.** With `RPC_URL` set and a `mainnet` or `devnet` dataset, the RPC's genesis hash
-   must match the dataset's cluster before anything is ingested, by the poller or by the webhook
-   (`localnet` has no pinned hash and is not checked). A check that fails (wrong cluster, RPC down,
-   credits used up) is logged as `ingest error` and tried again at the next interval. Once it has
-   passed it is not repeated.
+   must match the dataset's cluster before the poller reads anything else from that RPC and before
+   the webhook stores anything (`localnet` has no pinned hash and is not checked). A check that
+   fails (wrong cluster, RPC down, credits used up) is logged as `ingest error` and tried again at
+   the next interval. Once it has passed it is not repeated.
 2. **Signatures.** `getSignaturesForAddress` for the program id and for the Executor PDA (two
    calls), then one `getTransaction` per new signature whose transaction succeeded.
 3. **Account snapshot.** Four `getProgramAccounts` scans. Taken on the first poll after start, on
    every poll that finds a new transaction that succeeded, and otherwise every
    `SNAPSHOT_EVERY_N_POLLS` polls (default 20; 1 = every poll).
-4. **ORE rounds.** The resolver reads the Round account of each round a rig dug in (and its reset
+4. **Round resolver.** It reads the Round account of each round a rig dug in (and its reset
    transaction where no ResetEvent has arrived), and calls nothing while no round is waiting.
-   api.ore.com needs no RPC; up to `ORE_API_VERIFY_SAMPLE` of its new rounds per pass are re-read
-   from chain with `getTransaction`.
+5. **ORE rounds from api.ore.com** (mainnet dataset only). No RPC is needed for it. At most
+   `ORE_API_PAGES_PER_PASS` requests a pass; see [the next section](#ore-rounds-from-apiorecom).
+   Up to `ORE_API_VERIFY_SAMPLE` of its new rounds per pass are re-read from chain with
+   `getTransaction`, in a pass whose RPC step went through.
 
-A pass that fails, at any step, is logged and tried again at the next interval. It does not end the
-process: the API keeps serving what is stored (`serve.test.ts` runs the real command against an RPC
-that refuses connections). `ingest --once` still exits with a non-zero code when its pass fails
-(`serve.test.ts` runs that command too). With `RPC_URL` unset there is no chain ingestion and no RPC
-call; ORE rounds still come from api.ore.com.
+A step that fails is logged as `ingest error`, with `step` set to `rpc` or `ore-api`, and does not
+keep the other from running: api.ore.com is asked while the RPC is down or on another cluster, and
+the RPC is polled while api.ore.com answers with an error (`loop.test.ts`, "the two steps of a
+pass"). The pass is failed if either step failed, and is tried again at the next interval. It does
+not end the process: the API keeps serving what is stored (`serve.test.ts` runs the real command
+against an RPC that refuses connections). `ingest --once` still exits with a non-zero code when its
+pass fails (`serve.test.ts` runs that command too). With `RPC_URL` unset there is no chain ingestion
+and no RPC call; ORE rounds still come from api.ore.com.
 
 **Why a new signature is enough to ask for the snapshot.** The scans read accounts owned by the
 heads_down program. Only the owning program can change an account's data, give a new account its
@@ -205,7 +211,7 @@ and 9 `getMultipleAccounts` calls in 9 passes.
 for the next query. Only the error's message is logged: the error object node-postgres hands over
 carries the client, and with it the database password. `db.test.ts` checks this with the real `pg`
 driver against a stand-in server that speaks the wire protocol and drops its connections the way a
-shutdown does.
+shutdown does. The pool's line is a warning (no query failed), the client's an error.
 
 The node-postgres path as a whole was run by hand on 2026-10-04 against PGlite behind the Postgres
 wire protocol (`@electric-sql/pglite-socket` 0.2.11, which is not a dependency of this package).
@@ -216,6 +222,134 @@ stand-in RPC gave the same API answers as the embedded engine, apart from the ti
 reached through the driver. A Postgres server, with its authentication, its own concurrency and
 Railway's version, has still not been used: none is available where the suite runs, so the first
 deployment is the first run against one.
+
+### ORE rounds from api.ore.com
+
+`/events/reset` lists ORE's rounds newest first, 100 to a page: about two hours of rounds.
+The API is ORE's, and it answers HTTP 429 to a client that asks for many pages in a row. On
+2026-10-04 the live indexer asked for the pages of its whole 14-day backfill in one pass, was
+turned away past page 100, stored nothing, and started again at page 0 five minutes later. A pass
+now asks for a few pages and keeps them (`src/sources/oreApi.ts`):
+
+- **A page budget.** At most `ORE_API_PAGES_PER_PASS` requests a pass (default 10; 1 to 100), a
+  second apart. Each page is stored when it arrives, in one transaction with the note of which
+  round ids have been read (cursor `ore-api`/`covered`), so a later page that fails loses nothing.
+- **The newest first.** Page 0, then the newest round id still missing below what is stored, and
+  so on. That closes the head (the rounds that arrived since the last pass), then any range an
+  earlier pass left open, and then goes on with the backfill where it stopped, until a round older
+  than `ORE_ROUNDS_SINCE` (default: 14 days before the process started) or the end of the list.
+- **No saved page number.** Every new round moves the older ones one place down the list, so the
+  page a round is on keeps changing. The page to ask for is worked out from the round ids of the
+  page read last, and a page is taken for the ids it holds. A page that overlaps an earlier one
+  only repeats rounds, and a round is stored once.
+- **Nothing left open without saying so.** When the newest stored round is further away than the
+  budget reaches (the indexer was off for a day), the range between stays open: the pass reports it
+  (`gaps` in its log line) and the next passes close it before they go further back.
+
+**What a first start on an empty database asks of ORE's API.** The first pass reads the 10 newest
+pages; every later pass reads the newest page and 9 older ones. The default 14 days are 16,000 to
+19,000 rounds, by how long a round takes: 18 passes and 175 requests at 77 s (the list on
+2026-10-04), 19 passes and 187 requests at 72 s (the average from 2026-08-11 to 2026-09-29, worked
+out from the round ids and dates in `ml/forecaster/RESULTS.md`), 22 passes and 212 requests at
+64 s (the newest page on 2026-10-10).
+At `INGEST_INTERVAL_S=300` that is an hour and a half to two hours, at 30 a quarter of an hour to
+twenty minutes: the intervals between the passes plus the passes themselves (ten requests, a
+second apart, plus the time the API takes to answer). The pass and request counts are tested
+(`oreApi.test.ts`, "a first start"); the times are computed, not measured against the real API.
+After the backfill a pass asks for the newest page only. `ORE_ROUNDS_SINCE` narrows it: one day
+back is 13 to 15 requests in two passes. Moving it back later reads the rounds between; moving it
+forward reads nothing more and deletes nothing.
+
+**Turned away.** HTTP 429, a 5xx, a timeout or a connection that fails end the ORE step of that
+pass. That is not an ingest error: what the pass stored stays, its log line says where it stopped
+(`stopped`), and the next pass goes on from there. A `Retry-After` in the answer is kept, up to an
+hour, and no request is made before it has passed (`waiting` in the log line). The wait is one
+second longer than the answer asks for, because the clock it is compared with counts whole
+seconds. A wait of more than an hour found in the database, as a clock that was set back would
+leave one, is not kept. Only when
+api.ore.com turns away three passes in a row, and none gets further than the one before, is the
+pass failed: `ingest error` and `lastPollOk: false`, until a pass gets through. Three passes span
+ten minutes at `INGEST_INTERVAL_S=300` and one minute at 30, so at a short interval a limit that
+holds for longer than that shows as failed passes until it lifts; the backfill then goes on
+(`oreApi.test.ts`, "finishes a 14-day backfill against an API with a request limit"). Any other
+answer (a 4xx, a body that is not the list, a page of which no item decodes) is an error at once.
+Without a `Retry-After` the indexer asks again at the next pass, starting with the newest page: one
+request if it is still turned away.
+
+**What the list does not give.** A round that one page skips between two neighbours is recorded as
+`ORE_API_GAP` in `/v1/health`'s problems, logged as `ore rounds: not listed by api.ore.com`, and not
+asked for again. An item that does not decode is recorded too (`BAD_FIELD`); its round counts as
+read when its round id is readable and lies between rounds of the same page that do decode, and
+the id of such an item is never taken for the page's place in the list. A page of which no item
+decodes is another matter: the API's items have changed shape, or the answer is not the list. That
+is an `ingest error` at once and nothing of the page is noted as read, so its rounds are read once
+they decode again. `ml/forecaster/RESULTS.md` counts 18 rounds missing from the list in 8 gaps
+between 2026-08-11 and 2026-09-29. A round that should sit exactly between two pages stays open
+until new rounds have moved it inside a page. A round a rig dug in does not depend on any of this:
+the resolver reads it from chain.
+
+**Where the list ends.** A page that comes back empty right after the last page was read is taken
+for the end of the list: the pass says `backfill: done` with `listEnd`, the oldest round it has.
+ORE's list reaches much further back than 14 days (its page 2,000 held rounds of April 2026 on
+2026-10-10), so with the default `ORE_ROUNDS_SINCE` a `listEnd` in the log means that the API gave
+an empty page where rounds are. That answer is believed for an hour and not for good: then a pass
+asks for the place again, and goes on with the backfill when it holds rounds. While it is believed
+with stored rounds below it, the pass says `running` and counts the gap. A list that does end is
+asked again every hour, the last page and the page after it.
+
+**The `ore rounds` log line**, one per pass:
+
+| Field | What |
+|---|---|
+| `stored` | rounds this pass read for the first time and wrote |
+| `verified`, `mismatches` | of the spot-checked rounds, how many were found on chain, and how many of those the chain corrected |
+| `pages` | pages api.ore.com answered in this pass |
+| `newest` | the newest round id it listed |
+| `backTo` | reset time of the oldest round of the unbroken run that ends at the newest |
+| `backfill` | `running`, or `done` once that run reaches `ORE_ROUNDS_SINCE` or the end of the list |
+| `listEnd` | only when it is `done` at the end of the list and not at `ORE_ROUNDS_SINCE`: the oldest round it has. Believed for an hour, then asked for again |
+| `gaps` | open ranges inside what has been read; left out when there is none |
+| `stopped`, `retryAfterS`, `stalledPasses`, `waiting` | only when api.ore.com turned the pass away: what it answered and where, the seconds until it is asked again, how many passes in a row that makes, and whether this pass asked nothing at all |
+
+**Tested, and not.** All of this runs against a stand-in for the API (`test/oreStandIn.ts`), in
+process and, for the real `serve` command, over HTTP (the service has no setting for the API's
+address; the test starts it with `--import test/redirectOreApi.ts`, which sends its requests for
+api.ore.com to the stand-in): the budget, a 429 half way and the pass after it, the list moving
+between and during passes, a head gap larger than the budget, the `since` bound, `Retry-After`,
+items that do not decode, a page of which none does, rounds left out, an empty or a short page
+where rounds are, and 24 seeded runs that mix all of these.
+The real API was asked by hand on two days, a few pages each. On 2026-10-04 pages 0 and 60 held
+100 rounds each with consecutive ids, and page 60 began exactly 6,000 ids below page 0. On
+2026-10-10 (three requests, three seconds apart) page 0 held 100 consecutive rounds, 64 s apart on
+average; page 2,000 held 100 rounds of April 2026 and began 28 ids further down than 200,000 below
+page 0; page 1,000,000 was answered with HTTP 200 and an empty list. Not known: how many requests
+it allows in what time, whether its 429 carries a `Retry-After`, and whether it ever answers with
+an empty or a short page where rounds are (the stand-in is made to; the real API was not seen
+to). A database written by the code
+before this (cursor `ore-api`/`newest-round`) is taken over: the unbroken run of stored rounds that
+ends at that cursor counts as read. One process per dataset is assumed to read api.ore.com. A
+second one would cost requests, not rounds: each rereads what the other's note leaves out (tested
+by putting an older note back, not with two processes).
+
+### Logs
+
+One JSON object per line: `t` (the time), `level`, `msg`, then the message's own fields
+(`src/log.ts`). `info` lines are written to stdout, `warn` and `error` lines to stderr. Before,
+every line went to stderr without a level, and Railway showed `api listening` as an error: its log
+viewer takes the severity from a JSON line's `level`, and from the stream when there is none
+(stdout is info, stderr is error; Railway's documentation, read 2026-10-04). No deployment was
+looked at after this change, and that documentation does not say which of the two wins for a
+`warn` line on stderr.
+
+| Level | Messages |
+|---|---|
+| `info` | `api listening`, `rpc poll`, `ore rounds`, `ore rounds resolved`, `migrations applied`, the simulator's lines |
+| `warn` | `rpc: transaction not yet available, will retry`; `webhook: refused, the RPC's cluster is not verified`; `ore rounds: not listed by api.ore.com`; `pg pool error` |
+| `error` | `ingest error` (with `step`: `rpc` or `ore-api`), `ingest: poll outcome not stored`, `ingest stopped`, `api: internal error`, `pg client error`, `fatal` |
+
+What a line may carry has not changed: hosts, counts and messages, never the RPC URL's key, the
+webhook secret or the database password. `serve.test.ts` looks for the key and the secret in both
+streams of the real command; `db.test.ts` looks for the password in what the database layer logs.
 
 ## API
 
@@ -242,16 +376,20 @@ so it shows that the API is up, not that data is arriving. For that, read the po
 are unix seconds, like the envelope's `asOf`):
 
 - `lastPollAt` and `lastPollOk`: when the last ingest pass finished, and whether it succeeded. A
-  pass covers the sources that are configured (the RPC poll only when `RPC_URL` is set).
-  `asOf - lastPollAt` growing past a few intervals means the loop has stopped or a pass is stuck;
-  `lastPollOk: false` means passes run and fail (RPC down, credits used up, wrong cluster). The
-  reason is in the log line `ingest error`, not in the response.
+  pass covers the sources that are configured (the RPC poll only when `RPC_URL` is set), and it
+  failed if either of its steps did. `asOf - lastPollAt` growing past a few intervals means the
+  loop has stopped or a pass is stuck; `lastPollOk: false` means passes run and fail (RPC down,
+  credits used up, wrong cluster, or api.ore.com turning the indexer away three passes in a row).
+  The reason is in the log line `ingest error`, not in the response.
 - `lastOkPollAt`: when the last successful pass finished.
 - All three are null until a pass has finished for the dataset, and always for `simulated`. They
   are stored with the cursors, so they survive a restart and a separate `ingest` process fills them too.
 - What they do not show: a pass that stops early because the RPC lists a transaction it does not
   serve yet counts as succeeded (log line `rpc: transaction not yet available, will retry`). If the
-  RPC never served it, `lastPollOk` would stay true while nothing new was stored.
+  RPC never served it, `lastPollOk` would stay true while nothing new was stored. A pass that
+  api.ore.com turned away once or twice counts as succeeded as well, and so does every pass of a
+  backfill that is still running: how far the ORE rounds reach is in the `ore rounds` log line
+  (`backTo`, `backfill`), not in the response.
 
 `lastSlot` and `lastBlockTime` belong to the newest stored transaction. They are null before the
 first one and stand still whenever nothing lands on chain, so they say nothing about a stalled
@@ -321,11 +459,21 @@ pnpm typecheck   # tsc --noEmit, strict
 - `sources.test.ts`: RPC retry and secret redaction (a provider's error text included), polling cursors, when the account
   snapshot is taken and when it is skipped, that it stays owed after a poll that failed half way, api.ore.com parsing and
   chain override, webhook.
-- `loop.test.ts`: the ingest loop against a fake RPC: the genesis-hash check is retried, nothing is ingested before it
-  passes, a wrong cluster never ingests, a failed pass does not end the loop, `--once` still fails.
+- `oreApi.test.ts`: reading ORE's round list against a stand-in for api.ore.com (`oreStandIn.ts`): the page budget and
+  the pause, a refusal half way and the pass after it, the list moving between and during passes, a head gap larger than
+  the budget, rounds that come twice, the `since` bound, `Retry-After`, items that do not decode, a page of which none
+  does, rounds the list leaves out, the end of the list and an empty page where rounds are, the spot check, 24 seeded
+  runs that mix these, and the passes and requests of a first start.
+- `loop.test.ts`: the ingest loop against a fake RPC and a fake api.ore.com: the genesis-hash check is retried, nothing
+  is read from the RPC before it passes, a wrong cluster never ingests, a failed pass does not end the loop, `--once`
+  still fails; a step that fails does not keep the other from running, and a pass that api.ore.com turns away is failed
+  only at the third in a row.
 - `serve.test.ts`: the real commands as processes. `serve` with an RPC that refuses connections stays up and `/v1/health`
   reports the failed pass; `serve` with an RPC on another cluster stores nothing, by the poller or by the webhook, until the
-  RPC shows the right one; `ingest --once` exits with code 1 when its pass fails and 0 when it succeeds.
+  RPC shows the right one; `ingest --once` exits with code 1 when its pass fails and 0 when it succeeds; `serve` without
+  an RPC, turned away half way by a stand-in for api.ore.com over HTTP, waits as told and finishes in the passes that
+  follow. Every log line has its level, info lines on stdout and the others on stderr.
+- `log.test.ts`: the log line (one JSON object, `t`, `level` and `msg` first) and the stream each level is written to.
 - `db.test.ts`: a lost Postgres connection is logged and does not end the process (the real `pg` driver against a
   stand-in server; no Postgres involved).
 - `simulate.test.ts`: determinism, and a full ingest with zero problems and consistent metrics.
@@ -342,4 +490,17 @@ pnpm typecheck   # tsc --noEmit, strict
 - Between new transactions the account snapshot is refreshed every `SNAPSHOT_EVERY_N_POLLS` polls:
   with the default of 20 that is 10 minutes at `INGEST_INTERVAL_S=30` and 100 minutes at 300. That
   is how old the accounts can get in the three cases listed under "Ingest loop and RPC use".
+- ORE rounds that api.ore.com delivers in a pass whose RPC step failed, or with no `RPC_URL` at
+  all, are stored without the on-chain spot check, and no later pass checks them.
+- How far the ORE backfill has come is in the `ore rounds` log line only. `/v1/health` does not
+  show it, and `/v1/share-by-hour` counts the rounds that have arrived so far (its `rounds` field).
+- An item of ORE's list that does not decode among items that do, and a round the list leaves out,
+  are recorded once and not asked for again: if the API served that round whole later, it would
+  not be read. A value of the cursor `ore-api`/`covered` that this code did not write (an empty
+  text, say) reads as nothing read: the indexer then reads the list again from the newest page, at
+  its page budget, and keeps the rounds it has.
+- The cursor `ore-api`/`newest-round` of the code before the page budget is no longer written. A
+  deployment rolled back to that code would walk the list in one pass from page 0 down to where
+  that cursor stood, or back to `ORE_ROUNDS_SINCE` on a database that never had it: the burst of
+  2026-10-04 again. This is read from that code, not tested.
 - The contract gaps and the choices made for them are in [INTERFACE-NOTES.md](INTERFACE-NOTES.md).

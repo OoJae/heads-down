@@ -350,7 +350,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | `p256-introspect` | 30 passed | re-run 2026-10-03 |
   | `sgt-verify` (host suites) | 69 passed, plus LiteSVM suites | `crates/sgt-verify/README.md` |
   | secp256r1 spike | 16/16 LiteSVM, 9/9 on a real validator | `spikes/secp256r1/README.md` |
-  | Indexer | 385 passed | re-run 2026-10-04 |
+  | Indexer | 477 passed | re-run 2026-10-10 |
   | Dashboard | 48 passed | re-run 2026-10-03 |
   | Android | 855 JVM unit tests | re-run 2026-10-04 |
   | End to end, local fork of mainnet | clock-in, dig, lift, replay refused, indexed | `docs/DEVSTACK.md` |

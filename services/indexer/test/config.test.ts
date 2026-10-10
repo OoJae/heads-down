@@ -13,12 +13,26 @@ describe("config", () => {
     expect(describeConfig(loadConfig({ SNAPSHOT_EVERY_N_POLLS: "7" }))).toMatchObject({ snapshotEveryPolls: 7, ingestIntervalS: 30 });
   });
 
+  it("asks api.ore.com for ten pages a pass unless ORE_API_PAGES_PER_PASS says otherwise", () => {
+    expect(loadConfig({}).oreApiPagesPerPass).toBe(10);
+    expect(loadConfig({ ORE_API_PAGES_PER_PASS: "1" }).oreApiPagesPerPass).toBe(1);
+    expect(loadConfig({ ORE_API_PAGES_PER_PASS: "100" }).oreApiPagesPerPass).toBe(100);
+    // 0 would never read the newest page; past 100 a pass is the burst that ORE's API turned away.
+    for (const bad of ["0", "-1", "101", "2.5", "many"]) expect(() => loadConfig({ ORE_API_PAGES_PER_PASS: bad }), bad).toThrow(/ORE_API_PAGES_PER_PASS/);
+    expect(describeConfig(loadConfig({ ORE_API_PAGES_PER_PASS: "4" }))).toMatchObject({ oreApi: true, oreApiPagesPerPass: 4 });
+    // The default bound of the backfill: 14 days before the process started.
+    const since = loadConfig({}).oreRoundsSince;
+    expect(Math.abs(since - (Math.floor(Date.now() / 1000) - 14 * 86_400))).toBeLessThanOrEqual(2);
+  });
+
   it("lists every variable it reads in both .env.example files", () => {
     // Every name loadConfig looks up, recorded by the environment object itself.
     const read = new Set<string>();
     loadConfig(new Proxy({}, { get: (_t, name) => (typeof name === "string" && read.add(name), undefined) }) as NodeJS.ProcessEnv);
-    expect(read.size).toBeGreaterThanOrEqual(21);
-    expect([...read]).toEqual(expect.arrayContaining(["RPC_URL", "INGEST_INTERVAL_S", "SNAPSHOT_EVERY_N_POLLS", "MARKET_PRICE_SOURCES", "RESOLVE_ROUNDS", "RESOLVE_MAX_ROUNDS", "RESOLVE_RESET_LOOKUPS"]));
+    expect(read.size).toBeGreaterThanOrEqual(22);
+    expect([...read]).toEqual(
+      expect.arrayContaining(["RPC_URL", "INGEST_INTERVAL_S", "SNAPSHOT_EVERY_N_POLLS", "MARKET_PRICE_SOURCES", "ORE_API_PAGES_PER_PASS", "RESOLVE_ROUNDS", "RESOLVE_MAX_ROUNDS", "RESOLVE_RESET_LOOKUPS"]),
+    );
     for (const file of ["../.env.example", "../../../deploy/railway/indexer/.env.example"]) {
       // A variable is listed when a line sets it, or shows it commented out.
       const listed = new Set([...readFileSync(new URL(file, import.meta.url), "utf8").matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]));

@@ -49,7 +49,7 @@ built; the Stack and Gift screens are not yet.
 | [`crates/p256-introspect`](crates/p256-introspect/README.md) | secp256r1 precompile introspection and Android Keystore signature helpers |
 | [`crank`](crank/README.md) | The permissionless crank: takes the phones' heartbeats, lands digs, BREAK and FREEZE, Stack check-ins. 213 tests, plus 14 against the real program on the fork and one end to end on a local validator |
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains |
-| [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 385 tests |
+| [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 477 tests |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain |
 | [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
