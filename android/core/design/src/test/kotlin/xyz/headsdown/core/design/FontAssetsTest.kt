@@ -3,8 +3,12 @@ package xyz.headsdown.core.design
 import android.content.Context
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.ResourceFont
+import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.core.content.res.ResourcesCompat
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -99,6 +103,35 @@ class FontAssetsTest {
         // The mono face: every character 0.6em.
         val mono = Paint().apply { typeface = typeface(R.font.ibm_plex_mono_regular); textSize = em }
         for (ch in listOf("0", "1", "W", ".", " ")) assertEquals(ch, 0.6f, mono.measureText(ch) / em, 0.005f)
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun `Compose resolves each family to its bundled file, and to the nearest one for a weight that is not there`() {
+        val resolver = createFontFamilyResolver(context)
+        // As the styles ask: no synthesis, so a weight that is missing is never a smeared copy.
+        fun resolved(family: FontFamily, weight: FontWeight): Typeface =
+            resolver.resolve(family, weight, FontStyle.Normal, FontSynthesis.None).value as Typeface
+
+        assertEquals(800, resolved(HdFonts.Display, FontWeight.ExtraBold).weight)
+        assertEquals(400, resolved(HdFonts.Mono, FontWeight.Normal).weight)
+        assertEquals(500, resolved(HdFonts.Mono, FontWeight.Medium).weight)
+        // The display face has one weight: whatever an old layout asks for, it draws that one.
+        for (asked in listOf(FontWeight.Normal, FontWeight.Bold, FontWeight.Black)) {
+            assertEquals("display at ${asked.weight}", 800, resolved(HdFonts.Display, asked).weight)
+        }
+        // A bold mono label (the reveal's sample badge) is the Medium file.
+        assertEquals(500, resolved(HdFonts.Mono, FontWeight.Bold).weight)
+
+        // And it is the bundled face that Compose hands back, not a platform stand-in: the
+        // display face's narrow "1", the mono face's one width for everything.
+        val em = 1000f
+        val display = Paint().apply { typeface = resolved(HdFonts.Display, FontWeight.ExtraBold); textSize = em }
+        assertEquals(0.47f, display.measureText("0") / em, 0.02f)
+        assertEquals(0.26f, display.measureText("1") / em, 0.02f)
+        val mono = Paint().apply { typeface = resolved(HdFonts.Mono, FontWeight.Medium); textSize = em }
+        assertEquals(mono.measureText("1"), mono.measureText("W"), 0.5f)
+        assertEquals(0.6f, mono.measureText("0") / em, 0.005f)
     }
 
     private fun typeface(id: Int): Typeface = checkNotNull(ResourcesCompat.getFont(context, id))
