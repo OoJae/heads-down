@@ -84,7 +84,7 @@ Four services on Railway, all against mainnet, and a Postgres with no public por
 | Service | Address | On 10 October 2026 |
 |---|---|---|
 | crank | <https://crank-production-21c2.up.railway.app> (`/healthz`, `/metrics`; the phones' intake is `wss://crank-production-21c2.up.railway.app/ws`) | built by Railway from `deploy/railway/crank/Dockerfile`; started at 18:48:47 with the fee payer [`5Xec1ZUw…`](https://solscan.io/account/5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk) |
-| indexer | <https://indexer-production-88dc.up.railway.app> | reads the chain through Helius since 17:36; the fix to its ORE round backfill is live, and the `ORE_ROUNDS_SINCE` override it needed before is removed |
+| indexer | <https://indexer-production-88dc.up.railway.app> | reads the chain through Helius since 17:36; the fix to its ORE round backfill is live, and its `ORE_ROUNDS_SINCE` override is removed |
 | dashboard | <https://dashboard-production-b80c.up.railway.app> | the public numbers, from the indexer |
 | registrar | <https://registrar-production-71d0.up.railway.app> | attested the rig key of the phone below |
 

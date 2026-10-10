@@ -296,9 +296,9 @@ the network up to 50,000, where the same transactions would have cost about 12,6
 lamports lost per dig at a price of 1,000, 4,028 to 4,082 at 20,000 and about 5,600 to 5,700 at
 the cap, and the default caps allow
 at most 20 digs a shift. At a price of 1,000 the reimbursement
-covers the fee from three rigs per transaction up (crank/README.md, measured on the fork). At the
-20,000 the service has run with since 10 October it does so only for a full batch of five fresh
-heartbeats, and then barely: about 6,760 to 7,040 lamports a rig against the 7,000 (computed for
+covers the fee from three rigs per transaction up (crank/README.md, from the fork's figures). At
+the 20,000 the service has run with since 10 October only a full batch of five fresh heartbeats
+comes near it: about 6,760 to 7,040 lamports a rig against the 7,000 (computed for
 a compute-unit limit of 38,000 to 52,000 a rig; no transaction with more than one rig has run on
 mainnet). Never reimbursed: a dig
 that lands after its round or twice (10,038 to 11,042 lamports each on 10 October), the
@@ -812,7 +812,7 @@ founder checklist, step 11.
 | `RPC_URL` | | | S | | unset until `initialize_config` has landed, then `https://mainnet.helius-rpc.com/?api-key=<key>` (set since 2026-10-10, 17:36 UTC) |
 | `INGEST_INTERVAL_S` | | | - | | `300` between test sessions, `30` to `60` while recording (section 5); the code's default is 30 |
 | `SNAPSHOT_EVERY_N_POLLS` | | | - | | default `20`. The indexer scans the program's accounts when a poll finds a new transaction, and otherwise every Nth poll as a safety net (100 minutes at an interval of 300 s) |
-| `ORE_ROUNDS_SINCE` | | | - | | a unix time; optional. It narrows how far back ORE's rounds are read (default 14 days). On 2026-10-04 the first read asked api.ore.com for all 14 days in one poll, got HTTP 429 and stored nothing; since 2026-10-10 the indexer reads `ORE_API_PAGES_PER_PASS` pages a pass (default 10), keeps each page, and takes a 429 as "later", so a first start finishes in about 22 passes (up to two hours at `INGEST_INTERVAL_S=300`; computed, not measured against the real API). The service had this override until that fix went live on 2026-10-10; it is removed |
+| `ORE_ROUNDS_SINCE` | | | - | | a unix time; optional. It narrows how far back ORE's rounds are read (default 14 days). On 2026-10-04 the first read asked api.ore.com for all 14 days in one poll, got HTTP 429 and stored nothing; since 2026-10-10 the indexer reads `ORE_API_PAGES_PER_PASS` pages a pass (default 10), keeps each page, and takes a 429 as "later", so a first start finishes in about 22 passes (up to two hours at `INGEST_INTERVAL_S=300`; computed, not measured against the real API). The service carried this override; with that fix live it was removed on 2026-10-10 |
 | `INDEXER_DATASET` | | | `mainnet` | | |
 | `TEAM_CRANKERS` | | | - | | `5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk` |
 | `CORS_ORIGIN` | | | `*` | | the API is public and read-only; or the dashboard's exact origin, with no trailing slash |
