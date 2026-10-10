@@ -50,8 +50,8 @@ head -c <so.len> /tmp/heads_down.onchain.so | shasum -a 256                     
 Those compare the chain with the receipt. They do not compare either with the source: the build
 is not reproducible across directories. `git checkout <build.git_commit>` and
 `bash programs/heads-down/scripts/build.sh` gave `so.sha256` only in the checkout the deployed
-file was built in. On 10 October 2026 the same sources and toolchain gave two other hashes in
-two other directories of the same machine, each for a file of the same 190,048 bytes
+file was built in. On 10 October 2026 the same sources and toolchain gave three other hashes in
+three other directories of the same machine, each for a file of the same 190,048 bytes
 ([docs/MAINNET.md](../../docs/MAINNET.md#check-it-yourself)). No build in a pinned container
 has been set up.
 

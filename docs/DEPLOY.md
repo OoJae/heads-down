@@ -610,9 +610,10 @@ receipt's `onchain.program_hash`, and the first 190,048 bytes of
 **Rebuilding does not check the source against those bytes, except in one place.** The recorded
 commit, built with the recorded toolchain, gives `so.sha256` in the directory the deployed file
 was built in (the preflight of 4 October in section 6 printed the same hash there). In another
-directory it does not. On 10 October 2026 the same sources built in two other directories of the same machine
-gave two more files of 190,048 bytes with other hashes; one was compared with the deployed file
-and differs in 968 bytes (MAINNET.md). Why the directory changes the output was not
+directory it does not. On 10 October 2026 the same sources built in three other directories of
+the same machine gave three more files of 190,048 bytes with three other hashes; one was
+compared with the deployed file and differs in 968 bytes, and one was built twice and gave its
+own hash both times (MAINNET.md). Why the directory changes the output was not
 investigated, and no build in a pinned container, which a third party could repeat, has been
 set up. Until one is, a signer of an upgrade (section 14) can compare a buffer with the
 receipt, and cannot confirm the receipt's hash from the source on another machine.

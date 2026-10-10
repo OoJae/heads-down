@@ -30,6 +30,7 @@ evening recorded in [MAINNET.md](MAINNET.md): one rig, the founder's own phone, 
 | Push and presence (FCM), rooms | **Not built** |
 | Jupiter quote proxy and the buy leg | **Partly.** The buy leg's transactions are built and tested against recorded Jupiter quotes; the quote proxy is not built and the app does not offer the leg |
 | Upgrade authority: Squads multisig behind a 72 h timelock | **Not so.** One keypair held by the founder, no delay on program upgrades. On mainnet since the deploy of 10 October 2026 that key is `9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW`. Config changes and governance rotation are behind a 72 h on-chain timelock (INTERFACE §12.3); pausing is immediate |
+| Verified builds: anyone can compare a pending buffer, or the deployed program, with the source | **Not so.** Anyone can compare the chain with the deploy's receipt, which holds the hash of the file that was deployed. Rebuilding the source gives that hash only in the directory of the first build: on 10 October 2026 three other directories of the same machine gave three other hashes. No build in a pinned container exists ([MAINNET.md](MAINNET.md#check-it-yourself)) |
 | In-app banner for a pending upgrade or config change | **Not built** |
 | Published attestation transcripts | **Partly.** The registrar keeps an append-only log file; nothing yet lets a third party check it against the chain |
 | API domain pinned to its CA | **Not built.** TLS with the system trust store |

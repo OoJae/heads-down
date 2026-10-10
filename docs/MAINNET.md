@@ -374,7 +374,9 @@ since commit `d67a1a40c2a0`, and no source file),
 built with the same toolchain (`cargo-build-sbf 4.1.0`) in two other directories of the same
 machine, gave two more files of 190,048 bytes with other hashes (`22098a39…2019` and
 `f11be448…071c`). The first differs from the deployed file in 968 bytes at 106 places; the ones
-looked at are call offsets. Why the directory changes the output was not investigated. In the
+looked at are call offsets. A third directory gave a fourth hash (`88a33dc5…c4aa`), and the same
+one again when it was built there a second time: the build repeats inside a directory and not
+across directories. Why the directory changes the output was not investigated. In the
 founder's checkout the build gave `07dd870a…` on 4 October and again for the deploy. So the link
 from the source to the deployed bytes rests on that one checkout today. This repository records
 no build in a pinned container, which a third party could repeat.

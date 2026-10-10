@@ -54,10 +54,11 @@ built; the Stack and Gift screens are not yet.
 | [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests. One short shift on one physical phone, on mainnet, on 10 October 2026 |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
-**Live on mainnet since 10 October 2026.** The program is deployed at
+**Deployed on mainnet on 10 October 2026.** The program is at
 [`HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`](https://solscan.io/account/HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p)
-(slot 455,359,196, built from commit `d67a1a40c2a0`; the 190,048 bytes on-chain are exactly that
-build). Its Config is initialized and its Executor PDA holds its float. The crank, the registrar,
+(slot 455,359,196, built from commit `d67a1a40c2a0`; the 190,048 bytes on-chain are exactly the
+file that was built for the deploy, and a rebuild in another directory does not give its hash:
+[docs/MAINNET.md](docs/MAINNET.md#check-it-yourself)). Its Config is initialized and its Executor PDA holds its float. The crank, the registrar,
 the indexer and the dashboard run on Railway against it. [docs/MAINNET.md](docs/MAINNET.md) is the
 record: every address and transaction, what it cost, what went wrong and how to check each
 statement yourself; the deploy's receipts are in [deploy/receipts/mainnet/](deploy/receipts/mainnet/).
