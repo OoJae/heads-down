@@ -1,0 +1,79 @@
+{
+  "buffer_write": {
+    "authority": "9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW",
+    "buffer": "26iQMRCbUqtVBm2XC5SztLtJc8PPxgqiNMDrSqyGpxiZ",
+    "buffer_lamports": 999647481,
+    "chunk_bytes": 960,
+    "chunks_already_written": 0,
+    "chunks_left": 0,
+    "chunks_total": 198,
+    "cluster": "mainnet",
+    "compute_unit_limit": 2670,
+    "created": true,
+    "cu_price_micro_lamports": 100000,
+    "fees_lamports": 1053286,
+    "last_slot": 455359145,
+    "mode": "fresh",
+    "rate_per_second": 1.0,
+    "recorded_at": "2026-10-10T18:46:44Z",
+    "schema": "heads-down/buffer-write/v1",
+    "seconds": 288,
+    "signed_again": 0,
+    "slow_downs": 0,
+    "so": {
+      "len": 190048,
+      "sha256": "07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d"
+    },
+    "transactions_landed": 198,
+    "transactions_sent": 198,
+    "verified": true
+  },
+  "build": {
+    "buffer_written_by": "hd-devstack-write-buffer",
+    "build_script": "programs/heads-down/scripts/build.sh",
+    "cargo_build_sbf": "cargo-build-sbf 4.1.0 platform-tools v1.54 rustc 1.89.0",
+    "cargo_features": "mainnet",
+    "cu_price_micro_lamports": "100000",
+    "git_commit": "d67a1a40c2a0bece7b9a1dc8736527c1a3d8654c",
+    "git_dirty": "0",
+    "preflight": "GO",
+    "solana_cli": "solana-cli 4.1.2 (src:182084b8; feat:c763ae0a, client:Agave)"
+  },
+  "cli_phase": {
+    "failed": 0,
+    "fees_lamports": 10297,
+    "since_slot": 455359175,
+    "transactions": 1
+  },
+  "cluster": "mainnet",
+  "fee_payer": "9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW",
+  "fee_payer_balance_after": 39418818,
+  "fee_payer_spent_lamports": 1001544182,
+  "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "kind": "fresh",
+  "last_deploy_slot": 455359196,
+  "max_len": 196608,
+  "onchain": {
+    "matches_local_so": true,
+    "program_hash": "0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58",
+    "region_len": 196608
+  },
+  "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+  "programdata": "3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ",
+  "programdata_len": 196653,
+  "programdata_rent_lamports": 999647480,
+  "recorded_at": "2026-10-10T18:46:55Z",
+  "schema": "heads-down/deploy-receipt/v1",
+  "signature": "4naPfgTXDKRxG7NhunoNKVBWkCwuvdJoyBGytmebCpuDzdrP6Gm4UwxNYm5r5zzUu8vuZKgYiaFp1BzrTwH2Pae2",
+  "so": {
+    "len": 190048,
+    "path": "programs/heads-down/target/deploy/heads_down.so",
+    "program_hash": "0154706c62cb7bb6aacf463501e49b016b87809ed7193fcae08afc4e3f891b58",
+    "sbpf": "v3",
+    "sha256": "07dd870a879faac20d4932f297da3b50719c9b900761409250c8841cc7b8527d"
+  },
+  "tx_fee_lamports": 10297,
+  "tx_slot": 455359196,
+  "unix_time": 1791658015,
+  "upgrade_authority": "9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW"
+}

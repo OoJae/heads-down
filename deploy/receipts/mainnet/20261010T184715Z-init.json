@@ -1,0 +1,33 @@
+{
+  "authority_balance_after": 36005387,
+  "cluster": "mainnet",
+  "config": "inzDn4ogmXbx9YDAKDHkfwJHy1jhsaWxGQvricDAEmW",
+  "config_existed": false,
+  "executor_balance": 1450240,
+  "executor_float_target": 1450240,
+  "executor_float_transfer": {
+    "fee_lamports": 5136,
+    "signature": "5pPKTrBQLPUY8uk2Lf1mMysNAy4EwmgAWi7mDYwTEnwm5Xp5LdQtXptEnq3yf3JkWKuoPQ8EEpDNtbJ6bDjaAeK3",
+    "slot": 455359384
+  },
+  "executor_pda": "By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge",
+  "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "initialize_config": {
+    "fee_lamports": 7335,
+    "signature": "3R4UnCecw7BuzAvLZURtktLRnh6iEboPE6CpX35NdX7sKzjJcL4g84i1uxQdwwWHPioyEVcG3uBp4cfAhQFzJzUs",
+    "slot": 455359343
+  },
+  "params": {
+    "bury_bps": 0,
+    "crank_fee": 7000,
+    "executor_fee": 10000,
+    "governance": "37u9LWbPrzQFkfL6oXGoSfq9souRggVtGvYszRXHezXN",
+    "ore_layout_hash": "cc9b3521eaa022a05fd9c38f745b8844a740ca9e3243a91f1bbda66a3448aa91",
+    "registrar": "9deCPaA6iML39zQw4mptBeHRkm7DE6oVWGijdA9c2zgo"
+  },
+  "program_id": "HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p",
+  "recorded_at": "2026-10-10T18:47:32Z",
+  "schema": "heads-down/init-receipt/v1",
+  "unix_time": 1791658052,
+  "upgrade_authority": "9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW"
+}
