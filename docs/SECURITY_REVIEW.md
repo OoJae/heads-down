@@ -209,7 +209,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | Component | Tests |
 |---|---|
 | `programs/heads-down` (LiteSVM on a fork of live mainnet ORE, plus host unit tests, fuzz and golden vectors) | 171 |
-| `crank` | 213, 14 against the real program on the fork, and one end to end on a local validator |
+| `crank` | 214, 14 against the real program on the fork, and one end to end on a local validator (the 214 and the 14 were run again on 10 October 2026 with the crank's rebroadcast test added; the end-to-end test was not) |
 | `registrar` | 116 |
 | `services/indexer` | 477 |
 | `android` (JVM unit tests, all modules) | 855 passed; 4 more are skipped (they need a mainnet RPC or a running devstack) |
