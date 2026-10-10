@@ -30,9 +30,8 @@ values have to be set on the service, by hand or through the API, before its fir
 | `deploy.numReplicas` | nothing, as long as the service stays at one replica | |
 | `deploy.requiredMountPath` | nothing: there is no such setting on a service. The crank's and the registrar's entrypoints check for the volume themselves (below) | |
 
-Not tested, because it needs a service to be created: whether a new service still reads the
-file when its path is given in the service's settings. Setting the values above is harmless
-if it does.
+Not tested: whether a new service still reads the file when its path is given in the service's
+settings. Setting the values above is harmless if it does.
 
 Start commands come from the images (ENTRYPOINT/CMD): leave the service's Custom Start Command
 empty, because one would replace the crank's and the registrar's entrypoint.
@@ -91,12 +90,11 @@ is given to builds and deployments and can no longer be read in the UI or throug
 
 - Seal the three private values: `HD_CRANK_KEYPAIR_JSON`, `HD_REGISTRAR_KEYPAIR_JSON` and
   `HD_SESSION_SECRET`.
-- Seal every variable that carries the Helius key or a URL with the key in it: the shared
-  `HELIUS_API_KEY`, the crank's `HELIUS_API_KEY`, the indexer's `RPC_URL`, and the registrar's
-  `HD_RPC_URL` if it is set to such a URL. A variable that only references the shared one
-  (`${{shared.HELIUS_API_KEY}}`) is a variable of its own and must be sealed as well: Railway's
-  documentation does not say whether an unsealed reference to a sealed value can be read back,
-  and it was not tested.
+- Seal every variable that carries the Helius key or a URL with the key in it: the crank's
+  `HELIUS_API_KEY`, the indexer's `RPC_URL`, and the registrar's `HD_RPC_URL` if it is set to
+  such a URL. This deployment uses no shared variable (docs/DEPLOY.md, section 10.3):
+  Railway's documentation does not say whether an unsealed reference to a sealed value can be
+  read back, and it was not tested.
 - `DATABASE_URL` on the indexer is not a sealed value. It is a reference to a variable Railway
   generates for Postgres (`${{Postgres.DATABASE_URL}}`), so whoever can list the project's
   variables can read the database password. [postgres/README.md](postgres/README.md) says how

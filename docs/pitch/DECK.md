@@ -3,14 +3,15 @@
 Draft for the founder, written 2026-09-29 and brought up to the state of `main` on 2026-10-03.
 Every number cites the repo file it comes from.
 
-- `[TBD after device test]`: needs the Redmi 14C connected (it is not yet).
+- `[TBD after device test]`: needs a measured shift on the Redmi 14C (the app runs on it since
+  10 October 2026; no shift has run on it yet).
 - `[TBD after launch]`: needs real rigs on mainnet (the program is not deployed on any cluster yet:
   `crank/README.md`, `hd-crank check` output).
 - `[TBD]`: a build item or a founder decision.
 - Replace a TBD only with a measured value and its source.
 
 **Status chips used on slides.** **Built** = code plus passing tests in the repo. **Built, not on a
-device** = tested in CI or LiteSVM, never run on a phone. **On an emulator** = the real app ran it
+device** = covered by unit tests or LiteSVM on the build machine, never run on a phone. **On an emulator** = the real app ran it
 on an Android 14 emulator against a local fork of mainnet (`scripts/devstack/emulator-smoke.sh`),
 never on a phone. **Designed** = specified in `docs/`, not in code. **Next** = planned for the build.
 
@@ -115,7 +116,7 @@ The slide text and speaker notes below contain no word from its banned list.
 ## Slide 5: The trustless rig
 
 - **Message:** The executor is a program address that signs only for a fresh phone heartbeat, so no
-  server or team key can deploy your SOL.
+  server or crank can deploy your SOL. (One key can still upgrade the program at launch: slide 13.)
 - **On slide:**
   - Diagram: Your wallet → **your ORE Automation** (your SOL, owned by ORE) ← **Executor PDA**
     (heads_down) ← `dig` (anyone can crank) ← **P-256 heartbeat** from the phone's Keystore,
@@ -144,8 +145,7 @@ The slide text and speaker notes below contain no word from its banned list.
   | Compute for a dig | 39,414 CU with one rig, 67,421 with two (most of it ORE's own `deploy`) |
   | Max rigs per dig transaction | legacy 2 · v0 + lookup table 5 · v1 11 |
   | secp256r1 check | 0 CU in the precompile + 477 CU introspection; one 5,000-lamport fee per signature |
-  | Crank cost per rig-dig | about 6,050 lamports (v0 + table), about 5,500 (v1) |
-  | Crank end to end on a validator | 3 rigs, 1 tx, 20,168 lamports fees vs 21,000 reimbursed |
+  | Crank cost per rig-dig | about 6,040 lamports (v0 + table), about 5,500 (v1), against 7,000 reimbursed |
   | Seeker check | about 1,900 CU |
 
 - **Visual:** The table, with a small source tag on each row.
@@ -243,20 +243,20 @@ The slide text and speaker notes below contain no word from its banned list.
 - **Message:** Native Kotlin and Compose on system surfaces a web app cannot reach.
 - **On slide:**
   - "Quick Settings tile → non-exported trampoline → one MWA approval (clientlib-ktx 2.2.0)"
-  - "One clock-in transaction: ORE automate + register + caps + arm (677 bytes legacy, first run)"
+  - "One clock-in transaction: ORE automate + register + caps + arm (fits one legacy packet)"
   - "`specialUse` foreground service. Killed by the OS = cold, nothing spent."
   - "HyperOS/MIUI keep-alive onboarding and a 'killed last night' health check"
   - "Android 16 Live Update notification with a 14/15 fallback"
   - "855 JVM unit tests"
 - **Visual:** Phone captures: the tile in the Quick Settings panel, the wallet sheet, the ongoing
   notification `[TBD after device test]`.
-- **Speaker notes:** "Only the launcher activity and the tile service are exported. The trampoline
+- **Speaker notes:** "Only the launcher activity, the tile service and the two widget receivers are exported. The trampoline
   reads no intent extras. Release builds strip every `android.util.Log` call, backups are off, RPC
   is HTTPS-only and the crank uplink WSS-only. The app shows success only after the transaction is
   confirmed with no error."
 - **Serves:** Public: UX. Align: UX, UI.
 - **Sources:** `android/README.md` (modules, clock-in, security notes),
-  `android/INTERFACE-NOTES.md` §3 (677 bytes), `android/` (count of `@Test`).
+  `android/INTERFACE-NOTES.md` §4 (one legacy packet), `docs/SECURITY_REVIEW.md` §5 (855 tests passed).
 
 ## Slide 11: SKR is collateral and gifts, and never pays you for holding it
 
@@ -357,7 +357,7 @@ The slide text and speaker notes below contain no word from its banned list.
 
   - "16 bug classes mapped to named tests; 9,000 fuzzed instructions on the program binary, no aborts"
   - "Security review before deployment: 114 findings, 18 confirmed by a reproducing test, each
-    fix with its regression test; what is still open is written down"
+    fix of a confirmed finding with its regression test; what is still open is written down"
   - "Registrar: a hash-chained log of every voucher (a file today, not yet published)"
   - "Dashboard: a SIMULATED banner shows on every page while data is simulated"
   - "Not yet: Radiants audit run, Kani proofs, external audit `[TBD]`"
@@ -379,8 +379,8 @@ The slide text and speaker notes below contain no word from its banned list.
   - "D1 / D7 / D14 retention `[TBD after launch]`"
   - "Share of ORE miners per round, 00:00 to 06:00 `[TBD after launch]`"
   - "Founder's Redmi rig: nights run, rounds dug `[TBD after device test]`"
-  - "Today: heads_down is not deployed on mainnet; the dashboard runs on a labelled simulated
-    dataset."
+  - "Today: heads_down is not deployed on mainnet; the dashboard runs against mainnet and shows
+    ORE's own rounds and zeros for Heads Down."
 - **Visual:** Dashboard tiles. Show the SIMULATED banner if the data is still simulated.
 - **Speaker notes:** "No vanity counts, no paid testers, no referral bounties. Metrics come from
   on-chain rows only, and anyone can recompute them from the CSV exports."
@@ -423,12 +423,12 @@ The slide text and speaker notes below contain no word from its banned list.
   - "Founder: solo, Nigeria (WAT), building with AI agents on one Redmi 14C. `[founder to
     personalise]`"
 - **Visual:** Three columns: Proven / Next / After. Founder photo `[TBD]`.
-- **Speaker notes:** "Four hundred and fourteen commits since the repo was created on 29 September
+- **Speaker notes:** "More than four hundred and sixty commits since the repo was created on 29 September
   2026 `[update the count before recording]`. Offline means no mining and no loss, which suits power and
   network cuts where I live."
 - **Serves:** Public: Stickiness & PMF (founder-market fit), Presentation & Demo.
 - **Sources:** `README.md` (proven so far), `spikes/*/README.md`, `crank/README.md`,
-  `registrar/README.md`, `git rev-list --count --no-merges main` (414 on 2026-10-03).
+  `registrar/README.md`, `git rev-list --count --no-merges main` (464 on 2026-10-10).
 
 ---
 

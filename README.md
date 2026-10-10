@@ -48,7 +48,7 @@ built; the Stack and Gift screens are not yet.
 | [`crates/sgt-verify`](crates/sgt-verify/README.md) | In-program Seeker Genesis Token verifier, tested on real mainnet SGTs and on a forgery that passes weaker checks |
 | [`crates/p256-introspect`](crates/p256-introspect/README.md) | secp256r1 precompile introspection and Android Keystore signature helpers |
 | [`crank`](crank/README.md) | The permissionless crank: takes the phones' heartbeats, lands digs, BREAK and FREEZE, Stack check-ins. 213 tests, plus 14 against the real program on the fork and one end to end on a local validator |
-| [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests on real attestation chains |
+| [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 385 tests |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain |
 | [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests |
@@ -57,14 +57,17 @@ built; the Stack and Gift screens are not yet.
 **Not done yet, in plain words.** The program is not deployed on mainnet. The indexer, the
 [dashboard](https://dashboard-production-b80c.up.railway.app) and the registrar run on Railway
 against mainnet; with no program there they show ORE's own rounds and zeros, and the crank is not
-started. The app has not run on a physical phone. It does run on an Android 14 emulator against the
+started. On 10 October 2026 the app ran on a physical phone for the first time, a Redmi 14C
+(Android 16, HyperOS 3): it made its rig key in the phone's secure hardware, and the live
+registrar accepted that key's attestation and a sign-in signed in Jupiter's wallet. That phone has
+not sent a transaction yet. Everything on-chain has run on an Android 14 emulator against the
 local stack: a heartbeat signed in the emulator's Keystore dug a round on a fork of mainnet, and a
 pickup landed a BREAK (`scripts/devstack/emulator-smoke.sh`). With Solana Mobile's test wallet
 installed there, the wallet has signed its clock-in, clock-out, taking SOL back and closing the
 rig, and the amounts that came back matched the screen to the lamport. The same emulator has
 signed in to the live registrar through the test wallet, which showed the name and icon of the
 published identity page; the registrar refused the emulator's software key, as it should. No
-production wallet has signed anything, and no transaction of the program has run on mainnet. The
+production wallet has signed a transaction, and no transaction of the program has run on mainnet. The
 app has no screens yet for Stack or Gift, and its clock-out cannot buy ORE yet. There has been no
 third-party audit.
 
@@ -73,8 +76,8 @@ third-party audit.
 - Every key's worst case is written down in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Its
   "As built" table says which of the listed protections exist today and which do not.
 - Before deploying we went through the whole system looking for holes:
-  [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) lists what was found, what was fixed (each
-  fix with a test) and what is still open.
+  [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) lists what was found, what was fixed (with
+  the test for each fix that has one) and what is still open.
 - To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this
   repository.
 
@@ -111,4 +114,5 @@ the local stack and [docs/DEPLOY.md](docs/DEPLOY.md) the mainnet runbook.
 
 ## License
 
-MIT (TBD)
+Apache-2.0, as the Cargo manifests of the program, the crank, the registrar and the two crates
+declare. A LICENSE file is still to be added.

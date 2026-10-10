@@ -6,8 +6,8 @@
 #   show                       ORE + heads_down state: program, upgrade authority, Config, pending, Executor
 #   pause                      propose_config paused=1: `dig` fails with Paused (18) from the next slot.
 #                              Nothing else stops: users can still break, freeze, end shifts and close rigs.
-#   unpause                    propose_config paused=0: takes effect only after apply_config, 864,000
-#                              slots (>= 72 h) later
+#   unpause                    propose_config paused=0: takes effect only after apply_config, once
+#                              864,000 slots and 72 h of cluster time have both passed
 #   propose [--registrar PK] [--crank-fee N] [--bury-bps N]
 #                              a timelocked change (unchanged fields keep their current values);
 #                              replaces any pending proposal and restarts its clock

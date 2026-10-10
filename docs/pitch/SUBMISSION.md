@@ -3,8 +3,8 @@
 Draft for the founder, written 2026-09-29 and brought up to the state of `main` on 2026-10-03.
 Paste only the text inside the quote blocks. Everything
 outside them is a note for the founder. Form fields are listed in
-`docs/research/judges-preferences.md` (submission form finding). Submissions close 2026-10-09
-06:59 UTC.
+`docs/research/judges-preferences.md` (submission form finding). Submissions close on Monday
+2026-10-12 at 23:59 UTC (the organisers extended the deadline).
 
 ---
 
@@ -23,7 +23,7 @@ outside them is a note for the founder. Form fields are listed in
 > account. The Automation's executor is a program address that signs ORE's deploy only when the
 > phone's Android Keystore P-256 key has signed a fresh heartbeat for the current ORE round,
 > verified on-chain by Solana's secp256r1 precompile. Pick the phone up and the rig goes cold. No
-> server, crank or team key can deploy your SOL. Guest rigs run on any Android; Seeker owners get a
+> server or crank can deploy your SOL. Guest rigs run on any Android; Seeker owners get a
 > tier verified in-program by their Seeker Genesis Token.
 
 **Project description (long):** the short text, then:
@@ -143,8 +143,8 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 
 - **On an emulator:** clock-in is one Quick Settings tile tap and one wallet approval (run with
   Solana Mobile's test wallet; no production wallet yet). The
-  one transaction bundles ORE `automate`, rig registration, caps and arming (677 bytes as legacy).
-  `android/INTERFACE-NOTES.md` §3
+  one transaction bundles ORE `automate`, rig registration, caps and arming (it fits one legacy packet).
+  `android/INTERFACE-NOTES.md` §4
 - **On an emulator:** heartbeats need no wallet prompt. The rig key signs with the screen
   off, and on-chain caps bound what it can do. In the real app on an Android 14 emulator, a
   Keystore-signed heartbeat dug a round on a fork of mainnet (`scripts/devstack/emulator-smoke.sh`). `crates/p256-introspect/README.md`,
@@ -183,7 +183,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
   program can use. `crates/`
 - **Built:** usage metrics ORE can recompute from its own `DeployEvent`s (signer = Executor PDA) and
   `ResetEvent`s, with CSV exports. `services/indexer/README.md`, `docs/ORE.md` §9
-- **Built:** a permissionless crank anyone can run. Measured crank cost is about 6,050 lamports per
+- **Built:** a permissionless crank anyone can run. Measured crank cost is about 6,040 lamports per
   rig-dig (v0 with a lookup table). `crank/README.md`
 - **Finding:** ORE stores `max_production_cost` but `deploy` never reads it; documented for ORE.
   `docs/ORE.md` §9
@@ -204,7 +204,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 - Tests: program 171, crank 213, registrar 116, `p256-introspect` 30, `sgt-verify` host 69,
   indexer 385, dashboard 48, Android 855. `docs/pitch/DECK.md` slide 14
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
-  with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
+  of a confirmed finding with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 
 ---
 
@@ -213,8 +213,12 @@ code with passing tests in the repo. **Designed** means specified, not built. **
 Pick the true one when you submit, and delete the rest.
 
 - "Live on mainnet with tiny caps; SKR flows `[live / specified]`."
-- "The heads_down program, crank, registrar and indexer are built and tested on a mainnet fork; the
-  Android app is built and tested in CI; on-device testing on the Redmi 14C is in progress."
+- "The heads_down program, crank, registrar and indexer are built and tested on a fork of mainnet;
+  the program is not deployed on mainnet yet. The indexer, the dashboard and the registrar run
+  against mainnet; the crank is not started. The Android app is built and unit-tested. It has run
+  on an Android 14 emulator with Solana Mobile's test wallet, and on a Redmi 14C, where it made a
+  hardware-backed rig key that the live registrar attested and signed in through Jupiter's wallet.
+  No physical phone has sent a transaction yet."
 
 ---
 

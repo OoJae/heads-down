@@ -1,6 +1,6 @@
 # Heads Down threat model
 
-> **Status.** This document states the security requirements and the bound on each key; the section "As built" below says which of its mitigations exist today. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.3](../programs/heads-down/INTERFACE.md); 171 tests on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
+> **Status.** This document states the security requirements and the bound on each key; the section "As built" below says which of its mitigations exist today. The on-chain program is implemented in [`programs/heads-down`](../programs/heads-down/README.md) (contract: [INTERFACE.md v1.3](../programs/heads-down/INTERFACE.md); 171 tests, 138 of them on a fork of live mainnet ORE, with an audit-class checklist in its README). Each check below names the negative test that must prove it. A check counts as done only when that test exists and passes in CI. This is not an audit result.
 >
 > ORE facts are cited as `file:line` at ORE commit `b92c5043`. The program deployed since 2026-10-02 is commit `48c203bd` (verify.osec.io), which differs from it in one constant of `wrap.rs`; no cited line changed ([ORE.md](ORE.md), section 1).
 
@@ -14,7 +14,7 @@ code, and the rest of the document should be read with it. The review that produ
 
 | Named below | Today |
 |---|---|
-| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 171 tests on a fork of live mainnet ORE) |
+| Program checks, caps, the heartbeat gate, SGT verification, Stack, Focus Bond, Gift, Bury | **Built** (INTERFACE v1.3; 171 tests, 138 of them on a fork of live mainnet ORE) |
 | Crank, registrar, indexer, dashboard | **Built** |
 | Freeze from the phone, Unfreeze with the wallet | **Built.** A frozen rig's next clock-in carries `unfreeze_rig`, signed by the wallet |
 | Claim ORE in the app | **Built.** The clock-out screen sends ORE's `claim_ore` to the wallet, or leaves the ORE in the user's Miner |
@@ -24,7 +24,7 @@ code, and the rest of the document should be read with it. The review that produ
 | Phones posting their own heartbeats to the chain | **Not built.** The phone sends them to one crank |
 | Kora fee relayer (K4b) | **Not built** |
 | Push and presence (FCM), rooms | **Not built** |
-| Jupiter quote proxy and the buy leg | **Not built** |
+| Jupiter quote proxy and the buy leg | **Partly.** The buy leg's transactions are built and tested against recorded Jupiter quotes; the quote proxy is not built and the app does not offer the leg |
 | Upgrade authority: Squads multisig behind a 72 h timelock | **Not so.** One keypair held by the founder, no delay on program upgrades. Config changes and governance rotation are behind a 72 h on-chain timelock (INTERFACE §12.3); pausing is immediate |
 | In-app banner for a pending upgrade or config change | **Not built** |
 | Published attestation transcripts | **Partly.** The registrar keeps an append-only log file; nothing yet lets a third party check it against the chain |
@@ -35,7 +35,7 @@ code, and the rest of the document should be read with it. The review that produ
 **What that changes in the worst cases below.**
 
 - **K3, crank and relayer.** With one crank and no other path, "liveness only" is true for mining
-  (nothing is spent when no heartbeat lands) and **not** for SKR at stake: a Stack seat records
+  (nothing is spent when no heartbeat lands) and **not** for bonded SKR: a Stack seat records
   gaps and a Focus Bond's shift seals without dark rounds when a rig's heartbeats are not landed,
   whoever's fault that is.
 - **K5, upgrade authority.** The worst case in the table applies **at once**, not after 72 hours,
@@ -50,7 +50,7 @@ code, and the rest of the document should be read with it. The review that produ
 |---|---|---|
 | **User wallet** (Seed Vault or MWA wallet) | Everything the wallet controls. This key is the root of authority, and Heads Down cannot bound it. | The wallet's own security; on-device transaction building and simulation |
 | **Rig P-256 key** (Android Keystore) | The armed weekly budget is deployed into ORE, but only in rounds where ORE's production-cost EMA is at or below the ceiling the wallet signed. Most of each deployed lamport comes back to the user, and none goes to the attacker. It can also forfeit this rig's own SKR bonds, or cheat at Stack. | Wallet-signed caps and expiry; the on-chain cost gate; ORE's per-square cap; Freeze (device key) and Revoke (wallet) |
-| **Crank or relayer** (anyone) | For mining, liveness only: nothing mines, nothing is lost. For SKR at stake it is more: a relayer that withholds heartbeats or a seat's `stack_checkin` makes a Stack seat record gaps and a Focus Bond's shift seal without dark rounds (see "As built"). | Competing permissionless cranks; the Nostr mirror; phones posting their own heartbeats; `stack_checkin` is permissionless, so any seat or phone can land it; grace gaps |
+| **Crank or relayer** (anyone) | For mining, liveness only: nothing mines, nothing is lost. For bonded SKR it is more: a relayer that withholds heartbeats or a seat's `stack_checkin` makes a Stack seat record gaps and a Focus Bond's shift seal without dark rounds (see "As built"). | Competing permissionless cranks; the Nostr mirror; phones posting their own heartbeats; `stack_checkin` is permissionless, so any seat or phone can land it; grace gaps |
 | **Registrar** (Ed25519 key) | Software keys get attestation level 1 or higher, so a cheater can win remote "honor-plus" Stack tables, up to the bond cap per seat. It has no custody and no mining authority. | Bond caps; in-person tables are the primary mode; voucher expiry; published transcripts; timelocked rotation |
 | **Upgrade authority** (beta) | **At once today** (one key, no delay; the 72 h multisig below is the plan, see "As built"): take the SKR and SOL held in Heads Down vaults, and force deploys of armed Automations, which ORE limits to `25 x automation.amount` plus one fee per round. It cannot withdraw from Automations or claim anyone's ORE. | 72 h timelock with an in-app banner; one-approval Revoke; small vault caps; then revoked (immutable v1) |
 | **Team servers** | Liveness, privacy exposure, and phishing-shaped notifications. None of them holds authority over funds. | No signing from push; every transaction is built on-device from chain state and simulated |

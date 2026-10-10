@@ -16,16 +16,17 @@ audit. Nothing described here was ever deployed in its unfixed form.
   wherever the code agreed with them. 65 were low or informational.
 
 The contract changes are in [INTERFACE.md §12.13](../programs/heads-down/INTERFACE.md). Every fix
-has a regression test, named in the tables.
+in section 1 has a regression test, named in its row. The later tables name a test where there is
+one; changes to procedures, settings and documents have none.
 
 ## 1. Confirmed findings
 
 | # | Finding | Severity | Status | Where |
 |---|---|---|---|---|
 | 1 | The crank charged a rig's rate limit before checking the signature, so anyone could name a rig in garbage frames and silence its heartbeats, BREAK and FREEZE | high | **Fixed.** The bucket is peeked before verification and charged after it | `crank/src/intake.rs`; test `forged_frames_do_not_spend_the_rigs_allowance` |
-| 2 | Stack: the attestation was checked only at `join_stack`, so a seat could swap in a software key afterwards and keep counting at attested-only tables | high | **Fixed** (v1.3). The attestation must be live at every check-in | INTERFACE §12.6; `tests/skr_stack.rs` |
+| 2 | Stack: the attestation was checked only at `join_stack`, so a seat could swap in a software key afterwards and keep counting at attested-only tables | high | **Fixed** (v1.3). The attestation must be live at every check-in | INTERFACE §12.6; `programs/heads-down/tests/tests/skr_stack.rs` |
 | 3 | `dig` reimbursed the cranker whenever SOL was deployed, even when the Executor had received no fee, so a wallet cranking its own rig could draw the shared float down | medium | **Fixed.** Reimbursement only when the fee arrived in the same dig; the crank skips such rigs | test `a_dig_that_brought_no_fee_is_not_reimbursed` |
-| 4 | `close_rig` then `register_rig` reset `shift_id`, `hb_counter` and `last_dug_round`: old signed messages replayed, a Stack seat forgot a recorded BREAK, and a round could be dug twice | medium (three findings) | **Fixed** (v1.3 tombstone, plus `last_dug_round`) | INTERFACE §12.4; `tests/tombstone.rs` |
+| 4 | `close_rig` then `register_rig` reset `shift_id`, `hb_counter` and `last_dug_round`: old signed messages replayed, a Stack seat forgot a recorded BREAK, and a round could be dug twice | medium (three findings) | **Fixed** (v1.3 tombstone, plus `last_dug_round`) | INTERFACE §12.4; `programs/heads-down/tests/tests/tombstone.rs` |
 | 5 | One signed message with `counter = u64::MAX` ended a rig's phone-key path for good | medium | **Fixed.** A message may raise the counter by at most 2^32; the app accepts at most 2^20 per chain read | tests `a_counter_cannot_jump_past_the_step_bound`, `one chain read moves the counter by at most a million` |
 | 6 | The app's wallet identity, its sign-in domain and its default service hosts pointed at `headsdown.xyz`, a domain registered by someone else | medium | **Fixed.** The identity is build configuration, no service has a default host, and a mainnet build fails without explicit values. The registrar's domain has no default | `android/app/build.gradle.kts`, `registrar/src/config.rs`; `check-endpoint-policy.sh` |
 | 7 | The clock-in deposit and caps were computed from RPC data with no bound | medium | **Mitigated.** `executor_fee` above 100,000 lamports is refused, which bounds the deposit by the request; the home screen states the amounts before the wallet opens. The transaction is still not simulated by the app | test `a fee above the ceiling is refused` |
@@ -82,7 +83,7 @@ Nothing here was live in its unfixed form, except where the table says "found on
 | The deploy would most likely have stopped half way on Helius' free plan (the Solana CLI sends about 200 writes 10 ms apart; the plan allows one a second), and could not be continued: preflight compared the full cost with the deployer's balance while 0.9996 SOL sat in the buffer, and told the founder to send that SOL again | high (no funds lost; a stalled deploy and a misleading request for 1 SOL) | **Fixed.** `deploy.sh` writes the buffer with a paced writer that can be stopped and continued, preflight counts what the buffer holds, and the rehearsal stops a deploy part way and continues it with exact funding. On the local fork behind a one-send-a-second proxy the CLI alone landed about 15 of 198 writes; the paced writer finished. Not run against Helius or on mainnet | `scripts/devstack/tool/src/buffer.rs`, `scripts/mainnet/deploy.sh`; `dry-run.sh` steps 3, 4 and 7 |
 | The first version of that writer never stopped when its writes were taken and could not land (a payer that ran out), and could land one chunk twice after a send with no answer | medium (found by the second pass) | **Fixed.** Only a write seen to land counts as progress, the payer is checked first, and a send with no answer is watched, not sent again | tool tests against a mock node |
 | An upgrade to a build that outgrew the program's space failed at the first try once the buffer was written beforehand: the CLI extended and upgraded back to back, and the loader refuses both in one slot | high (found by the second pass; no funds at risk, a second run completed) | **Fixed.** `deploy.sh` sends the extension itself and waits; preflight budgets the loader's 10,240-byte minimum | `dry-run.sh` step 9 |
-| A crank with an empty fee payer retried creating its lookup table without pause (about 335,000 RPC calls a day), and several failure paths could create a second table and forget the first. Each table locks 0.00256 SOL until it is closed by hand | high | **Fixed.** No create without the balance for it, a growing wait after a failure, the address on record before the create is sent, an answer older than the crank's own transaction is refused, and `max_tables` counts the tables on record | `crank/src/crank.rs`, `crank/src/alt.rs`; `tests/lookup_tables.rs` |
+| A crank with an empty fee payer retried creating its lookup table without pause (about 335,000 RPC calls a day), and several failure paths could create a second table and forget the first. Each table locks 0.00256 SOL until it is closed by hand | high | **Fixed.** No create without the balance for it, a growing wait after a failure, the address on record before the create is sent, an answer older than the crank's own transaction is refused, and `max_tables` counts the tables on record | `crank/src/crank.rs`, `crank/src/alt.rs`; `crank/tests/lookup_tables.rs` |
 | At the shipped polling rates the crank and the indexer used about 410,000 Helius credits a day with no rig at all: the free plan's month in under three days | high | **Fixed in part.** An idle crank reads nothing in most rounds, its chain poll is a setting, and the indexer scans accounts only when a transaction arrived: about 30,500 credits a day for the crank with the one-phone settings and about 2,000 for the indexer. That is still about the whole free plan in a month, so the crank is run for test nights, not left on | DEPLOY.md section 5; `crank/README.md` "RPC budget" |
 | The page at the app's identity address said that the address next to a signing prompt proves the request comes from the app. A wallet cannot verify that; any app can name the address | would have stopped publication | **Fixed before the page was published.** The page says what the wallet can and cannot check | `site/index.html` |
 | "Nothing but your phone's own hardware key can switch it on: not a server, not us" was stronger than the threat model: the program accepts any P-256 key the wallet registers, an emulator's key is software, and one key held by the founder can upgrade the program | high (wording) | **Fixed.** The page, the README, the pitch texts, the dashboard and the app say "a key in the phone's Android Keystore"; the app says "secure hardware" only where Android reports the key lives there | test `the rig key is called hardware only where Android says it is` |
@@ -101,11 +102,11 @@ Nothing here was live in its unfixed form, except where the table says "found on
 | Found on the live service: the public Solana RPC, the registrar's default, refuses requests from Railway's servers. Every attestation answered 503 while `/healthz` said ok, and the app registered a guest rig | medium (no funds; a rig that should be attested is not) | **Fixed.** The registrar uses a keyless RPC that answers, and says at start whether its RPC gives a slot | DEPLOY.md 10.4; `registrar/src/slot.rs` |
 | Found on the live service: the indexer's first read of ORE's rounds asked ORE's API for 14 days at once, was rate-limited, stored nothing and started over every pass | medium (no funds; an empty dashboard, and over a hundred wasted requests to ORE's API per pass) | **Worked around on the service** (a one-day window). The fix in code is written and waiting for its second pass | `ORE_ROUNDS_SINCE` |
 | Found by running the combined code: the crank's end-to-end test on a validator had not been run since 3 October and carried an expectation its own setup contradicted | low (a test, not the crank) | **Fixed.** The suite passes against the real program | `crank/tests/e2e_validator.rs` |
-| A build made as the runbook showed would not dig today: ORE's cost gate (about 770,000,000 lamports per ORE) is above the app's default ceilings (530,000,000 and 670,000,000) | medium (the product working as designed; a demo that shows no dig) | **Open, a decision.** A take that shows a dig needs a build with a raised ceiling, which places real SOL | DEPLOY.md 10.7 |
+| A build made as the runbook showed would not dig today: ORE's cost gate (about 770,000,000 lamports per ORE) is above the app's default ceilings (530,000,000 and 670,000,000) | medium (the product working as designed; a demo that shows no dig) | **Decided on 10 October 2026.** The build for the recorded demo raises the ceilings to 1,000,000,000 and 1,200,000,000 lamports per ORE and lowers the budgets to 0.005 SOL a shift and 0.035 SOL a week. It places real SOL | DEPLOY.md 10.7 |
 | Nothing reclaims the rent of the crank's lookup tables or of the ShiftLogs the crank pays for | low | **Open.** The commands for the tables are in DEPLOY.md section 16; the one-phone settings use no table and seal no shift | |
 | With the one-phone settings, a flood of frames naming made-up rigs can delay a phone's first heartbeat after an idle stretch | low | **Open, documented** | `crank/README.md` |
 | Attestation is tried once, when the rig key is made. If the registrar cannot be reached at that moment, the rig stays a guest | low | **Open** | |
-| The Helius key in use is shared with another project of the founder's, so both draw on the same credits | medium (availability) | **Open, a decision** | DEPLOY.md section 5 |
+| The Helius key in use is shared with another project of the founder's, so both draw on the same credits | medium (availability) | **It happened, and the key was replaced.** On 10 October 2026 that key's monthly credits were used up and Helius refused every call (`max usage reached`). The deployment now uses a new key | DEPLOY.md section 5 |
 
 What this pass did not do: build an image with Docker (none on the build machine; the three
 services that run were built by Railway), run anything against Helius' rate limiter, send a
@@ -113,7 +114,7 @@ transaction to mainnet, or run the app on a phone.
 
 ## 3. Open, and stated plainly
 
-These are true of what is deployed. None of them lets anyone take a user's mining funds, which
+These are true of the code as it will be deployed (the program is not on mainnet yet). None of them lets anyone take a user's mining funds, which
 stay in the user's own ORE Automation and Miner accounts.
 
 1. **Heartbeats reach the chain through a crank, and the team runs the only one today.** If no
@@ -124,16 +125,19 @@ stay in the user's own ORE Automation and Miner accounts.
    a direct path from the phone to the chain are designed and not built.
 2. **The upgrade authority is one key.** At launch the program can be upgraded by a single
    keypair held by the founder, with no multisig and no delay. Config changes (registrar, crank
-   fee, pause) and governance rotation are behind a 72 hour on-chain timelock; program upgrades
-   are not. Whoever holds that key could replace the program and take what the program's own
+   fee, un-pausing) and governance rotation are behind a 72 hour on-chain timelock, and pausing
+   is immediate; program upgrades are not delayed at all. Whoever holds that key could replace the program and take what the program's own
    accounts hold: Stack and Focus Bond SKR vaults, gift escrows, the Bury lot and the Executor
    float. It could not withdraw from anyone's ORE Automation or claim anyone's ORE.
-3. **The ways out are in the app, and none of them has run on a device yet.** Revoke ("Take SOL
+3. **The ways out are in the app, and none of them has run on a physical phone or with a
+   production wallet yet.** Revoke ("Take SOL
    back") closes the wallet's ORE Automation and returns every lamport in it; it is never refused
    and works without a rig bound to the phone, so it survives a reinstall. Close rig returns the
    Rig's rent, and is offered only when no shift is open and no Focus Bond is still locked.
-   Unfreeze rides on the next clock-in. Claim is on the clock-out screen. All four are unit-tested
-   against the program's golden vectors and an in-memory cluster only (section 4).
+   Unfreeze rides on the next clock-in. Claim is on the clock-out screen. Revoke and Close rig
+   have run in the app on an Android 14 emulator against a local fork of mainnet, signed in
+   Solana Mobile's test wallet; Unfreeze and Claim are unit-tested against the program's golden
+   vectors and an in-memory cluster only (section 4).
 4. **An in-person Stack table is open to any rig that pays the bond.** The program does not check
    that the players are in one room.
 5. **The registrar's log is a local file.** It records every voucher, but nothing yet lets a third
@@ -146,15 +150,18 @@ stay in the user's own ORE Automation and Miner accounts.
 ## 4. What this review did not cover
 
 - A third-party audit. There has been none.
-- Behaviour on real hardware. The app has run on an Android 14 emulator against a local fork of
-  mainnet (`scripts/devstack/emulator-smoke.sh`): setup, a Keystore key, heartbeats, an on-chain
+- Most behaviour on real hardware. The app has run on an Android 14 emulator against a local fork
+  of mainnet (`scripts/devstack/emulator-smoke.sh`): setup, a Keystore key, heartbeats, an on-chain
   dig, a pickup and its BREAK, and with Solana Mobile's test wallet the clock-in, the clock-out,
-  taking SOL back, closing the rig and clocking in again, each signed in the wallet. An emulator
-  has a software Keystore and stock Android, and the test wallet is not a production wallet, so
-  these are still untested: hardware Keystore attestation, the foreground service surviving a
-  HyperOS night, Solflare, Phantom or Seed Vault signing and sending, and any transaction of the
-  program on mainnet. The same emulator has signed in to the live registrar through the test
-  wallet (the registrar refused its software key, as it should).
+  taking SOL back, closing the rig and clocking in again, each signed in the wallet. The same
+  emulator has signed in to the live registrar through the test wallet (the registrar refused its
+  software key, as it should). An emulator has a software Keystore and stock Android, and the test
+  wallet is not a production wallet. On 10 October 2026 the app ran on a physical phone for the
+  first time, a Redmi 14C (Android 16, HyperOS 3): setup, a rig key made in the phone's TEE, that
+  key's attestation chain accepted by the live registrar, and a sign-in signed in Jupiter's
+  wallet. Still untested: the foreground service surviving a HyperOS night, a production wallet
+  signing and sending a transaction, Solflare, Phantom and Seed Vault altogether, and any
+  transaction of the program on mainnet.
 - ORE itself. Heads Down inherits ORE's custody of every Automation and Miner.
 
 ## 5. Tests after the fixes
@@ -165,7 +172,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 213, 14 against the real program on the fork, and one end to end on a local validator |
 | `registrar` | 116 |
 | `services/indexer` | 385 |
-| `android` (JVM unit tests, all modules) | 859, of which 4 are skipped (they need a device or a network) |
+| `android` (JVM unit tests, all modules) | 855 passed; 4 more are skipped (they need a mainnet RPC or a running devstack) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

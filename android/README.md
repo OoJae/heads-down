@@ -1,8 +1,10 @@
 # Heads Down: Android app
 
 Native Kotlin + Jetpack Compose. Package `xyz.headsdown`. minSdk 31, targetSdk 36, compileSdk 37.
-Built for a Redmi 14C (HyperOS / Android 14, no gyroscope, virtual proximity) and for stock
-Android 16 (Seeker). So far it has run only on an Android 14 emulator, not on a physical phone.
+Built for a Redmi 14C (HyperOS, no gyroscope, virtual proximity) and for stock Android 16
+(Seeker). It has run on an Android 14 emulator and, since 10 October 2026, on a Redmi 14C with
+Android 16 (HyperOS 3): setup, a rig key in the phone's TEE that the live registrar attested, and
+a sign-in in Jupiter's wallet. That phone has not sent a transaction yet.
 
 The on-chain contract is `programs/heads-down/INTERFACE.md` **v1.3** and its machine-checked
 vectors in `programs/heads-down/vectors/`. The app's builders are tested byte for byte against
@@ -84,7 +86,7 @@ cover a dig); the app and the program check them again. `mode=day` sets `plan_fl
 |---|---|
 | `core/keys` | Keystore P-256 rig key (StrongBox, else TEE; non-exportable; attested with the registrar's challenge), strict DER to raw `r‖s`, low-S, SEC1 compression, the v1.1 `HDv1` HEARTBEAT / BREAK / FREEZE / PLAN preimages, the shared write-ahead `RigCounter`, `RigMessageSigner` |
 | `core/wallet` | MWA 2.2.0: one-approval session (authorize, `get_capabilities`, build, sign and send), SIWS with the registrar's fields, a sign-only mode where the app submits (localdev), AES-GCM Keystore vault for the auth token, confirmation poller (success means confirmed with `err == null`) |
-| `core/chain` | Solana JSON-RPC over OkHttp, PDA derivation, checked ORE / heads_down account decoders, the v1.1 instruction builders, legacy/v0 transactions, the single-transaction clock-in, the crank uplink (contract A), the registrar client and attestation flow, the indexer haul client (contract B) |
+| `core/chain` | Solana JSON-RPC over OkHttp, PDA derivation, checked ORE / heads_down account decoders, the instruction builders (the v1.1 core, the v1.2 SKR set and v1.3's `close_shift_log`), legacy/v0 transactions, the single-transaction clock-in, the crank uplink (contract A), the registrar client and attestation flow, the indexer haul client (contract B) |
 | `feature/shift` | `ShiftStateMachine`, accelerometer `FaceDownDetector`, per-round `HeartbeatTicker`, `BoardRoundSource` (ORE `Board.round_id`), `CrankHeartbeatSink` (acks, link status), the shift journal (first pickup), the `specialUse` foreground service; the debug-only sensor lab |
 | `feature/reveal` | The morning haul reveal: exact alarm aligned to the user's next alarm, full-screen intent, a 120 Hz board replay, counts, effective price against market, streak, share grid, explorer link |
 | `feature/oem-keepalive` | HyperOS/MIUI detection, Autostart and "No restrictions" deep links with fallbacks, Doze exemption, "killed by the OS" health check |
@@ -119,8 +121,8 @@ PLAN (113):        "HDv1" | program_id(32) | rig(32) | kind=4 | counter u64 | ma
 ## Contract tests
 
 - `core/chain` **GoldenInstructionsTest** reads `programs/heads-down/vectors/instructions.json`
-  (a drift-checked copy in `src/test/resources/golden`) and rebuilds the 18 vectors the phone can
-  build (10 of the 15 tags: all but the admin and crank ones): data bytes and ordered account metas (pubkey,
+  (a drift-checked copy in `src/test/resources/golden`) and rebuilds the 31 vectors the phone can
+  build (19 of the 32 tags: all but the admin, governance and crank ones): data bytes and ordered account metas (pubkey,
   signer, writable) must be identical, and so must the secp256r1 and Ed25519 companion
   instructions. `GoldenMessagesTest` does the same for `messages.json`, `RegistrarVoucherTest`
   for `registrar.json`. `verifyGoldenVectors` runs before every unit-test task and fails on one
@@ -347,7 +349,8 @@ tests to prove no lab class is compiled into release.
 
 ## Still stubbed
 
-- The crank, registrar and indexer URLs are placeholders until the services are deployed.
+- The crank, registrar and indexer URLs are build properties with no default. The registrar and
+  the indexer run on Railway; the crank is not started (docs/DEPLOY.md, section 10).
 - `ClockInPolicy`: build-time budgets and cost ceilings until the plan screen and price feed exist.
 - "Buy the rest at market" (the Jupiter leg) and the nightly ORE target.
 - `StubOreRoundSource` remains for tests only.
