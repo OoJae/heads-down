@@ -5,7 +5,7 @@ and the first shift on the phone ([MAINNET.md](../MAINNET.md)). It is to be film
 builder's only phone, a Redmi 14C (model 2409BRN2CA, Android 16, HyperOS 3, no gyroscope, virtual
 proximity sensor). On 10 October 2026 that phone ran these beats once, on mainnet, with Jupiter
 Mobile as the wallet: a clock-in, heartbeats and five digs, an unlock and its BREAK, a clock-out,
-and taking the unplaced SOL back. The table below says for each item what has run, with the
+and taking back the SOL left in the ORE Automation. The table below says for each item what has run, with the
 transaction or the file, and what has not.
 
 **Rules for this video**
@@ -49,7 +49,9 @@ intake at `wss://crank-production-21c2.up.railway.app/ws`; the app accepts only 
 (`android/README.md`). The wallet on the phone is Jupiter Mobile. The app is the demo build of
 R13: a debug build with mainnet endpoints, 0.001 SOL digs on 4 squares and 0.005 SOL a shift, so
 a shift is five digs and then the crank sends nothing more for the rig. Solscan shows every
-transaction. ORE rounds advance on their own (about 78 s, `docs/ORE.md` §2).
+transaction. ORE rounds advance on their own (about 78 s in `docs/ORE.md` §2; on 10 October 2026
+the rounds of the first shift ended 289 to 292 slots apart, about 63 s at that evening's slot
+time).
 
 - **Gate.** At these prices the default build's gate stays shut: its plan ceiling is 0.53 SOL per
   ORE, and ORE's cost figure (`ema_ev`) was 0.690 to 0.704 SOL per ORE during the first shift
@@ -58,7 +60,8 @@ transaction. ORE rounds advance on their own (about 78 s, `docs/ORE.md` §2).
   ceiling to 1.2. **Disclose it in the VO and a caption.** What it cost that evening: each
   0.001 SOL dig also paid the 10,000-lamport executor fee, and for each of the four rounds
   settled so far ORE sent 0.000891 SOL back. The fifth round, 435,228, was not checkpointed at
-  20:44 UTC on 10 October, so what comes back from it is not known. No ORE was won.
+  20:44 UTC on 10 October, so what comes back from it is not known. No ORE came out of the four
+  that are settled.
 
 **B. Local devstack (rehearsal and fallback).** `scripts/devstack/up.sh` (docs/DEVSTACK.md): a
 local validator with the live ORE binary and accounts loaded, the program, the crank and the

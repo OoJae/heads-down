@@ -147,5 +147,5 @@ written from [MAINNET.md](../MAINNET.md): the mainnet deploy (program
 `HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`, slot 455,359,196) and
 [the first dig from the Redmi's own Keystore key](https://solscan.io/tx/25nBRCP6GExrKG4EDszGrKfWN9yYgJMopgnawTGi2Z9XNGj6UCtZgE6HFJN7rJXvu2C3VMjhh7bpXZnQg8DVzovY).
 Say what it was: one rig, the founder's own phone, one short shift of five digs of 0.001 SOL, on a
-debug build with the cost ceiling raised, and no ORE won. The third is not real: a night of rigs
+debug build with the cost ceiling raised, and no ORE won so far. The third is not real: a night of rigs
 on the dashboard that are not the founder's. There are no users.

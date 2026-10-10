@@ -170,7 +170,7 @@ legacy), build, sign and send. The registrar issues single-use, 10-minute SIWS n
 token sits in a Keystore AES-GCM vault. A confirmation poller handles blockheight expiry, and
 success requires `err == null`. It has run against one real wallet: on 10 October 2026, on the
 Redmi and on mainnet, Jupiter Mobile signed the sign-in and four transactions (two clock-ins, a
-clock-out and taking the unplaced SOL back). Honest: Jupiter showed "Could not verify request" on
+clock-out and taking back the SOL left in the ORE Automation). Honest: Jupiter showed "Could not verify request" on
 its connect prompt, because a wallet cannot verify the app's identity yet, and Solflare, Phantom
 and Seed Vault have not been tried. The three joins are closed in tests: the app's instructions
 match the program's golden vectors byte for byte, its heartbeat frames follow the crank's

@@ -45,8 +45,8 @@ outside them is a note for the founder. Form fields are listed in
 > the dashboard run against it. One rig, the founder's own phone (a Redmi 14C, with Jupiter Mobile
 > as its wallet), has run one short shift: five digs of 0.001 SOL, each one gated by a heartbeat
 > signed by a key in the phone's secure hardware, then a BREAK when the phone was unlocked, a
-> clock-out, and the unplaced SOL taken back. That shift ran on a debug build with the cost
-> ceiling raised; the default build would not have dug that evening. No ORE was won. There are no
+> clock-out, and the SOL left in its ORE Automation taken back. That shift ran on a debug build with the cost
+> ceiling raised; the default build would not have dug that evening. No ORE has been won. There are no
 > users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
 > has been no third-party audit.
 
@@ -253,8 +253,8 @@ not the founder, a change of the upgrade key. The record to check it against is
   the dashboard run against it. One rig, the founder's own phone (a Redmi 14C, with Jupiter Mobile
   as its wallet), has run one short shift: five digs of 0.001 SOL, each one gated by a heartbeat
   signed by a key in the phone's secure hardware, then a BREAK when the phone was unlocked, a
-  clock-out, and the unplaced SOL taken back. That shift ran on a debug build with the cost
-  ceiling raised; the default build would not have dug that evening. No ORE was won. There are no
+  clock-out, and the SOL left in its ORE Automation taken back. That shift ran on a debug build with the cost
+  ceiling raised; the default build would not have dug that evening. No ORE has been won. There are no
   users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
   has been no third-party audit."
 
