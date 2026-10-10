@@ -77,12 +77,13 @@ the amount the screen had stated, to the lamport.
 
 What that run was not: it was a debug build with a demo policy that raised the cost ceiling to
 1.0 SOL per ORE. ORE's own cost figure was 0.690 to 0.704 SOL per ORE during the shift, above the
-app's default of 0.53, so the default build would have dug nothing. No ORE was won in the five
-rounds. The first clock-in armed a shift that a second clock-in sealed about five minutes later
-with no round dug in it: the crank had accepted no heartbeat yet, and why that shift ended before
-a heartbeat reached the crank was not investigated. The crank's first dig landed after its round
-had ended and was skipped; three of the crank's settings were changed on the running service that
-evening ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found)).
+app's default of 0.53, so the default build would have dug nothing. No ORE came out of the four
+rounds that are settled, and the fifth is not settled (below). The first clock-in armed a shift
+that a second clock-in sealed about five minutes later with no round dug in it: the crank had
+accepted no heartbeat yet, and why that shift ended before a heartbeat reached the crank was not
+investigated. The crank's first dig landed after its round had ended and was skipped; three of
+the crank's settings were changed on the running service that evening
+([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found)).
 
 **Not done yet, in plain words.** There are no users: the one rig on mainnet is the founder's.
 Not run on a phone: a whole night under HyperOS, the haul reveal at the alarm, a dig refused
@@ -97,12 +98,13 @@ prompt and still connected and signed. No SKR instruction has been sent on mainn
 BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift, and its
 clock-out cannot buy ORE yet. There is no release signing key and no APK to download: the
 registrar accepts only the founder's debug-signed build. With one rig the crank pays more in fees
-than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports and each
-skipped attempt its whole fee, 60,473 lamports net over nine transactions. Whether the 4,480,400
-lamports that ORE holds in the wallet's Miner account can ever be taken back is not known. The
-last round dug, 435,228, had not been checkpointed at 20:44 UTC on 10 October, so what it returns
-is not known either; ORE forfeits what a round returns if nobody checkpoints it within about a
-day ([docs/ORE.md](docs/ORE.md), F8; [docs/MAINNET.md](docs/MAINNET.md#what-it-cost)).
+than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports net, and each
+skipped attempt and the BREAK their whole fee: 60,473 lamports net over nine transactions.
+Whether the 4,480,400 lamports that ORE holds in the wallet's Miner account can ever be taken
+back is not known. The last round dug, 435,228, had not been checkpointed at 20:44 UTC on
+10 October, so what it returns is not known either; ORE forfeits what a round returns if nobody
+checkpoints it within about a day
+([docs/ORE.md](docs/ORE.md), F8; [docs/MAINNET.md](docs/MAINNET.md#what-it-cost)).
 
 ## Security
 

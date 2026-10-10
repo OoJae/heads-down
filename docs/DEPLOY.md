@@ -91,9 +91,9 @@ still to do**.
    *To do. Not decided: one key can upgrade the program at once.*
 10. **Identity page**: after steps 5 and 6, and again after the first run on a phone, update the
     dated status line in `site/index.html`, commit, and publish it again (section 10.7).
-    *The line was changed in the repository on 10 October 2026 for the deploy. A phone ran its
-    first shift that evening, so it is due again; this page does not record that either version
-    was published.*
+    *The line was changed in the repository twice for 10 October 2026: for the deploy, and for
+    the first shift a phone ran that evening. This page does not record that either version was
+    published.*
 11. **Seal the crank's key variable.** `HD_CRANK_KEYPAIR_JSON` was set on the Railway service on
     10 October 2026 from the key file, through the CLI's standard input, and its sealing was
     asked for. Check in the Railway dashboard that it is sealed, and seal it if it is not
@@ -316,11 +316,13 @@ moves about 0.029 SOL: 20,200,000 lamports into the wallet's own ORE Automation,
 the Rig (2,600,960), of ORE's Automation (1,463,040) and of ORE's Miner (4,470,400), plus ORE's
 10,000 checkpoint reserve. Each sealed shift then costs 1,300,480 of ShiftLog rent. About 0.04 SOL
 covers a week of tests on one phone. What comes back: the Automation's balance and rent through
-"Take it back" in the app, and the Rig's rent less the 812,800 lamports that stay in the
-tombstone when the rig is closed. What does not: the tombstone, 10,000 lamports per dug round
-(7,000 to the crank,
-3,000 into the Executor), the SOL placed on squares that did not win, the fees, and the Miner's
-rent (ORE's account; whether ORE lets a wallet close it was not checked).
+"Take it back" in the app, the Rig's rent less the 812,800 lamports that stay in the
+tombstone when the rig is closed, and each ShiftLog's rent from 30 days after its shift ended
+(`close_shift_log`, which neither the app nor the crank sends yet). What does not: the
+tombstone, 10,000 lamports per dug round (7,000 to the crank, 3,000 into the Executor), what ORE
+keeps of the SOL placed on squares (10.9% of a square that did not win and 1% of one that did,
+[ORE.md](ORE.md)), and the fees. Not known: whether the lamports in the Miner, which is ORE's
+account, can ever be taken back.
 
 On mainnet on 10 October 2026 the first clock-in was made with the demo build of section 10.7 and
 moved 13,604,400 lamports: the same three rents and the reserve, 5,050,000 into the Automation
@@ -796,7 +798,7 @@ founder checklist, step 11.
 | `HD_CRANK_KEYPAIR_JSON` | S | | | | contents of `crank-payer.json` |
 | `PORT` | 8787 | 8080 | 8080 | 8080 | the domain's target port |
 | `RUST_LOG` | `info,hyper=warn,reqwest=warn` | `info` | | | |
-| `HD_CRANK_DIG_DEPLOY_MARGIN_SLOTS` | `80` | | | | set on 2026-10-10 at about 18:59 UTC. The crank sends a round's digs in a window before the round's end. With the 20 slots the image was built with, the first dig on mainnet landed 5 slots after its round had ended and was skipped at the crank's cost. With 80, the next four landed 49 to 77 slots before the end ([MAINNET.md](MAINNET.md#what-the-first-night-found)) |
+| `HD_CRANK_DIG_DEPLOY_MARGIN_SLOTS` | `80` | | | | set on 2026-10-10 at about 18:59 UTC. The crank sends a round's digs in a window before the round's end. With the 20 slots the image was built with, the first dig on mainnet landed 5 slots after its round had ended and was skipped at the crank's cost, and the second landed 11 slots before its round's end. With 80, the four digs that followed landed 49 to 77 slots before theirs ([MAINNET.md](MAINNET.md#what-the-first-night-found)) |
 | `HD_CRANK_DIG_CU_PRICE_MICRO_LAMPORTS` | `20000` | | | | set in the same restart: the floor of the dig's priority fee, which had settled on the 1,000 the image was built with. Which of the two changes made the digs land in time is not known. At 20,000 a dig that carries one rig cost 11,028 to 11,082 lamports against the 7,000 the program pays back |
 | `HD_CRANK_DIG_RETRY_AFTER_SLOTS` | `40` | | | | set on 2026-10-10 at about 19:00 UTC. With the 6 slots the image was built with, the crank signed a second attempt while the first was still on its way; both landed, and the second was refused, 10,053 and 11,042 lamports for nothing. No second attempt has landed since |
 | `HD_REGISTRAR_KEYPAIR_JSON` | | S | | | contents of `registrar.json` |
@@ -963,7 +965,8 @@ default build has not dug on mainnet.
 
 **The app's identity.** `identityUri` is the site the app names to the wallet as its identity
 (Mobile Wallet Adapter). Solana Mobile's test wallet shows it on the connect and sign-in prompts,
-not on the transaction prompt; other wallets are untested. Through its host it is also the Sign In
+not on the transaction prompt. Jupiter Mobile is the one other wallet tried (below); Solflare,
+Phantom and Seed Vault have not been. Through its host it is also the Sign In
 With Solana domain; the registrar's `HD_SIWS_DOMAIN` / `HD_SIWS_URI` must match it. The default is
 the project's GitHub Pages address, which only the repository owner's GitHub account can publish
 to. It ends in `/` on purpose: wallets resolve the icon `icon.png` against it, and without the
@@ -979,9 +982,10 @@ curl -sI https://oojae.github.io/heads-down/ | head -1                # HTTP/2 2
 curl -sI https://oojae.github.io/heads-down/icon.png | head -1
 ```
 
-The page carries a dated status line. It was changed on 10 October 2026 when the program was
-deployed, and it is due again now that a phone has run a shift. Keep it true: founder checklist
-step 10.
+The page carries a dated status line. In the repository it was changed when the program was
+deployed on 10 October 2026, and again for the first shift a phone ran that evening; the
+published page shows a change only once the command above has been run. Keep it true: founder
+checklist step 10.
 
 **What a wallet can and cannot check.** The identity is a string the app hands to the wallet.
 Nothing ties it to the app, so another app can name the same address, name and icon. On the
@@ -1261,7 +1265,7 @@ mount path: roll back to the previous deployment in Railway.
 | Helius key leaked | rotate in Helius and delete the old key, update `helius.env`, then the crank's `HELIUS_API_KEY` and the indexer's `RPC_URL` (each a sealed variable of its own service; this deployment has no shared variable, section 10.3), and redeploy both services | |
 | `deploy.sh` stops at its preflight with an RPC error | check the connection, then run it again. It happened on the first try on 10 October 2026 (`getGenesisHash: http: error sending request`, with ping round trips of 0.8 to 1.8 s): the second run, minutes later, deployed | nothing is sent before the preflight answers GO |
 | Deploy stopped part way | re-run `deploy.sh` at the same commit: preflight counts the rent and the chunks the buffer holds, and the writer sends only what is missing; or close the buffer (section 7). No SOL has to be sent for either. The writer says why it stopped: `the payer … holds …` names the SOL to send; `no write was seen to land for 300 s` means writes were taken and did not land (the RPC, the priority fee, or an empty deployer). Rehearsed on the fork; it has not happened on mainnet | |
-| The crank's digs land after their round: `hd_crank_digs_skipped_onchain_total{error="RoundNotActive"}` grows, and a rig that heartbeats is not dug | give the dig more room: raise `HD_CRANK_DIG_DEPLOY_MARGIN_SLOTS` on the service, and the priority floor `HD_CRANK_DIG_CU_PRICE_MICRO_LAMPORTS` (section 10.4). On 10 October 2026 the first dig missed its round with a 20-slot window and a floor of 1,000; with 80 and 20,000 the next four landed 49 to 77 slots before the end | each such dig costs the crank about 10,000 lamports and the rig its round; no SOL of the user's moves |
+| The crank's digs land after their round: `hd_crank_digs_skipped_onchain_total{error="RoundNotActive"}` grows, and a rig that heartbeats is not dug | give the dig more room: raise `HD_CRANK_DIG_DEPLOY_MARGIN_SLOTS` on the service, and the priority floor `HD_CRANK_DIG_CU_PRICE_MICRO_LAMPORTS` (section 10.4). On 10 October 2026, with a 20-slot window and a floor of 1,000, the first dig missed its round and the second landed 11 slots before its round's end; with 80 and 20,000 the four that followed landed 49 to 77 slots before theirs. Which of the two changes did it is not known | each such dig costs the crank about 10,000 lamports and the rig its round; no SOL of the user's moves |
 | The crank pays for second attempts: `hd_crank_digs_skipped_onchain_total{error="StaleHeartbeat"}` grows next to digs that landed | raise `HD_CRANK_DIG_RETRY_AFTER_SLOTS` (section 10.4): the retry fires before the first attempt is seen to land. On 10 October 2026 it was 6 slots and two of three rounds had a refused second attempt; none landed after it was set to 40 | the program refuses the second attempt, so nothing is dug twice; the crank loses about 10,000 to 11,000 lamports each time |
 | A second buffer at a commit whose buffer was handed to the vault | move `buffer-<commit>.json` out of the key directory, then run `deploy.sh` again (it makes a new keypair) | preflight refuses until then, and says so |
 | Helius credits used up | every call answers HTTP 429. Operator scripts: add `--public-rpc`. Services: the crank stops digging and the indexer stops reading the chain (its API keeps serving); remove the crank's deployment, and wait for the month to roll over or change the plan or the key. It happened on 10 October 2026, before the deploy: the key first used was shared with another project, and it was replaced | nothing is spent while nothing digs |

@@ -173,8 +173,8 @@ What the table does not say by itself:
   moved 5,027,040 lamports out of the Automation: 1,463,040 of rent and 3,564,000 that the four
   checkpoints had sent back to it.
 
-**Afterwards** (accounts read at slot 455,365,470, and the Miner again at slot 455,391,819, at
-20:45):
+**Afterwards** (accounts read at slot 455,365,470; the Miner again at slot 455,391,819, at
+20:45, and at slot 455,433,610, at 23:17, with the same fields each time):
 
 - No rig is armed and no shift is open. The ORE Automation
   [`9BGensrT…`](https://solscan.io/account/9BGensrT33mtZUE3h91GbfCrr4rRM5qUiVvWC2SbRoRk) is
@@ -199,7 +199,7 @@ it back": 11,193,320 less.
 |---|---|---|
 | ORE Miner [`A6Rjhk1S…`](https://solscan.io/account/A6Rjhk1SHe9vKvfpnQ6HHMWrEtRxd8i8hdYXnUYEomAm) | 4,480,400 | Not known: whether a Miner's lamports can ever be taken back from ORE was not established |
 | Rig [`DUmg1GrZ…`](https://solscan.io/account/DUmg1GrZhaELtpjY1KpA5ov6ANn4msoUPn4mLV2TWZgL) | 2,600,960 | 1,788,160 when the rig is closed. 812,800 stay behind (below) |
-| Two ShiftLogs, [`2wKGfqoT…`](https://solscan.io/account/2wKGfqoT2cesX9swmHv6ZgWRRP7eeV3Ntp8se6VoSQb3) and [`AeNsTaCL…`](https://solscan.io/account/AeNsTaCLqN3cRjbUwy5D7FHN6MeCA6DXWg8y2pEHE7XZ) | 2,600,960 (2 x 1,300,480) | Yes, 30 days after each shift ended (`close_shift_log`) |
+| Two ShiftLogs, [`2wKGfqoT…`](https://solscan.io/account/2wKGfqoT2cesX9swmHv6ZgWRRP7eeV3Ntp8se6VoSQb3) and [`AeNsTaCL…`](https://solscan.io/account/AeNsTaCLqN3cRjbUwy5D7FHN6MeCA6DXWg8y2pEHE7XZ) | 2,600,960 (2 x 1,300,480) | Yes, from 30 days after each shift ended: the program's `close_shift_log` returns it to the wallet that paid. Neither the app nor the crank sends that instruction yet |
 | Fees of the four wallet transactions | 25,000 | No |
 | Mining | 1,486,000 so far | 5,050,000 went out, 3,564,000 came back |
 | **Total** | **11,193,320** | |
@@ -364,7 +364,8 @@ program hash as well. It was not run for this page.
 
 **What this does not check: that the bytes come from the source.** A rebuild does not reproduce
 the hash outside the directory the deployed file was built in. On 10 October 2026 the same
-program sources (`programs/heads-down` and `crates` are unchanged since commit `d67a1a40c2a0`),
+program sources (under `programs/heads-down` and `crates` only three Markdown files have changed
+since commit `d67a1a40c2a0`, and no source file),
 built with the same toolchain (`cargo-build-sbf 4.1.0`) in two other directories of the same
 machine, gave two more files of 190,048 bytes with other hashes (`22098a39…2019` and
 `f11be448…071c`). The first differs from the deployed file in 968 bytes at 106 places; the ones
