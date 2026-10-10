@@ -10,6 +10,10 @@
 //! takes the transaction and never lands it, and counts the `sendTransaction` calls while the
 //! view the watcher would publish changes. The rig is the one of that first shift: 0.001 SOL
 //! on 4 squares, a lease of one round.
+//!
+//! On the way it checks the other thing that evening resized, the retry gap: a dig that is
+//! still unconfirmed is signed again by the round's second pass, 40 slots after the first with
+//! the default settings, and not a slot earlier.
 
 mod common;
 #[path = "common/rpc_stub.rs"]
@@ -149,6 +153,22 @@ async fn a_dig_is_sent_again_only_while_its_round_takes_deploys() {
     assert!(sent_at.elapsed() >= REBROADCAST_EVERY);
     assert_eq!(p.metrics.txs_sent.get(), 1, "a rebroadcast is not a new transaction");
 
+    // ---- the round's second pass -----------------------------------------------------------------
+    // 39 slots after the first pass the dig is unconfirmed and still inside the default
+    // `dig.retry_after_slots` of 40: a pass reads, finds the rig's dig pending, and signs nothing.
+    let early = view(ROUND, 41);
+    p.chain.send_replace(early.clone());
+    p.crank.dig_tick(&early).await.unwrap();
+    assert_eq!((p.metrics.digs_submitted.get(), p.metrics.txs_sent.get()), (1, 1), "a second attempt inside the retry gap");
+    // 40 slots after it, where the running loop makes the round's second pass, the dig is
+    // planned from fresh chain state and signed again: a second transaction, the last one
+    // `dig.max_attempts_per_round` allows. It is what still digs the round when the first
+    // attempt is lost for good, and what was a paid duplicate on mainnet when the gap was 6.
+    let second = view(ROUND, 40);
+    p.chain.send_replace(second.clone());
+    p.crank.dig_tick(&second).await.unwrap();
+    assert_eq!((p.metrics.digs_submitted.get(), p.metrics.txs_sent.get()), (2, 2), "no second attempt after the retry gap");
+
     // ---- the round ends --------------------------------------------------------------------------
     // The watcher shows the slot at the round's end. The Board still names the round: ORE
     // resets it 48 slots later. A send that was decided a moment ago may still go out.
@@ -156,12 +176,13 @@ async fn a_dig_is_sent_again_only_while_its_round_takes_deploys() {
     assert!(!round_takes_digs(&p.chain.borrow(), ROUND, min_slots_left));
     tokio::time::sleep(Duration::from_millis(600)).await;
     let (at_the_end, polls) = (sends(&b), b.stub.lock().count("getSignatureStatuses"));
-    assert!(at_the_end <= 3, "{at_the_end} sends");
-    // Two more rebroadcast intervals pass, and nothing is sent. The clock would have allowed
-    // it: the limit set when the dig went out was 80 slots at 400 ms, 32 s.
+    assert!((3..=5).contains(&at_the_end), "{at_the_end} sends");
+    // Two more rebroadcast intervals pass, and neither transaction is sent again. The clock
+    // would have allowed it: the limits set when they went out were 80 and 40 slots at 400 ms,
+    // 32 s and 16 s.
     tokio::time::sleep(REBROADCAST_EVERY * 2 + Duration::from_millis(600)).await;
     assert_eq!(sends(&b), at_the_end, "a dig was sent again after its round had ended");
-    assert!(sent_at.elapsed() < Duration::from_millis(80 * 400), "the time limit had not run out");
+    assert!(sent_at.elapsed() < Duration::from_millis(40 * 400), "neither time limit had run out");
     // The transaction is still watched: bytes sent earlier can land late, and that outcome
     // (a skip the crank paid for) belongs in the ledger and the metrics.
     assert!(b.stub.lock().count("getSignatureStatuses") > polls, "the status is still asked for");
