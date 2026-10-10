@@ -41,6 +41,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import xyz.headsdown.core.design.BrandGlyph
+import xyz.headsdown.core.design.HdArgb
 import xyz.headsdown.feature.reveal.board.BoardReplay
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
@@ -216,7 +218,8 @@ fun RevealScreen(
 private fun Header(copy: RevealCopy) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PixelMark()
+            // The mark, at the width the three heat pixels had here.
+            BrandGlyph(Modifier.size(22.dp))
             Spacer(Modifier.size(8.dp))
             Text("HEADS DOWN", style = PixelLabel, color = RevealColors.AshMuted)
         }
@@ -242,16 +245,6 @@ private fun Header(copy: RevealCopy) {
     }
 }
 
-/** Three stacked pixels: the rig's heat mark. */
-@Composable
-private fun PixelMark() {
-    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        listOf(RevealColors.Ember, RevealColors.Ember, RevealColors.OreGold).forEach {
-            Box(Modifier.size(6.dp).background(it))
-        }
-    }
-}
-
 @Composable
 private fun StatsGrid(stats: List<RevealStat>) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -267,7 +260,7 @@ private fun StatsGrid(stats: List<RevealStat>) {
 private fun StatTile(stat: RevealStat, modifier: Modifier) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = RevealColors.CharcoalRaised),
         border = BorderStroke(1.dp, RevealColors.CharcoalOutline),
     ) {
@@ -285,7 +278,7 @@ private fun StatTile(stat: RevealStat, modifier: Modifier) {
 @Composable
 private fun PriceCard(copy: RevealCopy) {
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = RevealColors.CharcoalRaised),
         border = BorderStroke(1.dp, RevealColors.OreGold.copy(alpha = 0.5f)),
     ) {
@@ -333,13 +326,13 @@ private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
 private val PREVIEW_NOW = 1_790_000_000_000L
 private val PREVIEW_ZONE: ZoneId = ZoneId.of("Africa/Lagos")
 
-@Preview(name = "Mined night", widthDp = 400, heightDp = 1400, backgroundColor = 0xFF121314, showBackground = true)
+@Preview(name = "Mined night", widthDp = 400, heightDp = 1400, backgroundColor = HdArgb.PREVIEW_PIT, showBackground = true)
 @Composable
 private fun RevealMinedPreview() = RevealTheme {
     RevealScreen(FakeHaulRepository.sampleNight(PREVIEW_NOW, PREVIEW_ZONE), PREVIEW_ZONE, animate = false)
 }
 
-@Preview(name = "Gate closed", widthDp = 400, heightDp = 1400, backgroundColor = 0xFF121314, showBackground = true)
+@Preview(name = "Gate closed", widthDp = 400, heightDp = 1400, backgroundColor = HdArgb.PREVIEW_PIT, showBackground = true)
 @Composable
 private fun RevealGateClosedPreview() = RevealTheme {
     RevealScreen(FakeHaulRepository.sampleGateClosed(PREVIEW_NOW, PREVIEW_ZONE), PREVIEW_ZONE, animate = false)

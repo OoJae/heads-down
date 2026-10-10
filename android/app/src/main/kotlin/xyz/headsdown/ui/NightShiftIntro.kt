@@ -108,7 +108,7 @@ fun NightShiftIntro(onContinue: () -> Unit, continueLabel: String = NightShiftCo
         NightShiftCopy.STEPS.forEachIndexed { i, step -> RitualStep(i + 1, step) }
 
         Card(
-            shape = RoundedCornerShape(18.dp),
+            shape = MaterialTheme.shapes.medium,
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.dp, HdColors.OreGold.copy(alpha = 0.6f)),
         ) {

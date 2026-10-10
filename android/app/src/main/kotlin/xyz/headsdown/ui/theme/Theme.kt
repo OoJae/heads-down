@@ -1,60 +1,48 @@
 package xyz.headsdown.ui.theme
 
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import xyz.headsdown.core.design.HdArgb
+import xyz.headsdown.core.design.HdCompat
+import xyz.headsdown.core.design.HdPalette
+import xyz.headsdown.core.design.HdType
+import xyz.headsdown.core.design.HeadsDownTheme as UndersideTheme
 
 /**
- * Night-shift palette: charcoal surfaces, ember for "rig hot", ORE gold for hauls. Every text
- * colour here meets WCAG AA (4.5:1) on Charcoal and CharcoalRaised (see ThemeContrastTest);
- * the widget's WidgetPalette and the reveal's RevealColors mirror these values.
+ * COMPATIBILITY SHIM. The names the screens from before the redesign use, with the values of
+ * "The Underside" (`:core:design`): Charcoal is the pit, CharcoalRaised the slab, Ash the chalk,
+ * AshMuted the ash, OreGold the seam. Nothing here holds a colour of its own; a screen that is
+ * rebuilt reads `Hd.colors` instead and this object goes when the last one has been.
+ *
+ * Every text colour here meets WCAG AA (4.5:1) on Charcoal and CharcoalRaised (see
+ * ThemeContrastTest); the widget's WidgetPalette and the reveal's RevealColors are the same shim.
  */
 object HdColors {
-    val Charcoal = Color(0xFF121314)
-    val CharcoalRaised = Color(0xFF1C1D20)
-    val CharcoalOutline = Color(0xFF2E2F33)
-    val Ember = Color(0xFFFF6A1A)
-    val EmberDim = Color(0xFF7A3514)
-    val OreGold = Color(0xFFF2B233)
-    val Ash = Color(0xFFECE7E1)
-    val AshMuted = Color(0xFF9A948D)
-    val Frost = Color(0xFF8FB8DE)
-    val Cooling = Color(0xFFFFB067)
+    val Charcoal: Color = HdPalette.Dark.pit
+    val CharcoalRaised: Color = HdPalette.Dark.slab
+
+    /** The hairline flattened onto the pit: the old layouts draw their outlines opaque. */
+    val CharcoalOutline: Color = Color(HdArgb.HAIRLINE_ON_PIT)
+    val Ember: Color = HdPalette.Dark.ember
+    val OreGold: Color = HdPalette.Dark.seam
+    val Ash: Color = HdPalette.Dark.chalk
+    val AshMuted: Color = HdPalette.Dark.ash
+
+    // Colours the new system has no role for (HdCompat): they leave with the layouts that name them.
+    val EmberDim: Color = Color(HdCompat.EMBER_DIM)
+    val Frost: Color = Color(HdCompat.FROST)
+    val Cooling: Color = Color(HdCompat.COOLING)
 }
 
-private val scheme = darkColorScheme(
-    primary = HdColors.Ember,
-    onPrimary = HdColors.Charcoal,
-    secondary = HdColors.OreGold,
-    onSecondary = HdColors.Charcoal,
-    background = HdColors.Charcoal,
-    onBackground = HdColors.Ash,
-    surface = HdColors.CharcoalRaised,
-    onSurface = HdColors.Ash,
-    surfaceVariant = HdColors.CharcoalRaised,
-    onSurfaceVariant = HdColors.AshMuted,
-    outline = HdColors.CharcoalOutline,
-)
+/** Mono capitals for labels ("HEADS DOWN", "RIG"): the design system's label style. */
+val PixelLabel: TextStyle = HdType.Default.label
 
-private val typography = Typography(
-    displaySmall = TextStyle(fontSize = 40.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp),
-    headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
-    bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
-    labelLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-)
-
-/** Monospace caps for pixel-style labels ("HEADS DOWN", "RIG"). */
-val PixelLabel = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, letterSpacing = 2.sp)
-
-/** Always dark: this app lives on a nightstand. */
+/**
+ * The app's theme: the design module's, dark. Always dark for now: this app lives on a
+ * nightstand, and the light palette is switched on in a later stage.
+ */
 @Composable
 fun HeadsDownTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = scheme, typography = typography, content = content)
+    UndersideTheme(darkTheme = true, content = content)
 }

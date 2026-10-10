@@ -10,6 +10,8 @@ android {
 }
 
 dependencies {
+    // The palette (HdArgb, and the colour resources the picker previews use).
+    implementation(projects.core.design)
     api(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
     implementation(libs.androidx.core.ktx)

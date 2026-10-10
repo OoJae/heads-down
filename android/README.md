@@ -87,12 +87,13 @@ cover a dig); the app and the program check them again. `mode=day` sets `plan_fl
 | `core/keys` | Keystore P-256 rig key (StrongBox, else TEE; non-exportable; attested with the registrar's challenge), strict DER to raw `r‖s`, low-S, SEC1 compression, the v1.1 `HDv1` HEARTBEAT / BREAK / FREEZE / PLAN preimages, the shared write-ahead `RigCounter`, `RigMessageSigner` |
 | `core/wallet` | MWA 2.2.0: one-approval session (authorize, `get_capabilities`, build, sign and send), SIWS with the registrar's fields, a sign-only mode where the app submits (localdev), AES-GCM Keystore vault for the auth token, confirmation poller (success means confirmed with `err == null`) |
 | `core/chain` | Solana JSON-RPC over OkHttp, PDA derivation, checked ORE / heads_down account decoders, the instruction builders (the v1.1 core, the v1.2 SKR set and v1.3's `close_shift_log`), legacy/v0 transactions, the single-transaction clock-in, the crank uplink (contract A), the registrar client and attestation flow, the indexer haul client (contract B) |
+| `core/design` | "The Underside", the design system: the palette in both modes (`Hd.colors`, `HdArgb` for what Compose does not draw), the type scale and the three bundled font files (`core/design/FONTS.md`), shapes, the three springs, `HeadsDownTheme` (which also dresses `MaterialTheme`), the components (`BarButton`, `ActionDock`, `DisplayText`, `Choice`, `LedgerRow`, …), the hero slot with its static stand-in, `Theme.HeadsDown` with the splash, and the launcher icon's layers |
 | `feature/shift` | `ShiftStateMachine`, accelerometer `FaceDownDetector`, per-round `HeartbeatTicker`, `BoardRoundSource` (ORE `Board.round_id`), `CrankHeartbeatSink` (acks, link status), the shift journal (first pickup), the `specialUse` foreground service; the debug-only sensor lab |
 | `feature/reveal` | The morning haul reveal: exact alarm aligned to the user's next alarm, full-screen intent, a 120 Hz board replay, counts, effective price against market, streak, share grid, explorer link |
 | `feature/oem-keepalive` | HyperOS/MIUI detection, Autostart and "No restrictions" deep links with fallbacks, Doze exemption, "killed by the OS" health check |
 | `surface/tile` | Quick Settings tile and the non-exported translucent MWA trampoline |
 | `surface/notification` | Ongoing shift notification: Android 16 Live Update (`ProgressStyle` + promoted ongoing), with a fallback on 14/15 |
-| `surface/widget` | Glance 1.2 widgets. **Rig**: heat (cold / armed / hot / cooling / frozen) with a five-pixel heat bar, a RemoteViews `Chronometer` that ticks the shift with no app updates, the last on-chain haul and the streak. **Crew**: a marked placeholder ("PREVIEW · NOT LIVE") until rooms exist. Dynamic colour where available, generated previews on Android 15+ |
+| `surface/widget` | Glance 1.2 widgets. **Rig**: heat (cold / armed / hot / cooling / frozen) with a five-pixel heat bar, a RemoteViews `Chronometer` that ticks the shift with no app updates, the last on-chain haul and the streak. **Crew**: a marked placeholder ("PREVIEW · NOT LIVE") until rooms exist. The Heads Down palette by default (Material You only if `preferBrandColors` was turned off), generated previews on Android 15+ |
 | `surface/haptics` | The haptic language: arm thunk, cooling tick, reveal drumroll, Motherlode flourish. Composed primitives when every primitive is supported, else an amplitude waveform, else on/off. Basic motors (the Redmi 14C) also get a generated CC0 thunk (`surface/haptics/SOUNDS.md`). `HapticGovernor` keeps it from ever buzzing per round |
 | `app` | Hilt graph, Compose home screen and onboarding, the night-shift intro, the shift observer that drives the widget and haptics, hardened manifest, R8 rules, the `localdev` build type and the debug-only rig debug screen |
 
@@ -314,6 +315,17 @@ scripts/devstack/phone.sh          # adb reverse 8899, 8900, 8787, 8788, 8790 (a
   `src/localdev` adds a network security config, for exactly those two hosts).
   `app/scripts/check-endpoint-policy.sh` checks the Gradle side; `EndpointPolicyTest` and
   `CleartextConfigTest` the rest.
+
+## Design system
+
+`core/design` is the one module that may write a colour, name a font file or draw the mark.
+`SingleSourceTest` fails if a palette literal appears in the app, the reveal or a surface, or if the
+tile icon or the notification icon stops carrying the canonical glyph; `StillnessTest` fails if
+anything asks for an animation that never ends (one known exception: the home screen's ember breath,
+to be removed with the old home screen). The screens from before the redesign still read
+`MaterialTheme` and their old colour names (`HdColors`, `RevealColors`, `WidgetPalette`): those are
+shims over the new palette now, kept until each screen is rebuilt on the components. `HdCompat` holds
+the three colours the new system has no role for (the frozen blue, the cooling orange, a dim ember).
 
 ## Surfaces
 

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive icon foreground (108dp canvas, 66dp safe zone): the slab seen from a low angle,
+    hovering over a thin line of gold light. Its farthest corner is 30.8 units from the centre,
+    inside the 33-unit safe circle. Path data: HdGlyph.LAUNCHER_* (SingleSourceTest).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- the slab's face -->
+    <path
+        android:fillColor="@color/hd_icon_face"
+        android:pathData="M29,36h50v10h-50z" />
+    <!-- the top edge, catching a little light -->
+    <path
+        android:fillColor="@color/hd_icon_edge"
+        android:pathData="M29,36h50v1h-50z" />
+    <!-- its underside, lit from below -->
+    <path android:pathData="M29,46h50l-7,10h-36z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endColor="@color/hd_icon_seam"
+                android:endX="54"
+                android:endY="56"
+                android:startColor="@color/hd_icon_underside_shadow"
+                android:startX="54"
+                android:startY="46"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+    <!-- the seam -->
+    <path
+        android:fillColor="@color/hd_icon_seam"
+        android:pathData="M34,66h40v5h-40z" />
+</vector>

@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +31,19 @@ class WidgetStoreAndHooksTest {
         )
         first.update { written }
         assertEquals(written, WidgetStateStore(prefs("widget_roundtrip")).state.value)
+    }
+
+    @Test
+    fun `a widget nobody configured wears the brand, and still follows the wallpaper when asked to`() {
+        val store = WidgetStateStore(prefs("widget_brand_default"))
+        assertTrue(store.preferBrandColors)
+        assertEquals(WidgetColorMode.BRAND, WidgetColorPolicy.mode(sdkInt = 34, preferBrand = store.preferBrandColors))
+        assertEquals(WidgetColorMode.BRAND, WidgetColorPolicy.mode(sdkInt = 36, preferBrand = store.preferBrandColors))
+        // The choice is kept, and read back by a new store over the same file.
+        store.preferBrandColors = false
+        val reopened = WidgetStateStore(prefs("widget_brand_default"))
+        assertFalse(reopened.preferBrandColors)
+        assertEquals(WidgetColorMode.DYNAMIC, WidgetColorPolicy.mode(sdkInt = 34, preferBrand = reopened.preferBrandColors))
     }
 
     @Test

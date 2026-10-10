@@ -18,9 +18,13 @@ class WidgetStateStore internal constructor(private val prefs: SharedPreferences
     private val _state = MutableStateFlow(read())
     val state: StateFlow<RigWidgetState> = _state.asStateFlow()
 
-    /** Widget colours follow the wallpaper unless the user picked the Heads Down palette. */
+    /**
+     * The widget wears the Heads Down palette unless this was turned off, in which case it
+     * follows the wallpaper (Material You). Brand is the default: a rig that was never asked
+     * shows the slab, not the wallpaper's colours.
+     */
     var preferBrandColors: Boolean
-        get() = prefs.getBoolean(K_BRAND, false)
+        get() = prefs.getBoolean(K_BRAND, true)
         set(value) = prefs.edit { putBoolean(K_BRAND, value) }
 
     /** Applies [transform] atomically; returns (before, after). */

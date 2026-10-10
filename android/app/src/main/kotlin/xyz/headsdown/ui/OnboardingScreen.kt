@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -189,7 +188,7 @@ internal fun rigKeyLine(status: RigKeyStatus): String = when (status) {
 @Composable
 private fun StepCard(index: Int, title: String, subtitle: String, done: Boolean, actions: @Composable () -> Unit) {
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, if (done) HdColors.EmberDim else HdColors.CharcoalOutline),
     ) {

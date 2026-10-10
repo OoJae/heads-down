@@ -6,13 +6,15 @@ import androidx.glance.color.ColorProviders
 import androidx.glance.color.DynamicThemeColorProviders
 import androidx.glance.material3.ColorProviders
 import androidx.glance.unit.ColorProvider
+import xyz.headsdown.core.design.HdArgb
+import xyz.headsdown.core.design.HdCompat
 import androidx.glance.color.ColorProvider as DayNightColorProvider
 
 enum class WidgetColorMode {
     /** Material You: surfaces follow the wallpaper, day and night. */
     DYNAMIC,
 
-    /** The Heads Down look: charcoal in both day and night. */
+    /** The Heads Down look: the pit in both day and night. The default (WidgetStateStore). */
     BRAND,
 }
 
@@ -25,26 +27,32 @@ object WidgetColorPolicy {
 }
 
 /**
- * The widget palette, ARGB. Mirrors the app's `HdColors` (an app unit test keeps them equal).
- * The `*_ON_LIGHT` variants are the same hues darkened to at least 4.5:1 on light Material
- * surfaces, for dynamic colour in day mode.
+ * COMPATIBILITY SHIM: the widget's old colour names, ARGB as `Long`, with the values of "The
+ * Underside" (`:core:design`). The same shim as the app's `HdColors` (an app unit test keeps them
+ * equal). The `*_ON_LIGHT` variants are for dynamic colour in day mode: the light palette's ember
+ * and gold, at least 4.5:1 on light Material surfaces.
  */
 object WidgetPalette {
-    const val CHARCOAL = 0xFF121314L
-    const val CHARCOAL_RAISED = 0xFF1C1D20L
-    const val CHARCOAL_OUTLINE = 0xFF2E2F33L
-    const val EMBER = 0xFFFF6A1AL
-    const val ORE_GOLD = 0xFFF2B233L
-    const val ASH = 0xFFECE7E1L
-    const val ASH_MUTED = 0xFF9A948DL
-    const val FROST = 0xFF8FB8DEL
-    const val COOLING = 0xFFFFB067L
+    const val CHARCOAL = HdArgb.PIT.toLong() and OPAQUE
+    const val CHARCOAL_RAISED = HdArgb.SLAB.toLong() and OPAQUE
+    const val CHARCOAL_OUTLINE = HdArgb.HAIRLINE_ON_PIT.toLong() and OPAQUE
+    const val EMBER = HdArgb.EMBER.toLong() and OPAQUE
+    const val ORE_GOLD = HdArgb.SEAM.toLong() and OPAQUE
+    const val ASH = HdArgb.CHALK.toLong() and OPAQUE
+    const val ASH_MUTED = HdArgb.ASH.toLong() and OPAQUE
 
-    const val EMBER_ON_LIGHT = 0xFFA33700L
-    const val ORE_GOLD_ON_LIGHT = 0xFF7A5200L
-    const val COOLING_ON_LIGHT = 0xFF8F4A00L
-    const val FROST_ON_LIGHT = 0xFF2F5F8AL
+    const val EMBER_ON_LIGHT = HdArgb.Day.EMBER.toLong() and OPAQUE
+    const val ORE_GOLD_ON_LIGHT = HdArgb.Day.SEAM.toLong() and OPAQUE
+
+    // Colours the new system has no role for (HdCompat): they leave with the layouts that name them.
+    const val FROST = HdCompat.FROST.toLong() and OPAQUE
+    const val COOLING = HdCompat.COOLING.toLong() and OPAQUE
+    const val COOLING_ON_LIGHT = HdCompat.COOLING_DAY.toLong() and OPAQUE
+    const val FROST_ON_LIGHT = HdCompat.FROST_DAY.toLong() and OPAQUE
 }
+
+/** An ARGB `Int` widened to the unsigned `Long` Compose's `Color(Long)` takes. */
+private const val OPAQUE = 0xFFFFFFFFL
 
 /** Accent colours for one [WidgetColorMode]. */
 class WidgetAccents(private val mode: WidgetColorMode) {

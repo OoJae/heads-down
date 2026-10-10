@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Mirrors WidgetPalette and the app's HdColors (static picker previews and layouts). -->
-    <color name="hd_widget_charcoal">#FF121314</color>
-    <color name="hd_widget_ember">#FFFF6A1A</color>
-    <color name="hd_widget_gold">#FFF2B233</color>
-    <color name="hd_widget_ash">#FFECE7E1</color>
-    <color name="hd_widget_ash_muted">#FF9A948D</color>
-    <color name="hd_widget_cooling">#FFFFB067</color>
+    <!--
+        The widget's old colour names for its static layouts (the picker previews, the
+        chronometer), as aliases of the design module's palette (:core:design, res/values/colors.xml).
+        No colour is written here.
+    -->
+    <color name="hd_widget_charcoal">@color/hd_pit</color>
+    <color name="hd_widget_ember">@color/hd_ember</color>
+    <color name="hd_widget_gold">@color/hd_seam</color>
+    <color name="hd_widget_ash">@color/hd_chalk</color>
+    <color name="hd_widget_ash_muted">@color/hd_ash</color>
+    <color name="hd_widget_cooling">@color/hd_compat_cooling</color>
 </resources>

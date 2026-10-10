@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        "The Underside" for XML: the window, the splash, the widget's picker previews, the icons.
+        The same values as HdArgb in HdColors.kt; PaletteXmlTest keeps the two equal. These are
+        the dark palette. A later stage may add values-night / values-notnight variants of the
+        six roles; nothing here assumes there are none.
+    -->
+    <color name="hd_pit">#FF0C0C0D</color>
+    <color name="hd_slab">#FF18181A</color>
+    <color name="hd_chalk">#FFEFEAE0</color>
+    <color name="hd_ash">#FF98938A</color>
+    <color name="hd_seam">#FFF2B233</color>
+    <color name="hd_ember">#FFE8622A</color>
+
+    <!--
+        THE ICON'S OWN COLOURS. Never night-qualified: the launcher icon and the splash mark are
+        the dark slab over the gold line whatever the system theme is.
+        - background: the pit.
+        - face: the slab's top, lifted so it reads against the pit (the slab colour itself would be 1.1:1).
+        - edge: one unit along the top of the face, a little lighter.
+        - underside: from shadow to the gold light it hovers over.
+    -->
+    <color name="hd_icon_background">#FF0C0C0D</color>
+    <color name="hd_icon_face">#FF3A3A3E</color>
+    <color name="hd_icon_edge">#FF6A6A70</color>
+    <color name="hd_icon_underside_shadow">#FF6B4E1A</color>
+    <color name="hd_icon_seam">#FFF2B233</color>
+
+    <!-- COMPATIBILITY (HdCompat.COOLING): the widget's crew preview still names it. -->
+    <color name="hd_compat_cooling">#FFFFB067</color>
+</resources>

@@ -53,7 +53,7 @@ class CrewWidget : GlanceAppWidget() {
     }
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        val mode = WidgetColorPolicy.mode(Build.VERSION.SDK_INT)
+        val mode = WidgetColorPolicy.mode(Build.VERSION.SDK_INT, WidgetStateStore.get(context).preferBrandColors)
         provideContent {
             GlanceTheme(colors = WidgetColors.providers(mode)) { CrewPlaceholderContent(mode, open = null) }
         }

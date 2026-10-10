@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import xyz.headsdown.core.design.HdArgb
+import xyz.headsdown.core.design.HdCompat
 import kotlin.math.pow
 
 class WidgetColorsTest {
@@ -39,6 +41,36 @@ class WidgetColorsTest {
         val darkSurfaces = listOf(0xFF141218L, 0xFF211F26L)
         listOf(WidgetPalette.EMBER, WidgetPalette.ORE_GOLD, WidgetPalette.COOLING, WidgetPalette.FROST)
             .forEach { fg -> darkSurfaces.forEach { bg -> assertAa(fg, bg) } }
+    }
+
+    @Test
+    fun `the widget palette is the design module's, as unsigned longs`() {
+        fun argb(value: Long): Int {
+            assertTrue("%X is an opaque ARGB value".format(value), value in 0xFF000000L..0xFFFFFFFFL)
+            return value.toInt()
+        }
+        assertEquals(HdArgb.PIT, argb(WidgetPalette.CHARCOAL))
+        assertEquals(HdArgb.SLAB, argb(WidgetPalette.CHARCOAL_RAISED))
+        assertEquals(HdArgb.HAIRLINE_ON_PIT, argb(WidgetPalette.CHARCOAL_OUTLINE))
+        assertEquals(HdArgb.EMBER, argb(WidgetPalette.EMBER))
+        assertEquals(HdArgb.SEAM, argb(WidgetPalette.ORE_GOLD))
+        assertEquals(HdArgb.CHALK, argb(WidgetPalette.ASH))
+        assertEquals(HdArgb.ASH, argb(WidgetPalette.ASH_MUTED))
+        // In day mode a Material You widget takes the light palette's ember and gold.
+        assertEquals(HdArgb.Day.EMBER, argb(WidgetPalette.EMBER_ON_LIGHT))
+        assertEquals(HdArgb.Day.SEAM, argb(WidgetPalette.ORE_GOLD_ON_LIGHT))
+        // And the colours the new system has no role for come from the same module.
+        assertEquals(HdCompat.FROST, argb(WidgetPalette.FROST))
+        assertEquals(HdCompat.COOLING, argb(WidgetPalette.COOLING))
+        assertEquals(HdCompat.FROST_DAY, argb(WidgetPalette.FROST_ON_LIGHT))
+        assertEquals(HdCompat.COOLING_DAY, argb(WidgetPalette.COOLING_ON_LIGHT))
+    }
+
+    @Test
+    fun `the unlit pixel and the empty seat stay quieter than any text`() {
+        // The outline is the hairline: decoration, well under 3:1, so it never reads as a state.
+        assertTrue(contrast(WidgetPalette.CHARCOAL_OUTLINE, WidgetPalette.CHARCOAL) < 3.0)
+        assertTrue(contrast(WidgetPalette.CHARCOAL_OUTLINE, WidgetPalette.CHARCOAL) > 1.0)
     }
 
     @Test

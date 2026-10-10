@@ -7,9 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -21,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,8 +33,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -47,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import xyz.headsdown.core.design.BrandGlyph
+import xyz.headsdown.core.design.components.HeatPixels as DesignHeatPixels
 import xyz.headsdown.rig.FocusBondSetting
 import xyz.headsdown.feature.oemkeepalive.ExitCause
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
@@ -141,7 +138,7 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PixelMark(Modifier.size(28.dp))
+            BrandGlyph(Modifier.size(28.dp))
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("HEADS DOWN", style = PixelLabel, color = HdColors.AshMuted)
@@ -201,7 +198,7 @@ private fun RigCard(
     val look = lookOf(snapshot.state)
     val hot = snapshot.state is ShiftState.Down
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = if (hot) BorderStroke(2.dp, emberBreath()) else BorderStroke(1.dp, HdColors.CharcoalOutline),
     ) {
@@ -281,7 +278,7 @@ private fun RigCard(
 private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
     Card(
         modifier = Modifier.testTag(HomeTags.BOND_CARD),
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, HdColors.CharcoalOutline),
     ) {
@@ -324,7 +321,7 @@ private fun FocusBondCard(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
 @Composable
 private fun HaulCard(onPreviewReveal: () -> Unit, onClockOut: (() -> Unit)?) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, HdColors.OreGold.copy(alpha = 0.5f)),
     ) {
@@ -347,7 +344,7 @@ private fun HaulCard(onPreviewReveal: () -> Unit, onClockOut: (() -> Unit)?) {
 @Composable
 private fun WidgetCard(onAddWidget: () -> Unit) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, HdColors.CharcoalOutline),
     ) {
@@ -371,41 +368,10 @@ private fun emberBreath(): Color {
     return HdColors.Ember.copy(alpha = glow)
 }
 
-/** Five pixels that fill with heat, as on the widget. */
+/** Five pixels that fill with heat, as on the widget. The drawing is the design module's. */
 @Composable
 private fun HeatPixels(lit: Int, color: Color) {
-    Canvas(
-        Modifier
-            .size(width = 38.dp, height = 6.dp)
-            .semantics { contentDescription = "Heat $lit of 5" },
-    ) {
-        val px = size.height
-        val gap = (size.width - 5 * px) / 4
-        repeat(5) { i ->
-            drawRect(
-                color = if (i < lit) color else HdColors.CharcoalOutline,
-                topLeft = Offset(i * (px + gap), 0f),
-                size = Size(px, px),
-            )
-        }
-    }
-}
-
-/** The pixel mark: a face-down phone (ember) under an ORE-gold heartbeat pixel. */
-@Composable
-private fun PixelMark(modifier: Modifier) {
-    Box(modifier) {
-        Canvas(Modifier.fillMaxSize()) {
-            val p = size.minDimension / 7
-            fun px(x: Int, y: Int, c: Color) = drawRect(c, Offset(x * p, y * p), Size(p, p))
-            // heartbeat
-            px(1, 2, HdColors.OreGold); px(2, 2, HdColors.OreGold); px(3, 1, HdColors.OreGold)
-            px(4, 3, HdColors.OreGold); px(5, 2, HdColors.OreGold)
-            // phone, face-down
-            for (x in 0..6) px(x, 5, HdColors.Ember)
-            px(0, 4, HdColors.EmberDim); px(6, 4, HdColors.EmberDim)
-        }
-    }
+    DesignHeatPixels(lit = lit, color = color, description = "Heat $lit of 5")
 }
 
 @Composable
@@ -425,7 +391,7 @@ private fun HealthBanner(health: ShiftHealth, onFix: () -> Unit) {
         else -> return
     }
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = HdColors.EmberDim.copy(alpha = 0.35f)),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
