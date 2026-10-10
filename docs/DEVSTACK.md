@@ -251,8 +251,8 @@ sha256 `57503f43…`, which is the build verify.osec.io attributes to commit `b9
   | `governance` | dev key `governance.json` | local only |
   | `registrar` | dev key `registrar.json` (also the key of the optional local registrar) | local only |
   | `executor_fee` | **10,000** lamports | ECONOMICS.md's placeholder; every rig's Automation must use exactly this fee |
-  | `crank_fee` | **7,000** lamports | ORE's own executor fee. crank/README measures ~6,050 lamports (v0 + table, 5 rigs) to 6,723 lamports (3 rigs) of crank cost per fresh-heartbeat dig; `crank_fee ≤ executor_fee` holds |
-  | `bury_bps` | 0 | no bury path yet |
+  | `crank_fee` | **7,000** lamports | ORE's own executor fee. crank/README measures 6,037 to 6,040 lamports per rig (v0 + table, 5 rigs) for a fresh-heartbeat dig; three rigs in one transaction come to about 6,723 each (four signatures at 5,000, plus the priority fee, shared by three); `crank_fee ≤ executor_fee` holds |
+  | `bury_bps` | 0 | stored, but no instruction reads it |
 
   Override them with `HD_EXECUTOR_FEE` / `HD_CRANK_FEE`.
 - **Executor float:** 1 SOL (`HD_EXECUTOR_FLOAT`), a plain transfer to

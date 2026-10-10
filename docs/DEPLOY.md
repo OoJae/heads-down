@@ -3,7 +3,11 @@
 The runbook for putting `heads_down` on mainnet and running its services on Railway: keys,
 funding, the preflight, the deploy, `initialize_config`, the Executor float, the Railway
 services, monitoring, rollback, upgrades, the move to a Squads multisig, and what it costs.
-Everything here was rehearsed end to end on a local mainnet fork (section 12).
+The deploy path (keys, funding, preflight, a deploy that is stopped and continued,
+`initialize_config`, the Executor float, upgrades, a buffer for a multisig, the pause) was
+rehearsed end to end on a local mainnet fork (section 12). Not rehearsed: closing the program,
+the move to a Squads vault, un-pausing, and any write to mainnet. The preflight, which only
+reads, has run against mainnet through Helius (section 6).
 
 Contents: [Founder checklist](#founder-checklist) ·
 [1. What runs where](#1-what-runs-where) · [2. Keys](#2-keys) · [3. Funding](#3-funding) ·
@@ -41,7 +45,8 @@ In order. Until step 5 no transaction is signed by these keys.
    back and what does not: 0.9996 SOL is locked in the program's rent and 0.0053 SOL is gone for
    good. Two more amounts are not in the table: the **wallet on the phone** needs about 0.04 SOL
    for a week of tests, and a **first upgrade** needs about 0.964 SOL lent to the deployer for a
-   few minutes, so the working budget is about 2.07 SOL if an upgrade must stay possible.
+   few minutes, so the working budget is about 2.11 SOL if an upgrade must stay possible
+   (1.10 + 0.04 + 0.964).
 4. **Preflight**: `scripts/mainnet/preflight.sh` must end with `GO`.
 5. **Deploy**: `scripts/mainnet/deploy.sh` (type the confirmation). It writes the program into a
    buffer at one transaction a second (198 writes for today's build: a little over three minutes on
@@ -88,7 +93,8 @@ The scripts, all in `scripts/mainnet/` (each has `--help`):
 | `dry-run.sh` | the whole runbook on an isolated local fork | local only |
 | `selftest.sh` | checks that need no cluster and no real key: which RPC a script picks, the pins on the funded addresses, argument checks | no |
 
-Every script takes `--cluster mainnet|localnet` (default mainnet) and `--keys-dir DIR`. With
+Every script except `dry-run.sh` and `selftest.sh` takes `--cluster mainnet|localnet` (default
+mainnet) and `--keys-dir DIR`. With
 `--cluster localnet` it targets the dev stack and refuses the mainnet key directory. The
 Rust half is `hd-devstack` (`scripts/devstack/tool`), whose `--cluster` guard checks the RPC's
 genesis hash and host before reading or signing anything.
@@ -119,13 +125,16 @@ The three funded addresses are pinned in `scripts/mainnet/lib.sh` (`HD_EXPECTED_
 `keys.sh` stops before it prints any amount, and `preflight.sh` answers NO-GO, if `deployer.json`,
 `crank-payer.json` or `governance.json` derives another address: SOL sent to the pinned address
 could not be spent with the file at hand. The pins are not checked for `--cluster localnet` or for
-another key directory (`--keys-dir`, `HD_MAINNET_KEYS`); the scripts then say so. After a key is
+another key directory (`--keys-dir`, `HD_MAINNET_KEYS`). On mainnet with another key directory
+the scripts say so (`funded addresses not checked`); on localnet they say nothing about pins.
+After a key is
 replaced on purpose, change its pin and the tables in this file.
 
 Who can do what with each key, and the worst case if it leaks, is in
 [THREAT_MODEL.md](THREAT_MODEL.md) section 5. In short: the crank key and the registrar key
-cannot move user funds; governance can pause, change `crank_fee` (≤ `executor_fee`), the
-registrar and `bury_bps` after 72 h, and nothing else; the upgrade authority is the full
+cannot move user funds; governance can pause at once, change `crank_fee` (≤ `executor_fee`), the
+registrar and `bury_bps` after 72 h, name a successor that can take over after the same 72 h
+(v1.3, below), and nothing else; the upgrade authority is the full
 program authority, which is why it moves to a time-locked multisig (section 15).
 
 **`Config.governance` is set at `initialize_config`.** `propose_config` changes the registrar,
@@ -160,7 +169,9 @@ estimate is 0.02901 SOL. The scripts budget the same sum for a program of `--max
 in the dry run, section 12), so about **0.031 SOL is still in the deployer afterwards**. An
 earlier version of this page budgeted 0.005 SOL and asked for 1.01 SOL: with exactly that, the
 CLI stopped before sending anything ("insufficient funds for spend + fee"). `dry-run.sh --tight`
-now funds every key with exactly the amounts above, and it has to pass.
+now funds every key with exactly what this table comes to at the local validator's rent (6,960
+lamports per byte there, so the deployer gets 1.407535720 SOL; the fee budget and the two other
+keys are the same), and it has to pass.
 
 The buffer is now written by `hd-devstack write-buffer` (section 7), which has no such check and
 pays 5,267 lamports a write. The budget is kept so that `deploy.sh --cli-only`, where the CLI
@@ -185,7 +196,8 @@ build) plus the fee budget: about 0.999 SOL in the deployer, which will hold abo
 That is a top-up of about **0.964 SOL**, and all of it but about 0.001 SOL of fees comes back
 when the upgrade executes (the buffer's rent goes to the spill account, the deployer). So the
 working budget is about **2.07 SOL** if a bug found on the phone must be fixable on-chain: the
-1.10 above, and 0.964 lent to the deployer for a few minutes per upgrade.
+1.10 above, and 0.964 lent to the deployer for a few minutes per upgrade. With the 0.04 SOL for
+the wallet on the phone it is about 2.11 SOL.
 
 Today's build fills 97% of the 196,608-byte `--max-len` (6,560 bytes of headroom). A build that
 outgrows it must extend the ProgramData, and mainnet enforces a minimum extension of 10,240 bytes:
@@ -231,9 +243,12 @@ take their SOL back and claim in ORE. Three consequences:
   tooling yet); sweep the crank's and governance's balances; close the program last.
 
 **The crank's 0.05 SOL is a fee float, and one phone does not pay for itself.** A dig that
-carries one rig's fresh heartbeat costs the crank 10,047 lamports (one transaction signature, one
-secp256r1 signature, the priority fee) and the program reimburses `crank_fee` = 7,000: about 3,000
-lamports lost per dig, and the default caps allow at most 20 digs a shift. The reimbursement
+carries one rig's fresh heartbeat costs the crank 10,047 lamports at the priority floor of 1,000
+micro-lamports per CU (one transaction signature, one secp256r1 signature, 47 of priority fee;
+measured on the fork). `deploy/railway/crank/crank.toml` lets the price follow the network up to
+50,000, which is about 2,300 lamports more. The program reimburses `crank_fee` = 7,000: about
+3,000 lamports lost per dig at the floor and about 5,300 at the cap, and the default caps allow
+at most 20 digs a shift. The reimbursement
 covers the fee only from three rigs per transaction up (crank/README.md). Never reimbursed: the
 heartbeat records on nights when the cost gate stays closed (about 10,000 lamports each, every
 third round: about 1,240,000 lamports over an 8-hour night for one rig), BREAK and FREEZE (about
@@ -255,21 +270,22 @@ rent (ORE's account; whether ORE lets a wallet close it was not checked).
 
 | Parameter | Value | Why |
 |---|---|---|
-| `--max-len` | **196,608** (192 KiB) | Chosen as 1.76x the 111,600-byte v1.1 build, to hold the SKR instructions without an extend. They are in now: today's v1.3 build is 190,048 bytes, which leaves 6,560 bytes (3%). Rent 0.9996 SOL. 2x (223,200) would cost 1.1347 SOL and 256 KiB 1.3326 SOL. If a later build outgrows it, `solana program deploy` extends the ProgramData during the upgrade, in steps of at least 10,240 bytes (52,019,200 lamports each, paid by the deployer and locked like the rest). |
-| `executor_fee` | **10,000** lamports | **Immutable** (no instruction changes it), and every rig's Automation must use exactly this Discretionary fee (`dig` skips any other value). It must cover the worst measured crank cost with room for congestion: crank/README.md measures 5,500 (v1, 11 rigs) to 7,550 (legacy, 2 rigs) lamports per fresh-heartbeat dig, 6,723 end to end; ORE's own executor charges 7,000 and a sampled third-party one 12,000. 10,000 is ECONOMICS.md's figure and lets `crank_fee` rise to 10,000 under congestion without touching user Automations. At 0.001 SOL per dig it is 1% of the per-round spend. |
-| `crank_fee` | **7,000** lamports | Covers a v0 + lookup-table batch (5 rigs: 5,000 secp256r1 + 1,000 signature share + priority ≈ 6,050-6,723). `crank_fee ≤ executor_fee` is enforced by the program. The 3,000 lamports per dig it leaves behind accrue in the Executor, which only ever pays ORE's CHECKPOINT_FEE top-ups and reimbursements, so the float grows with use. With one rig per transaction the crank pays 10,047 and gets 7,000 back; the fee covers it from three rigs per transaction up (section 3). Raise it (timelocked) with `governance.sh propose --crank-fee N` if priority fees stay high. |
-| `bury_bps` | **0** | v1.1 has no bury path (`INTERFACE.md` §10). |
+| `--max-len` | **196,608** (192 KiB) | Chosen as 1.76x the 111,600-byte v1.1 build, to hold the SKR instructions without an extend. They are in now: today's v1.3 build is 190,048 bytes, which leaves 6,560 bytes (3%). Rent 0.9996 SOL. 2x (223,200) would cost 1.1347 SOL and 256 KiB 1.3326 SOL. If a later build outgrows it, `deploy.sh --mode upgrade` extends the ProgramData with `solana program extend` before the upgrade (section 7, step 6): by the shortfall, and by at least 10,240 bytes (52,019,200 lamports for 10,240 bytes, paid by the deployer and locked like the rest). |
+| `executor_fee` | **10,000** lamports | **Immutable** (no instruction changes it), and every rig's Automation must use exactly this Discretionary fee (`dig` skips any other value). It must cover the crank's measured cost per rig in a batch with room for congestion: crank/README.md measures 5,493 (v1, 11 rigs) to 7,541 (legacy, 2 rigs) lamports per rig for a fresh-heartbeat dig, and 10,047 for a transaction that carries a single rig, which the fee does not cover (section 3); ORE's own executor charges 7,000 and a sampled third-party one 12,000. 10,000 is ECONOMICS.md's figure and lets `crank_fee` rise to 10,000 under congestion without touching user Automations. At 0.001 SOL per dig it is 1% of the per-round spend. |
+| `crank_fee` | **7,000** lamports | Covers a v0 + lookup-table batch (5 rigs: 5,000 secp256r1 + 1,000 signature share + priority ≈ 6,040; 3 rigs ≈ 6,723). `crank_fee ≤ executor_fee` is enforced by the program. The 3,000 lamports per dig it leaves behind accrue in the Executor, which only ever pays ORE's CHECKPOINT_FEE top-ups and reimbursements, so the float grows with use. With one rig per transaction the crank pays 10,047 and gets 7,000 back; the fee covers it from three rigs per transaction up (section 3). Raise it (timelocked) with `governance.sh propose --crank-fee N` if priority fees stay high. |
+| `bury_bps` | **0** | Stored, but no instruction reads it (`INTERFACE.md` §10): the Executor's surplus is not routed to Bury, and the v1.2 Bury auction sells SKR forfeits only. |
 | `ore_layout_hash` | `cc9b3521…48aa91` | `sha256(heads_down::ore::LAYOUT_PREIMAGE)`, computed by the program crate inside the tool; the program refuses any other value. |
 | Executor float | **rent-exempt(0) + 100,000 + 100 x crank_fee** = 1,450,240 lamports on mainnet | rent so the PDA exists, the program's own reserve (10 x CHECKPOINT_FEE, which reimbursements never touch), and 100 reimbursements of slack. A dig pays the Executor 10,000 before the program reimburses 7,000, so reimbursements are self-funding; the slack absorbs late third-party checkpoints that take 10,000 each. |
-| priority fee | 100,000 micro-lamports/CU | deploy and admin transactions; the whole deploy's priority fees stay around 0.001 SOL. |
+| priority fee | 100,000 micro-lamports/CU | deploy and admin transactions; at this price a buffer write (2,670 CU) pays 267 lamports of priority fee on top of its 5,000-lamport signature fee, and the whole deploy pays about 0.00005 SOL of priority fees (53,584 lamports in the dry run) out of about 0.0011 SOL of fees. |
 | `--write-rate` | **1** transaction a second | Helius' free plan allows one `sendTransaction` a second. The writer waits that long after each write, so it stays under the limit; a plan that allows more can be given more. On the local fork, behind a proxy that lets one `sendTransaction` a second through, about 185 writes took 188 s and none was refused. Not run on mainnet. |
 | `--max-sign-attempts` | 20 | only for `deploy.sh --cli-only`, where the CLI writes the buffer itself: 20 signing rounds before it gives up. The default path does not use it: `write-buffer` signs a write again whenever its blockhash expired. |
 
 The program is built with `programs/heads-down/scripts/build.sh` (`--features mainnet`: the real
-SGT anchors) by `cargo-build-sbf` 4.1.0, which produces **SBPF v0**. SIMD-0500 ("disable
-deployment of SBPF v0, v1 and v2") is **inactive** on mainnet today; `preflight.sh` checks it on
-every run and stops if it becomes active or pending (then the build must move to `--arch v3`,
-whose feature is active on mainnet since slot 428,976,000).
+SGT anchors; `--arch v3`) by `cargo-build-sbf` 4.1.0, which produces **SBPF v3** (ELF `e_flags`
+3; `HD_SBF_ARCH=v0` builds the v0 fallback). Mainnet accepts SBPF v3 deployments since slot
+428,976,000; `preflight.sh` checks that feature on every run and stops if it is not active.
+SIMD-0500 ("disable deployment of SBPF v0, v1 and v2") is **inactive** on mainnet today and does
+not touch a v3 build: preflight stops on it, active or pending, only for a v0 to v2 build.
 
 ## 5. Helius
 
@@ -286,19 +302,23 @@ whose feature is active on mainnet since slot 428,976,000).
 
   | Service | Idle, credits a day | A night with one phone adds |
   |---|---|---|
-  | crank, the baked `crank.toml` | about 108,500 (3.3M in 30 days: the free plan lasts about 9 days) | about 50,000 |
+  | crank, the baked `crank.toml` | about 108,500 (3.3M in 30 days: the free plan lasts about 9 days) | about 70,000 (with lookup tables on, the poller also scans the rigs between dig windows while a phone is heads down; computed from the code, not measured) |
   | crank, with the one-phone overrides of `deploy/railway/crank/.env.example` | about 30,500 (0.9M in 30 days) | about 50,000 |
   | indexer at `INGEST_INTERVAL_S=300` | about 2,000 | about 5,000 |
   | indexer at `INGEST_INTERVAL_S=30` | about 12,600 | about 17,000 |
   | registrar | 0 (it uses a keyless RPC, section 10.4) | 0 |
 
-  Before the changes of 2026-10-04 the two services used about 410,000 credits a day idle, and an
+  Before the changes of 2026-10-04 the two services used about 430,000 credits a day idle (crank
+  303,000, indexer at 30 s 125,000), and an
   unfunded crank more. So: with the one-phone overrides and the indexer at 300 s, an idle stack
   uses about the whole free plan in a month, and every test night comes on top. **Run the crank
   for test nights and for the recorded demo, and remove its deployment in between**, or put Heads
   Down on a Helius account of its own. Watch the credit meter in the Helius dashboard.
 - **Do not share the key with another project.** Credits and rate limits are counted per account,
   so another project on the same key spends the same 1M credits and the same one send a second.
+  It happened on 10 October 2026: the key first used here was shared with another project, its
+  monthly credits ran out, and Helius answered every call with `max usage reached` until the key
+  was replaced.
 - **The operator scripts are not stuck when the credits are gone:** `--public-rpc` (or
   `HD_PUBLIC_RPC=1`) on `governance.sh`, `solana.sh`, `init-config.sh`, `preflight.sh`, `keys.sh`
   and `deploy.sh` uses the public mainnet RPC although `helius.env` is there, and prints which RPC
@@ -330,11 +350,13 @@ scripts/mainnet/preflight.sh            # read-only; exit 0 = GO
 | deployer / crank-payer / governance address | on mainnet with the default key directory: the key file does not derive the funded address (`9DSVM862…`, `5Xec1ZUw…`, `37u9LWbP…`). Override `HD_EXPECTED_DEPLOYER`, `HD_EXPECTED_CRANK_PAYER` or `HD_EXPECTED_GOVERNANCE` only on purpose |
 | git | (warning) local changes: `deploy.sh` refuses a dirty tree on mainnet |
 | cluster | the RPC's genesis hash is not mainnet's `5eykt4Us…`, or the RPC is a loopback fork |
+| program id | the program keypair's address is not the id the program crate and the crank are built for |
 | program .so | not an SBF ELF; its sha256 and the solana-verify hash are printed |
+| SBPF version | the `.so` names no SBPF version in its ELF flags, or it is an SBPF v1 or v2 build whose feature is not active |
 | max-len | fresh: smaller than the build or above 10 MiB. Upgrade: a build above 10 MiB; a build that outgrows the deployed ProgramData is a warning that says how many bytes the upgrade adds |
 | buffer | the deploy's per-commit buffer address holds something that is not the deployer's buffer for this build: another authority, another size, or not a buffer. A buffer that is the deployer's is counted, and the line says how many chunks are still to write |
 | SIMD-0500 | active or pending for an SBPF v0-v2 build (or SBPFv3 not enabled for a v3 build) |
-| program account | something already lives at `HDn4vg…` (fresh mode) |
+| program account | fresh: something already lives at `HDn4vg…`. Upgrade: nothing is deployed there, or the deployer is not its upgrade authority |
 | deployer balance | below what is still needed: ProgramData(max-len), less what the deploy's buffer already holds, + Program + fees for the chunks still to write + Config + float, all from `getMinimumBalanceForRentExemption` |
 | ORE upgrade slot | ORE's ProgramData slot is not 452,682,055 (docs/ORE.md) |
 | ORE program hash | ORE's bytes are not the verified build `9dbd2e0d…` (commit `48c203bd`) |
@@ -342,7 +364,8 @@ scripts/mainnet/preflight.sh            # read-only; exit 0 = GO
 | ORE user accounts | a sampled Automation or Miner from recent ORE transactions is not 160/100 or 752/103 |
 | init params | `executor_fee` 0 or `crank_fee > executor_fee` |
 
-Warnings (crank or governance key underfunded, no Automation sampled) do not block.
+Warnings (crank or governance key underfunded, no Automation sampled, the registrar's session
+secret missing, the current ORE Round account not there yet) do not block.
 
 Real run against mainnet on 2026-10-04, through Helius, before funding: the verdict is NO-GO for
 exactly that one reason.
@@ -423,7 +446,8 @@ scripts/mainnet/deploy.sh               # fresh deploy, max-len 196608
    the ProgramData with `solana program extend HDn4vg… <bytes>` (the bytes preflight names, at least
    10,240; one transaction) and waits eight slots. The plan shows a `ProgramData` line with the
    bytes and the rent they lock.
-7. Runs the pinned CLI, through a private CLI config holding the Helius URL:
+7. Runs the Solana CLI (Agave 4.1.2 in the rehearsal; `deploy.sh` records `solana --version` in
+   the receipt but does not check it), through a private CLI config holding the Helius URL:
    ```text
    solana program deploy --use-rpc --program-id ~/.config/heads-down/heads_down-program-keypair.json \
      --upgrade-authority deployer.json --keypair deployer.json --buffer buffer-<commit>.json \
@@ -448,9 +472,33 @@ every lamport in the buffer returns; the fees of the writes that landed (5,267 l
 not. If the writer stops with `the payer … holds …`, send the deployer the amount it names and run
 `deploy.sh` again. If it stops with `no write was seen to land for 300 s`, the line above it gives
 the deployer's balance and the counts: check the RPC and the priority fee (`--cu-price`), then run
-it again. If the final transaction landed but the receipt was not written (an RPC error right
-after it), a re-run in fresh mode is refused because the program exists: write the receipt with
-`hd-devstack verify-deploy` by hand.
+it again.
+
+If the final transaction landed but the receipt was not written (an RPC error right after it), a
+re-run in fresh mode is refused because the program exists. Write the receipt by hand, from the
+repository root at the commit that was deployed. `<UTC>` is the time stamp in the names of the
+files that run left in `~/.local/share/heads-down/deploy/`; the signature is in the last line of
+`deploy-mainnet-<UTC>.out` there (leave `--signature` out if there is none). The command reads
+over the public RPC, needs no key and signs nothing. Its arguments were checked against mainnet
+before the deploy (it stops at `is not a deployed upgradeable program`); it has not written a
+real receipt:
+
+```bash
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$HOME/.cargo/bin:$PATH"
+HD_CLUSTER=mainnet scripts/devstack/tool/target/release/hd-devstack verify-deploy --mode fresh \
+  --so programs/heads-down/target/deploy/heads_down.so \
+  --program-id HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p \
+  --deployer 9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW --max-len 196608 \
+  --signature <signature> \
+  --buffer-write ~/.local/share/heads-down/deploy/write-buffer-mainnet-<UTC>.json \
+  --meta git_commit=$(git rev-parse HEAD) --meta git_dirty=0 \
+  --meta build_script=programs/heads-down/scripts/build.sh --meta cargo_features=mainnet \
+  --meta "solana_cli=$(solana --version)" \
+  --meta "cargo_build_sbf=$(cargo-build-sbf --version | tr '\n' ' ' | sed 's/ *$//')" \
+  --meta cu_price_micro_lamports=100000 --meta preflight=GO \
+  --meta buffer_written_by=hd-devstack-write-buffer \
+  --out deploy/receipts/mainnet/<UTC>-fresh-$(git rev-parse HEAD | cut -c1-12).json
+```
 
 Flags: `--write-rate N` changes the pace, `--cli-only` lets the CLI write the buffer itself,
 `--public-rpc` uses the public RPC.
@@ -472,7 +520,7 @@ toolchain reproduces `so.sha256`.
 scripts/mainnet/init-config.sh          # then: scripts/mainnet/governance.sh show
 ```
 
-`initialize_config` (tag 0, `vectors/instructions.json`) with accounts
+`initialize_config` (tag 0, `programs/heads-down/vectors/instructions.json`) with accounts
 `[upgrade authority (signer, pays rent), Config PDA, ProgramData 3jjGZ8EE8DJcRag9eTFMMxStNo55PHLa5xVPktW52WPZ, System]`.
 The tool first checks that `deployer.json` is the upgrade authority recorded in ProgramData
 (the program checks it too), prints the plan (governance and registrar public keys, the fees,
@@ -516,7 +564,7 @@ build context; Postgres is Railway's template. The project was created on 2026-1
 | `Postgres` | private network only: it has no public port | the template's own | nothing |
 | `indexer` | `https://indexer-production-88dc.up.railway.app` | - | Postgres. Runs without `RPC_URL` until the program is initialized |
 | `dashboard` | `https://dashboard-production-b80c.up.railway.app` | - | the indexer's address, at build time |
-| `registrar` | `https://registrar-production-71d0.up.railway.app` | `/data`, 1 GB | its key, its session secret, an app certificate digest |
+| `registrar` | `https://registrar-production-71d0.up.railway.app` | `/data`, 1 GB | its key, its session secret, an app certificate digest, `HD_SIWS_DOMAIN` |
 | `crank` | `https://crank-production-21c2.up.railway.app` | `/data`, 1 GB | **the deployed and initialized program, a funded fee payer, its key and the Helius key** |
 
 ### 10.1 How a service is created
@@ -645,8 +693,8 @@ stay unset.
 fee payer: signals at most 250,000 lamports an hour, `end_shift` 6,000,000 a day, Stack 500,000 an
 hour and 10,000,000 a table, one lookup table; `chain_poll_secs = 15` and one full rig read in 10
 idle rounds. `[record]` stays at 1,000,000 lamports an hour and `init_bury_vault` stays on in that
-file. For one phone on Helius' free plan, set the block of overrides at the end of
-`deploy/railway/crank/.env.example` on the service: `HD_CRANK_ALT_ENABLED=false`,
+file. For one phone on Helius' free plan, set the six overrides of the block "one phone on
+Helius' free plan" in `deploy/railway/crank/.env.example` on the service: `HD_CRANK_ALT_ENABLED=false`,
 `HD_CRANK_STACK_ENABLED=false`, `HD_CRANK_STACK_INIT_BURY_VAULT=false`,
 `HD_CRANK_END_SHIFT_ENABLED=false`, `HD_CRANK_CLEANUP_ENABLED=false` and
 `HD_CRANK_INTAKE_RIG_FETCHES_PER_SECOND=1`. They cut the idle cost from about 108,500 to about
@@ -712,7 +760,8 @@ In the image they listen on `0.0.0.0:$PORT`.
 Do not open a Railway shell on the crank or the registrar. The service's first environment stays
 readable to root inside the container whatever the entrypoint unsets, so `env`, `printenv`, `set`
 or a read of `/proc/*/environ` there prints the keys. Everything the first-deploy check needs is
-in the deploy log (below).
+in the deploy log: the line `key file removed; hd-<service> (pid N, uid 10001) on 0.0.0.0:<port>`
+(section 12, last paragraph of "Docker-free checks", and deploy/railway/README.md).
 
 ### 10.6 Checks without Docker
 
@@ -743,6 +792,21 @@ cd android
 The RPC URL must not carry an API key: the public `https://api.mainnet-beta.solana.com` works for a
 demo build; a keyed provider needs a proxy that adds the key server-side.
 
+**The cost ceiling.** A shift digs only while ORE's cost per ORE (`ema_ev`) is within the plan
+the build arms: 0.53 SOL per ORE by default, under a wallet-signed ceiling of 0.67. On 2026-10-10
+the live figure was about 0.713 SOL per ORE, so a build with the defaults clocks in and never
+digs (the crank logs `cost_gate`). The build for the recorded demo adds four properties to the
+command above:
+
+```bash
+  -Pheadsdown.policy.planMaxEvCost=1000000000 -Pheadsdown.policy.capMaxCost=1200000000 \
+  -Pheadsdown.policy.shiftBudgetLamports=5000000 -Pheadsdown.policy.weeklyBudgetLamports=35000000
+```
+
+That build places real SOL at up to 1.0 SOL per ORE, under a ceiling of 1.2: at most 0.005 SOL a
+shift (five digs of 0.001 SOL) and 0.035 SOL a week. `android/README.md` ("Clock-in policy for
+demo takes") lists every policy property.
+
 **The app's identity.** `identityUri` is the site the app names to the wallet as its identity
 (Mobile Wallet Adapter). Solana Mobile's test wallet shows it on the connect and sign-in prompts,
 not on the transaction prompt; other wallets are untested. Through its host it is also the Sign In
@@ -761,8 +825,9 @@ curl -sI https://oojae.github.io/heads-down/ | head -1                # HTTP/2 2
 curl -sI https://oojae.github.io/heads-down/icon.png | head -1
 ```
 
-The page carries a dated status line ("not deployed on mainnet, not run on a physical phone yet").
-Keep it true: founder checklist step 10.
+The page carries a dated status line (on 10 October 2026: not deployed on mainnet, and the one
+physical phone the app has run on has not sent a transaction yet). Keep it true: founder checklist
+step 10.
 
 **What a wallet can and cannot check.** The identity is a string the app hands to the wallet.
 Nothing ties it to the app, so another app can name the same address, name and icon. On the
@@ -773,9 +838,11 @@ its signing certificate. That file is fetched from the host's root, so for `ooja
 belongs in the `OoJae/oojae.github.io` repository (the account's own site, which would then vouch
 for every project on that host), not in this project's page under `/heads-down/`. It also needs a
 release signing key, which does not exist yet: release builds are unsigned and debug builds carry
-the debug key. Solana Mobile's test wallet signs and sends without either. Solflare, Phantom and
-Seed Vault have not been tried; the protocol lets a wallet decline an identity it cannot verify, so
-the connect prompt of the wallet used for the demo is the first thing to try on the phone.
+the debug key. Solana Mobile's test wallet signs and sends without either. On the Redmi 14C on
+10 October 2026, Jupiter's wallet showed "Could not verify request" on its connect prompt, and
+still connected and signed the sign-in; it has not been asked to sign a transaction yet. Solflare,
+Phantom and Seed Vault have not been tried; the protocol lets a wallet decline an identity it
+cannot verify.
 
 ## 11. Monitoring and alerts
 
@@ -1021,15 +1088,15 @@ mount path: roll back to the previous deployment in Railway.
 | Situation | Do | Effect |
 |---|---|---|
 | Any doubt about digs (a bug, an ORE change, bad crank behaviour) | `scripts/mainnet/governance.sh pause`. If Helius answers HTTP 429 because the key has no credits left: `scripts/mainnet/governance.sh --public-rpc pause` | **Immediate**: from the next transaction `dig` fails with `Paused` (18). Nothing else stops: users can still break, freeze, end shifts, close rigs and Revoke in ORE. No SOL moves. |
-| Resume | `governance.sh unpause`, then after 864,000 slots (≥ 72 h; ~96 h at 400 ms) `governance.sh apply` | Un-pausing always waits for the timelock. A new proposal replaces a pending one and restarts the clock. |
+| Resume | `governance.sh unpause`, then `governance.sh apply` 72 hours later. The program waits for both 864,000 slots and 72 hours of cluster time; at today's slots of about 0.27 s the slots pass after about 64 hours, so `governance.sh show` says no slots are left while `apply` is still refused with `TimelockNotElapsed` (19) until the 72 hours are over | Un-pausing always waits for the timelock. A new proposal replaces a pending one and restarts the clock. |
 | Program bug | pause, fix, then upgrade with a fresh buffer (section 14) | users' funds stay in their own ORE Automations throughout |
 | Crank misbehaving or compromised | stop the Railway service; rename `crank-payer.json` aside, run `keys.sh` (it creates a new one), move the old key's SOL with `solana.sh --keypair <old file> -- transfer <new pubkey> ALL --allow-unfunded-recipient`, update `HD_CRANK_KEYPAIR_JSON` and `TEAM_CRANKERS`, redeploy. `keys.sh` and `preflight.sh` stop on the new key until its pin is changed: set `HD_EXPECTED_CRANK_PAYER=<new pubkey>` for those runs, then update the pin in `scripts/mainnet/lib.sh` and the tables in sections 2, 3 and 10.4. The lookup table named in `/data/hd-crank/lookup_tables.json` belongs to the old key: close it with the old key and remove that file, or the new crank creates no table (it has `alt.max_tables = 1`, and a table on record counts) | liveness only: the worst case is no digs |
 | Registrar key compromised | stop the registrar; rename `registrar.json` aside and run `keys.sh` for a new one; `governance.sh propose --registrar <new>`; after 72 h `apply`, then start the registrar with the new key. Until `apply` the chain still trusts the old key (rigs can register unattested meanwhile). For a routine rotation, run old and new side by side until `apply` | attestation levels only (THREAT_MODEL K4) |
-| Helius key leaked | rotate in Helius, update `helius.env` and the shared variable, redeploy | |
+| Helius key leaked | rotate in Helius and delete the old key, update `helius.env`, then the crank's `HELIUS_API_KEY` and the indexer's `RPC_URL` (each a sealed variable of its own service; this deployment has no shared variable, section 10.3), and redeploy both services | |
 | Deploy stopped part way | re-run `deploy.sh` at the same commit: preflight counts the rent and the chunks the buffer holds, and the writer sends only what is missing; or close the buffer (section 7). No SOL has to be sent for either. The writer says why it stopped: `the payer … holds …` names the SOL to send; `no write was seen to land for 300 s` means writes were taken and did not land (the RPC, the priority fee, or an empty deployer) | |
 | A second buffer at a commit whose buffer was handed to the vault | move `buffer-<commit>.json` out of the key directory, then run `deploy.sh` again (it makes a new keypair) | preflight refuses until then, and says so |
 | Helius credits used up | every call answers HTTP 429. Operator scripts: add `--public-rpc`. Services: the crank stops digging and the indexer stops reading the chain (its API keeps serving); remove the crank's deployment, and wait for the month to roll over or change the plan or the key | nothing is spent while nothing digs |
-| ORE upgraded its program (it did on 2026-09-25 and 2026-10-02) | Nothing to do at once: the crank's breaker has already stopped digs, and `preflight.sh` answers NO-GO. Then: read the diff between the commits verify.osec.io names; refresh the fixtures (`programs/heads-down/tests/fixtures/fetch-fixtures.sh`, `scripts/devstack/up.sh --refresh-fixtures`); run the program's and the crank's fork suites and `dry-run.sh --tight`; move the pin (`crank/src/ore.rs`, both `crank.toml`, `ORE_PROGRAM_HASH` in `scripts/devstack/tool/src/ops.rs`, `docs/ORE.md`); redeploy the crank | no digs, so nothing is mined and nothing is spent, until the pin is moved |
+| ORE upgraded its program (it did on 2026-09-25 and 2026-10-02) | Nothing to do at once: the crank's breaker has already stopped digs, and `preflight.sh` answers NO-GO. Then: read the diff between the commits verify.osec.io names; refresh the fixtures (`programs/heads-down/tests/fixtures/fetch-fixtures.sh`, `scripts/devstack/up.sh --refresh-fixtures`); run the program's and the crank's fork suites and `dry-run.sh --tight`; move the pin (`crank/src/ore.rs`, `crank/crank.example.toml`, `deploy/railway/crank/crank.toml`, `ORE_PROGRAM_HASH` and the commit named beside it in `scripts/devstack/tool/src/ops.rs`, `docs/ORE.md`, and the slot and hash quoted in section 6 and in the header of `scripts/mainnet/preflight.sh`); redeploy the crank | no digs, so nothing is mined and nothing is spent, until the pin is moved |
 
 ## 14. Upgrades with a fresh buffer
 
@@ -1052,7 +1119,8 @@ match first.
      the buffer's rent (0.966282040 SOL for today's build) for good. Compare it character by
      character. After the hand-over, `deploy.sh` at the same commit is refused by preflight: the
      buffer is the vault's.
-  2. Every signer checks the buffer: `solana-verify get-buffer-hash <BUFFER> -um` must equal the
+  2. Every signer checks the buffer: `solana-verify get-buffer-hash <BUFFER> -um` (install once
+     with `cargo install solana-verify`) must equal the
      receipt's `onchain.program_hash`, which equals a local rebuild of the recorded commit.
   3. In Squads: **Programs → `HDn4vg…` → Upgrade**, buffer `<BUFFER>`, spill account (where the
      buffer's rent returns) the deployer. Approve to the threshold; the vault's time lock
@@ -1091,7 +1159,11 @@ single key. Until it is done, the documents say plainly that one key can upgrade
    ```
    The vault is a PDA and cannot co-sign, hence the flag: **check the address character by
    character**, because a typo makes the program un-upgradeable forever.
-4. Verify: `scripts/mainnet/solana.sh -- program show HDn4vg…` prints `Authority: <VAULT>`.
+4. Verify: `scripts/mainnet/solana.sh -- program show HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p`
+   prints `Authority: <VAULT>`. From now on `init-config.sh` refuses to run (its signer is no
+   longer the upgrade authority): top up the Executor with
+   `scripts/mainnet/solana.sh -- transfer By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge <SOL>`
+   (section 9).
 5. After the audit: revoke through the vault (`set-upgrade-authority --final`) for an
    immutable v1. docs/ORE.md §8 explains why v1 then relies on the layout pins alone.
 
@@ -1121,7 +1193,7 @@ vault holds the authority.
 | Helius | Free | **$0** while a month stays inside 1M credits (section 5); otherwise **$49** (Developer, 10M credits) plus $5 per further million |
 | SOL: crank fees | | about 0.001 to 0.003 SOL per phone-night (section 3); budget 0.01 to 0.05 SOL a month |
 | SOL: lookup tables | one-time, only when lookup tables are on | 0.00256 SOL + 0.00065 SOL per rig. It comes back only by hand, with the crank stopped: `scripts/mainnet/solana.sh --keypair <crank-payer.json> -- address-lookup-table deactivate <TABLE> --bypass-warning`, about 5 minutes later `… address-lookup-table close <TABLE> --recipient <ADDR>`. Keep the table's address (the crank logs `created lookup table`). After closing a table, remove `/data/hd-crank/lookup_tables.json` (or the table's entry in it) before the crank runs again: a table on record counts against `alt.max_tables = 1`, so the crank would otherwise create none and dig without one |
-| SOL: Executor | | grows by 3,000 lamports per dig; nothing ever leaves it (section 9) |
+| SOL: Executor | | grows by 3,000 lamports per dig (10,000 in, 7,000 reimbursed to the crank); nobody can withdraw from it, and only ORE's checkpoint fee of 10,000 lamports, when a third party checkpointed a Miner late, takes it down (section 9) |
 | SOL: an upgrade | per upgrade, temporary | about 0.964 SOL lent to the deployer for a few minutes; all but about 0.001 SOL of fees comes back (section 3) |
 | SOL: a larger build | only when a build outgrows max-len | 52,019,200 lamports per 10,240-byte extension, locked like the program's rent |
 | SOL: Squads | one-time, optional | 0.1 SOL per multisig, never returned (section 15) |
@@ -1138,7 +1210,7 @@ one: 0.035 in the deployer, and the crank's 0.05 and governance's 0.01, which ar
 | Path | Committed | Holds |
 |---|---|---|
 | `scripts/mainnet/*.sh` | yes | the runbook's scripts (no secrets; `scripts/mainnet/.gitignore` refuses `*.json` and `*.env` there, and the root `.gitignore` refuses the key file names anywhere in the repository) |
-| `deploy/railway/<service>/` | yes | Dockerfile, `railway.json` (a record of the service's settings), `.env.example` (names only), entrypoints, `crank.toml` (placeholders only) |
+| `deploy/railway/<service>/` | yes | Dockerfile, `railway.json` (a record of the service's settings), `.env.example` (every variable the service reads; names only for secrets), entrypoints, `crank.toml` (placeholders only) |
 | `.railway/` | never (ignored) | where `railway config pull` writes the project as code. Never run it with `--include-variables` in the repository: it writes every unsealed value into that file |
 | `deploy/receipts/mainnet/` | **yes, after each change** | public receipts |
 | `deploy/receipts/localnet/` | no (ignored) | dry-run receipts |

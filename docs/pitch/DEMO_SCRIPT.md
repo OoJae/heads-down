@@ -31,7 +31,7 @@ phone beat is therefore `[TBD after device test]` until it has been rehearsed on
 | R8 | Morning haul reveal | **Built, not on a device.** Exact alarm, full-screen reveal, rounds replayed from the indexer (`android/feature/reveal`) | 2:03 | android |
 | R9 | Stack (Nearby tables, SKR bonds) | Built and tested in the program and the crank (`docs/SKR.md` §9). No screens in the app and no Nearby pairing yet. For the SKR beat, film the Focus Bond on the home screen | 2:15 (stretch) | program, android |
 | R10 | Audible arm cue | **Built, not on a device.** A composed haptic with an audible fallback for motors that cannot compose (`android/surface/haptics`) | 0:00 | android |
-| R11 | Dashboard on real data | Indexer runs the simulated dataset until the program is deployed (`services/indexer/README.md`) | 2:35 | indexer |
+| R11 | Dashboard on real data | The indexer and the dashboard run on Railway against mainnet; until the program is deployed they show ORE's own rounds and zeros (`README.md`) | 2:35 | indexer |
 | R12 | Debug-only sensor view (live tilt angle and face-down verdict), excluded from release | **Built.** The Sensor lab, in debug builds only (`android/README.md`) | 1:44 | android |
 | R13 | Plan settings for the take: `lease_rounds = 1` and a raised, disclosed ceiling | **Done.** Build properties `headsdown.policy.*` (`android/README.md`) | trustless beat | android |
 
@@ -49,18 +49,17 @@ transaction. ORE rounds advance on their own (about 78 s, `docs/ORE.md` §2).
   the plan and wallet ceilings above the live `ema_ev`. **Disclose it in the VO and a caption.**
   The cost is small: a 0.001 SOL dig loses about 10.5% to ORE fees plus the fixed fee.
 
-**B. Local devstack (rehearsal and fallback).** `solana-test-validator` with the live ORE binary
-and accounts loaded, as in `crank/tests/e2e_validator.rs`, using fixtures from
-`spikes/ore-executor/fetch-fixtures.sh`. Use Solana Explorer with a custom cluster:
+**B. Local devstack (rehearsal and fallback).** `scripts/devstack/up.sh` (docs/DEVSTACK.md): a
+local validator with the live ORE binary and accounts loaded, the program, the crank and the
+indexer. Use Solana Explorer with a custom cluster:
 `https://explorer.solana.com/tx/<sig>?cluster=custom&customUrl=http%3A%2F%2Flocalhost%3A8899`.
 
-- **Limits.** The e2e setup rewrites the fixture Board to one open window, and nothing in it
-  advances ORE rounds, so plan for single-round beats only: a dig lands, then the replay is skipped
-  with `StaleHeartbeat`. The order is reversed from the script, so caption it "local validator, mainnet
-  ORE loaded".
-- **The phone cannot join the devstack as-is.** The app refuses non-`https` RPC and non-`wss` crank
-  URLs, so the "phone" on the devstack is the e2e test's simulated phone. Rehearse chain-side shots
-  here, then film phone shots on A.
+- **Limits.** Its round driver keeps ORE rounds moving, so the beats can run in the script's
+  order. Caption it "local fork of mainnet".
+- **The phone joins through the `localdev` build.** `scripts/devstack/phone.sh` forwards the ports
+  over USB and `./gradlew :app:installLocaldev` installs the build that may use them
+  (android/README.md). Debug and release builds still refuse non-`https` RPC and non-`wss` crank
+  URLs.
 
 ---
 
@@ -73,9 +72,9 @@ and accounts loaded, as in `crank/tests/e2e_validator.rs`, using fixtures from
 | 0:22–0:45 | Screen capture of the same clock-in: tile, wallet approval (camera if the wallet blocks capture), "Rig armed" notification. Cut to Solscan: one transaction with ORE `automate`, `register_rig` (first run), `set_caps`, `arm_shift`. | "One approval · one transaction" · the tx signature | "I tap the Quick Settings tile. One wallet approval funds tonight's capped shift inside ORE's own Automation and arms the rig. That's the only signature tonight. This is a Redmi 14C. Any Android with a mobile wallet can run a guest rig, and Seeker owners get a tier verified on-chain by their Seeker Genesis Token." | `scrcpy` recording started **before** arming (§5). |
 | 0:45–1:22 | **Trustless beat** (step by step in §4). Split screen: phone on the left, terminal and Solscan on the right. | "Round N · dig ✓" → "Phone lifted" → "Replayed heartbeat → RigSkipped · 7 StaleHeartbeat · no ORE instruction" → "Round N+1 · fresh heartbeat · dig ✓" · "Demo setting: price ceiling raised for this take" | "Every ORE round, about 78 seconds, the phone signs a heartbeat with a key that never leaves its Keystore. A crank can dig for my rig only if that heartbeat verifies on-chain, through Solana's secp256r1 precompile. Now I pick the phone up. It stops signing. So I play a dishonest crank: I copy my last heartbeat off the chain and resend it. The program skips my rig: stale heartbeat. Nothing reaches ORE. Phone back down. Next round, a fresh heartbeat, and the dig lands in ORE." | Terminal: `hd-crank` log lines for accepted heartbeats; the replay tool's output (R7). |
 | 1:22–1:44 | Chart: `ml/forecaster/figures/eff_price_vs_budget.png`, then the live gate value from `hd-crank check`. | "58,801 ORE rounds · 47 nights" · "every round: +36% to +90% vs buying" · "gated chunks + buy the rest: −1.4% to −3.0%" | "For this take I raised my price ceiling so a dig could land on camera. Normally the gate decides. In our backtest of 58,801 ORE rounds, digging a little every round cost 36 to 90 percent more than buying. Gated chunks plus buying the rest came out 1.4 to 3 percent cheaper. Modest, and we say so." | `ml/forecaster/RESULTS.md` TL;DR figures. |
-| 1:44–2:03 | The detector on a table: phone face-down, a knock, no change; a lift, cooling. Use the debug sensor view if it exists (captioned), else the terminal. | "On-device · accelerometer only (no gyroscope)" · "Forecaster: advisory (lost to the on-chain rule)" · "Can only tighten wallet-signed limits" | "The AI runs on the phone. Pickup detection uses only the accelerometer; this phone has no gyroscope. A learned pickup-versus-bump classifier is next. Our cost forecaster lost to the simple on-chain rule, so it only explains the night. Nothing on the phone can raise the limits my wallet signed." | `ml/forecaster/MODEL_CARD.md` card as a 2 s insert. |
+| 1:44–2:03 | The detector on a table: phone face-down, a knock, no change; a lift, cooling. Use the debug sensor view if it exists (captioned), else the terminal. | "On-device · accelerometer only (no gyroscope)" · "Forecaster: advisory (lost to the on-chain rule)" · "Can only tighten wallet-signed limits" | "The AI runs on the phone. Pickup detection uses only the accelerometer; this phone has no gyroscope. A pickup-versus-bump classifier is built, trained on synthetic data so far. Our cost forecaster lost to the simple on-chain rule, so it only explains the night. Nothing on the phone can raise the limits my wallet signed." | `ml/forecaster/MODEL_CARD.md` card as a 2 s insert. |
 | 2:03–2:15 | **If R8 ships:** 07:00 alarm opens the full-screen haul reveal. **Fallback:** the "Rig cold · Shift ended · N rounds dark" notification, then Solscan: the `end_shift` tx and its ShiftLog. | reveal: "rounds dark · digs · price per ORE vs market" / fallback: "ShiftLog on-chain" | Reveal: "At my alarm, the haul reveal replays the night: rounds dark, digs landed, and what I paid per ORE against the market." Fallback: "In the morning the shift closes on-chain: dark rounds, rounds dug and SOL deployed, in a ShiftLog anyone can read." | Real footage from a real night only. Never a staged Motherlode. |
-| 2:15–2:35 | **Stretch (R9 ships):** a dinner table, friends' phones pair over Nearby, each posts an SKR bond; a knock, all stay hot; a reach, one rig breaks; Solscan settle. **Alternative (default today):** three friends' Android phones as guest rigs on a table; knock the table; one friend reaches for their phone. | Stretch: "SKR bond · 80% of forfeits to finishers · 20% buys ORE for ORE's bury" / Alternative: "3 phones · 3 guest rigs · knock ≠ pickup" | Stretch: "SKR makes it social. At a table, each friend bonds SKR on keeping their phone down. A knock on the table doesn't count; a pickup does. Finishers take back their bonds plus most of the forfeits, and the rest buys ORE that ORE buries." Alternative: "Three friends, three different Android phones, all guest rigs. I knock the table: every rig keeps heartbeating. One of us reaches for a phone: that rig cools. SKR-bonded table contests build on exactly this; they're designed, not in this build." | Terminal: per-rig heartbeat acceptances at the crank (needs R3). |
+| 2:15–2:35 | **Stretch (R9 ships):** a dinner table, friends' phones pair over Nearby, each posts an SKR bond; a knock, all stay hot; a reach, one rig breaks; Solscan settle. **Alternative (default today):** three friends' Android phones as guest rigs on a table; knock the table; one friend reaches for their phone. | Stretch: "SKR bond · 80% of forfeits to finishers · 20% buys ORE for ORE's bury" / Alternative: "3 phones · 3 guest rigs · knock ≠ pickup" | Stretch: "SKR makes it social. At a table, each friend bonds SKR on keeping their phone down. A knock on the table doesn't count; a pickup does. Finishers take back their bonds plus most of the forfeits, and the rest buys ORE that ORE buries." Alternative: "Three friends, three different Android phones, all guest rigs. I knock the table: every rig keeps heartbeating. One of us reaches for a phone: that rig cools. SKR-bonded table contests build on exactly this; the program has them, the app's screens come next." | Terminal: per-rig heartbeat acceptances at the crank (needs R3). |
 | 2:35–2:52 | Dashboard scrolled: `/` tiles, `/share/`, `/digs/` with Solscan links. Then the repo: `docs/THREAT_MODEL.md`, `crates/`. | Real data: tile values with links. Simulated: the SIMULATED banner stays in frame. | "Every number on the dashboard comes from chain data and links to the transaction behind it. The program, the crank, the Seeker and P-256 crates and the threat model are open source, with a written worst case for every key." If simulated, add first: "This is still the labelled simulated dataset." | `dashboard/README.md` run steps. |
 | 2:52–3:00 | The face-down phone in the dark. | "Heads Down. Put it down. It digs." · "Powered by ORE" · store status `[TBD]` | "Heads Down. Put it down. It digs. Powered by ORE." | none |
 
@@ -90,7 +89,7 @@ the pauses and the close.
    over after the lift. Raise the ceiling (R13; caption it). Start `scrcpy` and the terminal. Put the phone
    face-down; `adb shell dumpsys power | grep mWakefulness` shows `Asleep`.
 2. **Round N.** The phone heartbeats; late in the round the crank digs (it waits until about 20
-   slots, about 8 s, before `end_slot`: `crank/README.md`). On Solscan the dig tx shows a
+   slots, about 5 s at today's slot time, before `end_slot`: `crank/README.md`). On Solscan the dig tx shows a
    `Secp256r1SigVerify1111111111111111111111111` instruction, the `heads_down` dig, and an inner
    instruction into ORE `oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv`.
 3. **Lift.** Lift the phone and press power once to light the lock screen. **Do not unlock:**
@@ -205,7 +204,8 @@ explorer's block time visible.
 > say so.
 >
 > The AI runs on the phone. Pickup detection uses only the accelerometer; this phone has no
-> gyroscope. A learned pickup-versus-bump classifier is next. Our cost forecaster lost to the
+> gyroscope. A pickup-versus-bump classifier is built, trained on synthetic data so far. Our cost
+> forecaster lost to the
 > simple on-chain rule, so it only explains the night. Nothing on the phone can raise the limits my
 > wallet signed.
 >
@@ -214,7 +214,7 @@ explorer's block time visible.
 >
 > Three friends, three different Android phones, all guest rigs. I knock the table: every rig keeps
 > heartbeating. One of us reaches for a phone: that rig cools. SKR-bonded table contests build on
-> exactly this; they're designed, not in this build.
+> exactly this; the program has them, the app's screens come next.
 >
 > Every number on the dashboard comes from chain data and links to the transaction behind it. The
 > program, the crank, the Seeker and P-256 crates and the threat model are open source, with a

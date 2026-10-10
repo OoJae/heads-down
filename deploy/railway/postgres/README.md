@@ -7,19 +7,18 @@ repo: Railway runs, backs up and upgrades it, and provides the connection variab
    `Postgres` (the reference below uses it).
 2. Railway attaches a volume and generates the credentials. The service exposes
    `DATABASE_URL` (private network: `postgresql://postgres:…@postgres.railway.internal:5432/railway`),
-   `DATABASE_PUBLIC_URL` (TCP proxy, for your own `psql` only), and `PGHOST`, `PGPORT`,
-   `PGUSER`, `PGPASSWORD`, `PGDATABASE`.
+   `DATABASE_PUBLIC_URL` only once Public Access has been added (step 4), and `PGHOST`,
+   `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`.
 3. In the **indexer** service set `DATABASE_URL=${{Postgres.DATABASE_URL}}`. The private URL
    stays on Railway's internal network (no egress cost, no TLS needed). Do not give the indexer
    the public URL.
-4. Remove the database's public endpoint: Railway's PostgreSQL template comes with a TCP proxy
-   enabled (a public address like `shuttle.proxy.rlwy.net:15140`, per Railway's documentation),
-   and the indexer does not use it. The proxy is in the Postgres service's **Settings**, in the
-   **Networking** section; remove it there, or through the API. The credentials are ordinary
-   variables that anyone who can list the project's variables can read; without the proxy they
-   open nothing from outside Railway. Add a proxy again for the time you need your own `psql`.
-   (Railway's documentation describes adding a proxy in that section, not removing one, and
-   the removal was not tried when this step was written.)
+4. Check that the database has no public endpoint. Railway's documentation says databases are
+   deployed private by default: a TCP proxy (a public address like `shuttle.proxy.rlwy.net:15140`)
+   and `DATABASE_PUBLIC_URL` exist only after **Public Access** is added in the Postgres
+   service's **Settings → Networking**. If that section shows one, remove it there: the indexer
+   does not use it. The credentials are ordinary variables that anyone who can list the
+   project's variables can read; without the proxy they open nothing from outside Railway. Add
+   Public Access again for the time you need your own `psql`.
 5. Nothing else: `node src/main.ts serve` applies `services/indexer/migrations/*.sql` on start
    (each once, in a transaction, recorded in `schema_migrations`).
 
