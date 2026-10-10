@@ -143,12 +143,13 @@ AlignAI MWA fixtures `[TBD]`.
 ### 10. "What does your attestation registrar trust, and what if its key leaks?" (EthelSec, Mert)
 
 It checks the chain up to pinned Google roots, the exact chain shape, TEE or StrongBox, verified
-boot with a locked bootloader, our package and release-certificate digest, and a challenge bound to
-the wallet. It then signs an Ed25519 voucher, which the program checks through precompile
+boot with a locked bootloader, our package and signing-certificate digest, and a challenge bound to
+the wallet. No release key exists yet, so the live registrar is set to the digest of my machine's
+debug certificate and accepts only builds signed with it. It then signs an Ed25519 voucher, which the program checks through precompile
 introspection. Every voucher goes into a public, hash-chained log. If the key leaks, software keys
 can pass as hardware, so a cheater could win capped remote Stack tables. It has no custody and no
 mining authority. Leaked keyboxes on rooted phones are a residual risk; the revocation list is
-checked and fails closed. 105 tests, including real Google attestation chains.
+checked and fails closed. 116 tests, including real Google attestation chains.
 
 *Evidence:* `registrar/README.md`, `docs/THREAT_MODEL.md` K4.
 
