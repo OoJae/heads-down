@@ -28,18 +28,41 @@ chain_poll_secs = 15
 [dig]
 enabled = true
 tx_format = "v0"                   # v0 + the crank's own lookup table: 5 fresh heartbeats per tx
-deploy_margin_slots = 20
+# The dig window opens 80 slots before a round's end, and a dig that is still unconfirmed 40
+# slots later is planned and signed again. Both values were found on this service on
+# 2026-10-10, the first evening on mainnet, through Helius' free plan (docs/MAINNET.md):
+# - With 20 slots the first dig landed 5 slots after its round had ended: a RoundNotActive skip
+#   that cost this fee payer 10,038 lamports and that nothing reimbursed.
+#   3Komo8wsU2WcCwPzEQmjq7EriciqucYeXBKtRUDD9Mu6cr3giq1g9m6YchaaR7QDCy6hkURHGxPfh8W6LByf8KJu
+# - With a retry after 6 slots the second attempt went out while the first was still
+#   unconfirmed. Both landed, and the program refused the second (StaleHeartbeat): 10,053 and
+#   11,042 lamports for nothing.
+#   4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM
+#   baNzqcBzu49Rer1rnjcMugBHdPHp7F6wSLQTUUH22hyGSddQZaVLR57eUZNjhi2fCEzdYjZZcrUka4GTcGCbfeo
+# With 80 slots the next four digs landed 49 to 77 slots before their round's end, and with 40
+# no second attempt landed in the three rounds that followed. Six rounds are a small sample.
+deploy_margin_slots = 80
 min_slots_left = 3
-retry_after_slots = 6
+retry_after_slots = 40
 max_attempts_per_round = 2
 max_rigs_per_tx = 16
-cu_price_micro_lamports = 1000     # priority floor
-dynamic_priority_fee = true        # 75th percentile of recent fees on the Board + Round accounts...
+# The priority floor. It was 1,000, and the dynamic fee below had settled on it when the first
+# dig missed its round. 20,000 was set in the same restart as the 80-slot window, so which of
+# the two made the next four digs land in time is not known: 80 slots at 1,000 was never
+# observed. At 20,000 a transaction that carries one rig cost 11,028 to 11,082 lamports that
+# evening (two signatures and 1,028 to 1,082 of priority) against crank_fee = 7,000: this fee
+# payer lost 4,028 to 4,082 lamports on each of the four digs it landed at that price.
+cu_price_micro_lamports = 20000
+dynamic_priority_fee = true        # 75th percentile of recent fees on the Board + Round accounts, never under the floor...
 priority_fee_percentile = 75
-# ...capped. A fresh-heartbeat rig costs ~45k CU; at the cap that is ~2,250 lamports of priority on
-# top of ~6,000 of signature fees (v0 batch of 5): at most ~1,250 lamports above crank_fee = 7,000
-# during congestion, never more. Raise crank_fee through governance (<= executor_fee = 10,000)
-# rather than this cap if congestion persists.
+# ...and capped. A fresh-heartbeat rig costs ~45k CU: about 900 lamports of priority at the floor
+# and ~2,250 at the cap, on top of ~6,000 of signature fees in a v0 batch of 5. That is about 100
+# lamports under crank_fee = 7,000 at the floor and at most ~1,250 above it during congestion,
+# never more. With fewer than five rigs in the transaction each rig's share of the signature fee
+# is larger (6,250 with four, 6,667 with three), and at this floor the dig costs more than
+# crank_fee pays back. (Computed; no batch of more than one rig has run on mainnet.) Raise
+# crank_fee through governance (<= executor_fee = 10,000) rather than this cap if congestion
+# persists.
 max_cu_price_micro_lamports = 50000
 simulate = true
 cu_margin_percent = 15
@@ -49,7 +72,7 @@ ore_programdata_slot = 452682055   # ORE upgrade pin (docs/ORE.md): a mismatch t
 config_poll_secs = 30
 # While no heartbeat is held and no known rig has a lease, a dig pass reads nothing; one pass
 # in every 10 rounds (about 12 minutes) still does. Only a rig whose heartbeat another crank
-# applied waits for that read. 0 = every pass reads (3 scans, up to 3 times a round).
+# applied waits for that read. 0 = every pass reads (3 scans, on each of a round's two passes).
 idle_full_read_rounds = 10
 
 [intake]
