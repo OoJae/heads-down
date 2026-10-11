@@ -29,10 +29,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import xyz.headsdown.clockout.ClockOutActivity
 import xyz.headsdown.core.design.Hd
 import xyz.headsdown.core.design.components.HdHaptics
@@ -98,6 +102,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         sender = ActivityResultSender(this)
+        // A clock-in the wallet sent, whose answer never reached the app, is picked up from the
+        // chain here: each time the app comes to the front, for as long as it could still land.
+        lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.pickUpClockIn() } }
         slabConfig = resolveSlab()
         // No cue reaches the motor while a shift is running: the governor refuses a shift moment.
         val appHaptics = AppHaptics(haptics) { vm.shift.value.state.isRunning }

@@ -1,5 +1,10 @@
 package xyz.headsdown.rig
 
+import android.os.SystemClock
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import xyz.headsdown.BuildConfig
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.clockin.ClockInComposer
@@ -111,6 +116,10 @@ data class ClockInPolicy(
  * [ClockInTransactions] over core/chain: reads Config / Rig / Automation, composes the single
  * clock-in transaction (with the registrar voucher for this key, when one is held), and after
  * confirmation binds the Rig and lifts the message counter to the on-chain `hb_counter`.
+ *
+ * What it hands the wallet it also writes down ([PendingClockInStore]): the wallet sends the
+ * transaction itself, and when its answer never reaches this app, [recover] finds the clock-in
+ * on-chain instead of the user being asked to approve, and pay for, a second one.
  */
 @Singleton
 class ChainClockIn @Inject constructor(
@@ -123,9 +132,13 @@ class ChainClockIn @Inject constructor(
     private val policy: ClockInPolicy,
     private val focusBond: FocusBondSetting,
     private val reveal: RevealScheduler,
+    private val pending: PendingClockInStore,
 ) : ClockInTransactions {
 
     @Volatile private var lastRefusal: String? = null
+
+    /** One look at the chain at a time: the home screen and the trampoline both ask. */
+    private val recovering = Mutex()
 
     override fun refusal(): String? = lastRefusal
 
@@ -150,24 +163,29 @@ class ChainClockIn @Inject constructor(
         }
         // Before any message for this Rig is signed, the local sequence must be above chain's.
         counter.raiseFloor(prepared.plan.hbCounterFloor)
+        val spec = ShiftSpec(
+            shiftId = prepared.plan.expectedShiftId.toLong(),
+            mode = policy.mode,
+            plannedRounds = ClockInPolicy.plannedRounds(request.windowSeconds),
+            // Heartbeats lease what the plan allows; BREAKs stop at the plan window's end.
+            leaseRounds = prepared.plan.plan.leaseRounds,
+            windowEndUnix = prepared.plan.plan.windowEndTs,
+        )
+        // Written down before the wallet is asked to sign: from here the transaction can land
+        // whether or not this app is still there to hear so.
+        pending.save(PendingClockIn(authority, key, spec, prepared.lastValidBlockHeight, System.currentTimeMillis() / 1000))
         return PreparedClockIn(
             prepared.transactions,
             prepared.lastValidBlockHeight,
             note = ClockInPolicy.noteFor(prepared.plan.unfreezes, prepared.plan.bondLocked, prepared.plan.bondReleased, prepared.bondDeferred),
-            spec = ShiftSpec(
-                shiftId = prepared.plan.expectedShiftId.toLong(),
-                mode = policy.mode,
-                plannedRounds = ClockInPolicy.plannedRounds(request.windowSeconds),
-                // Heartbeats lease what the plan allows; BREAKs stop at the plan window's end.
-                leaseRounds = prepared.plan.plan.leaseRounds,
-                windowEndUnix = prepared.plan.plan.windowEndTs,
-            ),
+            spec = spec,
         )
     }
 
     override suspend fun confirmed(account: WalletAccount, prepared: PreparedClockIn): ShiftSpec {
         val authority = Pubkey(account.publicKey)
         binding.save(authority)
+        pending.clear() // its outcome is known
         // The shift id the phone signs for is the one this clock-in armed: the Rig's id before the
         // transaction, plus one. A re-read can only confirm it. It is never adopted from the RPC:
         // a node answering with a later id would have the phone sign BREAKs for a shift that has
@@ -179,5 +197,47 @@ class ChainClockIn @Inject constructor(
             widgets.onStreak(it.streak.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
         }
         return prepared.spec
+    }
+
+    override suspend fun recover(patienceMillis: Long): ShiftSpec? = recovering.withLock { look(patienceMillis) }
+
+    private suspend fun look(patienceMillis: Long): ShiftSpec? {
+        val started = SystemClock.elapsedRealtime()
+        while (true) {
+            val waiting = pending.load() ?: return null
+            val decision = try {
+                // The height first, then the Rig: a transaction that does not show in a read made
+                // after the height had passed its last valid block cannot land any more.
+                val height = runCatching { service.blockHeight() }.getOrNull()
+                val rig = service.readRig(waiting.authority)
+                ClockInRecovery.decide(waiting, rig, rigKeys.compressedPublicKey(), System.currentTimeMillis() / 1000, height)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                Recovery.Wait // the chain could not be read: nothing is known, nothing is forgotten
+            }
+            when (decision) {
+                is Recovery.Arm -> {
+                    // What a confirmed clock-in does: bind the Rig, lift the counter above chain's.
+                    binding.save(waiting.authority)
+                    counter.raiseFloor(decision.hbCounter)
+                    widgets.onStreak(decision.streak.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
+                    pending.clear()
+                    return decision.spec
+                }
+                is Recovery.Drop -> {
+                    pending.clear()
+                    return null
+                }
+                Recovery.Wait -> {
+                    if (SystemClock.elapsedRealtime() - started + RECOVER_POLL_MILLIS > patienceMillis) return null
+                    delay(RECOVER_POLL_MILLIS)
+                }
+            }
+        }
+    }
+
+    private companion object {
+        const val RECOVER_POLL_MILLIS = 2_000L
     }
 }

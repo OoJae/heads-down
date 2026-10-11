@@ -80,9 +80,12 @@ What that run was not: it was a debug build with a demo policy that raised the c
 1.0 SOL per ORE. ORE's own cost figure was 0.690 to 0.704 SOL per ORE during the shift, above the
 app's default of 0.53, so the default build would have dug nothing. No ORE came out of the four
 rounds that are settled, and the fifth is not settled (below). The first clock-in armed a shift
-that a second clock-in sealed about five minutes later with no round dug in it: the crank had
-accepted no heartbeat yet, and why that shift ended before a heartbeat reached the crank was not
-investigated. The crank's first dig landed after its round had ended and was skipped; three of
+that a second clock-in sealed about five minutes later with no round dug in it: the wallet had
+sent the transaction and the app never heard so, so the phone stayed cold and the founder
+approved a second clock-in. It happened again the next night. The app now writes down what it
+hands the wallet and finds it on-chain by itself; that fix has run on the emulator and not yet
+on the phone ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found), item 4). The
+crank's first dig landed after its round had ended and was skipped; three of
 the crank's settings were changed on the running service that evening
 ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found)).
 
