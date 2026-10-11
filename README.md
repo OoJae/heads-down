@@ -7,6 +7,18 @@ An entry for [Clock In](https://solanamobile.radiant.nexus/), the third Solana M
 Native Android, built on the Solana Mobile Stack and Mobile Wallet Adapter. Runs on any Android
 phone with a Solana wallet; Seeker owners get a tier verified on-chain by their Seeker Genesis Token.
 
+<p>
+  <img src="site/deck/img/app-first-launch.png" width="190" alt="The app's first screen: a dark slab seen from below, the words Turn it over, and the button Set up my rig">
+  <img src="site/deck/img/app-home-armed.png" width="190" alt="The home screen with the rig armed: ember light under the slab, and Lay your phone face-down to start the shift">
+  <img src="site/deck/img/app-take-back.png" width="190" alt="The Take it back sheet: what the ORE Automation holds, to the lamport, and the button Take SOL back">
+  <img src="site/deck/img/app-reveal.png" width="190" alt="The morning reveal on the app's sample night: the board of 25 squares in gold and the ORE mined">
+</p>
+
+The app on an Android 14 emulator against a local fork of mainnet, 11 October 2026; the last
+screen is the sample night the app offers before a first haul. The same build has not run on a
+phone yet (below). [The deck](https://oojae.github.io/heads-down/deck/) is 18 slides
+([PDF](https://oojae.github.io/heads-down/deck/heads-down-deck.pdf)).
+
 ## How it works
 
 You clock in with **one wallet approval**. It funds a capped shift inside **your own ORE Automation
