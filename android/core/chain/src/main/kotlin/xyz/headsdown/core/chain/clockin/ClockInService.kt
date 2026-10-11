@@ -15,6 +15,7 @@ import xyz.headsdown.core.chain.registrar.RegistrarVoucher
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
 import xyz.headsdown.core.chain.tx.TransactionBuilder
 import xyz.headsdown.core.chain.tx.TxVersion
+import xyz.headsdown.core.wallet.Commitment
 import xyz.headsdown.core.wallet.PreparedTransactions
 import xyz.headsdown.core.wallet.WalletCapabilities
 
@@ -111,4 +112,7 @@ class ClockInService(
         val address = HeadsDownProgram.rig(authority).address
         return HeadsDownAccounts.rigOrNull(address, rpc.getAccountInfo(address))
     }
+
+    /** The cluster's block height: past a transaction's `lastValidBlockHeight`, it can no longer land. */
+    suspend fun blockHeight(): Long = rpc.getBlockHeight(Commitment.CONFIRMED)
 }

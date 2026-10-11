@@ -41,6 +41,7 @@ import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.rig.RigBindingStore
 import xyz.headsdown.rig.RigOnboarding
 import xyz.headsdown.rig.VoucherStore
+import xyz.headsdown.surface.tile.ClockInTransactions
 import xyz.headsdown.surface.tile.TileAddOutcome
 import xyz.headsdown.surface.tile.TilePrompt
 import xyz.headsdown.surface.widget.RigWidgetReceiver
@@ -89,6 +90,7 @@ class HomeViewModel @Inject constructor(
     crankLink: CrankLinkMonitor,
     private val focusBond: FocusBondSetting,
     private val policy: ClockInPolicy,
+    private val clockIn: ClockInTransactions,
 ) : ViewModel() {
 
     private val _shiftWindow = MutableStateFlow<String?>(null)
@@ -136,6 +138,19 @@ class HomeViewModel @Inject constructor(
     }
 
     /** Re-reads every permission / setting; call on resume (users change them in Settings). */
+    /**
+     * Arms the shift of a clock-in the wallet sent and this app never heard back about, once the
+     * chain shows it. It returns when there is nothing left to wait for. Call it only while the
+     * app is in front: a shift can only be started from the foreground.
+     */
+    suspend fun pickUpClockIn() {
+        if (shift.value.state.isRunning) return
+        val spec = clockIn.recover(PICK_UP_PATIENCE_MILLIS) ?: return
+        if (shift.value.state.isRunning) return
+        shifts.arm(spec)
+        refresh() // the rig is bound now
+    }
+
     fun refresh() {
         viewModelScope.launch {
             val key = withContext(Dispatchers.Default) { rigKeys.status(vouchers.forKey(rigKeys.compressedPublicKey())?.level) }
@@ -245,5 +260,8 @@ class HomeViewModel @Inject constructor(
         private const val K_AUTOSTART_OPENED = "autostart_opened"
         private const val K_TILE = "tile_added"
         private const val K_INTRO = "intro_seen"
+
+        /** How long the home screen goes on looking for a clock-in that could still land: past a blockhash's life. */
+        private const val PICK_UP_PATIENCE_MILLIS = 150_000L
     }
 }
