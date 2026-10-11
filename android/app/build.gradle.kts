@@ -126,6 +126,14 @@ require(policyShiftBudget >= policyDigLamports && policyWeeklyBudget >= policySh
     "headsdown.policy: shiftBudgetLamports must cover one dig and weeklyBudgetLamports the shift"
 }
 
+// DEVELOPER ENTRIES on the home screen: "Sensor lab (debug)" and "Rig key and devstack (debug)".
+// Their screens exist in the debug and localdev builds only (release has neither); this hides the
+// two links there too, for a debug build that is shown to people:
+//   ./gradlew :app:assembleDebug -Pheadsdown.devEntries=false
+// The default keeps them: scripts/devstack/emulator-smoke.sh opens "Rig key and devstack".
+val devEntries = prop("headsdown.devEntries") ?: "true"
+require(devEntries == "true" || devEntries == "false") { "headsdown.devEntries must be true or false" }
+
 android {
     namespace = "xyz.headsdown"
 
@@ -155,6 +163,7 @@ android {
         buildConfigField("int", "POLICY_SOLO_TILES", "$policySoloTiles")
         buildConfigField("long", "POLICY_SHIFT_BUDGET_LAMPORTS", "${policyShiftBudget}L")
         buildConfigField("long", "POLICY_WEEKLY_BUDGET_LAMPORTS", "${policyWeeklyBudget}L")
+        buildConfigField("boolean", "SHOW_DEV_ENTRIES", devEntries)
     }
 
     buildFeatures {

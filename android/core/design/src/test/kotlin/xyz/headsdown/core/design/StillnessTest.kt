@@ -24,11 +24,11 @@ class StillnessTest {
     private val frameLoop = listOf("withFrameNanos", "withFrameMillis")
 
     /**
-     * KNOWN EXCEPTION, for the next stage to remove: the home screen's `emberBreath()` runs an
-     * infinite transition around the rig card while the rig is hot. When it goes, this test fails
-     * until the entry is deleted, so the list cannot outlive what it excuses.
+     * No exception is left. The home screen's `emberBreath()`, an infinite transition around the
+     * rig card while the rig was hot, went with the card when the home screen was rebuilt. A file
+     * named here would have to say which stage removes it, and the test fails until it is.
      */
-    private val endlessExceptions = setOf("app/src/main/kotlin/xyz/headsdown/ui/HomeScreen.kt")
+    private val endlessExceptions = emptySet<String>()
 
     /** The board replay is driven by `withFrameNanos` and stops when the night has been replayed. */
     private val frameLoopAllowed = setOf("feature/reveal/src/main/kotlin/xyz/headsdown/feature/reveal/ui/RevealBoard.kt")

@@ -6,78 +6,58 @@ import android.content.Intent
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import xyz.headsdown.core.chain.registrar.AttestationOutcome
-import xyz.headsdown.core.design.HdMaterial
 import xyz.headsdown.core.keys.KeySecurityLevel
-import xyz.headsdown.feature.oemkeepalive.KeepAliveGuide
-import xyz.headsdown.feature.oemkeepalive.KeepAliveStep
 import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.surface.notification.NotificationAccess
 import xyz.headsdown.surface.notification.NotificationPermissionPolicy
 import xyz.headsdown.surface.notification.NotificationPermissionStep
+import xyz.headsdown.surface.tile.TileAddOutcome
 import xyz.headsdown.surface.tile.TilePrompt
-import xyz.headsdown.ui.theme.HdColors
+import xyz.headsdown.ui.setup.SetupActions
+import xyz.headsdown.ui.setup.SetupContent
+import xyz.headsdown.ui.setup.SetupStep
 
 /**
- * Five steps, in the order the night loop depends on them:
- * notifications -> exact alarm -> OEM keep-alive -> Quick Settings tile -> rig key.
+ * First launch and setup: what this is, then five steps in the order the night loop depends on
+ * them: notifications -> exact alarm -> OEM keep-alive -> Quick Settings tile -> rig key.
  *
- * [onCreateRigKey] creates the key (attested by the registrar through a wallet sign-in when it
- * can be); the Activity wires it, because the wallet needs its result sender.
+ * This is the stateful route: it owns the permission launcher and the notification-permission
+ * state machine, and hands the layout to the stateless [SetupContent]. [onCreateRigKey] creates
+ * the key (attested by the registrar through a wallet sign-in when it can be); the Activity wires
+ * it, because the wallet needs its result sender. [onContinue] leaves setup ("Start using Heads
+ * Down", "Skip for now"); [onHowItWorks] opens the night-shift introduction.
  */
 @Composable
-fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -> Unit, onCreateRigKey: () -> Unit) {
+fun OnboardingScreen(
+    state: OnboardingState,
+    vm: HomeViewModel,
+    onContinue: () -> Unit,
+    onCreateRigKey: () -> Unit,
+    onHowItWorks: () -> Unit = {},
+) {
     val context = LocalContext.current
     val activity = LocalActivity.current
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         vm.refresh()
     }
+    val loaded by vm.loaded.collectAsStateWithLifecycle()
+    // The step the person opened out of turn; null follows the first one that is not done.
+    var selectedStep by rememberSaveable { mutableStateOf<SetupStep?>(null) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text("Set up your rig", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Five steps so your phone can take the night shift. If anything fails, the rig simply goes cold: nothing is spent.",
-            color = HdColors.AshMuted,
-        )
-
-        StepCard(1, "Notifications", "Your shift shows as an ongoing notification, and the morning reveal needs one.", state.notificationsGranted) {
-            Button(onClick = {
+    SetupContent(
+        state = state,
+        actions = SetupActions(
+            onMarkIntroSeen = vm::markIntroSeen,
+            onAllowNotifications = {
                 val step = NotificationPermissionPolicy.nextStep(
                     sdkInt = HomeViewModel.sdkInt,
                     granted = state.notificationsGranted,
@@ -93,56 +73,23 @@ fun OnboardingScreen(state: OnboardingState, vm: HomeViewModel, onContinue: () -
                     }
                     NotificationPermissionStep.OPEN_SETTINGS -> context.launch(NotificationAccess.appNotificationSettings(context))
                 }
-            }) { Text("Allow notifications") }
-        }
-
-        StepCard(2, "Morning alarm", "Your haul reveal opens right after your own alarm rings.", state.exactAlarmsAllowed) {
-            Button(onClick = { context.launch(vm.exactAlarmSettingsIntent()) }) { Text("Allow exact alarm") }
-        }
-
-        StepCard(3, "Keep the shift alive", keepAliveSubtitle(state), state.keepAliveDone) {
-            val oem = state.oem
-            if (oem != null) {
-                KeepAliveGuide.steps(oem).forEach { guide ->
-                    Column(Modifier.padding(vertical = 4.dp)) {
-                        Text(guide.title, style = MaterialTheme.typography.titleMedium)
-                        Text(guide.detail, color = HdColors.AshMuted, style = MaterialTheme.typography.bodyMedium)
-                        guide.action?.let { action ->
-                            OutlinedButton(onClick = { vm.openKeepAlive(action) }, modifier = Modifier.padding(top = 6.dp), border = HdMaterial.controlBorder()) {
-                                Text(if (action == KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS) "Allow background running" else "Open settings")
-                            }
-                        }
-                        if (guide.action == KeepAliveStep.AUTOSTART && !state.autostartConfirmed) {
-                            TextButton(onClick = vm::confirmAutostart) { Text("I turned Autostart on") }
-                        }
-                    }
-                }
-            }
-        }
-
-        StepCard(4, "Quick Settings tile", "Clock in from anywhere: swipe down, tap Heads Down next to Do Not Disturb.", state.tileAdded) {
-            if (state.tilePromptSupported) {
-                Button(onClick = { TilePrompt.request(context, vm::onTileResult) }) { Text("Add the tile") }
-            } else {
-                Text("Swipe down twice, tap the pencil, and drag Heads Down next to Do Not Disturb.", color = HdColors.AshMuted)
-                TextButton(onClick = { vm.onTileResult(xyz.headsdown.surface.tile.TileAddOutcome.UNSUPPORTED) }) { Text("Done") }
-            }
-        }
-
-        StepCard(5, "Create your rig key", rigKeySubtitle(state.rigKey, state.attestation), state.rigKeyReady) {
-            Button(onClick = onCreateRigKey, enabled = !state.creatingKey) {
-                Text(if (state.creatingKey) "Creating the key…" else "Create rig key")
-            }
-        }
-
-        Spacer(Modifier.height(4.dp))
-        Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
-            Text(if (state.allDone) "Start using Heads Down" else "Skip for now")
-        }
-    }
+            },
+            onAllowExactAlarm = { context.launch(vm.exactAlarmSettingsIntent()) },
+            onOpenKeepAlive = vm::openKeepAlive,
+            onConfirmAutostart = vm::confirmAutostart,
+            onAddTile = { TilePrompt.request(context, vm::onTileResult) },
+            onConfirmTile = { vm.onTileResult(TileAddOutcome.UNSUPPORTED) },
+            onCreateRigKey = onCreateRigKey,
+            onFinish = onContinue,
+            onHowItWorks = onHowItWorks,
+        ),
+        selectedStep = selectedStep,
+        onSelectStep = { selectedStep = it },
+        loading = !loaded,
+    )
 }
 
-private fun keepAliveSubtitle(state: OnboardingState): String =
+internal fun keepAliveSubtitle(state: OnboardingState): String =
     if (state.oem?.needsAutostartStep == true) {
         "HyperOS closes background apps aggressively. These settings keep your shift running until morning."
     } else {
@@ -184,37 +131,6 @@ internal fun rigKeyLine(status: RigKeyStatus): String = when (status) {
             "Heartbeats are signed by a key in this phone's Android Keystore, which is not hardware-backed on this device."
     }
     else -> "Create your rig key to sign heartbeats."
-}
-
-@Composable
-private fun StepCard(index: Int, title: String, subtitle: String, done: Boolean, actions: @Composable () -> Unit) {
-    Card(
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, if (done) HdColors.EmberDim else HdColors.CharcoalOutline),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = CircleShape,
-                    color = if (done) HdColors.Ember else HdColors.CharcoalOutline,
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Text(
-                        if (done) "✓" else "$index",
-                        modifier = Modifier.padding(top = 4.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        color = if (done) HdColors.Charcoal else HdColors.Ash,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Spacer(Modifier.size(12.dp))
-                Text(title, style = MaterialTheme.typography.titleMedium)
-            }
-            Text(subtitle, color = HdColors.AshMuted, style = MaterialTheme.typography.bodyMedium)
-            if (!done) actions()
-        }
-    }
 }
 
 internal fun Context.launch(intent: Intent) {

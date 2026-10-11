@@ -1,39 +1,38 @@
 package xyz.headsdown.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import xyz.headsdown.ui.theme.HdColors
+import xyz.headsdown.core.design.BrandGlyph
+import xyz.headsdown.core.design.Hd
+import xyz.headsdown.core.design.HdArgb
+import xyz.headsdown.core.design.HdDimens
+import xyz.headsdown.core.design.components.ActionDock
+import xyz.headsdown.core.design.components.BarButton
+import xyz.headsdown.core.design.components.DisplayText
+import xyz.headsdown.core.design.components.Label
+import xyz.headsdown.core.design.components.PinnedBarScreen
+import xyz.headsdown.core.design.components.Plate
+import xyz.headsdown.core.design.components.PlateTone
+import xyz.headsdown.core.design.components.ProvideCappedFontScale
+import xyz.headsdown.ui.setup.Body
 import xyz.headsdown.ui.theme.HeadsDownTheme
-import xyz.headsdown.ui.theme.PixelLabel
 
 /** The ritual, step by step, in plain words. Kept as data so the honesty test can read it. */
 object NightShiftCopy {
@@ -84,73 +83,74 @@ object NightShiftCopy {
 const val INTRO_CONTINUE_TAG = "intro-continue"
 
 /**
- * The first onboarding page: what "your phone's night shift" means and the face-down ritual,
- * honestly (no income language; what happens when things fail).
+ * What "your phone's night shift" means and the face-down ritual, honestly (no income language;
+ * what happens when things fail). Opened from setup and from the home screen; its one bar goes
+ * back to where the person came from.
  */
 @Composable
 fun NightShiftIntro(onContinue: () -> Unit, continueLabel: String = NightShiftCopy.CONTINUE) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text("HEADS DOWN", style = PixelLabel, color = HdColors.AshMuted)
-        Text(
-            NightShiftCopy.TITLE,
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.semantics { heading() },
-        )
-        Text(NightShiftCopy.LEAD, color = HdColors.Ash, style = MaterialTheme.typography.bodyMedium)
-
-        NightShiftCopy.STEPS.forEachIndexed { i, step -> RitualStep(i + 1, step) }
-
-        Card(
-            shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, HdColors.OreGold.copy(alpha = 0.6f)),
-        ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(NightShiftCopy.NOT_TITLE, color = HdColors.OreGold, style = MaterialTheme.typography.titleMedium)
-                Text(NightShiftCopy.NOT_BODY, color = HdColors.Ash, style = MaterialTheme.typography.bodyMedium)
+    PinnedBarScreen(
+        content = {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                BrandGlyph(Modifier.size(28.dp))
+                Label("HEADS DOWN", color = Hd.colors.chalk)
             }
-        }
+            DisplayText(NightShiftCopy.TITLE, Modifier.semantics { heading() }, style = Hd.type.title)
+            Body(NightShiftCopy.LEAD)
 
-        Button(
-            onClick = onContinue,
-            modifier = Modifier.fillMaxWidth().testTag(INTRO_CONTINUE_TAG),
-            colors = ButtonDefaults.buttonColors(containerColor = HdColors.Ember, contentColor = HdColors.Charcoal),
-        ) { Text(continueLabel) }
-    }
+            Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                NightShiftCopy.STEPS.forEachIndexed { i, step -> RitualStep(i + 1, step) }
+            }
+
+            Plate(Modifier.fillMaxWidth(), tone = PlateTone.Slab) {
+                Label(NightShiftCopy.NOT_TITLE)
+                Body(NightShiftCopy.NOT_BODY)
+            }
+        },
+        dock = {
+            ActionDock {
+                BarButton(continueLabel, onClick = onContinue, modifier = Modifier.fillMaxWidth().testTag(INTRO_CONTINUE_TAG))
+            }
+        },
+    )
 }
 
+/** One step of the ritual: a square badge with its number, the step's name, and what happens in it. */
 @Composable
 private fun RitualStep(index: Int, step: NightShiftCopy.Step) {
-    Row(verticalAlignment = Alignment.Top) {
-        // A square pixel badge instead of a circle: the rig's pixel look.
+    val colors = Hd.colors
+    val shape = Hd.shapes.chip
+    // "Heads down" is the step the app is named after: its badge is the filled one.
+    val named = index == 2
+    Row(
+        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         Box(
             Modifier
+                .padding(top = 2.dp)
                 .size(28.dp)
-                .background(if (index == 2) HdColors.Ember else HdColors.CharcoalOutline, RoundedCornerShape(4.dp)),
+                .then(if (named) Modifier.background(colors.chalk, shape) else Modifier.border(HdDimens.Hairline, colors.ash, shape)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "$index",
-                textAlign = TextAlign.Center,
-                color = if (index == 2) HdColors.Charcoal else HdColors.Ash,
-                fontWeight = FontWeight.Bold,
-            )
+            // The number is the badge's drawing; the order of the steps already says it. Like the
+            // badge it does not grow with the font, or a digit would be cut by its square.
+            ProvideCappedFontScale(max = 1f) {
+                BasicText(
+                    "$index",
+                    Modifier.clearAndSetSemantics { },
+                    style = Hd.type.label.copy(color = if (named) colors.onChalk else colors.ash),
+                )
+            }
         }
-        Spacer(Modifier.size(12.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(step.title, style = MaterialTheme.typography.titleMedium)
-            Text(step.body, color = HdColors.AshMuted, style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            BasicText(step.title, style = Hd.type.headline.copy(color = colors.chalk))
+            Body(step.body, color = colors.ash)
         }
     }
 }
 
-@Preview(widthDp = 400, heightDp = 1200)
+@Preview(widthDp = 360, heightDp = 1300, backgroundColor = HdArgb.PREVIEW_PIT, showBackground = true)
 @Composable
 private fun NightShiftIntroPreview() = HeadsDownTheme { NightShiftIntro(onContinue = {}) }
