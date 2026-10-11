@@ -1,6 +1,7 @@
 package xyz.headsdown.surface.haptics
 
 import android.content.Context
+import android.os.VibrationEffect
 import android.os.VibrationEffect.Composition
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
@@ -60,6 +61,50 @@ class HapticsDeviceTest {
         val plan = haptics().play(HapticCue.COOLING_TICK, HapticMoment.SHIFT)
         assertEquals(HapticPlan.OnOffWaveform(HapticScripts.of(HapticCue.COOLING_TICK).onOff, withSound = false), plan)
         assertEquals(HapticScripts.of(HapticCue.COOLING_TICK).onOff, shadow.pattern.toList())
+    }
+
+    @Test
+    fun `a UI cue on a basic motor is the driver's predefined effect`() {
+        shadow.setHasVibrator(true)
+        shadow.setHasAmplitudeControl(false)
+        shadow.setSupportedPrimitives(emptyList())
+        val h = haptics()
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_TICK), h.play(HapticCue.UI_KNOCK, HapticMoment.FOREGROUND))
+        assertEquals(VibrationEffect.EFFECT_TICK, lastPredefinedEffect())
+        assertEquals(HapticPlan.Predefined(VibrationEffect.EFFECT_HEAVY_CLICK), h.play(HapticCue.UI_CONFIRM, HapticMoment.FOREGROUND))
+        assertEquals(VibrationEffect.EFFECT_HEAVY_CLICK, lastPredefinedEffect())
+        assertTrue(shadow.primitiveSegmentsInPrimitiveEffects.orEmpty().isEmpty())
+    }
+
+    /**
+     * The effect id of the one prebaked segment the motor was last given, or null. On Android 12
+     * and later a predefined effect is a composition of one `PrebakedSegment`, a platform class
+     * that is not in the SDK, kept by the shadow in a field it does not publish: read by reflection.
+     */
+    private fun lastPredefinedEffect(): Int? {
+        val field = ShadowVibrator::class.java.getDeclaredField("vibrationEffectSegments").apply { isAccessible = true }
+        val segment = (field.get(null) as List<*>).singleOrNull() ?: return null
+        if (segment.javaClass.simpleName != "PrebakedSegment") return null
+        return segment.javaClass.getMethod("getEffectId").invoke(segment) as Int
+    }
+
+    @Test
+    fun `a UI cue on a full motor is composed, and one during a shift never reaches the motor`() {
+        shadow.setHasVibrator(true)
+        shadow.setSupportedPrimitives(ALL)
+        val h = haptics()
+        assertEquals(HapticPlan.Silent, h.play(HapticCue.UI_KNOCK, HapticMoment.SHIFT))
+        assertEquals(HapticPlan.Silent, h.play(HapticCue.UI_CONFIRM, HapticMoment.REVEAL))
+        assertFalse(shadow.isVibrating)
+        assertTrue(shadow.primitiveSegmentsInPrimitiveEffects.orEmpty().isEmpty())
+        assertTrue(h.play(HapticCue.UI_SNAP, HapticMoment.FOREGROUND) is HapticPlan.Composed)
+        assertEquals(
+            listOf(ShadowVibrator.PrimitiveEffect(Composition.PRIMITIVE_CLICK, 0.5f, 0)),
+            shadow.primitiveSegmentsInPrimitiveEffects,
+        )
+        // Within the snap's own 400 ms: refused, and the motor is not asked again.
+        now += 399
+        assertEquals(HapticPlan.Silent, h.play(HapticCue.UI_SNAP, HapticMoment.FOREGROUND))
     }
 
     @Test
