@@ -99,6 +99,11 @@ class ClockOutSheetTest : SheetTestBase() {
     )
     private val nothingAtAll = ClockOutFacts(ShiftOutcome.NoOpenShift, BondOutcome.None, 0uL, nothingByDefault = true, 0uL, 0uL, fullClaim = null)
 
+    /** "Buy ORE" as a mainnet build offers it, and with Jupiter's quote for 0.001 SOL (11 October 2026). */
+    private val offered = BuyChoice(offers = BuyChoice.OFFERS)
+    private val marketQuote = BuyQuote(spendLamports = 1_000_000uL, oreAtoms = 96_488_910uL, minOreAtoms = 95_524_020uL, slippageBps = 100, route = listOf("Meteora DLMM"))
+    private val quoted = offered.copy(spendLamports = 1_000_000uL, quote = marketQuote)
+
     private val confirmed =
         "Confirmed on-chain. Shift sealed as completed. Focus Bond back in your wallet: 100 SKR. " +
             "0.0032 SOL back in your wallet. About 0.00018001 ORE claimed to your wallet."
@@ -115,6 +120,11 @@ class ClockOutSheetTest : SheetTestBase() {
         Triple("ready, the wallet is open", ClockOutState.Ready(insideWindow, endEarly = true, working = true), ClockOutTags.CONFIRM),
         Triple("ready, a problem", ClockOutState.Ready(completed, problem = ClockOutModel.NOT_CONFIRMED), ClockOutTags.CONFIRM),
         Triple("ready, nothing at all", ClockOutState.Ready(nothingAtAll), ClockOutTags.CONFIRM),
+        Triple("ready, a buy on offer", ClockOutState.Ready(completed, buy = offered), ClockOutTags.CONFIRM),
+        Triple("ready, a buy being quoted", ClockOutState.Ready(completed, buy = offered.copy(spendLamports = 1_000_000uL, quoting = true)), ClockOutTags.CONFIRM),
+        Triple("ready, a buy quoted", ClockOutState.Ready(completed, buy = quoted), ClockOutTags.CONFIRM),
+        Triple("ready, no quote for the buy", ClockOutState.Ready(completed, buy = offered.copy(spendLamports = 5_000_000uL, noQuote = true)), ClockOutTags.CONFIRM),
+        Triple("ready, a buy and nothing else", ClockOutState.Ready(nothingAtAll, buy = quoted), ClockOutTags.CONFIRM),
         Triple("done", ClockOutState.Done(confirmed, SIGNATURE), ClockOutTags.CLOSE),
         Triple("done, no explorer", ClockOutState.Done(confirmed), ClockOutTags.CLOSE),
     )
@@ -634,5 +644,68 @@ class ClockOutSheetTest : SheetTestBase() {
             show(state)
             for (text in textsInOrder()) assertEquals("$name: \"$text\"", emptyList<String>(), HonestCopy.violations(text))
         }
+    }
+
+    // --- "Buy ORE" ---
+
+    @Test
+    fun `a build that cannot buy has no buy row, and one that can starts with it off`() {
+        var state by mutableStateOf<ClockOutState>(ClockOutState.Ready(completed))
+        show { ClockOutScreen(state, {}, {}, {}, {}, {}) }
+        rule.onAllNodesWithTag(ClockOutTags.BUY).assertCountEquals(0)
+        rule.onAllNodesWithText(ClockOutLedger.BUY).assertCountEquals(0)
+
+        state = ClockOutState.Ready(completed, buy = offered)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ClockOutTags.BUY).performScrollTo().assertIsDisplayed().assertTextEquals(ClockOutCopy.BUY_OFFER)
+        rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + "0").assertIsSelected().assertTextEquals("Off")
+        for (spend in BuyChoice.OFFERS) rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + spend).assertIsNotSelected()
+        rule.onAllNodesWithTag(ClockOutTags.BUY_QUOTE).assertCountEquals(0)
+        rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsEnabled().assertTextEquals("Clock out")
+    }
+
+    @Test
+    fun `choosing an amount asks once, states the quote before the wallet, and the bar names the buy`() {
+        val asked = mutableListOf<ULong>()
+        var state by mutableStateOf<ClockOutState>(ClockOutState.Ready(completed, buy = offered))
+        show { ClockOutScreen(state, {}, {}, {}, {}, {}, onBuy = { asked += it }) }
+        rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + "1000000").performScrollTo().assertTextEquals("0.001 SOL").performClick()
+        assertEquals(listOf(1_000_000uL), asked)
+
+        // The market is being asked: the bar waits, and the sheet does not say there is nothing to sign.
+        state = ClockOutState.Ready(completed, buy = offered.copy(spendLamports = 1_000_000uL, quoting = true))
+        rule.waitForIdle()
+        rule.onNodeWithTag(ClockOutTags.BUY_QUOTE).assertTextEquals(ClockOutCopy.BUY_QUOTING)
+        rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsNotEnabled()
+        rule.onAllNodesWithTag(ClockOutTags.NOTHING).assertCountEquals(0)
+
+        state = ClockOutState.Ready(completed, buy = quoted)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + "1000000").assertIsSelected()
+        rule.onNodeWithTag(ClockOutTags.BUY_QUOTE).assertTextEquals(ClockOutCopy.buyQuote(marketQuote))
+        rule.onNodeWithText("about 0.00096488 ORE").assertExists()
+        rule.onNodeWithText(ClockOutCopy.BUY_FIRST_ORE).assertExists()
+        rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsEnabled().assertTextEquals("Clock out and buy ORE")
+        // Tapping the amount already chosen does not ask the market again; "Off" does turn it off.
+        rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + "1000000").performScrollTo().performClick()
+        rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + "0").performScrollTo().performClick()
+        assertEquals(listOf(1_000_000uL, 0uL), asked)
+
+        // Nothing else to sign: the bar says what the approval is for.
+        state = ClockOutState.Ready(nothingAtAll, buy = quoted)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsEnabled().assertTextEquals("Buy ORE")
+        rule.onAllNodesWithTag(ClockOutTags.NOTHING).assertCountEquals(0)
+
+        // No quote: nothing will be bought, and the bar is the plain clock-out again.
+        state = ClockOutState.Ready(completed, buy = offered.copy(spendLamports = 5_000_000uL, noQuote = true))
+        rule.waitForIdle()
+        rule.onNodeWithTag(ClockOutTags.BUY_QUOTE).assertTextEquals(ClockOutCopy.BUY_NO_QUOTE)
+        rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsEnabled().assertTextEquals("Clock out")
+
+        // The wallet is open: the choice cannot be changed under it.
+        state = ClockOutState.Ready(completed, buy = quoted, working = true)
+        rule.waitForIdle()
+        for (spend in listOf(0uL) + BuyChoice.OFFERS) rule.onNodeWithTag(ClockOutTags.BUY_CHOICE + spend).assertIsNotEnabled()
     }
 }

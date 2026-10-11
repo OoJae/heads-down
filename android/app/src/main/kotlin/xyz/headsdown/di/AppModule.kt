@@ -36,6 +36,8 @@ import xyz.headsdown.core.chain.registrar.RigAttestationFlow
 import xyz.headsdown.core.chain.rpc.OkHttpJsonRpcTransport
 import xyz.headsdown.core.chain.rpc.RpcProtocolException
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
+import xyz.headsdown.core.chain.swap.JupiterSwapProvider
+import xyz.headsdown.core.chain.swap.OkHttpSwapHttp
 import xyz.headsdown.core.chain.withdraw.WithdrawService
 import xyz.headsdown.core.keys.PrefsCounterStore
 import xyz.headsdown.core.keys.RigCounter
@@ -118,9 +120,17 @@ object AppModule {
     @Provides @Singleton
     fun clockInService(rpc: SolanaJsonRpc): ClockInService = ClockInService(rpc)
 
-    /** No swap provider yet: the clock-out seals, releases and claims; it does not buy. */
+    /**
+     * The clock-out seals, releases and claims; with a SWAP_URL it can also buy ORE (Jupiter).
+     * An empty SWAP_URL builds an app that does not offer the buy. The swap API is HTTPS in every
+     * build: a local fork has no market, so there is no loopback form of it.
+     */
     @Provides @Singleton
-    fun clockOutService(rpc: SolanaJsonRpc): ClockOutService = ClockOutService(rpc)
+    fun clockOutService(rpc: SolanaJsonRpc, client: OkHttpClient): ClockOutService {
+        val url = BuildConfig.SWAP_URL
+        val verdict = EndpointPolicy.require(EndpointKind.SWAP, url, allowLoopbackCleartext = false)
+        return ClockOutService(rpc, swap = if (verdict == EndpointVerdict.Disabled) null else JupiterSwapProvider(OkHttpSwapHttp(url, client)))
+    }
 
     @Provides @Singleton
     fun withdrawService(rpc: SolanaJsonRpc): WithdrawService = WithdrawService(rpc)

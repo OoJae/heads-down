@@ -33,6 +33,12 @@ val rpcUrl = prop("headsdown.rpcUrl") ?: "https://api.devnet.solana.com"
 val crankUrl = prop("headsdown.crankUrl") ?: ""
 val registrarUrl = prop("headsdown.registrarUrl") ?: ""
 val indexerUrl = prop("headsdown.indexerUrl") ?: ""
+// "Buy ORE" at clock-out: a swap API that speaks Jupiter's `/quote` and `/swap-instructions`.
+// Empty (the default) builds an app that does not offer the buy. Only mainnet has an ORE market:
+//   -Pheadsdown.swapUrl=https://api.jup.ag/swap/v1
+// The app sends it the mints, the amount and, for the instructions, the wallet's address; it
+// trusts none of what comes back (JupiterGuard) and refuses any fee the provider adds.
+val swapUrl = prop("headsdown.swapUrl") ?: ""
 
 // WHO THE APP SAYS IT IS. This is the site the app names to the wallet as its identity (Mobile
 // Wallet Adapter) and the SIWS message names its host. Solana Mobile's test wallet shows it on the
@@ -90,6 +96,10 @@ requireEndpoint("headsdown.rpcUrl", rpcUrl, "https", "http", allowLoopback = fal
 if (crankUrl.isNotEmpty()) requireEndpoint("headsdown.crankUrl", crankUrl, "wss", "ws", allowLoopback = false)
 if (registrarUrl.isNotEmpty()) requireEndpoint("headsdown.registrarUrl", registrarUrl, "https", "http", allowLoopback = false)
 if (indexerUrl.isNotEmpty()) requireEndpoint("headsdown.indexerUrl", indexerUrl, "https", "http", allowLoopback = false)
+if (swapUrl.isNotEmpty()) {
+    require(cluster == "mainnet") { "headsdown.swapUrl: there is no ORE market to buy from outside mainnet" }
+    requireEndpoint("headsdown.swapUrl", swapUrl, "https", "http", allowLoopback = false)
+}
 requireEndpoint("headsdown.localdev.rpcUrl", localdevRpcUrl, "https", "http", allowLoopback = true)
 if (localdevCrankUrl.isNotEmpty()) requireEndpoint("headsdown.localdev.crankUrl", localdevCrankUrl, "wss", "ws", allowLoopback = true)
 if (localdevRegistrarUrl.isNotEmpty()) {
@@ -151,6 +161,7 @@ android {
         buildConfigField("String", "CRANK_WS_URL", "\"$crankUrl\"")
         buildConfigField("String", "REGISTRAR_URL", "\"$registrarUrl\"")
         buildConfigField("String", "INDEXER_URL", "\"$indexerUrl\"")
+        buildConfigField("String", "SWAP_URL", "\"$swapUrl\"")
         // The site the wallet shows for this app, and the domain the app signs in to (SIWS); the
         // registrar must answer for exactly this domain.
         buildConfigField("String", "IDENTITY_URI", "\"$identityUri\"")
@@ -197,6 +208,8 @@ android {
             buildConfigField("String", "CRANK_WS_URL", "\"$localdevCrankUrl\"")
             buildConfigField("String", "REGISTRAR_URL", "\"$localdevRegistrarUrl\"")
             buildConfigField("String", "INDEXER_URL", "\"$localdevIndexerUrl\"")
+            // A local fork has no pools: nothing to buy from.
+            buildConfigField("String", "SWAP_URL", "\"\"")
             // scripts/devstack/up.sh --with-registrar runs the registrar with HD_SIWS_DOMAIN=localhost.
             buildConfigField("String", "SIWS_DOMAIN", "\"localhost\"")
             buildConfigField("boolean", "LOOPBACK_CLEARTEXT_ALLOWED", "true")
