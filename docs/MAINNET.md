@@ -207,7 +207,7 @@ it back": 11,193,320 less.
 |---|---|---|
 | ORE Miner [`A6Rjhk1S…`](https://solscan.io/account/A6Rjhk1SHe9vKvfpnQ6HHMWrEtRxd8i8hdYXnUYEomAm) | 4,480,400 | Not known: whether a Miner's lamports can ever be taken back from ORE was not established |
 | Rig [`DUmg1GrZ…`](https://solscan.io/account/DUmg1GrZhaELtpjY1KpA5ov6ANn4msoUPn4mLV2TWZgL) | 2,600,960 | 1,788,160 when the rig is closed. 812,800 stay behind (below) |
-| Two ShiftLogs, [`2wKGfqoT…`](https://solscan.io/account/2wKGfqoT2cesX9swmHv6ZgWRRP7eeV3Ntp8se6VoSQb3) and [`AeNsTaCL…`](https://solscan.io/account/AeNsTaCLqN3cRjbUwy5D7FHN6MeCA6DXWg8y2pEHE7XZ) | 2,600,960 (2 x 1,300,480) | Yes, from 30 days after each shift ended: the program's `close_shift_log` returns it to the wallet that paid. Neither the app nor the crank sends that instruction yet |
+| Two ShiftLogs, [`2wKGfqoT…`](https://solscan.io/account/2wKGfqoT2cesX9swmHv6ZgWRRP7eeV3Ntp8se6VoSQb3) and [`AeNsTaCL…`](https://solscan.io/account/AeNsTaCLqN3cRjbUwy5D7FHN6MeCA6DXWg8y2pEHE7XZ) | 2,600,960 (2 x 1,300,480) | Yes, from 30 days after each shift ended: the program's `close_shift_log` returns it to the wallet that paid. The app's "Take it back" sheet states this rent and offers the instruction from that day (added 11 October; it has not run on mainnet, where no log is 30 days old before 9 November). The crank does not send it |
 | Fees of the four wallet transactions | 25,000 | No |
 | Mining | 1,486,000 that evening | 5,050,000 went out, 3,564,000 came back. Round 435,228 sent 891,000 more into the wallet's Automation the next evening |
 | **Total** | **11,193,320** | |
@@ -425,7 +425,8 @@ What it showed:
   only bar read "Clock in", and the link that seals a shift was a screen further down. The
   founder clocked in again each time, and then asked how to clock out. Each clock-in sealed the
   shift before it and paid a ShiftLog's rent, 1,300,480 lamports, which the program gives back
-  from 30 days after the shift ended (no tool sends that instruction yet). Changed in the app:
+  from 30 days after the shift ended (since 11 October the app's "Take it back" sheet states that
+  rent and offers to take it back from that day). Changed in the app:
   "Clock out" now stands directly under "Shift ended".
 - **Clock-out and "Take it back" ran on the phone with the final build** (transactions 42 and
   43), which had been installed over the evening's earlier one. The sheet said the Automation

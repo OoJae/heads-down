@@ -108,16 +108,21 @@ the crank's settings were changed on the running service that evening
 
 **Not done yet, in plain words.** There are no users: the one rig on mainnet is the founder's.
 Not run on a phone: a whole night under HyperOS, the haul reveal at the alarm, a dig refused
-because the cost gate is shut, Close rig, Unfreeze, Claim, the Focus Bond, the Seeker tier, and
-any wallet other than Jupiter's (Solflare, Phantom and Seed Vault have not been tried). Close rig
+because the cost gate is shut, Close rig, Unfreeze, Claim, the Focus Bond, buying ORE at
+clock-out, the Seeker tier, and any wallet other than Jupiter's (Solflare, Phantom and Seed Vault
+have not been tried). The Focus Bond ran end to end on the emulator on 11 October (10 test SKR
+locked at clock-in, the shift run to the end of its window, the SKR back at clock-out), against
+the local fork with a stand-in SKR mint. Close rig
 and a clock-in over the tombstone it leaves have run only on an Android 14 emulator against a
 local fork of mainnet, signed in Solana Mobile's test wallet
 (`scripts/devstack/emulator-smoke.sh --wallet`), where the amounts that came back matched the
 screen to the lamport. On that emulator the test wallet showed the name and icon of the published
 identity page; on the phone, Jupiter's wallet showed "Could not verify request" on its connect
 prompt and still connected and signed. No SKR instruction has been sent on mainnet, and the
-BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift, and its
-clock-out cannot buy ORE yet. There is no release signing key: the APK to download is the
+BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift. Its
+clock-out can buy ORE through Jupiter in a build that is given a swap API (added 11 October): a
+live quote and the transaction built from it were simulated on mainnet, and nothing has been
+signed for one yet. There is no release signing key: the APK to download is the
 founder's debug-signed build ([release](https://github.com/OoJae/heads-down/releases/tag/v0.1.0-clock-in)), the only one the registrar accepts. With one rig the crank pays more in fees
 than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports net, and each
 skipped attempt and the BREAK their whole fee: 60,473 lamports net over nine transactions.
