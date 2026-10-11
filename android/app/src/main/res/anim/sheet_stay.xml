@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The screen under a sheet: it does not move, and it stays drawn for as long as the sheet takes.
+    Without an animation of its own the system would remove it at once, and the sheet would cross
+    an empty window.
+-->
+<alpha xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="300"
+    android:fromAlpha="1"
+    android:toAlpha="1" />

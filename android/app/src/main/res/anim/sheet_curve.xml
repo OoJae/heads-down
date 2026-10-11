@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The expressive-out curve: most of the way in the first third of the time, then a long arrival.
+    Material 3's "emphasized decelerate", cubic-bezier(0.05, 0.7, 0.1, 1).
+-->
+<pathInterpolator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:controlX1="0.05"
+    android:controlX2="0.1"
+    android:controlY1="0.7"
+    android:controlY2="1" />
