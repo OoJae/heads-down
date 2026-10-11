@@ -8,8 +8,8 @@
 #    hd-crank is started as uid 10001 with setpriv --no-new-privs; root can read the key file,
 #    hd-crank can read it, nobody else can.
 # 3. hd-crank listens on 0.0.0.0:$PORT, or on [::]:$PORT (dual-stack) when /proc/net/if_inet6
-#    has a size. Files in /proc report size 0, so in the image expect 0.0.0.0 (not run on Linux
-#    here; the [::] branch is left as it was).
+#    has a size. Files in /proc report size 0, so in the image expect 0.0.0.0 (it was
+#    0.0.0.0:8787 on Railway on 2026-10-10; the [::] branch is left as it was).
 # 4. hd-crank loads the key before it binds its port; once the port answers (or after 30 s),
 #    the key file is deleted. SIGTERM / SIGINT are forwarded as SIGINT (hd-crank's shutdown).
 #    If this script stops before that (a step fails, or SIGTERM arrives), the key directory is
@@ -95,7 +95,8 @@ rm -rf "$key_dir"
 key_dir=""
 # /proc/<pid> is owned by the uid the process runs as (Linux), so this line shows whether the
 # drop to uid 10001 happened. "unknown" where there is no /proc (macOS) or hd-crank has already
-# exited. The Linux half has not run yet: the first Railway deploy is its first run.
+# exited. On Linux it first ran on Railway on 2026-10-10, and the line read
+# "key file removed; hd-crank (pid 13, uid 10001) on 0.0.0.0:8787".
 say INFO "key file removed; hd-crank (pid $child, uid $(stat -c %u "/proc/$child" 2>/dev/null || echo unknown)) on $HD_CRANK_LISTEN"
 
 status=0

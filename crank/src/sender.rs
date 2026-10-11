@@ -6,6 +6,10 @@
 //! fresh blockhash is a separate, bounded decision taken by the crank loop after
 //! re-planning from fresh chain state (see [`crate::ledger`]).
 //!
+//! A dig is rebroadcast only while its ORE round still takes deploys
+//! ([`Submitter::confirm_while`]): landed after the round's end it is a `RoundNotActive` skip
+//! that the crank pays for and nothing reimburses.
+//!
 //! With the `helius-sender` feature and `sender.helius_sender_url`, sends go to Helius
 //! Sender (which requires `skipPreflight` and a tip transfer, added by the builder);
 //! statuses are still read from the regular RPC.
@@ -97,6 +101,21 @@ impl Submitter {
 
     /// Rebroadcast `wire` and poll until it confirms, its blockhash expires, or `max_wait`.
     pub async fn confirm(&self, signature: &str, wire: &[u8], last_valid_block_height: u64, p: ConfirmPolicy) -> Outcome {
+        self.confirm_while(signature, wire, last_valid_block_height, p, || true).await
+    }
+
+    /// [`Self::confirm`] for a transaction that is worth landing only for a while, as a dig is
+    /// inside its ORE round: a rebroadcast goes out only while `worth_sending()` answers true
+    /// (it is asked before each one, and may answer true again later). The polling does not
+    /// change: bytes that were sent earlier can still land, and the caller is told how it ended.
+    pub async fn confirm_while(
+        &self,
+        signature: &str,
+        wire: &[u8],
+        last_valid_block_height: u64,
+        p: ConfirmPolicy,
+        worth_sending: impl Fn() -> bool,
+    ) -> Outcome {
         let start = Instant::now();
         let mut last_send = Instant::now();
         let sigs = [signature.to_string()];
@@ -123,7 +142,7 @@ impl Submitter {
             if start.elapsed() >= p.max_wait {
                 return Outcome::Unknown;
             }
-            if start.elapsed() < p.rebroadcast_for && last_send.elapsed() >= p.rebroadcast_every {
+            if start.elapsed() < p.rebroadcast_for && last_send.elapsed() >= p.rebroadcast_every && worth_sending() {
                 let _ = self.send(wire).await;
                 last_send = Instant::now();
             }

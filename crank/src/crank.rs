@@ -277,6 +277,21 @@ pub fn plan_with(
     Ok(planner::plan(&inputs, policy, submitted))
 }
 
+/// May a dig for `round_id` be sent now, a first time or again? Only while the watcher shows
+/// that round as the live one with at least `min_slots_left` slots, and at least one, before
+/// its `end_slot`. It is what the loop asks before a dig pass, asked again before every
+/// rebroadcast: ORE takes a deploy only in a slot before `end_slot`, and a dig that lands
+/// later is a `RoundNotActive` skip the crank pays for (the first dig on mainnet was one).
+/// A round that has not started has no end yet (`dig.start_rounds`), and without a Board
+/// there is nothing to go by: both answer true.
+pub fn round_takes_digs(view: &ChainView, round_id: u64, min_slots_left: u64) -> bool {
+    match view.board {
+        Some(b) if b.round_id != round_id => false,
+        Some(_) => view.slots_left().is_none_or(|left| left >= min_slots_left.max(1)),
+        None => true,
+    }
+}
+
 /// What the crank knows about its lookup tables besides the decoded accounts (behind a mutex
 /// that is never held across an await).
 #[derive(Default)]
@@ -921,11 +936,18 @@ impl Crank {
             tokio::spawn(async move {
                 let _guard = guard;
                 let slots_left = this.chain.borrow().slots_left().unwrap_or(0);
+                // The same bytes go out again only while the watcher shows the round live
+                // (`round_takes_digs`). The time limit alone is not enough: it counts 400 ms a
+                // slot, and at mainnet's 0.22 s on 10 October 2026 the 80 slots of the window
+                // were over after 17 s while the clock allowed 32. It stays as the bound for a
+                // view that stands still.
                 let policy = ConfirmPolicy {
                     rebroadcast_for: Duration::from_millis(slots_left.saturating_mul(400)),
                     ..ConfirmPolicy::default()
                 };
-                let outcome = this.submitter.confirm(&sig, &wire, lvbh, policy).await;
+                let min_slots_left = this.cfg.dig.min_slots_left;
+                let live = || round_takes_digs(&this.chain.borrow(), round_id, min_slots_left);
+                let outcome = this.submitter.confirm_while(&sig, &wire, lvbh, policy, live).await;
                 this.handle_outcome(&sig, &batch, round_id, outcome, &debits).await;
             });
         }

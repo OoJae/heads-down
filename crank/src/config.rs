@@ -88,8 +88,10 @@ pub struct Config {
     /// Round over HTTP (two calls), beside the WebSocket stream. 1..=[`MAX_CHAIN_POLL_SECS`].
     /// The stream delivers every slot; the poll covers a stream that stalled, and while it
     /// does the crank sees the chain once per interval. The dig window (`deploy_margin_slots`
-    /// down to `min_slots_left`) is under 5 s long at today's slot time, so the longer the
-    /// interval, the likelier a stalled stream costs that round's dig.
+    /// down to `min_slots_left`) is 77 slots with the defaults: about 17 s at the 0.22 s slots
+    /// of 10 October 2026, about 21 s at 0.27 s. With the stream stalled a round's first dig
+    /// pass waits for the first poll inside the window, so the longer the interval, the later
+    /// the dig is sent and the likelier it misses its round.
     pub chain_poll_secs: u64,
     /// Digging.
     pub dig: DigConfig,
@@ -500,11 +502,22 @@ pub struct DigConfig {
     pub enabled: bool,
     /// Message format.
     pub tx_format: TxFormat,
-    /// Start submitting when `end_slot - slot <= deploy_margin_slots` (deploy late).
+    /// Start submitting when `end_slot - slot <= deploy_margin_slots`. ORE takes a deploy only
+    /// in a slot before `end_slot`, so this is all the room a dig has to be read, simulated,
+    /// sent and landed. Deploying late keeps other miners' SOL off the chosen squares
+    /// (THREAT_MODEL K3), so the window is as short as landing allows: 80 slots, a third of
+    /// a 240-slot round. It was 20 until 10 October 2026, when the first dig on mainnet
+    /// landed 5 slots after its round had ended (see the defaults below).
     pub deploy_margin_slots: u64,
-    /// Stop submitting when fewer slots than this remain.
+    /// Stop submitting when fewer slots than this remain: no dig pass starts, and a dig that
+    /// was sent is not sent again (the rebroadcast of the same signed bytes stops).
     pub min_slots_left: u64,
-    /// Re-plan and re-send (fresh blockhash) if not confirmed after this many slots.
+    /// Re-plan and re-send (fresh blockhash) if not confirmed after this many slots. Also the
+    /// least gap between two dig passes of a round, so with the defaults a round has two
+    /// passes, 80 and 40 slots before its end. It was 6 until 10 October 2026: on mainnet
+    /// the second attempt then went out while the first was still unconfirmed, and both
+    /// landed (see the defaults below). The Stack loop holds a seat's check-in back for this
+    /// many slots while a dig of the same rig is unconfirmed (not tested with 40).
     pub retry_after_slots: u64,
     /// Transactions per (rig, round) at most.
     pub max_attempts_per_round: u32,
@@ -512,7 +525,12 @@ pub struct DigConfig {
     pub max_rigs_per_tx: usize,
     /// Account-lock limit.
     pub max_account_locks: usize,
-    /// Static priority fee (micro-lamports per CU).
+    /// Static priority fee (micro-lamports per CU), and the floor of the dynamic one. The
+    /// default of 1,000 is what the fork suites were measured with. On mainnet on 10 October
+    /// 2026 it was paid by two digs, both with the 20-slot window (one missed its round); the
+    /// four digs sent with the 80-slot window all paid 20,000 and landed in their round. An
+    /// 80-slot window at 1,000 was never observed. `deploy/railway/crank/crank.toml` sets
+    /// 20,000.
     pub cu_price_micro_lamports: u64,
     /// Use `getRecentPrioritizationFees` instead of the static price.
     pub dynamic_priority_fee: bool,
@@ -561,9 +579,25 @@ impl Default for DigConfig {
         DigConfig {
             enabled: true,
             tx_format: TxFormat::V0,
-            deploy_margin_slots: 20,
+            // Sized by the first shift on mainnet, 10 October 2026 (docs/MAINNET.md), through
+            // Helius' free plan from Railway. With 20 (sized on the local fork) the dig of
+            // round 435,223 landed in slot 455,362,308, 5 slots after the round's end, and was
+            // a `RoundNotActive` skip the crank paid for:
+            // 3Komo8wsU2WcCwPzEQmjq7EriciqucYeXBKtRUDD9Mu6cr3giq1g9m6YchaaR7QDCy6hkURHGxPfh8W6LByf8KJu
+            // The next dig landed 11 slots before its round's end. With 80, the digs of rounds
+            // 435,225 to 435,228 landed 62, 77, 77 and 49 slots before theirs. Six rounds is a
+            // small sample, and the priority fee went from 1,000 to 20,000 in the same restart,
+            // so which of the two changes made the difference is not known.
+            deploy_margin_slots: 80,
             min_slots_left: 3,
-            retry_after_slots: 6,
+            // With 6, the second attempt of rounds 435,224 and 435,225 went out while the first
+            // was still unconfirmed. Both landed, and the program refused the second
+            // (`StaleHeartbeat`) at the crank's cost, 10,053 and 11,042 lamports:
+            // 4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM
+            // baNzqcBzu49Rer1rnjcMugBHdPHp7F6wSLQTUUH22hyGSddQZaVLR57eUZNjhi2fCEzdYjZZcrUka4GTcGCbfeo
+            // With 40, no second attempt landed in the three rounds that followed. The six first
+            // attempts of that evening landed 3 to 31 slots after their window opened.
+            retry_after_slots: 40,
             max_attempts_per_round: 2,
             max_rigs_per_tx: 16,
             max_account_locks: crate::tx::DEFAULT_MAX_ACCOUNT_LOCKS,
@@ -1068,6 +1102,13 @@ mod tests {
         assert_eq!(c.ws_url.as_deref(), Some("wss://api.mainnet-beta.solana.com"));
         assert_eq!(c.program_id(), hd::PROGRAM_ID);
         assert!(c.secrets().is_empty());
+        // The dig window and the retry gap as the first shift on mainnet sized them: two dig
+        // passes a round, 80 and 40 slots before its end. The priority floor stays the fork's.
+        let d = &c.dig;
+        assert_eq!((d.deploy_margin_slots, d.min_slots_left, d.retry_after_slots, d.max_attempts_per_round), (80, 3, 40, 2));
+        assert_eq!((d.deploy_margin_slots - d.min_slots_left) / d.retry_after_slots + 1, 2, "passes a round");
+        assert_eq!(d.cu_price_micro_lamports, 1_000);
+        assert_eq!(crate::ledger::RetryPolicy::default().retry_after_slots, d.retry_after_slots);
     }
 
     #[test]
@@ -1191,7 +1232,9 @@ mod tests {
         assert_eq!(c.dig.tx_format, TxFormat::V1);
         assert_eq!(c.keypair_path, Some(PathBuf::from("/tmp/k.json")));
         assert!(Config::from_toml("unknown_key = 1").is_err());
-        assert!(Config::from_toml("[dig]\nmin_slots_left = 30").unwrap().finalize(&no_env).is_err());
+        // The dig window must have a length: 79 of the default 80 slots is one, 80 is not.
+        assert!(Config::from_toml("[dig]\nmin_slots_left = 79").unwrap().finalize(&no_env).is_ok());
+        assert!(Config::from_toml("[dig]\nmin_slots_left = 80").unwrap().finalize(&no_env).is_err());
         assert!(Config::from_toml("[dig]\ntx_format = \"v2\"").is_err());
         assert!(Config::from_toml("[sender]\nhelius_sender_url = \"https://sender.helius-rpc.com/fast\"")
             .unwrap()
@@ -1419,6 +1462,11 @@ mod tests {
         assert_eq!(c.chain_poll_secs, 15);
         assert!(c.chain_poll_secs > Config::default().chain_poll_secs && c.chain_poll_secs <= MAX_CHAIN_POLL_SECS);
         assert_eq!(c.dig.idle_full_read_rounds, 10);
+        // What the service ran with from the first evening on mainnet: the 80-slot window, the
+        // 40-slot retry, and a priority floor of 20,000 under the cap of 50,000.
+        assert_eq!((c.dig.deploy_margin_slots, c.dig.min_slots_left, c.dig.retry_after_slots), (80, 3, 40));
+        assert!(c.dig.dynamic_priority_fee);
+        assert_eq!((c.dig.cu_price_micro_lamports, c.dig.max_cu_price_micro_lamports), (20_000, 50_000));
         let float = 50_000_000u64;
         let per_day = [
             ("signals", c.signals.max_lamports_per_hour * 25),
@@ -1463,7 +1511,17 @@ mod tests {
         for (name, value) in profile {
             assert!(overrides.contains(&(name.to_string(), value.to_string())), "the one-phone profile has {name}={value}");
         }
-        assert!(names.len() >= 12, "{names:?}");
+        // The three overrides set on the running service on 10 October 2026, with the values
+        // this crank.toml now carries itself.
+        let timing = [
+            ("HD_CRANK_DIG_DEPLOY_MARGIN_SLOTS", "80"),
+            ("HD_CRANK_DIG_RETRY_AFTER_SLOTS", "40"),
+            ("HD_CRANK_DIG_CU_PRICE_MICRO_LAMPORTS", "20000"),
+        ];
+        for (name, value) in timing {
+            assert!(overrides.contains(&(name.to_string(), value.to_string())), "the timing overrides have {name}={value}");
+        }
+        assert!(names.len() >= 15, "{names:?}");
         assert_eq!(unknown_env_overrides(names.iter().copied()), Vec::<String>::new());
         // All of them at once load on top of the Railway file and say what they say.
         let env = |k: &str| match k {
@@ -1474,5 +1532,6 @@ mod tests {
         assert!(!c.alt.enabled && !c.stack.enabled && !c.stack.init_bury_vault && !c.end_shift.enabled && !c.cleanup.enabled);
         assert_eq!(c.intake.rig_fetches_per_second, 1.0);
         assert!(c.dig.enabled && c.signals.enabled && c.record.enabled, "the profile leaves digging, BREAK / FREEZE and records on");
+        assert_eq!((c.dig.deploy_margin_slots, c.dig.retry_after_slots, c.dig.cu_price_micro_lamports), (80, 40, 20_000));
     }
 }

@@ -18,6 +18,9 @@ crank can make rigs miss rounds; it cannot move a lamport anywhere ORE and the p
 - Tested against the **real `heads_down` program** and the **live mainnet ORE binary** (LiteSVM fork suite,
   `--features real-program`), end to end on `solana-test-validator` with the real process wiring, and
   read-checked against mainnet itself (`hd-crank check`).
+- Running against mainnet since 10 October 2026, for one rig that has run one short shift: nine transactions,
+  five of them digs ([`docs/MAINNET.md`](../docs/MAINNET.md)). That evening resized the dig window and the retry
+  gap; [Deploy timing](#how-it-works) and [Operating costs](#operating-costs) have what it measured.
 
 ## Contents
 
@@ -67,7 +70,8 @@ export HELIUS_API_KEY=...          # env only; fills {HELIUS_API_KEY} in rpc_url
 ./target/release/hd-crank --config crank.toml --keypair ~/.config/hd-crank/id.json replay --signature <dig tx> [--dry-run]
 ```
 
-`hd-crank check` against mainnet on 2026-09-29 (read-only, public RPC):
+`hd-crank check` against mainnet on 2026-09-29 (read-only, public RPC; eleven days before the program was
+deployed and initialized there, hence its last line):
 
 ```text
 slot           451741378
@@ -140,19 +144,85 @@ separately; the fork suite asserts all three against the real program.
 the planner never reuses its lease. Idle, Broken and Frozen never dig. Focus-only rigs never dig; their heartbeats
 are recorded instead.
 
-**Deploy timing.** The loop waits until `end_slot − slot ≤ deploy_margin_slots` (20 ≈ 8 s) and stops at
-`min_slots_left` (3). Deploying late means less SOL piles onto the chosen squares after the dig (THREAT_MODEL K3).
-Rounds that have not started (`end_slot == u64::MAX`) are left to ORE's own miners unless `start_rounds = true`.
+**Deploy timing.** The loop waits until `end_slot − slot ≤ deploy_margin_slots` (80) and starts no pass with
+fewer than `min_slots_left` (3) slots to go. A pass follows the one before it after `retry_after_slots` (40), so
+a round has two: 80 and 40 slots before its end. ORE takes a deploy only in a slot before `end_slot`, so the
+window is all the room a dig has to be read, simulated, sent and landed. Deploying late means less SOL piles
+onto the chosen squares after the dig (THREAT_MODEL K3), which is why the window was 20 slots until mainnet
+showed that 20 does not leave enough room to land (below). With 80 the crank deploys in the last third of a
+240-slot round where it used to deploy in the last twelfth; what that costs a rig in squares that fill up
+after its dig was not measured. Rounds that have not started (`end_slot == u64::MAX`) are left to ORE's own
+miners unless `start_rounds = true`.
+
+In seconds the window depends on the slot time. On 10 October 2026 mainnet made 4,431 slots in 967 s, 0.218 s
+a slot: 80 slots were the last 17.5 s of a 52.4 s round. At 0.27 s a slot, the figure the rest of this README was
+computed with, they are 21.6 s of 64.8 s.
+
+*What mainnet measured, 10 October 2026.* One rig, one transaction per dig, through Helius' free plan from
+Railway. Every first attempt of the evening, with the window and the priority floor it was sent under
+(transactions and fees: [Operating costs](#operating-costs); the whole shift:
+[`docs/MAINNET.md`](../docs/MAINNET.md)):
+
+| ORE round | Window | Priority (µL per CU) | Window opened at slot | Landed in slot | Slots after the window opened | Slots before the round's end | Result |
+|---|---|---|---|---|---|---|---|
+| 435,223 | 20 | 1,000 | 455,362,283 | 455,362,308 | 25 | 5 after it | `RigSkipped(RoundNotActive)`: the round was missed |
+| 435,224 | 20 | 1,000 | 455,362,572 | 455,362,581 | 9 | 11 | `RigDug`; a second attempt landed in the same slot and was refused |
+| 435,225 | 80 | 20,000 | 455,362,801 | 455,362,819 | 18 | 62 | `RigDug`; a second attempt landed 15 slots later and was refused |
+| 435,226 | 80 | 20,000 | 455,363,090 | 455,363,093 | 3 | 77 | `RigDug` |
+| 435,227 | 80 | 20,000 | 455,363,379 | 455,363,382 | 3 | 77 | `RigDug` |
+| 435,228 | 80 | 20,000 | 455,363,671 | 455,363,702 | 31 | 49 | `RigDug` |
+
+Round ends are each Round account's `expires_at` less 288,000 slots, read from mainnet that evening. ORE sets
+`expires_at` to `end_slot` plus a day of slots (`docs/ORE.md`); 288,000 is the difference that gives round
+435,223 the end slot the crank's own log named, 455,362,303. With the 20-slot window the record is one miss in
+two rounds; with 80 slots, four of four. The sample is six rounds, and the window and the priority floor were
+changed in the same restart (`HD_CRANK_DIG_DEPLOY_MARGIN_SLOTS=80` and
+`HD_CRANK_DIG_CU_PRICE_MICRO_LAMPORTS=20000` on the service, at about 18:59 UTC), so which of the two made the
+difference is not known. An 80-slot window at the code's default floor of 1,000 was never observed:
+`deploy/railway/crank/crank.toml` carries 20,000 for that reason, and `crank.example.toml` says so beside its
+1,000. The fifth dig landed 31 slots after its window opened, at the 20,000 floor. The chain does not show when
+it was sent, so whether the pass started late or the transaction took that long to land is not known; if it was
+the landing, a 20-slot window would have missed that round as well.
+
+*Is the phone's heartbeat there when the window opens?* Yes, with room. The app reads `Board.round_id` every 5 s
+and signs as soon as it changes (`android/feature/shift/…/BoardRoundSource.kt`), so its heartbeat reaches the
+crank a few seconds into a round, and the window opens 160 slots after the round's first deploy: 35 s at 0.218 s
+slots. After one failed read the app waits 10 s, after two in a row 20 s more, so two failed reads in a row can
+bring the heartbeat in after the first pass; the second pass, 40 slots later, still takes it. What the wider
+window and the longer retry gap do change is the other end: a heartbeat that arrives after the second pass, in
+the last 40 slots of the round (8.7 s at 0.218 s slots), is not dug in that round, where the three passes of
+the old settings (20, 14 and 8 slots before the end) took one as late as 8 slots before the end. A rig that
+signs leases of one round loses that round. On 10 October the digs of rounds 435,226 and 435,227 landed 3 slots
+after their window opened, so the heartbeat was already held; and after each of the two restarts of the crank
+during that shift the phone connected again by itself, and its heartbeats were accepted again within the next
+round.
 
 **Idempotency and retries.** The program already makes a second dig in a round a skip (`last_dug_round`,
 strictly increasing counters). The ledger keeps the crank from paying for duplicates: a rig goes into a new
 transaction for a round only after its previous one expired, failed, or stayed unconfirmed for
-`retry_after_slots`, at most `max_attempts_per_round` times. Rebroadcasts reuse the same signed bytes. **Every
-attempt is re-planned from fresh chain state**: an old ORE `checkpoint` instruction, resent after the miner moved
-rounds, aborts the whole batch (`tests/fork.rs`).
+`retry_after_slots` (40), at most `max_attempts_per_round` times. **Every attempt is re-planned from fresh chain
+state**: an old ORE `checkpoint` instruction, resent after the miner moved rounds, aborts the whole batch
+(`tests/fork.rs`). The retry gap was 6 slots until 10 October 2026. On mainnet a dig then took longer than that
+to be seen confirmed, so the second attempt went out while the first was still on its way: in round 435,223
+(the first landed after the round's end, the second was never seen to land), and in rounds 435,224 and 435,225,
+where both landed and the program refused the second with `RigSkipped(StaleHeartbeat)`, at the crank's cost.
+`HD_CRANK_DIG_RETRY_AFTER_SLOTS=40` was set on the service at about 19:00 UTC; no second attempt landed in the
+three rounds dug after that. The six first attempts landed 3 to 31 slots after their window opened. A dig
+that is lost for good is still signed again by the round's second pass (`tests/rebroadcast.rs`, against a node
+that takes a transaction and never lands it).
+
+**Rebroadcasts** reuse the same signed bytes, every 2 s until the transaction is confirmed or its blockhash
+expires. A dig is sent again
+only while the watcher shows its round live with at least `min_slots_left` slots to go: the same bytes landed
+after `end_slot` are a `RoundNotActive` skip that the crank pays for and nothing reimburses, which is what the
+first dig on mainnet was (whether its first send or a rebroadcast landed is not known). Before, only a clock
+stopped the rebroadcasts, and it counts 400 ms a slot: at 0.218 s slots the 80 slots of a window are over after
+17.5 s while that clock allows 32 s. The clock stays as the limit for a view that stands still
+(`tests/rebroadcast.rs`).
 
 **Idle rounds.** A dig pass that reads the chain costs three `getProgramAccounts` scans, a
-`getMultipleAccounts` and a `getBlockHeight`, up to three times a round. While the crank is idle a pass reads
+`getMultipleAccounts` and a `getBlockHeight`, on each pass of a round (two with the default settings). While
+the crank is idle a pass reads
 nothing. Idle means all of: no heartbeat is held; no rig of the last read has a lease that covers the round;
 no heartbeat was held and no rig was a dig candidate in the last 4 rounds (a lease lasts at most 3, and the rig
 list is read before a dig lands, so the lease a dig leaves is not in it). An idle crank still makes one full
@@ -361,7 +431,11 @@ CU varies with ORE's bump search on each wallet's PDAs, so treat the ranges as s
 ## Operating costs
 
 Fees are 5,000 lamports per transaction signature **and per secp256r1 signature** (re-asserted in
-`tests/packing.rs` and the fork suite), plus the priority fee (`CU limit × price / 10⁶`). Measured with the real
+`tests/packing.rs` and the fork suite), plus the priority fee (`CU limit × price / 10⁶`, rounded up). Two sets
+of figures follow: the fork's, for batches, and what mainnet charged on 10 October 2026, for one rig per
+transaction.
+
+**On the fork.** Measured with the real
 program, CU limit sized by simulation (+15% + 1,000), 1,000 micro-lamports/CU, `crank_fee = 7,000`:
 
 | Dig mode | Rigs per tx | Fee per rig | Reimbursed per rig | **Net per rig-dig** |
@@ -370,6 +444,53 @@ program, CU limit sized by simulation (+15% + 1,000), 1,000 micro-lamports/CU, `
 | v1, fresh heartbeat | 11 | 5,493-5,495 | 7,000 | **+1,504 to +1,506** |
 | v0 + table, lease reuse (`hb_ix = 0xFF`) | 12 | 453-455 | 7,000 | **+6,545 to +6,546** |
 | legacy, fresh heartbeat | 2 | 7,538-7,541 | 7,000 | −538 to −541 |
+
+**On mainnet, 10 October 2026.** Every transaction the crank's fee payer
+(`5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk`) paid for during the first shift: one rig, one transaction per
+dig, v0 without a lookup table, `crank_fee = 7,000`. Fee, CU limit and price are read from each transaction as
+`getTransaction` gives it. Each is named by the first characters of its signature;
+[`docs/MAINNET.md`](../docs/MAINNET.md) has the links.
+
+| Transaction | What | CU used / limit | Price (µL per CU) | Fee | Reimbursed | **Net** |
+|---|---|---|---|---|---|---|
+| `3Komo8ws…` | dig of round 435,223, landed after the round's end: `RigSkipped(RoundNotActive)` | 11,935 / 37,892 | 1,000 | 10,038 | 0 | **−10,038** |
+| `25nBRCP6…` | dig of round 435,224 (fresh heartbeat, no checkpoint): `RigDug` | 45,059 / 52,428 | 1,000 | 10,053 | 7,000 | **−3,053** |
+| `4EJvGg7a…` | second attempt for round 435,224, same heartbeat: `RigSkipped(StaleHeartbeat)` | 11,918 / 52,707 | 1,000 | 10,053 | 0 | **−10,053** |
+| `2DX9jEZf…` | ORE checkpoint of 435,224 and dig of 435,225: `RigDug` | 44,427 / 52,091 | 20,000 | 11,042 | 7,000 | **−4,042** |
+| `baNzqcBz…` | second attempt for round 435,225, same heartbeat: `RigSkipped(StaleHeartbeat)` | 12,856 / 52,091 | 20,000 | 11,042 | 0 | **−11,042** |
+| `4VwGpdfS…` | checkpoint of 435,225 and dig of 435,226: `RigDug` | 46,146 / 54,067 | 20,000 | 11,082 | 7,000 | **−4,082** |
+| `4pgkrNUn…` | checkpoint of 435,226 and dig of 435,227: `RigDug` | 44,110 / 51,726 | 20,000 | 11,035 | 7,000 | **−4,035** |
+| `5CodA3FB…` | checkpoint of 435,227 and dig of 435,228: `RigDug` | 43,670 / 51,368 | 20,000 | 11,028 | 7,000 | **−4,028** |
+| `63FZYbEy…` | the phone's BREAK: `ShiftBroken` | 1,429 / 5,000 | 20,000 | 10,100 | 0 | **−10,100** |
+| nine transactions | | | | 95,473 | 35,000 | **−60,473** |
+
+- **The arithmetic.** Each of these carries two signatures, the transaction's and the phone's secp256r1 one:
+  10,000 lamports. The rest is the CU limit times the price: 52,428 × 1,000 / 10⁶ is 53 lamports, 52,091 ×
+  20,000 / 10⁶ is 1,042. The program pays `crank_fee` back inside the dig, so the fee payer's balance moves by
+  the net figure in one step (50,952,962 to 50,949,909 for the first dig). A transaction that ends in a skip is
+  paid in full and reimbursed nothing.
+- **One rig per transaction does not pay for itself** (the fork's table already loses at two rigs per
+  transaction): −3,053 a dig at a price of 1,000, −4,028 to −4,082 at 20,000. The fork's figure for a single
+  rig at 1,000 was 10,047; mainnet's 10,053 is the same sum with a CU limit of 52,428 where the fork's was
+  about 47,000.
+- **What the old timing cost.** The missed round and the two second attempts are 31,133 of the 60,473 lamports:
+  10,038 for a round that was not dug, and 10,053 and 11,042 for attempts the program refused. A round with a
+  refused second attempt cost the crank 13,106 lamports net at the old price and 15,084 at the new one, against
+  3,053 and about 4,050 without it.
+- **What a priority floor of 20,000 does to a batch** (computed, not measured). The fork's table is at a price
+  of 1,000, where a rig's share of the priority fee is 37 to 40 lamports. With a CU limit of 38,000 to 52,000 a
+  rig (the fork's batches of five, and mainnet's single digs) that share is 760 to 1,040 lamports at 20,000, on
+  top of 6,000 of signatures a rig in a batch of five, 6,250 in a batch of four and 6,667 in a batch of three.
+  So a full batch of five fresh heartbeats comes to 6,760 to 7,040 lamports a rig against `crank_fee = 7,000`,
+  and four or fewer cost more than is paid back. At 1,000 the fee is covered from three rigs up. So with the
+  floor of `deploy/railway/crank/crank.toml` a crank loses on every fresh-heartbeat dig outside a full batch and
+  about breaks even inside one. Lease reuses carry no secp256r1 signature and stay well under `crank_fee`
+  (about 1,160 lamports a rig at 12 a transaction, by the same arithmetic).
+- **Not measured on mainnet:** a transaction with more than one rig, a lease reuse, a lookup table, a
+  `record_heartbeats`, an `end_shift` by the crank, a FREEZE, anything of Stack. The batch figures above are the
+  fork's.
+
+What follows applies to both sets:
 
 - **Reimbursement** is `Config.crank_fee`, paid by the program from the Executor PDA only after a real deploy
   that brought the Executor at least `crank_fee` in the same dig, and only while the Executor keeps
@@ -402,15 +523,18 @@ per 0.1 MB; the free plan is 1,000,000 a month, 10 requests a second.
 
 The table is **computed from the code**, for an idle crank whose fee payer is funded: the program is
 initialized, no heartbeat, no rig with a lease, 266 ms slots and one ORE round every 75 s (1,150 a day; both
-read from mainnet on 2026-10-04), and an RPC that answers fast enough for three dig passes to fit a round.
-"Before" is commit `3a17e09` with the `deploy/railway/crank/crank.toml` of that commit.
+read from mainnet on 2026-10-04), and an RPC that answers fast enough for every dig pass to fit a round.
+"Before" is commit `3a17e09` with the `deploy/railway/crank/crank.toml` of that commit: a 20-slot dig window
+with three passes a round, all of them reading. The idle figures after it do not depend on the number of
+passes. On 10 October 2026 slots took 218 ms and a round 63 s (1,370 a day), which the table was not
+recomputed for.
 
 | Loop | What it asks | Setting | Before | Now, with the deployed `crank.toml` | Now, with the one-phone overrides |
 |---|---|---|---|---|---|
 | chain watcher's HTTP poll | `getSlot` + `getMultipleAccounts`; the new Round account once a round | `chain_poll_secs` (was a fixed 5 s; 15 in the deployed file) | 35,700 | 12,700 | 12,700 |
 | poller | heads_down Config, ORE's upgrade pin, two balances | `dig.config_poll_secs` (30) | 11,500 | 11,500 | 11,500 |
-| poller's rig scan, for the lookup table | 3 scans, on the polls outside the dig window (about 3 in 4) | `alt.enabled` | 65,000 | 0 | off |
-| dig passes | 3 scans + 2 calls, 3 times a round | `dig.idle_full_read_rounds` (10) | 110,000 | 3,700 | 3,700 |
+| poller's rig scan, for the lookup table | 3 scans, on the polls outside the dig window (about 3 in 4 with the 20-slot window of "before"; about 1 in 2 with 80 slots) | `alt.enabled` | 65,000 | 0 | off |
+| dig passes | 3 scans + 2 calls on each pass that reads ("before": three passes a round, all reading) | `dig.idle_full_read_rounds` (10) | 110,000 | 3,700 | 3,700 |
 | checkpoint sweep | 1 scan every 20 rounds | `dig.checkpoint_sweep` | 600 | 600 | 600 |
 | Stack discovery | 2 scans every 30 s | `stack.enabled`, `stack.discover_secs` | 57,600 | 57,600 | off |
 | end_shift sweep | 1 scan a minute | `end_shift.enabled`, `end_shift.poll_secs` | 14,400 | 14,400 | off |
@@ -429,10 +553,12 @@ nights and nothing for another service on the same key. Three more settings lowe
 - `dig.idle_full_read_rounds = 50` saves 2,900 a day. Only a rig whose heartbeat another crank applied waits
   for that read.
 
-**A night with a phone is not idle.** While a heartbeat is held, or a lease runs, every dig pass reads
-(96 credits a round), and the record pass scans once a round (30) while a heartbeat is held. Computed, not
-measured: one phone heads down for 8 hours (384 rounds) adds about 50,000 credits to the idle figure. Thirty
-such nights are more than the free plan.
+**A night with a phone is not idle.** While a heartbeat is held, or a lease runs, every dig pass reads: two
+passes, 64 credits a round (96 with the three passes of the 20-slot window), and the record pass scans once a
+round (30) while a heartbeat is held. Computed, not measured: one phone heads down for 8 hours adds about
+36,000 credits to the idle figure at 75 s rounds (384 rounds), and about 43,000 at the 63 s rounds of
+10 October 2026 (457 rounds). With three passes the first figure was about 50,000. Thirty such nights are more
+than the free plan. What the first shift on mainnet used was not read from Helius' meter.
 
 **An unfunded fee payer.** Before, a crank with lookup tables on and nothing in its fee payer sent a create
 every 45 s or so and polled each one until its blockhash expired. Now it asks three calls once (two rents,
@@ -489,9 +615,12 @@ public endpoint: 0.71 MB, which is 102 MB and 2,050 credits a day.
   grows. A poll is two calls, each with that timeout, so an RPC that needs more than 10 s for the two can
   show as `degraded` at 20 s; and while the stream is stalled one failed poll is enough at 15 s or more (at
   5 s it takes five in a row). `/healthz` is right in both cases: the crank has not seen a new slot for 30 s.
-  And a dig window is under 5 s long at today's slot time: with the stream stalled, a 5 s poll falls into
-  most windows and a 15 s poll into about one in three (computed from the window's length, not tested).
-  That is the price of the 23,000 calls a day the deployed file saves.
+  And the poll decides when a round's first dig pass starts while the stream is stalled. The dig window is 77
+  slots, 16.8 s at the 0.218 s slots of 10 October 2026: a poll every 15 s or less falls into every window,
+  and a 20 s poll into about five in six (computed from the window's length, not tested). The pass then starts
+  up to one interval after the window opened, with that much less room to land. With the 20-slot window,
+  under 5 s long, a 15 s poll fell into about one window in three. The deployed file's 15 s saves 23,000 calls
+  a day.
 - `dig.idle_full_read_rounds` (default 10, `0` = every pass reads): see "Idle rounds" above.
 - `HELIUS_API_KEY` set but empty stops the crank at start with `HELIUS_API_KEY is set to an empty value`
   (it used to say `unexpected characters`).
@@ -583,6 +712,10 @@ cargo build-sbf --manifest-path test-fixtures/mock-heads-down/Cargo.toml
 cargo test --features fork --test fork -- --nocapture --test-threads=1          # mock heads_down
 
 bash ../programs/heads-down/scripts/build.sh                                    # the real program
+# Its five Stack, Focus Bond and gift tests also need the SKR mint account, which the spike's script does not
+# dump: run ../programs/heads-down/tests/fixtures/fetch-fixtures.sh (a superset; the suite takes that set when
+# it is there), or add the mint to the fixtures directory:
+#   solana -um account SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3 --output json-compact > <fixtures>/SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3.json
 HD_PROGRAM_SO=../programs/heads-down/target/deploy/heads_down.so \
   cargo test --features real-program --test fork -- --nocapture --test-threads=1
 
@@ -593,7 +726,7 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| unit (`src/**`) | 121 | layouts and pins, the v1.1 Rig fields, lease grants equal to the program's, events 1..=10 and the tag-4/10 dedupe, error names, budget and week roll equal to the program's, held squares and `k`, ack-code mapping, signal hub idempotency / budget / queue, config (every setting's variable, the bound on `chain_poll_secs`, the Railway `crank.toml` and the overrides named in its `.env.example`), rate limiter, ALT (the state file, the backoff schedule), the idle decision table, breaker, watcher, RPC transaction parsing, an answer older than the slot asked for |
+| unit (`src/**`) | 121 | layouts and pins, the v1.1 Rig fields, lease grants equal to the program's, events 1..=10 and the tag-4/10 dedupe, error names, budget and week roll equal to the program's, held squares and `k`, ack-code mapping, signal hub idempotency / budget / queue, config (every setting's variable, the bound on `chain_poll_secs`, the dig window, retry gap and priority floor of the defaults, the Railway `crank.toml` and the overrides named in its `.env.example`), rate limiter, ALT (the state file, the backoff schedule), the idle decision table, breaker, watcher, RPC transaction parsing, an answer older than the slot asked for |
 | `tests/golden.rs` | 11 | every builder against `programs/heads-down/vectors/`: `dig` (3 vectors, PDAs re-derived), `record_heartbeats`, `break_shift` / `freeze_rig` P-256, `end_shift` (both callers), all precompile data rebuilt byte for byte, all 5 messages, every event sample and skip-code name |
 | `tests/vectors.rs` | 6 | preimages, digests and `ema_ev` against an independent Python implementation |
 | `tests/p256_verify.rs` | 7 | OpenSSL-made signatures (low and high S), wrong key, wrong message, r/s = 0 or n, tampering, replay, unknown rig fetched once, cache refresh after re-arm and key rotation, contract-A JSON |
@@ -602,7 +735,8 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
 | `tests/intake.rs` | 14 | real sockets: contract-A acks for heartbeats, BREAK and FREEZE (idempotent, stale, reasons, shift, state), decimal strings, unknown fields, legacy spellings, `/v1/heartbeats`, signal budget and disable, per-IP / per-rig limits, size and connection caps, `/healthz`, `/metrics` |
 | `tests/litesvm_alt.rs` | 2 | ALT create/extend against the real ALT program |
 | `tests/lookup_tables.rs` | 22 | the crank's table maintenance through a JSON-RPC stub backed by LiteSVM (the real ALT program executes what the crank sends): an empty fee payer sends nothing and is asked about once; a create that does not land is retried after 60, 120, ... 3,600 s, across restarts, and a clock set back does not stretch the wait; a failed read at start or during a wait, a create or an extend that landed unseen, a node that lags (with a provider that honors `minContextSlot` and with one that ignores it), a state file that cannot be written or understood, each without a second table or a doubled entry; `max_tables`, also when a read does not show a table the state file names or shows it under another key; a pinned table; two syncs at the same moment, and the running crank (`Crank::run`), each creating one table; and 12 seeded sequences of 100 random faults, half of them against a provider that ignores `minContextSlot`, checked after every step |
-| `tests/idle_passes.rs` | 8 | the dig pass and the poller against the same stub, counting calls: one read at start and one per `idle_full_read_rounds` while idle; every pass reads while a heartbeat is held, while a known lease runs and for 4 rounds after; a lease another crank made is seen at the periodic read; what a pass leaves behind (rig list, intake cache, Config) with and without a heads_down Config; the poller's rig scan stops while idle or unfunded; a phone's first heartbeat after an idle stretch through the intake's checks (one rig lookup, planned in its round; refused as busy when one lookup a second is already taken); and the running loop itself (`Crank::run`) over 14 dig windows: it reads at start, rests while idle, reads every pass of a round in which a heartbeat came and went, and rests again |
+| `tests/idle_passes.rs` | 8 | the dig pass and the poller against the same stub, counting calls: one read at start and one per `idle_full_read_rounds` while idle; every pass reads while a heartbeat is held, while a known lease runs and for 4 rounds after; a lease another crank made is seen at the periodic read; what a pass leaves behind (rig list, intake cache, Config) with and without a heads_down Config; the poller's rig scan stops while idle or unfunded; a phone's first heartbeat after an idle stretch through the intake's checks (one rig lookup, planned in its round; refused as busy when one lookup a second is already taken); and the running loop itself (`Crank::run`) over 11 dig passes: none before the 80-slot window opens, none sooner than 40 slots after the last, none with fewer than 3 slots to go; it reads at start, rests while idle, reads every pass of a round in which a heartbeat came and went, and rests again |
+| `tests/rebroadcast.rs` | 1 | a dig the node takes and never lands, through the same stub: sent once, sent again 2 s later while its round is live, signed a second time by the pass 40 slots after the first (and not by one 39 slots after it), and neither transaction sent again once the watcher shows the round over, although the time limits had not run out; the rule at its edges (fewer than `min_slots_left` slots, the round's end, the next round, a round that has not started) |
 | `tests/fork.rs` (`fork`, mock) | 4 | live ORE: plan → pack → v0 + table → land; masks equal predictions; squares and debits exact; reimbursement; replay skipped; stale checkpoint aborts; wrong-shift heartbeat skipped with the p256 code; forged signature sinks the batch; Cooling; v1 and legacy land |
 | `tests/fork.rs` (`real-program`) | 14 | the 4 above against the real program, plus BREAK / FREEZE landed (Cooling → Broken → Frozen, stale resubmission refused), focus-only `record_heartbeats` (9 rigs, 3 batches, dark rounds on-chain), permissionless `end_shift` (rent, V2 event, refused while the lease lives), `replay` → `StaleHeartbeat`, the cost table above, and the 5 Stack, Focus Bond and gift tests of `tests/real/skr_suite.rs` |
 | `tests/e2e_validator.rs` (`e2e`) | 1 | validator + live ORE + the binary's wiring: WS watcher, contract-A intake, table creation, simulate-sized CU, 3 rigs dug in one tx; with `real-program` also a BREAK and a FREEZE landed through the intake, a focus-only heartbeat recorded and a stale shift sealed |
@@ -652,7 +786,7 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   `lookup_tables.json` is removed. `scripts/devstack/up.sh` removes it together with the ledger. (Not run
   against a validator: it is the lagging-node case of `tests/lookup_tables.rs` with a node that never catches
   up.)
-- A round with a phone heads down still costs three full dig passes (96 Helius credits) and one record scan
+- A round with a phone heads down still costs two full dig passes (64 Helius credits) and one record scan
   (30): the passes read every Armed, Down and Cooling rig of the program, not only the ones that heartbeat.
 - While the crank is idle nothing refreshes the intake's rig cache (an entry lives 60 s), so a phone's first
   frame after an idle stretch costs one rig lookup; its heartbeat is then planned in the round it arrived in,
@@ -661,8 +795,28 @@ cargo test --features e2e,real-program --test e2e_validator -- --nocapture      
   `rate_limited` until one of its frames gets a lookup, or arrives within a minute of a pass that read (one
   in `dig.idle_full_read_rounds` rounds while idle; before, every round had three). `tests/idle_passes.rs`
   shows each of these steps; how long a sustained flood keeps a phone out was not measured.
-- With the WebSocket stalled the crank sees the chain once per `chain_poll_secs`, and at 15 s it misses most
-  dig windows until the stream is reopened (30 s of silence). Not measured.
+- With the WebSocket stalled the crank sees the chain once per `chain_poll_secs`, and a round's first dig pass
+  starts up to that long after its window opened. At 15 s that can be most of a 17 s window, and a dig sent that
+  late can miss its round, until the stream is reopened (30 s of silence). Not measured.
+- **The dig's timing rests on one evening.** `deploy_margin_slots = 80`, `retry_after_slots = 40` and the
+  priority floor of 20,000 in `deploy/railway/crank/crank.toml` come from six rounds with one rig on
+  10 October 2026, through Helius' free plan from Railway. Not known: how they hold at another hour, with
+  another RPC, with a batch of rigs, or with the floor at the code's default of 1,000; and what deploying in
+  the last third of a round, not the last twelfth, costs a rig in squares that fill up after its dig. The
+  retry gap has little room to spare: the slowest first attempt of that evening landed 31 slots after its
+  window opened, and a dig that is not on chain when the second pass reads, 40 slots after the first, is
+  signed again, as it was with 6.
+- `min_slots_left = 3` still lets a pass start with 3 slots to go, after a restart or a stalled stream. The
+  fastest landing seen on mainnet was 3 slots after the window opened, the slowest 31, so such a pass can pay
+  for a dig that lands after the round. It was not changed.
+- **Stack and the longer retry gap.** The Stack loop holds a seat's check-in back while a dig of the same rig
+  is unconfirmed, for `dig.retry_after_slots`: 40 slots now, 6 before. A dig sent by the second pass of a round
+  can so hold a check-in back until the round is over, and Stack is fail-closed: a round without a check-in is
+  one the seat cannot get back. Not tested with these values: Stack is off on the running service and nobody
+  is seated at a table.
+- `tests/e2e_validator.rs` sets its own 160-slot window and takes the default retry gap; it was not run again
+  after the defaults changed (it starts a validator). Neither were the local stack's two smokes
+  (`scripts/devstack/smoke.sh` and `scripts/devstack/emulator-smoke.sh`), whose crank runs with the defaults.
 - `hd_crank_fees_lamports_total`, `hd_crank_signal_fees_lamports_total` and `hd_crank_record_fees_lamports_total`
   read the fee from `getTransaction` after the landing (5 tries, about 4 s), so they can lag the landed counters
   and miss a transaction the RPC never returns. The lamport budgets are unaffected: they are debited with the
