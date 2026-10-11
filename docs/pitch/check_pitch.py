@@ -87,11 +87,12 @@ for tag in ("skr-A", "skr-B"):
     print(f"skrIntegration {tag}: {len(s)} chars {'OK' if ok else 'TOO LONG'}")
     fail |= not ok
 
-# Deck: 15-17 slides, each with the required parts
+# Deck: 15-18 slides (the eighteenth is the app's own slide, added with the redesign), each with
+# the required parts
 deck = open(os.path.join(pitch, "DECK.md"), encoding="utf-8").read()
 slides = re.split(r"\n## Slide \d+:", deck)[1:]
 print(f"deck slides: {len(slides)}")
-fail |= not (15 <= len(slides) <= 17)
+fail |= not (15 <= len(slides) <= 18)
 for i, s in enumerate(slides, 1):
     for part in ("**Message:**", "**On slide", "**Visual:**", "**Speaker notes:**", "**Serves:**",
                  "**Sources:**"):

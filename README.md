@@ -51,7 +51,7 @@ built; the Stack and Gift screens are not yet.
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains. Running on Railway against mainnet |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 477 tests. Running on Railway against mainnet |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain. [Running on Railway](https://dashboard-production-b80c.up.railway.app) on the indexer's mainnet data |
-| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget. 855 JVM unit tests. One short shift on one physical phone, on mainnet, on 10 October 2026 |
+| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget, all drawn from one design module (`core/design`) around a shader-drawn slab that stays level with the real world. 1,324 JVM unit tests. One short shift on one physical phone, on mainnet, on 10 October 2026, on the build before the redesign; the redesigned build has run end to end on an Android 14 emulator and not yet on the phone |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
 **Deployed on mainnet on 10 October 2026.** The program is at
@@ -79,8 +79,8 @@ the amount the screen had stated, to the lamport.
 What that run was not: it was a debug build with a demo policy that raised the cost ceiling to
 1.0 SOL per ORE. ORE's own cost figure was 0.690 to 0.704 SOL per ORE during the shift, above the
 app's default of 0.53, so the default build would have dug nothing. No ORE came out of the four
-rounds that are settled, and the fifth is not settled (below). The first clock-in armed a shift
-that a second clock-in sealed about five minutes later with no round dug in it: the wallet had
+rounds settled that evening, nor of the fifth, which the next evening's first dig settled. The
+first clock-in armed a shift that a second clock-in sealed about five minutes later with no round dug in it: the wallet had
 sent the transaction and the app never heard so, so the phone stayed cold and the founder
 approved a second clock-in. It happened again the next night. The app now writes down what it
 hands the wallet and finds it on-chain by itself; that fix has run on the emulator and not yet
@@ -105,10 +105,10 @@ registrar accepts only the founder's debug-signed build. With one rig the crank 
 than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports net, and each
 skipped attempt and the BREAK their whole fee: 60,473 lamports net over nine transactions.
 Whether the 4,480,400 lamports that ORE holds in the wallet's Miner account can ever be taken
-back is not known. The last round dug, 435,228, had not been checkpointed at 20:44 UTC on
-10 October, so what it returns is not known either; ORE forfeits what a round returns if nobody
-checkpoints it within about a day
-([docs/ORE.md](docs/ORE.md), F8; [docs/MAINNET.md](docs/MAINNET.md#what-it-cost)).
+back is not known. The last round dug that evening, 435,228, was checkpointed by the next
+evening's first dig and sent back the same 89.1% as the others; that second evening's own last
+round was settled seven hours later by the crank's checkpoint sweep, with no phone involved
+([docs/MAINNET.md](docs/MAINNET.md#the-second-evening-11-october-2026)).
 
 ## Security
 
