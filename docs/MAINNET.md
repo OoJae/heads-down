@@ -159,8 +159,9 @@ What the table does not say by itself:
 
 - **The first shift never dug.** It was sealed by the second clock-in, 4 minutes 58 seconds after
   the first, with reason 4 (`LEASE_LAPSE`: no heartbeat lease was ever granted in the shift). The
-  crank had accepted no heartbeat yet. Why the first shift ended before a heartbeat reached the
-  crank was not investigated.
+  crank had accepted no heartbeat yet, because the phone never started the shift: the wallet
+  sent the clock-in, the app did not hear so, and the home screen stayed cold until the founder
+  approved a second one ("What the first night found", item 4).
 - **Round 435,223 was missed.** The crank sent its dig at slot 455,362,283, 20 slots before the
   round's end, and it landed 25 slots later. The crank paid 10,038 lamports for a skip. A second
   attempt,
@@ -297,6 +298,29 @@ heartbeats were accepted again within the next round.
 All three are variables on the Railway service: they override what the crank's image was built
 with. The crank's own defaults, and how it times a dig, are described in
 [`crank/README.md`](../crank/README.md) ("How it works", "Deploy timing").
+
+**4. The app did not always hear that its clock-in had landed.** On mainnet the wallet sends the
+clock-in itself. The app armed the phone's shift only when the wallet's answer came back to the
+window that had asked, and the signature then confirmed through the app's own RPC. On 10 October
+the first clock-in landed (transaction 1) and the home screen did not change; the founder tapped
+"Clock in" again and approved a second one (transaction 2), which sealed the first shift and
+paid the rent of a second shift log, 1,300,480 lamports. The same happened on 11 October. Which
+step lost the answer on the phone is not known: there is no log from the phone for either night.
+The code allowed three ways (Android closing the app's clock-in window behind the wallet, the
+wallet session ending after the send, the confirmation not being readable through the public
+RPC), and in each of them nothing looked at the chain afterwards.
+
+Fixed in the app on 11 October: what the app hands the wallet is written down before the wallet
+is asked to sign, and the shift this phone prepared is armed once the Rig shows it open for this
+phone's key. The app looks when it comes to the front, when its clock-in window is opened again
+(before any wallet request), and after a wallet session that failed or did not confirm. A shift
+id is never taken from the RPC: only the id the phone itself prepared is armed, and a record
+whose transaction can no longer land (its blockhash expired, a later shift armed, the window
+over) is forgotten. Rehearsed on the Android 14 emulator against the local fork: a clock-in
+landed from another wallet for the phone's key while the app was in front (armed within
+seconds), one that was already on-chain when the Quick Settings tile was tapped (armed, and the
+wallet was not opened), and one that could never land (forgotten). Both emulator end-to-end
+runs pass with it. **Not yet seen on the phone.**
 
 ## Not run yet
 

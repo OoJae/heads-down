@@ -185,6 +185,15 @@ sign and send:
   when it covers this wallet and key, was signed by `Config.registrar` and expires well after the
   current slot; a guest rig with the same key is upgraded once. Anything else registers a guest:
   a level-0 or unusable voucher would fail the whole clock-in on-chain.
+- **A clock-in the app never heard back about is found on-chain.** On mainnet the wallet sends
+  the transaction, so it can land while the app is not there to hear so (Android closed the
+  clock-in window behind the wallet, the session dropped after the send, the confirmation could
+  not be read). What is handed to the wallet is written down first (`PendingClockInStore`), and
+  `ClockInRecovery` arms the shift this phone prepared once the Rig shows it open for this
+  phone's key: when the app comes to the front, when the clock-in window opens again (before any
+  wallet request, so a second approval is not asked for), and after a session that failed or did
+  not confirm. The shift id is the phone's own; one read from the RPC is never adopted. A record
+  whose transaction can no longer land is forgotten.
 - **The plan window ends just before the user's alarm.** Inside the window a pickup is a BREAK,
   and the shift then seals as ended early (no streak, a Focus Bond forfeit). So a Night Shift's
   window is not a fixed length: it ends two minutes before `AlarmManager.getNextAlarmClock()`
