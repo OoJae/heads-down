@@ -51,8 +51,8 @@ sealed interface ClockOutState {
         val canSign: Boolean get() = facts.somethingToSign(claimAll, endEarly)
     }
 
-    /** Confirmed on-chain with no error. */
-    data class Done(val message: String) : ClockOutState
+    /** Confirmed on-chain with no error. [signature] is the clock-out's own transaction, for a link to it. */
+    data class Done(val message: String, val signature: String? = null) : ClockOutState
 }
 
 /** One wallet session: authorize, build inside it, sign and send, confirm. Supplied by the Activity. */
@@ -145,7 +145,7 @@ class ClockOutModel(
                         if (session.report.allConfirmed) {
                             val plan = session.prepared.plan
                             if (plan.shift is ShiftOutcome.Ends) runCatching(onShiftSealed)
-                            ClockOutState.Done(ClockOutCopy.done(plan))
+                            ClockOutState.Done(ClockOutCopy.done(plan), session.report.outcomes.firstOrNull()?.signature)
                         } else {
                             // Failed or expired is known: nothing happened. Anything else is unknown, and is said so.
                             val outcomes = session.report.outcomes

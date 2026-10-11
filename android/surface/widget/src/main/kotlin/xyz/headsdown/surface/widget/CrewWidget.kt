@@ -5,16 +5,14 @@ import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalContext
 import androidx.glance.action.Action
-import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -23,16 +21,11 @@ import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
-import androidx.glance.layout.height
+import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
-import androidx.glance.semantics.contentDescription
-import androidx.glance.semantics.semantics
-import androidx.glance.text.FontFamily
-import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
-import androidx.glance.text.TextStyle
 
 /**
  * PLACEHOLDER. The "Crew" dark-presence row (who in your room is dark right now) needs rooms,
@@ -80,37 +73,33 @@ object CrewPlaceholderCopy {
 @Composable
 internal fun CrewPlaceholderContent(mode: WidgetColorMode, open: Action?) {
     val colors = GlanceTheme.colors
-    val accents = WidgetAccents(mode)
-    var root = GlanceModifier
-        .fillMaxSize()
-        .background(colors.surface)
-        .cornerRadius(20.dp)
-        .padding(horizontal = 14.dp, vertical = 12.dp)
-        .semantics { contentDescription = CrewPlaceholderCopy.DESCRIPTION }
-    if (open != null) root = root.clickable(open)
-    Column(root) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                CrewPlaceholderCopy.TITLE,
-                style = TextStyle(color = colors.onSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace),
-            )
-            Spacer(GlanceModifier.width(8.dp))
-            Text(
-                CrewPlaceholderCopy.TAG,
-                style = TextStyle(color = accents.cooling, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
-            )
-        }
-        Spacer(GlanceModifier.height(8.dp))
-        // Empty seats: outlined squares, never filled, because nobody is really here.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            repeat(CrewPlaceholderCopy.EMPTY_SEATS) { i ->
-                if (i > 0) Spacer(GlanceModifier.width(8.dp))
-                Box(GlanceModifier.size(18.dp).background(colors.outline).padding(2.dp)) {
-                    Box(GlanceModifier.size(14.dp).background(colors.surface)) {}
+    // One row of the home screen, full at the size it asks for: its text keeps its size under a larger system font.
+    val type = WidgetType(LocalContext.current.resources, max = 1f)
+    WidgetSlab(mode, CrewPlaceholderCopy.DESCRIPTION, open) {
+        Column(GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(CrewPlaceholderCopy.TITLE, style = type.label(11f, colors.onSurfaceVariant), maxLines = 1)
+                Spacer(GlanceModifier.width(8.dp))
+                // Plain ink, not an accent: "not live" is a fact about this widget, not a problem with the rig.
+                Text(CrewPlaceholderCopy.TAG, style = type.label(11f, colors.onSurface), maxLines = 1)
+            }
+            // Empty seats: outlined squares, never filled, because nobody is really here. They sit in the
+            // height the two texts leave, so in a row shorter than the widget asks for it is the seats that
+            // give way and never a line of the sentence.
+            Box(GlanceModifier.defaultWeight().fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    repeat(CrewPlaceholderCopy.EMPTY_SEATS) { i ->
+                        if (i > 0) Spacer(GlanceModifier.width(8.dp))
+                        Box(GlanceModifier.size(SEAT).background(colors.outline).padding(SEAT_EDGE)) {
+                            Box(GlanceModifier.fillMaxSize().background(colors.surface)) {}
+                        }
+                    }
                 }
             }
+            Text(CrewPlaceholderCopy.LINE, style = type.body(12f, colors.onSurfaceVariant), maxLines = 2)
         }
-        Spacer(GlanceModifier.height(8.dp))
-        Text(CrewPlaceholderCopy.LINE, style = TextStyle(color = colors.onSurfaceVariant, fontSize = 12.sp), maxLines = 2)
     }
 }
+
+private val SEAT = 14.dp
+private val SEAT_EDGE = 2.dp

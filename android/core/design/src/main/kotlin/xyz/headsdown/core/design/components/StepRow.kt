@@ -79,12 +79,15 @@ fun StepRow(
                     badge.border(if (status == StepStatus.Current) 2.dp else HdDimens.Hairline, if (status == StepStatus.Current) colors.chalk else colors.ash, shape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // The number is the badge's drawing; the header's words carry the step.
-                    BasicText(
-                        index.toString(),
-                        Modifier.clearAndSetSemantics { },
-                        style = Hd.type.label.copy(color = if (status == StepStatus.Current) colors.chalk else colors.ash),
-                    )
+                    // The number is the badge's drawing; the header's words carry the step. Like
+                    // the badge it does not grow with the font: at 2.0 a digit is cut by its square.
+                    ProvideCappedFontScale(max = 1f) {
+                        BasicText(
+                            index.toString(),
+                            Modifier.clearAndSetSemantics { },
+                            style = Hd.type.label.copy(color = if (status == StepStatus.Current) colors.chalk else colors.ash),
+                        )
+                    }
                 }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {

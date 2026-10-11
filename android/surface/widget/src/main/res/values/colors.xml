@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-        The widget's old colour names for its static layouts (the picker previews, the
-        chronometer), as aliases of the design module's palette (:core:design, res/values/colors.xml).
+        The widget's colour names for its static layouts (the picker previews, the chronometer),
+        as aliases of the design module's palette (:core:design, res/values/colors.xml).
         No colour is written here.
     -->
     <color name="hd_widget_charcoal">@color/hd_pit</color>
@@ -10,5 +10,5 @@
     <color name="hd_widget_gold">@color/hd_seam</color>
     <color name="hd_widget_ash">@color/hd_chalk</color>
     <color name="hd_widget_ash_muted">@color/hd_ash</color>
-    <color name="hd_widget_cooling">@color/hd_compat_cooling</color>
+    <!-- The hairline is res/color/hd_widget_hairline.xml: chalk at 12%, with no value of its own. -->
 </resources>

@@ -6,8 +6,14 @@
     <string name="hd_widget_crew_description">Placeholder: shows who in your room is dark once rooms are live.</string>
     <string name="hd_widget_preview_brand" translatable="false">HEADS DOWN</string>
     <string name="hd_widget_preview_heat">Rig hot</string>
-    <string name="hd_widget_preview_dark">Dark for 1:12</string>
-    <string name="hd_widget_preview_footer">Last haul 0.0194 ORE · Streak 23 nights</string>
-    <string name="hd_widget_preview_crew_tag">CREW · PREVIEW · NOT LIVE</string>
-    <string name="hd_widget_preview_crew_line">Rooms are not live yet.</string>
+    <!-- The status and the time of the same state, on two lines as the widget draws them. -->
+    <string name="hd_widget_preview_dark">Dark for</string>
+    <string name="hd_widget_preview_time" translatable="false">1:12:00</string>
+    <!-- The two lines under the seam, as the widget itself words them for the same state (WidgetRemoteViewsTest). -->
+    <string name="hd_widget_preview_haul">Last haul 0.0194 ORE</string>
+    <string name="hd_widget_preview_streak">Streak 23 nights</string>
+    <!-- The Crew placeholder's own three texts (CrewPlaceholderCopy; WidgetRemoteViewsTest keeps them equal). -->
+    <string name="hd_widget_preview_crew_title">CREW</string>
+    <string name="hd_widget_preview_crew_tag">PREVIEW · NOT LIVE</string>
+    <string name="hd_widget_preview_crew_line">Rooms are not live yet. When they are, this row shows who in your room is dark.</string>
 </resources>

@@ -7,8 +7,8 @@ import java.io.File
 
 /**
  * A still screen draws nothing. No source of this module, of the app or of the reveal asks for an
- * animation that never ends (two known places excepted, each named below with the stage that
- * removes it), and nothing in this module can reach a shader, a sensor, a motor or the log: its
+ * animation that never ends (one known place excepted, named below with the stage that removes
+ * it), and nothing in this module can reach a shader, a sensor, a motor or the log: its
  * components are composed in unit tests and previews with nothing behind them.
  */
 class StillnessTest {
@@ -24,11 +24,11 @@ class StillnessTest {
     private val frameLoop = listOf("withFrameNanos", "withFrameMillis")
 
     /**
-     * KNOWN EXCEPTION, for the next stage to remove: the home screen's `emberBreath()` runs an
-     * infinite transition around the rig card while the rig is hot. When it goes, this test fails
-     * until the entry is deleted, so the list cannot outlive what it excuses.
+     * No exception is left. The home screen's `emberBreath()`, an infinite transition around the
+     * rig card while the rig was hot, went with the card when the home screen was rebuilt. A file
+     * named here would have to say which stage removes it, and the test fails until it is.
      */
-    private val endlessExceptions = setOf("app/src/main/kotlin/xyz/headsdown/ui/HomeScreen.kt")
+    private val endlessExceptions = emptySet<String>()
 
     /** The board replay is driven by `withFrameNanos` and stops when the night has been replayed. */
     private val frameLoopAllowed = setOf(
@@ -44,13 +44,6 @@ class StillnessTest {
      * finds (AtRestTest shows one never coming to rest).
      */
     private val spinners = listOf("ProgressIndicator", "LoadingIndicator")
-
-    /**
-     * KNOWN EXCEPTION, for the stage that rebuilds the reveal: while the night's haul is being
-     * read, the reveal shows Material's indeterminate `CircularProgressIndicator`. A still
-     * `SkeletonBlock` and a sentence replace it; then this entry goes, as above.
-     */
-    private val spinnerExceptions = setOf("feature/reveal/src/main/kotlin/xyz/headsdown/feature/reveal/ui/RevealScreen.kt")
 
     private fun mainSources(): List<File> = listOf(design, app, reveal).flatMap(SourceTree::mainKotlin)
 
@@ -69,8 +62,9 @@ class StillnessTest {
     }
 
     @Test
-    fun `no spinner turns while a screen waits, except the one known place`() {
-        assertEquals(spinnerExceptions, filesNaming(spinners))
+    fun `no spinner turns while a screen waits`() {
+        // The reveal's loading spinner was the one known place; a still skeleton and a sentence replaced it.
+        assertEquals(emptySet<String>(), filesNaming(spinners))
     }
 
     @Test

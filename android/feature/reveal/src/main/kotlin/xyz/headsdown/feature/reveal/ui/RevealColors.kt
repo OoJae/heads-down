@@ -2,16 +2,16 @@ package xyz.headsdown.feature.reveal.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
 import xyz.headsdown.core.design.HdArgb
 import xyz.headsdown.core.design.HdCompat
 import xyz.headsdown.core.design.HdPalette
-import xyz.headsdown.core.design.HdType
 import xyz.headsdown.core.design.HeadsDownTheme
 
 /**
- * COMPATIBILITY SHIM: the reveal's old colour names with the values of "The Underside"
- * (`:core:design`). The same shim as the app's `HdColors` (an app unit test keeps them equal).
+ * COMPATIBILITY SHIM, read by nothing in this module any more: the reveal is drawn with the
+ * tokens of "The Underside" (`Hd.colors`), never with these names. It stays for one reader, the
+ * app's `ThemeContrastTest`, which still compares it with the app's own shim (`HdColors`); it
+ * leaves, [Cooling] and its `HdCompat` value included, when that comparison does.
  */
 object RevealColors {
     val Charcoal: Color = HdPalette.Dark.pit
@@ -22,15 +22,13 @@ object RevealColors {
     val Ash: Color = HdPalette.Dark.chalk
     val AshMuted: Color = HdPalette.Dark.ash
 
-    /** A colour the new system has no role for (HdCompat): it leaves with the layout that names it. */
+    /** A colour the new system has no role for (HdCompat). No screen of the reveal draws with it. */
     val Cooling: Color = Color(HdCompat.COOLING)
 }
 
-internal val PixelLabel: TextStyle = HdType.Default.label
-
 /**
- * The reveal's theme: the design module's, dark. The reveal used to swap Material's primary and
- * secondary (gold first); every colour on this screen is named explicitly, so nothing read them.
+ * The reveal's theme: the design module's, in the dark palette (the app is dark until a later
+ * stage switches the light one on; every colour here is a token, so the screen follows it then).
  */
 @Composable
 fun RevealTheme(content: @Composable () -> Unit) = HeadsDownTheme(darkTheme = true, content = content)

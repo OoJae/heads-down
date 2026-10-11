@@ -26,8 +26,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import xyz.headsdown.core.design.Hd
 import xyz.headsdown.core.design.HdDimens
 
@@ -42,7 +46,8 @@ import xyz.headsdown.core.design.HdDimens
  * [compact] draws a 48dp chip for a row of short options ("Off", "10 SKR"): filled when chosen,
  * outlined when not, the label on one line. A chip is as wide as its label and does not wrap it,
  * so lay chips out in a `FlowRow`: in a plain `Row` the last ones are squeezed and cut at a large
- * font scale.
+ * font scale. A chip given a width of its own (a weight in a row of four) keeps the whole label
+ * and gives up side padding instead, from 16dp down to 6dp.
  *
  * [onClick] is called on every tap, including a tap on the option already chosen: the caller
  * decides whether that takes the choice back.
@@ -91,7 +96,8 @@ fun Choice(
                 .then(if (selected) Modifier else Modifier.border(HdDimens.Hairline, if (enabled) colors.ash else colors.hairline, shape))
                 .focusRing(focused, ink)
                 .then(pick)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(vertical = 8.dp)
+                .yieldingSidePadding(wanted = 16.dp, least = 6.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -126,6 +132,24 @@ fun Choice(
         Canvas(Modifier.size(20.dp)) { drawChoiceMark(selected, checkbox, box, mark, markInk) }
         BasicText(label, Modifier.weight(1f), style = Hd.type.button.copy(color = ink))
     }
+}
+
+/**
+ * The side padding of a chip: [wanted] on each side wherever there is room for it. A chip that is
+ * given less width than its label and that padding need (four of them sharing a 320dp row) gives
+ * up padding, down to [least], before a letter of the label is cut.
+ */
+private fun Modifier.yieldingSidePadding(wanted: Dp, least: Dp): Modifier = layout { measurable, constraints ->
+    val most = wanted.roundToPx()
+    val side = if (constraints.hasBoundedWidth) {
+        val label = measurable.maxIntrinsicWidth(constraints.maxHeight)
+        ((constraints.maxWidth - label) / 2).coerceIn(least.roundToPx(), most)
+    } else {
+        most
+    }
+    val placeable = measurable.measure(constraints.offset(horizontal = -2 * side))
+    val width = constraints.constrainWidth(placeable.width + 2 * side)
+    layout(width, placeable.height) { placeable.place((width - placeable.width) / 2, 0) }
 }
 
 /** A 20dp square: empty with an outline, or filled with a tick (checkbox) or an inner square (radio). */

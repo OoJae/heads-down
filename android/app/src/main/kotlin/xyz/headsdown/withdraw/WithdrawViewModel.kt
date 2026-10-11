@@ -47,8 +47,8 @@ sealed interface WithdrawState {
         val canSign: Boolean get() = facts.somethingToSign(revoke, closeRig)
     }
 
-    /** Confirmed on-chain with no error. */
-    data class Done(val message: String) : WithdrawState
+    /** Confirmed on-chain with no error. [signature] is the transaction that did it, for a link to it. */
+    data class Done(val message: String, val signature: String? = null) : WithdrawState
 }
 
 /** One wallet session: authorize, build inside it, sign and send, confirm. Supplied by the Activity. */
@@ -172,7 +172,7 @@ class WithdrawModel(
                         if (session.report.allConfirmed) {
                             val plan = session.prepared.plan
                             if (plan.rigClose != null) runCatching { onRigClosed(wallet) }
-                            WithdrawState.Done(WithdrawCopy.done(plan))
+                            WithdrawState.Done(WithdrawCopy.done(plan), session.report.outcomes.firstOrNull()?.signature)
                         } else {
                             // Failed or expired is known: nothing happened. Anything else is unknown, and is said so.
                             val outcomes = session.report.outcomes

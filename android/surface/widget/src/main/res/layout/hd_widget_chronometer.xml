@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The shift chronometer. Colour and size are set from code (brand vs dynamic colour). -->
+<!--
+    The shift chronometer. Colour and size are set from code (brand vs dynamic colour, and the
+    size of the layout it sits in). Monospace: a figure, and the digits do not shift as they tick.
+-->
 <Chronometer xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/hd_widget_chronometer"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:fontFamily="sans-serif-medium"
+    android:fontFamily="monospace"
+    android:includeFontPadding="false"
     android:maxLines="1"
     android:textColor="@color/hd_widget_ash"
-    android:textSize="15sp" />
+    android:textSize="14sp" />
