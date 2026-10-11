@@ -229,6 +229,12 @@ class RevealRedesignTest {
         )
         assertEquals(order, texts.take(order.size))
         assertEquals("Clock out", texts.last())
+        // Each count is one node with its label, so it is read "Rounds dark, 312" and not as two things.
+        rule.onNodeWithText("312").assertTextEquals("Rounds dark", "312")
+        rule.onNodeWithText("18").assertTextEquals("Digs", "18")
+        rule.onNodeWithText("0.0180 SOL").assertTextEquals("SOL placed", "0.0180 SOL")
+        // The streak is drawn in capitals and read as written.
+        rule.onNodeWithTag(RevealTags.STREAK).assertTextEquals("Streak 22 → 23")
     }
 
     @Test
@@ -374,6 +380,27 @@ class RevealRedesignTest {
         advance(2_400)
         assertTrue(boardDescription().startsWith("Board replay finished"))
         assertStill("after the replay")
+    }
+
+    @Test
+    fun `the page is still again once the buy notice has come into view`() {
+        rule.setContent { RevealTheme { RevealScreen(sample, zone, animate = false) } }
+        // (The clock runs by itself for the taps: performScrollTo never returns under a paused clock.)
+        // The bar gives and springs back, the notice appears and the page scrolls to it. Waiting for
+        // idle would itself time out if any of that never ended.
+        rule.onNodeWithTag(RevealTags.BUY).performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(RevealTags.BUY_STUB).assertExists()
+        rule.mainClock.autoAdvance = false
+        advance(500)
+        assertStill("after the buy notice")
+        // A second tap asks for the notice again and then stops too.
+        rule.mainClock.autoAdvance = true
+        rule.onNodeWithTag(RevealTags.BUY).performClick()
+        rule.waitForIdle()
+        rule.mainClock.autoAdvance = false
+        advance(500)
+        assertStill("after a second tap")
     }
 
     @Test
