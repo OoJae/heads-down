@@ -8,15 +8,19 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -29,13 +33,19 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
@@ -52,6 +62,9 @@ import xyz.headsdown.core.chain.accounts.OreClaimEstimate
 import xyz.headsdown.core.chain.clockout.BondOutcome
 import xyz.headsdown.core.chain.clockout.ShiftOutcome
 import xyz.headsdown.core.design.HdType
+import xyz.headsdown.core.design.HeadsDownTheme
+import xyz.headsdown.core.design.components.DisplayText
+import xyz.headsdown.core.design.components.LocalHdHaptics
 import xyz.headsdown.core.keys.ShiftEndReason
 import xyz.headsdown.feature.reveal.haul.HonestCopy
 
@@ -248,6 +261,76 @@ class ClockOutSheetTest : SheetTestBase() {
     }
 
     @Test
+    fun `the confirmed statement stands where the title stood, at every font size`() {
+        for (scale in listOf(1f, 1.3f, 2f)) {
+            fontScale = scale
+            // The header is as tall as its tallest part: compared with a state whose way out is in the dock, as Done's is.
+            show(ClockOutState.Loading)
+            val title = rule.onNode(isHeading()).getUnclippedBoundsInRoot()
+            if (scale == 1f) {
+                // At the normal font size "Close" beside the name changes nothing: the ledger's title is on the same line.
+                show(ClockOutState.Ready(completed))
+                assertEquals(title, rule.onNode(isHeading()).getUnclippedBoundsInRoot())
+            }
+            show(ClockOutState.Done(confirmed, SIGNATURE))
+            val message = bounds(ClockOutTags.MESSAGE)
+            // Nothing between the sheet's name and the result: the result starts on the title's line.
+            assertEquals("at $scale the result starts where the title did", title.top.value, message.top.value, 0.5f)
+            assertEquals("at $scale", title.left.value, message.left.value, 0.5f)
+            // And its statement is set as a title is set: the same words given to DisplayText, in
+            // the same width, take the same lines and the same height (the display face stops
+            // growing with the system font where a title's does).
+            val lines = mutableListOf<TextLayoutResult>()
+            rule.onNodeWithTag(ClockOutTags.MESSAGE).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(lines)
+            val layout = lines.single()
+            val statementLines = (0 until layout.lineCount).count { layout.getLineStart(it) < "Confirmed on-chain.".length }
+            val statementHeight = with(rule.density) { layout.getLineBottom(statementLines - 1).toDp() }
+            show { DisplayText("Confirmed on-chain.", Modifier.padding(horizontal = 20.dp).testTag("as a title"), caps = false) }
+            assertEquals("at $scale: $statementLines lines of the statement", bounds("as a title").height.value, statementHeight.value, 1f)
+            assertEquals("at $scale", 2, statementLines)
+        }
+    }
+
+    @Test
+    fun `turning the phone asks nothing of the motor again and leaves the page where it was`() {
+        var state by mutableStateOf<ClockOutState>(ClockOutState.Ready(completed))
+        val restoration = StateRestorationTester(rule)
+        restoration.setContent {
+            CompositionLocalProvider(LocalHdHaptics provides haptics) {
+                HeadsDownTheme { ClockOutScreen(state, {}, {}, {}, {}, {}, cluster = "solana:mainnet") }
+            }
+        }
+        fun page() = rule.onAllNodes(hasScrollAction()).onFirst()
+        fun scrolled() = page().fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+
+        // A problem arrives: one cue, and the page goes to it.
+        state = ClockOutState.Ready(completed, problem = ClockOutModel.NOT_LANDED)
+        rule.waitForIdle()
+        assertEquals(listOf("refuse"), haptics.cues)
+        rule.onNodeWithTag(ClockOutTags.PROBLEM).assertIsDisplayed()
+        assertTrue(scrolled() > 0f)
+        // The reader goes back to the top, then turns the phone: the activity is made again around the same model.
+        page().performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) }
+        rule.waitForIdle()
+        assertEquals(0f, scrolled(), 0f)
+        restoration.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        assertEquals("the same problem is not a new refusal", listOf("refuse"), haptics.cues)
+        assertEquals("a notice that was already there does not pull the page to itself", 0f, scrolled(), 0f)
+        rule.onNodeWithTag(ClockOutTags.PROBLEM).assertTextEquals(ClockOutModel.NOT_LANDED)
+
+        // Confirmed: one cue, also after another turn, and the result is where the focus is.
+        state = ClockOutState.Done(confirmed, SIGNATURE)
+        rule.waitForIdle()
+        assertEquals(listOf("refuse", "confirm"), haptics.cues)
+        restoration.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        assertEquals(listOf("refuse", "confirm"), haptics.cues)
+        rule.onNodeWithTag(ClockOutTags.MESSAGE).assertTextEquals(confirmed).assertIsDisplayed().assertIsFocused()
+        rule.onAllNodesWithTag(ClockOutTags.CLOSE).assertCountEquals(1)
+    }
+
+    @Test
     fun `focus moves to the confirmed message, which a screen reader is told about`() {
         show(ClockOutState.Done(confirmed, SIGNATURE))
         val message = rule.onNodeWithTag(ClockOutTags.MESSAGE)
@@ -298,7 +381,7 @@ class ClockOutSheetTest : SheetTestBase() {
             // The primary action is whole inside the screen, at least a bar tall, and as wide as the margins leave.
             assertInsideTheScreen(dock)
             assertTrue("$name at $scale: the dock's bar is ${bounds(dock).height}", bounds(dock).height >= 56.dp)
-            assertEquals("$name at $scale", 320f, bounds(dock).width.value, 0.5f)
+            assertEquals("$name at $scale", root().width.value - 40f, bounds(dock).width.value, 0.5f)
             rule.onNodeWithTag(dock).assertIsDisplayed()
             // The dock holds that one control and nothing else.
             assertEquals("$name at $scale", dock, actionsInOrder().last())
@@ -328,6 +411,24 @@ class ClockOutSheetTest : SheetTestBase() {
 
     @Test
     fun `every state reflows at font scale 2 - the bar inside the screen, no amount cut`() = assertEveryStateFits(2f)
+
+    @Test
+    @Config(qualifiers = LANDSCAPE)
+    fun `every state fits a phone on its side, at the normal and at the largest font`() {
+        assertEveryStateFits(1f)
+        assertEveryStateFits(2f)
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_SCREEN)
+    fun `every state fits a small phone, at the normal and at the largest font`() {
+        assertEveryStateFits(1f)
+        assertEveryStateFits(2f)
+    }
+
+    @Test
+    @Config(qualifiers = LANDSCAPE)
+    fun `on a phone on its side the end-early warning still comes into view`() = assertTheWarningComesIntoView()
 
     @Test
     fun `at the normal font size the dock is one bar, low enough for a swipe above it to scroll the page`() {
@@ -405,6 +506,19 @@ class ClockOutSheetTest : SheetTestBase() {
             rule.onNodeWithTag(ClockOutTags.END_EARLY_WARNING).assertIsDisplayed()
         } finally {
             ValueAnimator::class.java.getMethod("setDurationScale", Float::class.javaPrimitiveType).invoke(null, 1f)
+        }
+    }
+
+    @Test
+    fun `in every state a screen reader meets words, full touch targets and nothing that is only drawn`() {
+        for (scale in listOf(1f, 2f)) {
+            fontScale = scale
+            for ((name, state, dock) in states) {
+                show(state)
+                assertSpeakable("$name at $scale")
+                // The dock is the last thing reached, and before it comes everything else there is to read.
+                assertEquals("$name at $scale", dock, spokenNodes().last().config.getOrNull(SemanticsProperties.TestTag))
+            }
         }
     }
 

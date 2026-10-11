@@ -3,6 +3,9 @@ package xyz.headsdown.clockout
 import android.app.Application
 import android.content.ComponentName
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Recomposer
@@ -12,17 +15,24 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
@@ -92,6 +102,16 @@ abstract class SheetTestBase {
             }
         }
         rule.waitForIdle()
+    }
+
+    /**
+     * The app's window between a phone's system bars: nothing of a sheet is drawn under them, so
+     * the page is as short as it is on the phone, while the screen the script measures its
+     * swipes on is the whole glass.
+     */
+    @Composable
+    protected fun BetweenTheBars(status: Dp = 32.dp, navigation: Dp = 48.dp, content: @Composable () -> Unit) {
+        Box(Modifier.fillMaxSize().padding(top = status, bottom = navigation)) { content() }
     }
 
     protected fun bounds(tag: String): DpRect = rule.onNodeWithTag(tag).getUnclippedBoundsInRoot()
@@ -164,6 +184,119 @@ abstract class SheetTestBase {
         )
     }
 
+    // ------------------------------------------------------------------ what a screen reader meets
+
+    /** Every node a screen reader stops on: the merged tree, top to bottom. */
+    protected fun spokenNodes(): List<SemanticsNode> {
+        val out = mutableListOf<SemanticsNode>()
+        fun walk(node: SemanticsNode) {
+            out += node
+            node.children.forEach(::walk)
+        }
+        walk(rule.onRoot().fetchSemanticsNode())
+        return out
+    }
+
+    /**
+     * Whatever a screen reader can stop on or act on has words, and nothing else is offered to it:
+     * - every node with a role, an action, a chosen state, a heading or a live region has a text;
+     * - nothing has an empty text or a description (the sheets draw no picture that means anything);
+     * - every control is a full touch target, 48dp both ways, and says what kind of control it is;
+     * - a choice says whether it is chosen;
+     * - what is only drawn (rules, skeleton lines, the marks inside a choice and a notice) is silent.
+     */
+    protected fun assertSpeakable(name: String) {
+        val nodes = spokenNodes()
+        for (node in nodes) {
+            val config = node.config
+            val words = config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+            assertEquals("$name: no node carries a description", null, config.getOrNull(SemanticsProperties.ContentDescription))
+            assertTrue("$name: no text is blank: $words", words.none { it.isBlank() })
+            val control = SemanticsActions.OnClick in config
+            val meansSomething = control ||
+                SemanticsProperties.Role in config ||
+                SemanticsProperties.Selected in config ||
+                SemanticsProperties.Heading in config ||
+                SemanticsProperties.LiveRegion in config ||
+                SemanticsProperties.Focused in config
+            if (meansSomething) assertTrue("$name: a node with a meaning has words: $config", words.isNotEmpty())
+            if (control || SemanticsProperties.Role in config) {
+                val role = config.getOrNull(SemanticsProperties.Role)
+                assertTrue("$name: \"${words.firstOrNull()}\" says what it is: $role", role == Role.Button || role == Role.Checkbox || role == Role.RadioButton)
+                val (width, height) = with(node.layoutInfo.density) { node.size.width.toDp() to node.size.height.toDp() }
+                assertTrue("$name: \"${words.firstOrNull()}\" is a full touch target: $width x $height", width >= 48.dp && height >= 48.dp)
+                assertEquals("$name: \"${words.firstOrNull()}\" is one label", 1, words.size)
+                if (role != Role.Button) assertTrue("$name: a choice says whether it is chosen", SemanticsProperties.Selected in config)
+            }
+        }
+        assertEquals("$name: one heading", 1, nodes.count { SemanticsProperties.Heading in it.config })
+    }
+
+    // ------------------------------------------------------------------ the emulator script's eyes and finger
+
+    /**
+     * One line of `ui.py texts`: a text that shows, and the middle of the part of it that shows.
+     * [whole] is what the script cannot know and a reader can: none of it is cut by an edge.
+     */
+    protected data class Seen(val text: String, val at: Offset, val whole: Boolean)
+
+    /** How often the script had to swipe to find what it was looking for. */
+    protected var swipes = 0
+
+    /**
+     * The screen as `scripts/devstack/emulator/ui.py` reads it from a uiautomator dump: every node
+     * that has a text (or a description) and shows at least in part, in layout order, with the
+     * middle of what shows of it. A node scrolled out of the page is not in a dump at all, and one
+     * that is cut by the dock's edge is tapped in the middle of what is left of it.
+     */
+    protected fun dump(): List<Seen> {
+        rule.waitForIdle()
+        return unmergedNodes().mapNotNull { node ->
+            val words = node.config.getOrNull(SemanticsProperties.Text)?.firstOrNull()?.text
+                ?: node.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()
+            // Clipped by everything that clips it: empty for what is outside the page's viewport.
+            val shows = node.boundsInRoot
+            if (words.isNullOrEmpty() || shows.width <= 0f || shows.height <= 0f) {
+                null
+            } else {
+                Seen(words, shows.center, whole = shows.width >= node.size.width - 0.5f && shows.height >= node.size.height - 0.5f)
+            }
+        }
+    }
+
+    /** `ui.py`'s matching: the whole text, case and all, or a part of it whatever the case. */
+    protected fun matches(text: String, exact: Boolean): List<Seen> =
+        dump().filter { if (exact) it.text == text else text.lowercase() in it.text.lowercase() }
+
+    /** `ui.py has`: on screen right now, without scrolling. */
+    protected fun has(text: String, exact: Boolean = false): Boolean = matches(text, exact).isNotEmpty()
+
+    /** `ui.py swipe up`: from 78% of the screen's height to 33%, in a quarter of a second, and whatever fling follows. */
+    protected fun swipeUp() {
+        swipes++
+        rule.onRoot().performTouchInput {
+            swipe(Offset(width / 2f, height * 0.78f), Offset(width / 2f, height * 0.33f), durationMillis = 250)
+        }
+        rule.waitForIdle()
+    }
+
+    /** `ui.py find`: the first match in layout order, swiping up to look for it, never back down. */
+    protected fun find(text: String, exact: Boolean = false): Seen {
+        repeat(6) {
+            matches(text, exact).firstOrNull()?.let { return it }
+            swipeUp()
+        }
+        throw AssertionError("'$text' is not on screen: ${dump().map { it.text }}")
+    }
+
+    /** `ui.py tap`: a finger on the middle of the first match, wherever on the glass that is. */
+    protected fun tap(text: String, exact: Boolean = false): String {
+        val hit = find(text, exact)
+        rule.onRoot().performTouchInput { click(hit.at) }
+        rule.waitForIdle()
+        return hit.text
+    }
+
     // ------------------------------------------------------------------ stillness
 
     /** Whether any composition is waiting for a frame or has something left to recompose. */
@@ -219,6 +352,10 @@ abstract class SheetTestBase {
 
         /** A short screen: what a split window or a small phone leaves. */
         const val SHORT_SCREEN = "w360dp-h480dp-xhdpi"
+
+        /** A small phone, and a phone on its side. */
+        const val SMALL_SCREEN = "w320dp-h568dp-xhdpi"
+        const val LANDSCAPE = "w800dp-h360dp-xhdpi"
 
         val TICKERS = setOf("SOL", "ORE", "SKR")
 

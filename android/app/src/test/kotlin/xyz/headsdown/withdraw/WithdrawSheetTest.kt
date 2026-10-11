@@ -18,6 +18,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -238,7 +239,7 @@ class WithdrawSheetTest : SheetTestBase() {
             // The primary action is whole inside the screen, at least a bar tall, and as wide as the margins leave.
             assertInsideTheScreen(dock)
             assertTrue("$name at $scale: the dock's bar is ${bounds(dock).height}", bounds(dock).height >= 56.dp)
-            assertEquals("$name at $scale", 320f, bounds(dock).width.value, 0.5f)
+            assertEquals("$name at $scale", root().width.value - 40f, bounds(dock).width.value, 0.5f)
             rule.onNodeWithTag(dock).assertIsDisplayed()
             // The dock holds that one control and nothing else.
             assertEquals("$name at $scale", dock, actionsInOrder().last())
@@ -263,6 +264,33 @@ class WithdrawSheetTest : SheetTestBase() {
     fun `every state reflows at font scale 2 - the bar inside the screen, no amount cut`() = assertEveryStateFits(2f)
 
     @Test
+    @Config(qualifiers = LANDSCAPE)
+    fun `every state fits a phone on its side, at the normal and at the largest font`() {
+        assertEveryStateFits(1f)
+        assertEveryStateFits(2f)
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_SCREEN)
+    fun `every state fits a small phone, at the normal and at the largest font`() {
+        assertEveryStateFits(1f)
+        assertEveryStateFits(2f)
+    }
+
+    @Test
+    @Config(qualifiers = LANDSCAPE)
+    fun `on a phone on its side what each choice costs still comes into view`() = assertTheConsequencesComeIntoView()
+
+    @Test
+    fun `the confirmed statement stands where the title stood`() {
+        show(WithdrawState.Ready(both))
+        val title = rule.onNode(isHeading()).getUnclippedBoundsInRoot()
+        show(WithdrawState.Done(confirmed, SIGNATURE))
+        assertEquals(title.top.value, bounds(WithdrawTags.MESSAGE).top.value, 0.5f)
+        assertEquals(title.left.value, bounds(WithdrawTags.MESSAGE).left.value, 0.5f)
+    }
+
+    @Test
     fun `at the normal font size the dock is one bar, low enough for a swipe above it to scroll the page`() {
         // The emulator script swipes from 78% of the screen's height: that point must be in the page.
         for ((name, state, dock) in states) {
@@ -281,6 +309,19 @@ class WithdrawSheetTest : SheetTestBase() {
             for ((name, state, _) in states) {
                 show(state)
                 assertAtRest("$name at $scale")
+            }
+        }
+    }
+
+    @Test
+    fun `in every state a screen reader meets words, full touch targets and nothing that is only drawn`() {
+        for (scale in listOf(1f, 2f)) {
+            fontScale = scale
+            for ((name, state, dock) in states) {
+                show(state)
+                assertSpeakable("$name at $scale")
+                // The dock is the last thing reached, and before it comes everything else there is to read.
+                assertEquals("$name at $scale", dock, spokenNodes().last().config.getOrNull(SemanticsProperties.TestTag))
             }
         }
     }
