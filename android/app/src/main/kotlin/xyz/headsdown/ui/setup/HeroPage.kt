@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layoutId
@@ -61,7 +62,7 @@ internal data class PageViewport(val heightPx: Int, val topInsetPx: Int)
  * for a page that turns itself away from its own top and still has to offer what is up there.
  * Over the hero it has no ground of its own; once the page has moved it stands on the pit, over
  * a hairline. A screen reader reaches it first, then the page, then what floats above the dock,
- * then the dock.
+ * then the dock. Nothing under the band (the status bar's strip included) takes a tap.
  */
 @Composable
 internal fun HeroPage(
@@ -119,6 +120,9 @@ private fun TopBand(topInsetPx: Int, scrollState: ScrollState, pinned: (@Composa
     Column(
         Modifier
             .fillMaxWidth()
+            // What has scrolled under the band is out of sight, and must be out of reach too: a
+            // tap on the band is the band's, never a link or a step hidden behind it.
+            .pointerInput(Unit) {}
             .drawBehind {
                 val closed = (scrollState.value / STATUS_STRIP_CLOSES_OVER.toPx()).coerceIn(0f, 1f)
                 if (closed > 0f) {

@@ -2,6 +2,7 @@ package xyz.headsdown.ui
 
 import android.app.Application
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,10 +12,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
@@ -171,6 +176,24 @@ class HeroPageTest : ScreenTest() {
         rule.waitForIdle()
         assertEquals((-450).dp, box("page").top)
         assertEquals(0.dp to 56.dp, span("pinned"))
+    }
+
+    @Test
+    fun `what has scrolled under the band cannot be tapped through it`() {
+        var taps = 0
+        show {
+            HeroPage(scrollState = rememberScrollState(), pinned = { Block("pinned", 56.dp) }, dock = { Block("dock", 100.dp) }) {
+                Box(Modifier.fillMaxWidth().height(2000.dp).testTag("page").clickable { taps++ })
+            }
+        }
+        // In the band: the page is under it there, and is not reached.
+        rule.onRoot().performTouchInput { click(Offset(centerX, 20.dp.toPx())) }
+        rule.waitForIdle()
+        assertEquals(0, taps)
+        // Under the band: the page's own.
+        rule.onRoot().performTouchInput { click(Offset(centerX, 200.dp.toPx())) }
+        rule.waitForIdle()
+        assertEquals(1, taps)
     }
 
     @Test

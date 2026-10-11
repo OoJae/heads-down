@@ -12,8 +12,10 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -223,6 +225,36 @@ class SmokeInvariantsTest : ScreenTest() {
         rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Armed").assertIsDisplayed()
         // And the bar that was "Clock in" is gone, not left under the new ones.
         assertEquals(emptyList<UiText>(), uiMatches("Clock in", exact = true))
+    }
+
+    @Test
+    fun `I4 - Armed is on screen after the clock-in wherever the page had been scrolled to`() {
+        var shown by mutableStateOf(Screens.idle)
+        show(bars = true) { Screens.Home(shown) }
+        // Someone read the page to its end before tapping the bar, which is always in reach.
+        rule.onNodeWithTag(HomeTags.RIG_DEBUG).performScrollTo()
+        assertFalse(uiHas("Rig cold", exact = true))
+        rule.onNodeWithTag(HomeTags.CLOCK_IN).assertIsDisplayed()
+
+        // The clock-in is confirmed: the page goes back to the word that says so.
+        shown = Screens.armed
+        rule.waitForIdle()
+        assertTrue(uiHas("Armed", exact = true))
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Armed").assertIsDisplayed()
+        rule.onNodeWithText("Lay your phone face-down to start the shift.").assertIsDisplayed()
+        assertTrue(uiHas("Rounds dark"))
+    }
+
+    @Test
+    fun `a page is not pulled to its top when the word stays the same`() {
+        var shown by mutableStateOf(Screens.broken)
+        show(bars = true) { Screens.Home(shown) }
+        rule.onNodeWithTag(HomeTags.RIG_DEBUG).performScrollTo().assertIsDisplayed()
+        // A shift that broke and a cold rig are both "Rig cold": nothing the reader did, nothing moves.
+        shown = Screens.idle
+        rule.waitForIdle()
+        rule.onNodeWithTag(HomeTags.RIG_DEBUG).assertIsDisplayed()
+        assertFalse(uiHas("Rig cold", exact = true))
     }
 
     // ------------------------------------------------------------------ I5

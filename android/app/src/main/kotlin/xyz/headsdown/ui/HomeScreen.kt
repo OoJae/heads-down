@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -299,6 +300,19 @@ fun HomeScreen(
     LaunchedEffect(running) { if (!running) freezeAsked = false }
     // The question dims the page like a sheet, so Back closes it like one: it keeps the shift.
     BackHandler(enabled = askingFreeze) { freezeAsked = false }
+
+    // The rig's word is at the top of the page. When it changes (a clock-in confirmed, the phone
+    // laid down or picked up, a freeze) the page goes back to it: what just happened is answered
+    // where it is said, not above a page that was scrolled to read something else. A page that
+    // is restored with its old position (a rotation) stays where it was.
+    val motion = Hd.motion
+    var shownWord by remember { mutableStateOf(look.word) }
+    LaunchedEffect(look.word) {
+        if (look.word != shownWord) {
+            shownWord = look.word
+            if (motion.reduced) scroll.scrollTo(0) else scroll.animateScrollTo(0, motion.settle())
+        }
+    }
 
     HeroPage(
         scrollState = scroll,
