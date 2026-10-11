@@ -79,7 +79,7 @@ if [[ ! -d "$REPO_ROOT/services/indexer/node_modules" ]]; then
 fi
 
 # ---- keys (outside the repo) ------------------------------------------------------------------------
-for k in "$K_UPGRADE" "$K_GOVERNANCE" "$K_REGISTRAR" "$K_CRANK" "$K_DRIVER" "$K_BACKGROUND"; do ensure_key "$k"; done
+for k in "$K_UPGRADE" "$K_GOVERNANCE" "$K_REGISTRAR" "$K_CRANK" "$K_DRIVER" "$K_BACKGROUND" "$K_SKR"; do ensure_key "$k"; done
 
 # ---- engine ------------------------------------------------------------------------------------------
 if [[ "$HD_DEVSTACK_ENGINE" == "test-validator" ]]; then
@@ -89,6 +89,7 @@ if [[ "$HD_DEVSTACK_ENGINE" == "test-validator" ]]; then
   else
     if [[ $REFRESH == 1 || ! -f "$FIXTURES/fetched.env" ]]; then bash "$DEVSTACK_DIR/fetch-mainnet.sh"; fi
     "$TOOL_BIN" genesis --fixtures "$FIXTURES" --out "$GENESIS" --entropy-secret "$ENTROPY_SECRET" \
+      --skr-authority "$(pubkey "$K_SKR")" \
       ${HD_ROUND_SLOTS:+--round-slots "$HD_ROUND_SLOTS"} ${HD_INTERMISSION_SLOTS:+--intermission-slots "$HD_INTERMISSION_SLOTS"}
     rm -rf "$LEDGER" "$RUN/crank-state" "$RUN/indexer-pg"
     RESET=(--reset)
@@ -130,7 +131,7 @@ done
 rpc getSlot | grep -q '"result"' || die "RPC did not come up (see $LOGS/validator.log)"
 log "RPC up at slot $(slot)"
 if [[ "$HD_DEVSTACK_ENGINE" == "surfpool" ]]; then
-  "$TOOL_BIN" --rpc "$RPC_URL" surgery --entropy-secret "$ENTROPY_SECRET" \
+  "$TOOL_BIN" --rpc "$RPC_URL" surgery --entropy-secret "$ENTROPY_SECRET" --skr-authority "$(pubkey "$K_SKR")" \
     ${HD_ROUND_SLOTS:+--round-slots "$HD_ROUND_SLOTS"} ${HD_INTERMISSION_SLOTS:+--intermission-slots "$HD_INTERMISSION_SLOTS"}
 fi
 

@@ -54,6 +54,7 @@ K_REGISTRAR="$HD_DEVSTACK_KEYS/registrar.json"
 K_CRANK="$HD_DEVSTACK_KEYS/crank.json"
 K_DRIVER="$HD_DEVSTACK_KEYS/round-driver.json"
 K_BACKGROUND="$HD_DEVSTACK_KEYS/background-miner.json"
+K_SKR="$HD_DEVSTACK_KEYS/skr-mint-authority.json"   # mint authority of the local SKR stand-in (fund-skr.sh)
 ENTROPY_SECRET="$HD_DEVSTACK_KEYS/entropy-secret"
 
 HD_SO="$REPO_ROOT/programs/heads-down/target/deploy/heads_down.so"

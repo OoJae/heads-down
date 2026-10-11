@@ -10,6 +10,7 @@
 //! | entropy Var | last revealed `seed` = head of our hash chain; `end_at = start_at = 0`; `samples` large | lets the round driver `reveal` (see `entropy.rs`); nobody outside ORE holds mainnet's provider seeds |
 //! | ORE-mint Authority | `last_mint_at = 0` | the mint program enforces 150 slots between mints against mainnet's slot |
 //! | ORE Config (optional) | `round_slots` / `intermission_slots` | only when explicitly overridden; default keeps mainnet's 240 / 48 |
+//! | SKR mint (optional, `--skr-authority`) | a stand-in mint at SKR's mainnet address: 6 decimals, no freeze authority, supply 0, mint authority = a local dev key | heads_down pins the SKR mint by address; nobody can mint mainnet's SKR, so a Focus Bond could not be tried locally (`fund-skr` mints to a wallet) |
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,27 @@ use crate::entropy::HashChain;
 use crate::ore::{self, var};
 use crate::util::{put32, put_u64, rent_exempt, u64_at, Chain};
 use hd_crank::ore::{BOARD_ADDRESS, CONFIG_ADDRESS, ORE_PROGRAM_ID, TREASURY_ADDRESS};
+
+/// The SKR mint, at the address heads_down pins (`token::SKR_MINT`).
+pub const SKR_MINT: Address = Address::from_str_const("SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
+/// SKR base units per SKR (6 decimals).
+pub const ONE_SKR: u64 = 1_000_000;
+/// `spl_token::state::Mint` length.
+const MINT_LEN: usize = 82;
+
+/// A stand-in for the SKR mint on the local fork: SKR's address, owner, decimals and absent
+/// freeze authority, with nothing minted and `authority` as its mint authority. It is what the
+/// local stack mints test SKR from; it never leaves this machine's validator.
+pub fn local_skr_mint(authority: &Address) -> Dumped {
+    let mut data = vec![0u8; MINT_LEN];
+    data[0..4].copy_from_slice(&1u32.to_le_bytes()); // mint_authority: Some
+    data[4..36].copy_from_slice(authority.as_ref());
+    // supply (36..44) = 0
+    data[44] = 6; // decimals
+    data[45] = 1; // is_initialized
+    // freeze_authority (46..82): None
+    Dumped { address: SKR_MINT, lamports: rent_exempt(MINT_LEN), owner: ore::TOKEN_PROGRAM_ID, data, executable: false }
+}
 
 /// Surfpool moves the local round ids this far ahead of mainnet's.
 pub const SURFPOOL_ROUND_OFFSET: u64 = 10_000_000;
@@ -174,6 +196,8 @@ pub struct GenesisOpts {
     pub entropy_secret: PathBuf,
     /// Timing overrides.
     pub timing: Timing,
+    /// Put the local SKR stand-in mint in the genesis, with this mint authority.
+    pub skr_authority: Option<Address>,
 }
 
 /// `solana-test-validator`: write the genesis account files and `accounts.args`.
@@ -190,6 +214,9 @@ pub fn genesis(o: &GenesisOpts) -> Result<()> {
     for a in [TREASURY_ADDRESS, ore::MINT_ADDRESS, ore::treasury_tokens(), ore::ADMIN_FEE_COLLECTOR] {
         accounts.push(read_dump(&o.fixtures, &a)?);
     }
+    if let Some(authority) = &o.skr_authority {
+        accounts.push(local_skr_mint(authority));
+    }
     let mut args = String::new();
     for d in &accounts {
         let p = write_account(&o.out, d)?;
@@ -198,12 +225,15 @@ pub fn genesis(o: &GenesisOpts) -> Result<()> {
     std::fs::write(o.out.join("accounts.args"), args)?;
     let pot = u64_at(&read_dump(&o.fixtures, &TREASURY_ADDRESS)?.data, 8);
     println!("genesis: {summary}, motherlode {:.1} ORE, {} accounts", pot as f64 / 1e11, accounts.len());
+    if let Some(authority) = &o.skr_authority {
+        println!("genesis: local SKR stand-in mint at {SKR_MINT}, mint authority {authority}");
+    }
     Ok(())
 }
 
 /// Surfpool: apply the same rewrites live with `surfnet_setAccount` (the accounts are first
 /// read through Surfpool, which clones them lazily from mainnet).
-pub async fn surgery(rpc: &str, entropy_secret: &Path, timing: Timing) -> Result<()> {
+pub async fn surgery(rpc: &str, entropy_secret: &Path, timing: Timing, skr_authority: Option<Address>) -> Result<()> {
     HashChain::ensure_secret(entropy_secret)?;
     let chain_h = HashChain::load(entropy_secret)?;
     let chain = Chain::new(rpc)?;
@@ -216,7 +246,10 @@ pub async fn surgery(rpc: &str, entropy_secret: &Path, timing: Timing) -> Result
     for a in [TREASURY_ADDRESS, ore::MINT_ADDRESS, ore::treasury_tokens(), ore::ADMIN_FEE_COLLECTOR] {
         chain.data(&a).await?.ok_or_else(|| anyhow!("{a} not found through the fork"))?;
     }
-    let (accounts, summary) = rewrite(&src, chain_h.head(), SURFPOOL_ROUND_OFFSET, timing)?;
+    let (mut accounts, summary) = rewrite(&src, chain_h.head(), SURFPOOL_ROUND_OFFSET, timing)?;
+    if let Some(authority) = &skr_authority {
+        accounts.push(local_skr_mint(authority));
+    }
     for d in &accounts {
         chain
             .call(
@@ -237,4 +270,25 @@ pub async fn surgery(rpc: &str, entropy_secret: &Path, timing: Timing) -> Result
     }
     println!("surgery: {summary}, {} accounts rewritten via surfnet_setAccount", accounts.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_local_skr_mint_is_a_classic_mint_at_skrs_address() {
+        let authority = Address::from_str_const("9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW");
+        let m = local_skr_mint(&authority);
+        assert_eq!(m.address.to_string(), "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
+        assert_eq!(m.owner, ore::TOKEN_PROGRAM_ID);
+        assert_eq!(m.data.len(), 82);
+        assert_eq!(&m.data[0..4], &[1, 0, 0, 0]);
+        assert_eq!(&m.data[4..36], authority.as_ref());
+        assert_eq!(u64_at(&m.data, 36), 0, "nothing minted");
+        assert_eq!((m.data[44], m.data[45]), (6, 1), "6 decimals, initialized");
+        assert!(m.data[46..].iter().all(|b| *b == 0), "no freeze authority");
+        assert_eq!(m.lamports, rent_exempt(82));
+        assert!(!m.executable);
+    }
 }

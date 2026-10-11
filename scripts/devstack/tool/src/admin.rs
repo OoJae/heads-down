@@ -1,5 +1,7 @@
 //! `fund`, `status` and `probe` (`init` lives in `ops.rs` with the other deploy operations).
 
+use std::path::Path;
+
 use anyhow::{anyhow, bail, Result};
 use hd_crank::hd::{self, HdConfig};
 use hd_crank::ore::{Board, OreConfig, Round, Treasury, BOARD_ADDRESS, CONFIG_ADDRESS, TREASURY_ADDRESS};
@@ -12,7 +14,9 @@ use crate::hd as hdix;
 use crate::ops::{program_state, ProgramState};
 use crate::ore::{self, var};
 use crate::phone::Phone;
-use crate::util::{b32_at, u64_at, Chain, SOL};
+use crate::genesis::{ONE_SKR, SKR_MINT};
+use crate::util::{b32_at, read_keypair, u64_at, Chain, SOL};
+use solana_instruction::{AccountMeta, Instruction};
 
 /// Airdrop `sol` to `to` on the local validator.
 pub async fn fund(rpc: &str, to: &Address, sol: f64) -> Result<()> {
@@ -20,6 +24,50 @@ pub async fn fund(rpc: &str, to: &Address, sol: f64) -> Result<()> {
     let lamports = (sol * SOL as f64) as u64;
     chain.airdrop(to, lamports).await?;
     println!("funded {to}: balance {} SOL", chain.balance(to).await? as f64 / SOL as f64);
+    Ok(())
+}
+
+/// Mint `skr` test SKR to `to`'s associated token account, from the local stand-in mint
+/// (`genesis --skr-authority`). `authority` is that mint's authority keypair; it pays the fee and
+/// the token account's rent out of an airdrop.
+pub async fn fund_skr(rpc: &str, to: &Address, skr: f64, authority: &Path) -> Result<()> {
+    let chain = Chain::new(rpc)?;
+    let auth = read_keypair(authority)?;
+    let (owner, mint, _) = chain.data(&SKR_MINT).await?.ok_or_else(|| anyhow!("no SKR mint on this chain: start the stack with up.sh"))?;
+    if owner != ore::TOKEN_PROGRAM_ID || mint.len() != 82 || mint[0..4] != [1, 0, 0, 0] || b32_at(&mint, 4) != auth.pubkey().to_bytes() {
+        bail!("the SKR mint on this chain is not the local stand-in of {}", auth.pubkey());
+    }
+    if !(skr > 0.0 && skr <= 1_000_000.0) {
+        bail!("amount must be above 0 and at most 1,000,000 SKR");
+    }
+    let units = (skr * ONE_SKR as f64).round() as u64;
+    if chain.balance(&auth.pubkey()).await? < SOL / 10 {
+        chain.airdrop(&auth.pubkey(), SOL).await?;
+    }
+    let account = Address::find_program_address(&[to.as_ref(), ore::TOKEN_PROGRAM_ID.as_ref(), SKR_MINT.as_ref()], &ore::ATA_PROGRAM_ID).0;
+    // Associated Token Account `CreateIdempotent` (1), then SPL Token `MintTo` (7).
+    let create = Instruction {
+        program_id: ore::ATA_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(auth.pubkey(), true),
+            AccountMeta::new(account, false),
+            AccountMeta::new_readonly(*to, false),
+            AccountMeta::new_readonly(SKR_MINT, false),
+            AccountMeta::new_readonly(hd_crank::ore::SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new_readonly(ore::TOKEN_PROGRAM_ID, false),
+        ],
+        data: vec![1],
+    };
+    let mut data = vec![7u8];
+    data.extend_from_slice(&units.to_le_bytes());
+    let mint_to = Instruction {
+        program_id: ore::TOKEN_PROGRAM_ID,
+        accounts: vec![AccountMeta::new(SKR_MINT, false), AccountMeta::new(account, false), AccountMeta::new_readonly(auth.pubkey(), true)],
+        data,
+    };
+    chain.send(&auth, &[create, mint_to]).await?;
+    let (_, token, _) = chain.data(&account).await?.ok_or_else(|| anyhow!("the SKR account was not created"))?;
+    println!("minted {skr} test SKR to {to}: account {account} holds {} SKR", u64_at(&token, 64) as f64 / ONE_SKR as f64);
     Ok(())
 }
 

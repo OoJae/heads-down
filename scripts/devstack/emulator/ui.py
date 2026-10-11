@@ -2,8 +2,10 @@
 """Read and tap an Android screen through adb (uiautomator dump). Used by emulator-smoke.sh.
 
   ui.py texts                 every text on screen, top to bottom
-  ui.py tap <text> [exact]    tap the first node whose text contains (or equals) <text>,
-                              scrolling down to look for it
+  ui.py tap <text> [exact] [last]
+                              tap the first node whose text contains (or equals) <text>,
+                              scrolling down to look for it; with "last", the lowest such node
+                              on the screen as it is (a sheet's title and its bar can read the same)
   ui.py find <text>           print the first matching text, exit 1 if there is none
   ui.py has <text> [exact]    exit 0 if it is on screen right now (no scrolling), else 1
   ui.py swipe up|down
@@ -62,6 +64,13 @@ def swipe(direction):
     time.sleep(0.8)
 
 
+def nudge():
+    """Scroll the page up by a quarter of the screen."""
+    w, h = screen()
+    adb("shell", "input", "swipe", str(w // 2), str(h * 60 // 100), str(w // 2), str(h * 35 // 100), "300")
+    time.sleep(0.8)
+
+
 def main():
     cmd = sys.argv[1]
     if cmd == "texts":
@@ -72,11 +81,27 @@ def main():
     elif cmd == "has":
         sys.exit(0 if matches(sys.argv[2], len(sys.argv) > 3 and sys.argv[3] == "exact") else 1)
     elif cmd in ("tap", "find"):
-        text, exact = sys.argv[2], len(sys.argv) > 3 and sys.argv[3] == "exact"
-        for _ in range(6):
+        text, exact = sys.argv[2], "exact" in sys.argv[3:]
+        if cmd == "tap" and "last" in sys.argv[3:]:
+            hit = sorted(matches(text, exact), key=lambda n: n[2])
+            if not hit:
+                sys.exit(f"'{text}' is not on screen")
+            adb("shell", "input", "tap", str(hit[-1][1]), str(hit[-1][2]))
+            time.sleep(0.3)
+            print(hit[-1][0])
+            return
+        nudged = False
+        for _ in range(7):
             hit = matches(text, exact)
             if hit:
                 if cmd == "tap":
+                    # A node at the foot of a scrolling page can lie under the bar pinned over it,
+                    # and the tap would land on the bar. Bring it up once and look again: what is
+                    # in the bar itself stays where it is and is tapped there.
+                    if not nudged and hit[0][2] > screen()[1] * 80 // 100:
+                        nudged = True
+                        nudge()
+                        continue
                     adb("shell", "input", "tap", str(hit[0][1]), str(hit[0][2]))
                     time.sleep(0.3)
                 print(hit[0][0])

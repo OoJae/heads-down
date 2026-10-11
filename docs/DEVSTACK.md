@@ -72,6 +72,7 @@ Executor PDA    By3vJvQUsCLexnv7VqHuEhtZZCmpmjZjfhxvqCnWPkge 1000000000 lamports
 | `smoke.sh [--keep]` | the E2E smoke; starts the stack if needed and stops it afterwards unless `--keep` |
 | `status.sh` / `logs.sh [name]` | health, ports, ORE round, Config, Executor float / follow logs |
 | `fund.sh <pubkey> [sol]` | local airdrop (dev wallet funding) |
+| `fund-skr.sh <pubkey> [skr]` | mints test SKR to a wallet from the fork's stand-in SKR mint (for a Focus Bond) |
 | `phone.sh [--serial S] [--fund <pubkey> [sol]] [--remove]` | `adb reverse` for 8899, 8900, 8787, 8788, 8790 |
 | `clock-in.sh <p256-hex> [--lease N] [--hours H]` | a Mac-held dev wallet arms a rig for a phone's Keystore key |
 | `fetch-mainnet.sh` | re-dump the ORE programs and accounts from mainnet (`up.sh --refresh-fixtures`) |
@@ -225,6 +226,7 @@ The other genesis rewrites (all in `tool/src/genesis.rs`):
 | Round `Board.round_id` | a fresh round: no SOL, `expires_at = u64::MAX`, rent-exempt | mainnet's in-flight round holds other miners' SOL, and its top miner cannot be known locally |
 | ORE-mint Authority | `last_mint_at = 0` | the mint program requires 150 slots between mints, measured against mainnet's slot |
 | ORE Config | only with `HD_ROUND_SLOTS` / `HD_INTERMISSION_SLOTS` | the default keeps mainnet's 240 / 48; the sum must stay ≥ 150 for the mint spacing |
+| SKR mint | not a rewrite: a stand-in mint written at SKR's own address (6 decimals, no freeze authority, nothing minted), whose mint authority is a local key (`skr-mint-authority.json`, beside the other devstack keys) | heads_down pins the SKR mint by address, and nobody but its issuer can mint mainnet's SKR. With the stand-in, `fund-skr.sh` gives a test wallet SKR and a Focus Bond can be locked, released and forfeited locally. It exists on this machine's validator only |
 
 Every other account is byte-for-byte mainnet: Treasury (Motherlode pot), ORE mint, the
 Treasury's ORE token account, and the admin fee collector. So are all three programs: `ore.so`
@@ -364,6 +366,43 @@ lamport, and at last a second clock-in over the tombstone, which must arm shift 
 
 EMULATOR SMOKE PASSED (with a wallet app): setup, clock-in, heartbeat, on-chain dig, pickup, BREAK, clock-out, SOL back, rig closed, clock-in again. No crash.
 ```
+
+**With a Focus Bond.** `emulator-smoke.sh --wallet <fakewallet.apk> --bond` goes on from the first
+clock-out to a second shift that carries a bond and runs to the end of its window (a rig's first
+clock-in has no room for a bond). The wallet gets 100 test SKR from the fork's stand-in mint
+(`fund-skr.sh`), "10 SKR" is chosen on the home screen, and the script checks the wallet's SKR
+on-chain after the clock-in (90) and after the clock-out (100). Between the two the phone lies dark
+until a dig has landed and the window is over, is lifted (no BREAK may land then), and the morning
+reveal is opened: it must say the shift is not sealed and show no haul, its "Clock out" must seal
+the shift `completed` and return the bond, and back on the reveal that shift's haul must appear
+once the local indexer has it. Build the APK for it with a short window as well
+(`-Pheadsdown.policy.windowMinutes=8`); the run takes about 20 minutes. Run of 11 October 2026:
+
+```text
+[emulator-smoke +   5s] installed app-localdev.apk on emulator-5554 (Android 14) and started it
+[emulator-smoke +  69s] setup done: notifications, background running, tile, rig key in the device's Keystore
+[emulator-smoke + 130s] CLOCKED IN with the wallet HERdakGZCHqAHqZTeZiqEuS6R1ZYLU3sPYfQ2Rh727s1: the app built the transaction, the wallet signed, the app submitted and confirmed it; rig GW5ZyQbPyAgMA7RfvMCJNxuBdQ4YBsAcMWzcKYQs8eF7 is armed
+[emulator-smoke + 258s] the crank accepted a heartbeat signed by the device's Keystore key
+[emulator-smoke + 337s] DIG LANDED on-chain with that heartbeat: tx 2k2qUAqBEEB1NX5u9NiTETrMFDXHRRHiX8DV7KhGX5Dx3YPcXoNaND1fHG3DF65fAHqB4PsWyV5ENxSx4qnePv1r
+[emulator-smoke + 349s] LIFTED: the app signed a BREAK and the crank landed it (the rig is now Cooling on-chain)
+[emulator-smoke + 414s] CLOCKED OUT with the wallet: Confirmed on-chain. Shift sealed as ended early.
+[emulator-smoke + 475s] CLOCKED IN on shift 2 with a Focus Bond: 10 SKR left the wallet; the window ends in 455 s
+[emulator-smoke + 654s] a dig landed inside the window; waiting 275 s for the window to end
+[emulator-smoke + 970s] WINDOW OVER, phone lifted: no BREAK was sent (the rig is still Down on-chain)
+[emulator-smoke +1054s] REVEAL, not sealed: 3 rounds signed dark
+[emulator-smoke +1092s] CLOCKED OUT from the reveal: Confirmed on-chain. Shift sealed as completed. Focus Bond back in your wallet: 10 SKR. The wallet holds 100 SKR again.
+[emulator-smoke +1203s] REVEAL, sealed: Streak 0 → 1 after See this shift on-chain
+
+EMULATOR SMOKE PASSED (with a wallet app and a Focus Bond): shift 1 sealed early, 10 SKR locked on shift 2, a dig, the window run out, no BREAK, the reveal before and after the clock-out, the shift sealed completed, 10 SKR back. No crash.
+```
+
+Two things the first attempts taught, both about the script and neither about the app: a chip at
+the foot of the home page can lie under the pinned "Clock in" bar, where a tap lands on the bar
+(`ui.py` now brings such a node up before tapping); and the app calls a window over only 90
+seconds after its end, a margin for a phone whose clock runs ahead of the cluster's, so a
+clock-out opened sooner still says "stays open". In an earlier, hand-finished run the local
+crank's own `end_shift` sealed the shift before the clock-out was opened; the clock-out then had
+only the bond to release, and did.
 
 The Quick Settings tile was tapped on the same emulator by hand (`adb shell cmd statusbar
 click-tile xyz.headsdown.localdev/xyz.headsdown.surface.tile.HeadsDownTileService`): from a
