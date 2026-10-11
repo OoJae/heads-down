@@ -16,6 +16,8 @@ data class RigWidgetText(
     val streak: String,
     /** One sentence for TalkBack (the chronometer itself is read by the system). */
     val contentDescription: String,
+    /** Whether [haul] names an amount of ORE. "No haul yet" is not one, so it is not drawn in gold. */
+    val hasHaul: Boolean = true,
 )
 
 /**
@@ -50,7 +52,7 @@ object RigWidgetCopy {
             if (chrono == null) append(line).append(". ")
             append(haul).append(". ").append(streak).append('.')
         }
-        return RigWidgetText(rig.heat, headline, line, chrono, haul, streak, description)
+        return RigWidgetText(rig.heat, headline, line, chrono, haul, streak, description, hasHaul = state.haul != null)
     }
 
     fun rounds(n: Int): String = if (n == 1) "1 round" else "$n rounds"

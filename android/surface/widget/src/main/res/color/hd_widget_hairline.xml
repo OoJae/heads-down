@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The hairline of the design system for the static picker previews: chalk at 12%
+    (HdPalette.HAIRLINE_ALPHA). It is derived from the chalk, so no colour is written here.
+    On the pit it is the colour the real widget draws its frame, its unlit pixels and its empty
+    seats in (HdArgb.HAIRLINE_ON_PIT).
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:alpha="0.12" android:color="@color/hd_chalk" />
+</selector>

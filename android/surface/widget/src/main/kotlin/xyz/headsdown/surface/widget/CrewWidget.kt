@@ -5,16 +5,15 @@ import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalContext
+import androidx.glance.LocalSize
 import androidx.glance.action.Action
-import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -27,12 +26,7 @@ import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
-import androidx.glance.semantics.contentDescription
-import androidx.glance.semantics.semantics
-import androidx.glance.text.FontFamily
-import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
-import androidx.glance.text.TextStyle
 
 /**
  * PLACEHOLDER. The "Crew" dark-presence row (who in your room is dark right now) needs rooms,
@@ -80,37 +74,31 @@ object CrewPlaceholderCopy {
 @Composable
 internal fun CrewPlaceholderContent(mode: WidgetColorMode, open: Action?) {
     val colors = GlanceTheme.colors
-    val accents = WidgetAccents(mode)
-    var root = GlanceModifier
-        .fillMaxSize()
-        .background(colors.surface)
-        .cornerRadius(20.dp)
-        .padding(horizontal = 14.dp, vertical = 12.dp)
-        .semantics { contentDescription = CrewPlaceholderCopy.DESCRIPTION }
-    if (open != null) root = root.clickable(open)
-    Column(root) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                CrewPlaceholderCopy.TITLE,
-                style = TextStyle(color = colors.onSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace),
-            )
-            Spacer(GlanceModifier.width(8.dp))
-            Text(
-                CrewPlaceholderCopy.TAG,
-                style = TextStyle(color = accents.cooling, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
-            )
-        }
-        Spacer(GlanceModifier.height(8.dp))
-        // Empty seats: outlined squares, never filled, because nobody is really here.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            repeat(CrewPlaceholderCopy.EMPTY_SEATS) { i ->
-                if (i > 0) Spacer(GlanceModifier.width(8.dp))
-                Box(GlanceModifier.size(18.dp).background(colors.outline).padding(2.dp)) {
-                    Box(GlanceModifier.size(14.dp).background(colors.surface)) {}
+    // One row of the home screen, full at 1.0: the text grows only as far as the box is taller than 90dp.
+    val type = WidgetType(LocalContext.current.resources, max = LocalSize.current.height.value / CrewWidget.SIZE.height.value)
+    WidgetSlab(mode, CrewPlaceholderCopy.DESCRIPTION, open) {
+        Column(GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(CrewPlaceholderCopy.TITLE, style = type.label(11f, colors.onSurfaceVariant), maxLines = 1)
+                Spacer(GlanceModifier.width(8.dp))
+                // Plain ink, not an accent: "not live" is a fact about this widget, not a problem with the rig.
+                Text(CrewPlaceholderCopy.TAG, style = type.label(11f, colors.onSurface), maxLines = 1)
+            }
+            Spacer(GlanceModifier.height(5.dp))
+            // Empty seats: outlined squares, never filled, because nobody is really here.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                repeat(CrewPlaceholderCopy.EMPTY_SEATS) { i ->
+                    if (i > 0) Spacer(GlanceModifier.width(8.dp))
+                    Box(GlanceModifier.size(SEAT).background(colors.outline).padding(SEAT_EDGE)) {
+                        Box(GlanceModifier.fillMaxSize().background(colors.surface)) {}
+                    }
                 }
             }
+            Spacer(GlanceModifier.height(5.dp))
+            Text(CrewPlaceholderCopy.LINE, style = type.body(12f, colors.onSurfaceVariant), maxLines = 2)
         }
-        Spacer(GlanceModifier.height(8.dp))
-        Text(CrewPlaceholderCopy.LINE, style = TextStyle(color = colors.onSurfaceVariant, fontSize = 12.sp), maxLines = 2)
     }
 }
+
+private val SEAT = 14.dp
+private val SEAT_EDGE = 2.dp
