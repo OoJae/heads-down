@@ -142,6 +142,11 @@ half4 main(float2 p) {
         c = face * (0.55 + 0.6 * ndl) * (1.0 + 0.5 * gr) * (1.0 + 0.22 * dot(q, l));
         c += rimc * sp * mix(0.022, 0.42, bm);
         c += rimc * fr * uRim * mix(0.30, 1.0, bm);
+        // Frost: only a frozen slab has any. The chalk lies on every face and gathers on every
+        // edge, so the state still reads on a light page, where a rim of chalk against cream is
+        // no rim at all.
+        float frost = smoothstep(0.25, 1.0, uRim);
+        c += rimc * frost * mix(0.045, 0.20, bm);
 
         if (!onZ) {
             // A side face: light leaking up from the lower rim, and the seam line on it.
@@ -192,7 +197,7 @@ half4 main(float2 p) {
             float shoulder = max(be.x, be.y) * uTune.y;
             float3 metal = emit * (0.030 + 0.11 * tl + 0.30 * ts) * (1.0 + 0.5 * gr);
             float core = clamp(1.0 - dot(c2, c2) * 2.4, 0.0, 1.0);
-            float3 hot = (emit * (0.74 + 0.24 * core) + float3(0.018 * core)) * (1.0 - 0.30 * shoulder);
+            float3 hot = (emit * (0.74 + 0.24 * core) + rimc * (0.022 * core)) * (1.0 - 0.30 * shoulder);
             float3 pad = mix(metal, hot, lit);
             float3 gap = face * 0.40 + emit * 0.075 * lit;
             c = mix(c, mix(gap, pad, tile), board);
@@ -213,11 +218,22 @@ half4 main(float2 p) {
 }
 """
 
-/** Counts what the inert defaults must never do; tests read it. */
+/**
+ * Counts what the inert defaults must never do, and what a live slab must do only in the draw
+ * phase; tests and the lab read it.
+ */
 internal object SlabProbe {
+    /** `RuntimeShader`s constructed. One per hero that draws with the shader; none by default. */
     @Volatile var shadersBuilt = 0
+
+    /** Frames the gravity follow asked for. */
     @Volatile var frameCallbacks = 0
+
+    /** Times the hero was drawn. */
     @Volatile var draws = 0
+
+    /** Times `SlabHero` was (re)composed. A moving slab draws; it does not recompose. */
+    @Volatile var compositions = 0
 }
 
 /** The grain: 64x64 of noise from a fixed seed, made once. */

@@ -109,10 +109,29 @@ internal class SlabMotionState(enter: Boolean) {
         if (dx * dx + dy * dy < SlabMotionSpec.DEADBAND_DEGREES * SlabMotionSpec.DEADBAND_DEGREES) return
         targetX = mapper.poseX
         targetY = mapper.poseY
-        if (parked) {
+        if (!muted) wakeIfBehind()
+    }
+
+    private fun wakeIfBehind() {
+        if (parked && (targetX != gravityX || targetY != gravityY)) {
             parked = false
             wake.trySend(Unit)
         }
+    }
+
+    /**
+     * The hero is scrolled so far that gravity no longer moves it (its weight in the pose is
+     * zero). A phone in the hand is never still, so without this a slab nobody can see would ask
+     * for a frame sixty times a second for as long as the page is read. Muted, the pose is still
+     * tracked and no frame is asked for; when gravity counts again the slab catches up.
+     */
+    private var muted = false
+
+    /** Called from the draw phase with whether gravity has any weight in the pose just drawn. */
+    fun gravityCounts(counts: Boolean) {
+        if (muted == !counts) return
+        muted = !counts
+        if (!muted) wakeIfBehind()
     }
 
     /** The sensor stopped (the activity paused): the next sample starts the filter again. */
@@ -142,6 +161,8 @@ internal class SlabMotionState(enter: Boolean) {
                     } else {
                         gravityX = nx
                         gravityY = ny
+                        // Scrolled away in the middle of a turn: stop here, catch up when it counts again.
+                        if (muted) parked = true
                     }
                 }
             }
@@ -192,8 +213,11 @@ internal class SlabMotionState(enter: Boolean) {
 
     // ---- launch ----
 
-    /** Added to the upward lean: the launch starts edge-on. */
-    val launchPitch = Animatable(if (enter) SlabMotionSpec.LAUNCH_FROM_DEGREES - SlabGeometry.REST_DEGREES else 0f)
+    /**
+     * How much of the pose the launch still holds: 1 is exactly edge-on, 0 is the pose the slab
+     * would have without a launch, wherever gravity puts that; the spring takes it a little past 0.
+     */
+    val launchTurn = Animatable(if (enter) 1f else 0f)
 
     /** 1 at the top of the drop, 0 at rest; the bounce takes it a little below 0. */
     val launchDrop = Animatable(if (enter) 1f else 0f)
@@ -204,7 +228,7 @@ internal class SlabMotionState(enter: Boolean) {
         withFrameNanos { }
         withFrameNanos { }
         launch {
-            launchPitch.animateTo(0f, spring(SlabMotionSpec.LAUNCH_TILT_DAMPING, SlabMotionSpec.LAUNCH_TILT_STIFFNESS, 0.05f))
+            launchTurn.animateTo(0f, spring(SlabMotionSpec.LAUNCH_TILT_DAMPING, SlabMotionSpec.LAUNCH_TILT_STIFFNESS, 0.002f))
         }
         launchDrop.animateTo(0f, spring(SlabMotionSpec.LAUNCH_DROP_DAMPING, SlabMotionSpec.LAUNCH_DROP_STIFFNESS, 0.002f))
     }
@@ -281,5 +305,39 @@ internal class SlabMotionState(enter: Boolean) {
 
     companion object {
         fun lean(x: Float, y: Float): Float = sqrt(x * x + y * y)
+    }
+}
+
+/**
+ * The pose the hero draws, from its parts: rest pulled toward gravity by gravity's weight, plus
+ * what the finger added, plus the scroll's pitch; then the launch, which holds the whole of it
+ * toward exactly edge-on; then the clamp. Pure, and called in the draw phase.
+ */
+internal object SlabPose {
+    /**
+     * Writes the tilt vector in degrees to [out] at 0 and 1. [launchTurn] is 1 while the launch
+     * holds the slab edge-on and 0 once it has let go.
+     */
+    fun compose(
+        gravityX: Float,
+        gravityY: Float,
+        gravityWeight: Float,
+        userX: Float,
+        userY: Float,
+        scrollPitch: Float,
+        launchTurn: Float,
+        out: FloatArray,
+    ) {
+        var x = gravityX * gravityWeight + userX
+        var y = SlabGeometry.REST_DEGREES + (gravityY - SlabGeometry.REST_DEGREES) * gravityWeight + userY + scrollPitch
+        if (launchTurn != 0f) {
+            // From edge-on TO this pose, whatever it is: a phone held flatter or steeper than
+            // usual still sees the slab start as a line and open, never start half open.
+            x *= 1f - launchTurn
+            y += (SlabMotionSpec.LAUNCH_FROM_DEGREES - y) * launchTurn
+        }
+        val clamp = SlabFrame.clampScale(x, y)
+        out[0] = x * clamp
+        out[1] = y * clamp
     }
 }

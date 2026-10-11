@@ -112,6 +112,79 @@ class SlabRenderTest {
         assertEdgeIs(image, pit)
     }
 
+    /** The hero's own frame for a 300 dp hero at rest: where the slab is, to probe round it. */
+    private fun restFrame(image: Bitmap) = SlabFrame().apply {
+        val w = image.width.toFloat()
+        val h = image.height.toFloat()
+        set(0f, SlabGeometry.REST_DEGREES, w / 2f, h * 0.47f, minOf(w * SlabGeometry.WIDTH_FRACTION, h * 0.78f))
+    }
+
+    @Test
+    fun `the halo hugs the silhouette, goes round its corners, and is strongest below`() {
+        val image = capture(SlabState.Hot, 5)
+        val pit = SlabPalette.Dark.pit.toArgb()
+        val frame = restFrame(image)
+        val glow = frame.slabWidthPx * SlabLook.GLOW_FRACTION
+        fun warmth(x: Float, y: Float): Int {
+            val pixel = image.getPixel(x.toInt(), y.toInt())
+            return red(pixel) - red(pit)
+        }
+        // Straight below the lower rim, a fifth of the reach out: bright.
+        val below = warmth(frame.centerX, frame.bottom + glow * 0.2f)
+        assertTrue("no light below the slab ($below)", below > 0x40)
+        // Diagonally off the lower corners, the same distance out: the light goes ROUND the
+        // corner. A halo made of one band per edge leaves a dark notch exactly here.
+        val k = glow * 0.2f * 0.7071f
+        val left = warmth(frame.left - k, frame.bottom + k)
+        val right = warmth(frame.right + k, frame.bottom + k)
+        assertTrue("a notch off the lower left corner ($left against $below below)", left > below / 2)
+        assertTrue("a notch off the lower right corner ($right against $below below)", right > below / 2)
+        // It falls off with distance from the silhouette, and is gone at its reach.
+        val further = warmth(frame.centerX, frame.bottom + glow * 0.6f)
+        assertTrue("the light does not fall off ($below then $further)", further < below / 3 && further >= 0)
+        assertEquals("light beyond the halo's reach", pit, image.getPixel(frame.centerX.toInt(), (frame.bottom + glow + 3f).toInt()))
+        // From above, the light is under the slab: above the far edge there is hardly any.
+        val above = warmth(frame.centerX, frame.top - glow * 0.2f)
+        assertTrue("as much light above the slab as below it ($above against $below)", above < below / 4)
+        // It follows the slab, not a blob round it: level with the middle of the top face and
+        // a reach and a half out to the side there is nothing at all.
+        assertEquals(pit, image.getPixel((frame.left - glow * 1.5f).toInt().coerceAtLeast(0), ((frame.top + frame.bottom) / 2f).toInt()))
+    }
+
+    @Test
+    fun `seen edge-on, the halo is a glow along the edge and not a puddle under it`() {
+        // The pose the lab calls Edge. An ellipse fitted to the slab's bounds has a flat, solid
+        // core here that the thin slab does not cover; the light must fall off from the edge.
+        rule.setContent {
+            val debug = SlabDebug().apply {
+                poseOverride = true
+                poseX = 0f
+                poseY = 90f
+            }
+            androidx.compose.runtime.CompositionLocalProvider(LocalSlabDebug provides debug) {
+                Box(Modifier.size(300.dp).background(SlabPalette.Dark.pit).testTag("hero")) {
+                    SlabHero(state = SlabState.Hot, heat = 5, modifier = Modifier.size(300.dp))
+                }
+            }
+        }
+        val image = rule.onNodeWithTag("hero").captureToImage().asAndroidBitmap()
+        val pit = SlabPalette.Dark.pit.toArgb()
+        val frame = SlabFrame().apply {
+            val w = image.width.toFloat()
+            val h = image.height.toFloat()
+            set(0f, 90f, w / 2f, h * 0.47f, minOf(w * SlabGeometry.WIDTH_FRACTION, h * 0.78f))
+        }
+        val glow = frame.slabWidthPx * SlabLook.GLOW_FRACTION
+        var previous = 0x100
+        for (step in 1..9) {
+            val y = frame.bottom + glow * step / 10f
+            val warmth = red(image.getPixel(frame.centerX.toInt(), y.toInt())) - red(pit)
+            assertTrue("the light under the edge does not fall at step $step ($previous then $warmth)", warmth < previous || warmth == 0)
+            previous = warmth
+        }
+        assertTrue("the light is still strong half a reach below a thin slab ($previous)", previous < 0x10)
+    }
+
     @Test
     fun `an armed slab shows the ember seam on its lower rim, and a cold one does not`() {
         fun emberOnCentreLine(image: Bitmap): Int {

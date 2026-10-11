@@ -82,12 +82,15 @@ fun SlabHero(
     onKnock: () -> Unit = {},
     contentDescription: String? = null,
 ) {
+    // A frame must never be a recomposition: tests and the lab count these against the draws.
+    SlabProbe.compositions++
     val config = LocalSlabConfig.current
     val debug = LocalSlabDebug.current
     val live = config.motion == SlabMotion.Live
     val drawer = remember(config.renderer) { SlabDrawers.create(config.renderer) }
     val frame = remember { SlabFrame() }
     val look = remember { SlabLook() }
+    val pose = remember { FloatArray(2) }
     val target = remember(state, heat) { SlabTarget.of(state, heat) }
     val motion = if (live) remember { SlabMotionState(enter) } else null
     val scroll by rememberUpdatedState(scrollPx)
@@ -140,32 +143,33 @@ fun SlabHero(
                     SlabProbe.draws++
 
                     // The pose: rest, pulled toward gravity, plus the finger, the launch and the scroll.
-                    var tiltX = 0f
-                    var tiltY = SlabGeometry.REST_DEGREES
+                    pose[0] = 0f
+                    pose[1] = SlabGeometry.REST_DEGREES
                     var scale = 1f
                     var centerY = h * CENTER_Y
                     var flipRows = 0f
                     if (motion != null) {
                         val p = SlabScroll.progress(scroll(), h)
                         val gravity = SlabScroll.gravityWeight(p)
+                        motion.gravityCounts(gravity > 0f)
                         val gx = motion.gravityX
                         val gy = motion.gravityY
                         val user = motion.user.value
-                        tiltX = gx * gravity + user.x
-                        tiltY = SlabGeometry.REST_DEGREES + (gy - SlabGeometry.REST_DEGREES) * gravity +
-                            user.y + motion.launchPitch.value + SlabScroll.pitchDegrees(p)
+                        SlabPose.compose(
+                            gx, gy, gravity, user.x, user.y, SlabScroll.pitchDegrees(p), motion.launchTurn.value, pose,
+                        )
                         scale = SlabScroll.scale(p)
                         centerY += h * SlabScroll.sink(p) - dropPx * motion.launchDrop.value
                         if (state == SlabState.Armed) flipRows = SlabTarget.armedFlipRows(SlabMotionState.lean(gx, gy)) * gravity
                     }
                     if (debug != null && debug.poseOverride) {
-                        tiltX = debug.poseX
-                        tiltY = debug.poseY
+                        val clamp = SlabFrame.clampScale(debug.poseX, debug.poseY)
+                        pose[0] = debug.poseX * clamp
+                        pose[1] = debug.poseY * clamp
                     }
-                    val clamp = SlabFrame.clampScale(tiltX, tiltY)
                     val widthFraction = debug?.widthFraction ?: SlabGeometry.WIDTH_FRACTION
                     val slabWidth = min(w * widthFraction, h * MAX_WIDTH_OF_HEIGHT) * scale
-                    frame.set(tiltX * clamp, tiltY * clamp, w / 2f, centerY, slabWidth)
+                    frame.set(pose[0], pose[1], w / 2f, centerY, slabWidth)
 
                     if (motion != null) motion.fill(look, target, palette) else look.set(target, palette)
                     look.lit = max(look.lit, flipRows)

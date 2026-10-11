@@ -1,13 +1,12 @@
 package xyz.headsdown.ui.slab
 
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -16,46 +15,78 @@ import kotlin.math.sqrt
 /**
  * Renderer B: the same slab from polygons projected in Kotlin, on a plain Canvas. Same geometry
  * and the same lighting numbers as the shader, per face instead of per pixel: flat faces, the
- * bevel as stroked edges, the board as tile quads, the halo as one radial gradient.
+ * bevel and the sides' outlines as stroked edges, the board as tile quads, and the halo as one
+ * mesh round the silhouette ([SlabHaloMesh]).
  *
  * It is the renderer of Android 12 and 12L, the default of tests and previews, and the fallback
- * if the shader cannot hold the frame rate. Compose `Path` only; nothing is allocated per frame
- * (the halo's brush is rebuilt when its colour changes).
+ * if the shader cannot hold the frame rate. Compose `Path` for the slab; nothing is allocated
+ * per frame.
  */
 internal class PolygonSlabDrawer : SlabDrawer {
     private val path = Path()
     private val pts = FloatArray(8)
-    private var haloBrush: Brush? = null
-    private var haloKey = Color.Unspecified
+    private val halo = SlabHaloMesh()
 
     override fun DrawScope.draw(frame: SlabFrame, look: SlabLook, palette: SlabPalette) {
         halo(frame, look, palette)
         val eye = frame.eye
         val eyeLength = SlabGeometry.EYE_DISTANCE
+        val frost = frost(look.rim)
         for (face in 0 until 6) {
             val bit = 1 shl face
             if (frame.faces and bit == 0) continue
-            val corners = SlabGeometry.FACE_CORNERS[face]
-            val c = frame.corners
-            path.rewind()
-            path.moveTo(c[2 * corners[0]], c[2 * corners[0] + 1])
-            path.lineTo(c[2 * corners[1]], c[2 * corners[1] + 1])
-            path.lineTo(c[2 * corners[2]], c[2 * corners[2] + 1])
-            path.lineTo(c[2 * corners[3]], c[2 * corners[3] + 1])
-            path.close()
+            facePath(frame, face)
             val under = bit == SlabGeometry.FACE_NZ
             val ndl = max(0f, if (under) abs(frame.light[2]) else frame.faceLight(bit))
             val ndv = (abs(eye[face / 2]) / eyeLength).coerceIn(0f, 1f)
             var fr = 1f - ndv
             fr *= fr
             fr *= fr
-            drawPath(path, stone(palette, 0.55f + 0.6f * ndl, fr * look.rim * 0.30f))
+            drawPath(path, stone(palette, 0.55f + 0.6f * ndl, fr * look.rim * 0.30f + 0.045f * frost))
         }
 
         if (frame.faces and SlabGeometry.FACE_NZ != 0) board(frame, look, palette)
         sides(frame, look)
+        sideEdges(frame, palette)
         bevels(frame, look, palette)
         outline(frame, look, palette)
+    }
+
+    private fun facePath(frame: SlabFrame, face: Int) {
+        val corners = SlabGeometry.FACE_CORNERS[face]
+        val c = frame.corners
+        path.rewind()
+        path.moveTo(c[2 * corners[0]], c[2 * corners[0] + 1])
+        path.lineTo(c[2 * corners[1]], c[2 * corners[1] + 1])
+        path.lineTo(c[2 * corners[2]], c[2 * corners[2] + 1])
+        path.lineTo(c[2 * corners[3]], c[2 * corners[3] + 1])
+        path.close()
+    }
+
+    /**
+     * Every visible side face, outlined in the edge colour. Without it a cold slab's sides are
+     * one shade off the page and its thickness cannot be read at all: the shader gets these
+     * lines from its bevel, here they are drawn. The lit bevel is drawn over the ones it shares.
+     */
+    private fun DrawScope.sideEdges(frame: SlabFrame, palette: SlabPalette) {
+        val c = frame.corners
+        val width = max(1.5f, 0.004f * frame.slabWidthPx)
+        for (face in 0 until 4) {
+            if (frame.faces and (1 shl face) == 0) continue
+            val corners = SlabGeometry.FACE_CORNERS[face]
+            for (edge in 0 until 4) {
+                val from = corners[edge]
+                val to = corners[(edge + 1) % 4]
+                drawLine(
+                    palette.faceEdge,
+                    Offset(c[2 * from], c[2 * from + 1]),
+                    Offset(c[2 * to], c[2 * to + 1]),
+                    strokeWidth = width,
+                    cap = StrokeCap.Round,
+                    alpha = SIDE_EDGE_ALPHA,
+                )
+            }
+        }
     }
 
     /** The chalk rim: the silhouette stroked, strong only when the rim is (a frozen slab). */
@@ -103,36 +134,10 @@ internal class PolygonSlabDrawer : SlabDrawer {
             alpha = 0.62f * strength
         }
         if (alpha <= 0.004f) return
-        val keyed = color.copy(alpha = alpha)
-        var brush = haloBrush
-        if (brush == null || keyed != haloKey) {
-            // The shader's falloff is a cube of the distance; these stops follow it.
-            brush = Brush.radialGradient(
-                0f to keyed,
-                0.55f to keyed,
-                0.7f to keyed.copy(alpha = alpha * 0.4f),
-                0.85f to keyed.copy(alpha = alpha * 0.1f),
-                1f to keyed.copy(alpha = 0f),
-                center = Offset.Zero,
-                radius = 1f,
-            )
-            haloBrush = brush
-            haloKey = keyed
-        }
-        val halfW = (frame.right - frame.left) / 2f
-        val halfH = (frame.bottom - frame.top) / 2f
-        // From above, the light is under the slab: the glow sits low. From below it is all around.
-        val low = (1f - min(1f, frame.underside * 2.5f)) * 0.5f * look.glowPx
-        val cx = (frame.left + frame.right) / 2f
-        val cy = (frame.top + frame.bottom) / 2f + low
-        val rx = halfW + look.glowPx
-        val ry = halfH + look.glowPx - low
-        withTransform({
-            translate(cx, cy)
-            scale(rx, ry, Offset.Zero)
-        }) {
-            drawRect(brush, Offset(-1f, -1f), Size(2f, 2f))
-        }
+        // From above the light is under the slab, so it shows below it and hardly above; from
+        // below it is all around. The same weighting as the shader's.
+        val lowest = if (palette.isLight) 0.25f else 0.10f + 0.90f * min(1f, frame.underside * 2.5f)
+        if (halo.build(frame, look.glowPx, color.toArgb(), alpha, lowest)) halo.draw(drawContext.canvas.nativeCanvas)
     }
 
     /** The 5x5 board on the underside: a darker bed, then one path of five tiles per row. */
@@ -141,20 +146,25 @@ internal class PolygonSlabDrawer : SlabDrawer {
         val z = -SlabGeometry.HALF_Z
         val e = look.emit
         val f = palette.face
-        val glow = 0.075f * min(1f, look.lit / SlabGeometry.TILES)
+        val step = SlabGeometry.GRID / SlabGeometry.TILES
         quad(frame, -half, -half, half, half, z)
-        drawPath(
-            path,
-            Color(
-                red = sqrt(min(1f, f.red * f.red * 0.40f + e.red * e.red * glow)),
-                green = sqrt(min(1f, f.green * f.green * 0.40f + e.green * e.green * glow)),
-                blue = sqrt(min(1f, f.blue * f.blue * 0.40f + e.blue * e.blue * glow)),
-            ),
-        )
+        drawPath(path, bed(f, e, 0f))
+        // The bed glows only between tiles that are lit: under the unlit rows it stays dark, or
+        // their gaps wash out and the rows read as one block. The lit rows as one piece, then
+        // the row that is lighting.
+        val lit = look.lit.coerceIn(0f, SlabGeometry.TILES.toFloat())
+        val whole = lit.toInt()
+        if (whole > 0) {
+            quad(frame, -half, -half, half, -half + whole * step, z)
+            drawPath(path, bed(f, e, 1f))
+        }
+        if (lit > whole) {
+            quad(frame, -half, -half + whole * step, half, -half + (whole + 1) * step, z)
+            drawPath(path, bed(f, e, lit - whole))
+        }
         val tl = abs(frame.light[2])
         // A little above the shader's flat pad: there is no shoulder here to catch the light.
         val metal = 0.055f + 0.11f * tl
-        val step = SlabGeometry.GRID / SlabGeometry.TILES
         val gap = SlabGeometry.TILE_GAP * step
         for (row in 0 until SlabGeometry.TILES) {
             val lit = (look.lit - row).coerceIn(0f, 1f)
@@ -185,6 +195,16 @@ internal class PolygonSlabDrawer : SlabDrawer {
                 ),
             )
         }
+    }
+
+    /** The floor between the tiles: the stone in shade, plus the light of a row that is [lit]. */
+    private fun bed(face: Color, emit: Color, lit: Float): Color {
+        val glow = 0.075f * lit
+        return Color(
+            red = sqrt(min(1f, face.red * face.red * 0.40f + emit.red * emit.red * glow)),
+            green = sqrt(min(1f, face.green * face.green * 0.40f + emit.green * emit.green * glow)),
+            blue = sqrt(min(1f, face.blue * face.blue * 0.40f + emit.blue * emit.blue * glow)),
+        )
     }
 
     private fun quad(frame: SlabFrame, x0: Float, y0: Float, x1: Float, y1: Float, z: Float) {
@@ -295,6 +315,7 @@ internal class PolygonSlabDrawer : SlabDrawer {
                 fr *= fr
                 best = max(best, sp * 0.42f + fr * look.rim)
             }
+            best += 0.20f * frost(look.rim)
             val from = corners[edge]
             val to = corners[(edge + 1) % 4]
             val edgeLight = palette.faceEdge
@@ -311,6 +332,17 @@ internal class PolygonSlabDrawer : SlabDrawer {
                 strokeWidth = width,
                 cap = StrokeCap.Round,
             )
+        }
+    }
+
+    companion object {
+        /** How strongly a side face's outline is drawn, in the palette's edge colour. */
+        const val SIDE_EDGE_ALPHA = 0.62f
+
+        /** The shader's frost: none until the rim is well past any state but Frozen, all at 1. */
+        fun frost(rim: Float): Float {
+            val t = ((rim - 0.25f) / 0.75f).coerceIn(0f, 1f)
+            return t * t * (3f - 2f * t)
         }
     }
 }

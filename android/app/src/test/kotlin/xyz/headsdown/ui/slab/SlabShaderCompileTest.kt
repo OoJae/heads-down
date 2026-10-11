@@ -119,6 +119,46 @@ class SlabShaderCompileTest {
         assertEquals(4, Regex("layout\\(color\\) uniform half4").findAll(SLAB_AGSL).count())
         assertTrue(Regex("half[234]? +(p|rd|q|t|d|uC|uRo|uEdge)\\b").find(SLAB_AGSL) == null)
         assertTrue("#" !in SLAB_AGSL)
+        // No grey either. A vector built from one number is zero, one or an epsilon; a vector is
+        // never a number times something (that is a grey with a name); and nothing is built
+        // from three numbers except an axis.
+        for (match in Regex("float3\\(([^(),]+)\\)").findAll(code)) {
+            val argument = match.groupValues[1].trim()
+            val number = argument.toFloatOrNull()
+            if (number != null) {
+                assertTrue("float3($argument) is a colour written into the source", number == 0f || number == 1f || number <= 1e-4f)
+            }
+            assertTrue("float3($argument) is a grey written into the source", !Regex("^[0-9.]+ *\\*").containsMatchIn(argument))
+        }
+        for (match in Regex("float3\\(([-0-9.e ]+),([-0-9.e ]+),([-0-9.e ]+)\\)").findAll(code)) {
+            val values = match.groupValues.drop(1).map { it.trim().toFloat() }
+            assertTrue("float3(${values.joinToString()}) is not an axis", values.all { it == 0f || it == 1f } && values.sum() == 1f)
+        }
+    }
+
+    /** The source without its comments, which talk about half-planes and half pixels. */
+    private val code = SLAB_AGSL.lines().joinToString("\n") { it.substringBefore("//") }
+
+    @Test
+    fun `half is used for colours only`() {
+        // On Mali `half` can be a true 16-bit float: 11 bits of mantissa cannot hold a pixel
+        // coordinate on a 1640 px screen to the sub-pixel, let alone a ray. The only halves in
+        // the source are the four colour uniforms, the parameter that squares one, main's
+        // return type and the value it returns.
+        val halves = Regex("\\bhalf[234]?\\b").findAll(code).count()
+        val colourUniforms = Regex("layout\\(color\\) uniform half4 \\w+;").findAll(code).count()
+        val colourParameter = Regex("float3 lin\\(half4 c\\)").findAll(code).count()
+        val mainReturn = Regex("half4 main\\(float2 p\\)").findAll(code).count()
+        val returned = Regex("return half4\\(half3\\(rgb\\), half\\(a\\)\\);").findAll(code).count()
+        assertEquals(4, colourUniforms)
+        assertEquals(1, colourParameter)
+        assertEquals(1, mainReturn)
+        assertEquals(1, returned)
+        assertEquals("a half that is not a colour", colourUniforms + colourParameter + mainReturn + 3 * returned, halves)
+        // Every other declaration is float, int or bool.
+        val declared = Regex("^\\s*(?:const |uniform )?(\\w+) \\w+(?:\\[6])?(?: =|;)", RegexOption.MULTILINE).findAll(code)
+            .map { it.groupValues[1] }.filter { it != "return" }.toSet()
+        assertEquals(setOf("float", "float2", "float3", "float3x3", "bool", "shader"), declared - "half4")
     }
 
     @Test

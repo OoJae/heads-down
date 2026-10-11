@@ -190,6 +190,42 @@ class SlabTiltTest {
     }
 
     @Test
+    fun `the underside shows by the time the phone is upright, for any hold angle up to about 55 degrees`() {
+        // The lean at upright is 62 + 1.8 * (90 - neutral). What that is for each hold angle the
+        // neutral can settle on, so the limit of "presented by upright" is written down:
+        fun leanUprightAfterHolding(hold: Float): Float {
+            filter.reset()
+            val fresh = TiltMapper()
+            var t = nanos
+            fun feedTo(mapper: TiltMapper, theta: Float, seconds: Float) {
+                val (x, y, z) = held(theta)
+                repeat((seconds * 50).toInt()) {
+                    t += step
+                    val first = !filter.hasValue
+                    if (filter.add(x, y, z, t)) {
+                        mapper.update(filter.x, filter.y, filter.z, if (first) 0f else 0.02f, filter.speedDegreesPerSecond < TiltMapper.STEADY_DEGREES_PER_SECOND)
+                    }
+                }
+            }
+            feedTo(fresh, hold, 60f)
+            assertEquals(hold.coerceIn(TiltMapper.NEUTRAL_MIN_DEGREES, TiltMapper.NEUTRAL_MAX_DEGREES), fresh.neutralDegrees, 0.1f)
+            feedTo(fresh, 90f, 2f)
+            nanos = t
+            return sqrt(fresh.poseX * fresh.poseX + fresh.poseY * fresh.poseY)
+        }
+        // At the usual hold and anything flatter, upright is well past edge-on: the board is presented.
+        assertTrue(leanUprightAfterHolding(30f) >= 150f)
+        assertEquals(143f, leanUprightAfterHolding(45f), 1.5f)
+        assertTrue(leanUprightAfterHolding(55f) >= 120f)
+        // Steeper holds give less. A phone read at 75 degrees is only edge-on when upright, and
+        // shows its underside from there on: by face-down it is at the clamp like any other.
+        assertEquals(116f, leanUprightAfterHolding(60f), 2f)
+        assertEquals(89f, leanUprightAfterHolding(75f), 2f)
+        hold(180f, 1f)
+        assertEquals(TiltMapper.MAX_LEAN_DEGREES, lean, 0f)
+    }
+
+    @Test
     fun `a phone left in a stand stops moving the slab`() {
         hold(60f, 60f)
         val settledX = mapper.poseX
