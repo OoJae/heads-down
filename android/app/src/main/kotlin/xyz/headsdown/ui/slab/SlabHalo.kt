@@ -194,7 +194,7 @@ internal class SlabHaloMesh {
             xy[2 * at] = x
             xy[2 * at + 1] = y
             val a = (alpha * FALLOFF[k] * weight(y, centerY, slabWidthPx, lowest) * 255f + 0.5f).toInt().coerceIn(0, 255)
-            colors[at] = (a shl 24) or (rgb and 0x00FFFFFF)
+            colors[at] = (a shl 24) or (rgb and 0xFFFFFF) // keep the colour, replace its alpha
             at++
         }
     }

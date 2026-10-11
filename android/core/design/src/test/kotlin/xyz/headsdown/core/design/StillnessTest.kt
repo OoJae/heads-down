@@ -31,7 +31,12 @@ class StillnessTest {
     private val endlessExceptions = setOf("app/src/main/kotlin/xyz/headsdown/ui/HomeScreen.kt")
 
     /** The board replay is driven by `withFrameNanos` and stops when the night has been replayed. */
-    private val frameLoopAllowed = setOf("feature/reveal/src/main/kotlin/xyz/headsdown/feature/reveal/ui/RevealBoard.kt")
+    private val frameLoopAllowed = setOf(
+        "feature/reveal/src/main/kotlin/xyz/headsdown/feature/reveal/ui/RevealBoard.kt",
+        // The slab's pose loop asks for a frame only while the pose is still moving and parks once it
+        // has converged; SlabInertTest in :app proves that a still phone draws nothing.
+        "app/src/main/kotlin/xyz/headsdown/ui/slab/SlabMotionState.kt",
+    )
 
     /**
      * Material's progress and loading indicators. Without a `progress` they run an infinite
@@ -59,7 +64,7 @@ class StillnessTest {
     }
 
     @Test
-    fun `a frame loop exists only in the board replay`() {
+    fun `a frame loop exists only where it ends by itself`() {
         assertEquals(frameLoopAllowed, filesNaming(frameLoop))
     }
 
