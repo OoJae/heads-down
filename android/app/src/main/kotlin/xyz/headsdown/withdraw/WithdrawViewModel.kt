@@ -43,8 +43,10 @@ sealed interface WithdrawState {
         val working: Boolean = false,
         /** Why the last attempt changed nothing, in fixed words. */
         val problem: String? = null,
+        /** Close the shift logs that are past their 30 days. Never on by default. */
+        val closeLogs: Boolean = false,
     ) : WithdrawState {
-        val canSign: Boolean get() = facts.somethingToSign(revoke, closeRig)
+        val canSign: Boolean get() = facts.somethingToSign(revoke, closeRig, closeLogs)
     }
 
     /** Confirmed on-chain with no error. [signature] is the transaction that did it, for a link to it. */
@@ -130,6 +132,8 @@ class WithdrawModel(
 
     fun setCloseRig(closeRig: Boolean) = choose { it.copy(closeRig = closeRig && it.facts.canCloseRig) }
 
+    fun setCloseLogs(closeLogs: Boolean) = choose { it.copy(closeLogs = closeLogs && it.facts.canCloseLogs) }
+
     private fun choose(change: (WithdrawState.Ready) -> WithdrawState.Ready) {
         val ready = _state.value as? WithdrawState.Ready ?: return
         if (!ready.working) _state.value = change(ready).copy(problem = null)
@@ -139,7 +143,7 @@ class WithdrawModel(
         val ready = _state.value as? WithdrawState.Ready ?: return
         val wallet = authority ?: return
         if (ready.working || !ready.canSign) return
-        val request = WithdrawRequest(revoke = ready.revoke, closeRig = ready.closeRig)
+        val request = WithdrawRequest(revoke = ready.revoke, closeRig = ready.closeRig, closeLogs = ready.closeLogs)
         _state.value = ready.copy(working = true, problem = null)
         scope.launch {
             var refusal: String? = null

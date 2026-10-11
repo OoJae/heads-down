@@ -1,6 +1,8 @@
 package xyz.headsdown.clockout
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,12 +12,16 @@ import org.junit.Test
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.accounts.OreClaimEstimate
 import xyz.headsdown.core.chain.clockout.BondOutcome
+import xyz.headsdown.core.chain.clockout.BuyLeg
 import xyz.headsdown.core.chain.clockout.BuyOutcome
 import xyz.headsdown.core.chain.clockout.ClockOutPlan
 import xyz.headsdown.core.chain.clockout.ClockOutRefusedException
 import xyz.headsdown.core.chain.clockout.ClockOutRequest
 import xyz.headsdown.core.chain.clockout.PreparedClockOut
 import xyz.headsdown.core.chain.clockout.ShiftOutcome
+import xyz.headsdown.core.chain.swap.SwapQuote
+import xyz.headsdown.core.chain.swap.SwapRequest
+import xyz.headsdown.core.chain.swap.SwapSkip
 import xyz.headsdown.core.chain.tx.Instruction
 import xyz.headsdown.core.keys.ShiftEndReason
 import xyz.headsdown.core.wallet.Commitment
@@ -57,6 +63,22 @@ class ClockOutModelTest {
         val requests = mutableListOf<ClockOutRequest>()
         var refuse: ClockOutRefusedException.Reason? = null
 
+        /** The build has a swap API, and what it quotes for a spend (absent: no quote). */
+        var canBuy = false
+        val quotes = mutableMapOf<ULong, BuyQuote>()
+        val quoted = mutableListOf<ULong>()
+        var quoteGate: CompletableDeferred<Unit>? = null
+        var bought: (ClockOutRequest) -> BuyOutcome = { BuyOutcome.NotRequested }
+
+        override val buyAvailable: Boolean get() = canBuy
+
+        override suspend fun quoteBuy(spendLamports: ULong): BuyQuote? {
+            quoted += spendLamports
+            quoteGate?.await()
+            if (spendLamports == 5_000_000uL) throw IOException("secret-host.example refused")
+            return quotes[spendLamports]
+        }
+
         override suspend fun preview(authority: Pubkey): ClockOutFacts {
             previews++
             if (previewFails) throw IOException("secret-host.example refused")
@@ -67,7 +89,7 @@ class ClockOutModelTest {
             requests += request
             refuse?.let { throw ClockOutRefusedException(it) }
             val plan = plan(request) ?: return null
-            return PreparedClockOut(listOf(byteArrayOf(1)), 100, authority, plan, BuyOutcome.NotRequested)
+            return PreparedClockOut(listOf(byteArrayOf(1)), 100, authority, plan, bought(request))
         }
     }
 
@@ -317,5 +339,242 @@ class ClockOutModelTest {
         advanceUntilIdle()
         assertEquals(1, chain.requests.size)
         assertTrue(model.state.value is ClockOutState.Done)
+    }
+
+    // --- "Buy ORE" ---
+
+    private val quote = BuyQuote(spendLamports = 1_000_000uL, oreAtoms = 96_488_910uL, minOreAtoms = 95_524_020uL, slippageBps = 100, route = listOf("Meteora DLMM"))
+
+    private fun swapQuote() = SwapQuote(
+        SwapRequest(Pubkey(ByteArray(32) { 2 }), Pubkey(ByteArray(32) { 3 }), 1_000_000uL, 100),
+        outAmount = 96_488_910uL, priceImpactBps = 1, route = listOf("Meteora DLMM"), platformFeeBps = 0, providerPayload = "{}",
+    )
+
+    private fun buying(facts: ClockOutFacts = completed) = FakeChain(facts, planFor(facts)).apply {
+        canBuy = true
+        quotes[1_000_000uL] = quote
+    }
+
+    @Test
+    fun `a build with no swap API offers no buy and ignores one`() = runTest {
+        val chain = FakeChain(completed, planFor(completed))
+        val model = ClockOutModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        assertFalse((model.state.value as ClockOutState.Ready).buy.available)
+        model.setBuy(1_000_000uL)
+        advanceUntilIdle()
+        assertEquals(BuyChoice(), (model.state.value as ClockOutState.Ready).buy)
+        assertTrue(chain.quoted.isEmpty())
+    }
+
+    @Test
+    fun `the buy is off until chosen, and what is signed is the spend and the minimum the sheet stated`() = runTest {
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = false) } }
+        val model = ClockOutModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        val ready = model.state.value as ClockOutState.Ready
+        assertEquals(BuyChoice(offers = BuyChoice.OFFERS), ready.buy)
+        assertTrue(ready.canSign)
+
+        // While the market is asked, nothing can be signed: the sheet has not stated the quote yet.
+        chain.quoteGate = CompletableDeferred()
+        model.setBuy(1_000_000uL)
+        runCurrent()
+        val asking = model.state.value as ClockOutState.Ready
+        assertTrue(asking.buy.quoting)
+        assertFalse(asking.canSign)
+        model.confirm(wallet())
+        runCurrent()
+        assertTrue(chain.requests.isEmpty())
+
+        chain.quoteGate!!.complete(Unit)
+        advanceUntilIdle()
+        val quoted = model.state.value as ClockOutState.Ready
+        assertEquals(quote, quoted.buy.quote)
+        assertFalse(quoted.buy.quoting)
+        assertTrue(quoted.canSign)
+
+        model.confirm(wallet())
+        advanceUntilIdle()
+        assertEquals(BuyLeg(1_000_000uL, 95_524_020uL, 100), chain.requests.single().buy)
+        val done = model.state.value as ClockOutState.Done
+        assertTrue(done.message, done.message.startsWith("Confirmed on-chain. Shift sealed as completed."))
+        assertTrue(done.message, done.message.endsWith("0.001 SOL swapped for ORE: at least 0.00095524 ORE is in your wallet."))
+    }
+
+    @Test
+    fun `no quote means no buy, and the clock-out goes ahead without it`() = runTest {
+        val chain = buying()
+        val model = ClockOutModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        model.setBuy(2_000_000uL) // the market has no route for it
+        advanceUntilIdle()
+        val none = (model.state.value as ClockOutState.Ready)
+        assertTrue(none.buy.noQuote)
+        assertNull(none.buy.quote)
+        // A failed read is the same as no quote, and its text is not ours to show.
+        model.setBuy(5_000_000uL)
+        advanceUntilIdle()
+        assertTrue((model.state.value as ClockOutState.Ready).buy.noQuote)
+        model.confirm(wallet())
+        advanceUntilIdle()
+        assertNull(chain.requests.single().buy)
+        assertFalse((model.state.value as ClockOutState.Done).message.contains("ORE was bought"))
+    }
+
+    @Test
+    fun `the last choice wins, off asks nothing, and an amount not on offer is ignored`() = runTest {
+        val chain = buying()
+        val model = ClockOutModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        chain.quoteGate = CompletableDeferred()
+        model.setBuy(1_000_000uL)
+        runCurrent()
+        model.setBuy(0uL) // changed their mind while the market was being asked
+        chain.quoteGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(BuyChoice(offers = BuyChoice.OFFERS), (model.state.value as ClockOutState.Ready).buy)
+        model.setBuy(123_456_789uL)
+        advanceUntilIdle()
+        assertEquals(listOf(1_000_000uL), chain.quoted)
+        model.confirm(wallet())
+        advanceUntilIdle()
+        assertNull(chain.requests.single().buy)
+    }
+
+    @Test
+    fun `a buy alone can be signed, and a buy that is skipped with nothing else says so`() = runTest {
+        val idle = completed.copy(shift = ShiftOutcome.NoOpenShift, bond = BondOutcome.None, nothingByDefault = true)
+        // Nothing to seal, nothing to claim: only the swap would be signed, and it could not be built.
+        val chain = FakeChain(idle) { null }.apply {
+            canBuy = true
+            quotes[1_000_000uL] = quote
+        }
+        val model = ClockOutModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        assertFalse((model.state.value as ClockOutState.Ready).canSign)
+        model.setBuy(1_000_000uL)
+        advanceUntilIdle()
+        assertTrue((model.state.value as ClockOutState.Ready).canSign)
+        model.confirm(wallet())
+        advanceUntilIdle()
+        assertEquals(ClockOutModel.NOTHING_BOUGHT, (model.state.value as ClockOutState.Ready).problem)
+    }
+
+    @Test
+    fun `a buy that was left out is reported with the clock-out it did not stop`() = runTest {
+        val chain = buying().apply { bought = { BuyOutcome.Skipped(SwapSkip.PRICE_MOVED) } }
+        val model = ClockOutModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        model.setBuy(1_000_000uL)
+        advanceUntilIdle()
+        model.confirm(wallet())
+        advanceUntilIdle()
+        val done = model.state.value as ClockOutState.Done
+        assertTrue(done.message, done.message.endsWith("No ORE was bought: the price moved past what the sheet showed."))
+    }
+
+    // --- what landed, when the wallet signed more than the clock-out ---
+
+    private val landed = ConfirmationOutcome.Confirmed("sig", 1, Commitment.CONFIRMED)
+    private val failed = ConfirmationOutcome.FailedOnChain("sig2", 1, "custom program error: 0x1771")
+    private val lost = ConfirmationOutcome.TimedOut("sig3", 40)
+
+    /** A wallet that signs whatever is prepared and reports [outcomes], one per transaction. */
+    private fun walletReporting(vararg outcomes: ConfirmationOutcome): ClockOutSigner = { prepare ->
+        when (val prepared = prepare(account, caps)) {
+            null -> WalletResult.Success(WalletSession.NothingToSign(account))
+            else -> WalletResult.Success(WalletSession.Submitted(account, prepared, SubmissionReport(outcomes.toList())))
+        }
+    }
+
+    private suspend fun kotlinx.coroutines.test.TestScope.quoted(chain: FakeChain, onSealed: () -> Unit = {}): ClockOutModel {
+        val model = ClockOutModel(chain, { authority }, this, onShiftSealed = onSealed)
+        model.load()
+        advanceUntilIdle()
+        model.setBuy(1_000_000uL)
+        advanceUntilIdle()
+        return model
+    }
+
+    @Test
+    fun `a clock-out that landed is done even when the swap in its own transaction did not`() = runTest {
+        var sealed = 0
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = true) } }
+        val model = quoted(chain) { sealed++ }
+        model.confirm(walletReporting(landed, failed))
+        advanceUntilIdle()
+        val done = model.state.value as ClockOutState.Done
+        assertTrue(done.message, done.message.startsWith("Confirmed on-chain. Shift sealed as completed."))
+        assertTrue(done.message, done.message.endsWith(ClockOutCopy.BUY_NOT_LANDED))
+        assertFalse(done.message.contains("swapped for ORE"))
+        assertEquals("the phone stops signing for the sealed shift", 1, sealed)
+        assertEquals("sig", done.signature)
+
+        // The swap's fate is not known: said so, and the clock-out is still done.
+        val unsure = quoted(buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = true) } })
+        unsure.confirm(walletReporting(landed, lost))
+        advanceUntilIdle()
+        assertTrue((unsure.state.value as ClockOutState.Done).message.endsWith(ClockOutCopy.BUY_NOT_CONFIRMED))
+    }
+
+    @Test
+    fun `a swap that landed is not hidden by a clock-out that did not, and trying again does not buy twice`() = runTest {
+        var sealed = 0
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = true) } }
+        val model = quoted(chain) { sealed++ }
+        model.confirm(walletReporting(failed, landed))
+        advanceUntilIdle()
+        val back = model.state.value as ClockOutState.Ready
+        assertEquals(
+            "0.001 SOL swapped for ORE: at least 0.00095524 ORE is in your wallet. But the clock-out did not go through on-chain: try it again. The buy is off now.",
+            back.problem,
+        )
+        assertEquals(BuyChoice(offers = BuyChoice.OFFERS), back.buy)
+        assertEquals(0, sealed)
+        // The second approval is the clock-out alone.
+        chain.bought = { BuyOutcome.NotRequested }
+        model.confirm(walletReporting(landed))
+        advanceUntilIdle()
+        assertNull(chain.requests.last().buy)
+        assertEquals(1, sealed)
+        assertFalse((model.state.value as ClockOutState.Done).message.contains("swapped"))
+    }
+
+    @Test
+    fun `one transaction that carried the buy and failed names the buy, changes nothing and turns the buy off`() = runTest {
+        var sealed = 0
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = false) } }
+        val model = quoted(chain) { sealed++ }
+        model.confirm(walletReporting(failed))
+        advanceUntilIdle()
+        val back = model.state.value as ClockOutState.Ready
+        assertEquals(ClockOutModel.NOT_LANDED_WITH_BUY, back.problem)
+        assertNull(back.buy.quote)
+        assertEquals(0uL, back.buy.spendLamports)
+        assertEquals(0, sealed)
+        assertFalse("the chain's own error text is not ours to show", back.problem!!.contains("0x1771"))
+
+        // Not known whether it landed: nothing is claimed either way, and a retry cannot buy again unasked.
+        val unsure = quoted(buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = false) } })
+        unsure.confirm(walletReporting(lost))
+        advanceUntilIdle()
+        val waiting = unsure.state.value as ClockOutState.Ready
+        assertEquals(ClockOutModel.NOT_CONFIRMED, waiting.problem)
+        assertNull(waiting.buy.quote)
+
+        // A clock-out with no buy that failed says what it always said.
+        val plain = ClockOutModel(buying(), { authority }, this)
+        plain.load()
+        advanceUntilIdle()
+        plain.confirm(walletReporting(failed))
+        advanceUntilIdle()
+        assertEquals(ClockOutModel.NOT_LANDED, (plain.state.value as ClockOutState.Ready).problem)
     }
 }

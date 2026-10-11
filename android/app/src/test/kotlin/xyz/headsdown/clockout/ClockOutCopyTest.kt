@@ -6,8 +6,13 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import xyz.headsdown.core.chain.accounts.OreClaimEstimate
+import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.clockout.BondOutcome
+import xyz.headsdown.core.chain.clockout.BuyOutcome
 import xyz.headsdown.core.chain.clockout.ShiftOutcome
+import xyz.headsdown.core.chain.swap.SwapQuote
+import xyz.headsdown.core.chain.swap.SwapRequest
+import xyz.headsdown.core.chain.swap.SwapSkip
 import xyz.headsdown.core.keys.ShiftEndReason
 import xyz.headsdown.feature.reveal.haul.HonestCopy
 import java.time.ZoneId
@@ -221,5 +226,54 @@ class ClockOutCopyTest {
         }
         assertTrue(text.size > 100)
         text.forEach { assertEquals(it, emptyList<String>(), HonestCopy.violations(it)) }
+    }
+
+    // --- "Buy ORE" ---
+
+    @Test
+    fun `a quote is stated as the amount, its price and the least the swap may deliver`() {
+        // Jupiter's answer for 0.001 SOL on 11 October 2026, at 1% slippage.
+        val q = BuyQuote(spendLamports = 1_000_000uL, oreAtoms = 96_488_910uL, minOreAtoms = 95_524_020uL, slippageBps = 100, route = listOf("Meteora DLMM"))
+        assertEquals(
+            "0.001 SOL buys about 0.00096488 ORE right now: 1.037 SOL per ORE. If the price moves and the swap would deliver less than " +
+                "0.00095524 ORE, nothing is bought. Route: Meteora DLMM. Heads Down adds no fee; the pools' own fees are in that price.",
+            ClockOutCopy.buyQuote(q),
+        )
+        // No route named: no "Route:" with nothing after it.
+        assertFalse(ClockOutCopy.buyQuote(q.copy(route = emptyList())).contains("Route"))
+        // The price is rounded up, never down: 0.001 SOL for exactly 0.001 ORE is 1.000, a hair less ORE is 1.001.
+        assertEquals("1.000", ClockOutCopy.price(1_000_000uL, 100_000_000uL))
+        assertEquals("1.001", ClockOutCopy.price(1_000_000uL, 99_999_999uL))
+        assertEquals("?", ClockOutCopy.price(1_000_000uL, 0uL))
+        assertEquals("Off", ClockOutCopy.buyLabel(0uL))
+        assertEquals("0.005 SOL", ClockOutCopy.buyLabel(5_000_000uL))
+    }
+
+    @Test
+    fun `what became of a buy is said in the result, and every reason it was left out has its sentence`() {
+        val quote = SwapQuote(
+            SwapRequest(Pubkey(ByteArray(32) { 2 }), Pubkey(ByteArray(32) { 3 }), 2_000_000uL, 100),
+            outAmount = 192_000_000uL, priceImpactBps = 1, route = emptyList(), platformFeeBps = 0, providerPayload = "{}",
+        )
+        assertNull(ClockOutCopy.bought(BuyOutcome.NotRequested))
+        assertEquals(
+            "0.002 SOL swapped for ORE: at least 0.0019008 ORE is in your wallet.",
+            ClockOutCopy.bought(BuyOutcome.Included(quote, ownTransaction = true)),
+        )
+        val reasons = SwapSkip.entries.map { ClockOutCopy.bought(BuyOutcome.Skipped(it))!! }
+        assertEquals(SwapSkip.entries.size, reasons.size)
+        for (said in reasons) {
+            assertTrue(said, said.startsWith("No ORE was bought: ") && said.endsWith("."))
+            assertEquals(said, emptyList<String>(), HonestCopy.violations(said))
+        }
+        val fixed = listOf(ClockOutCopy.BUY_OFFER, ClockOutCopy.BUY_FIRST_ORE, ClockOutCopy.BUY_QUOTING, ClockOutCopy.BUY_NO_QUOTE, ClockOutModel.NOTHING_BOUGHT)
+        for (said in fixed + ClockOutCopy.buyQuote(BuyQuote(1_000_000uL, 96_488_910uL, 95_524_020uL, 100, listOf("Meteora DLMM")))) {
+            assertEquals(said, emptyList<String>(), HonestCopy.violations(said))
+        }
+        // A clock-out that did nothing but buy still reads as one sentence after "Confirmed on-chain."
+        assertEquals(
+            "Confirmed on-chain. 0.002 SOL swapped for ORE: at least 0.0019008 ORE is in your wallet.",
+            ClockOutCopy.done(ShiftOutcome.NoOpenShift, BondOutcome.None, 0uL, null, ClockOutCopy.bought(BuyOutcome.Included(quote, ownTransaction = false))),
+        )
     }
 }

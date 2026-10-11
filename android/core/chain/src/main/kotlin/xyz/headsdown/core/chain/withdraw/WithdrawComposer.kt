@@ -16,6 +16,8 @@ data class WithdrawRequest(
     val revoke: Boolean = false,
     /** Close the Rig account: its rent goes back to the wallet. */
     val closeRig: Boolean = false,
+    /** Close the shift logs the program lets go of (30 days after each shift): their rent goes back to the wallet. */
+    val closeLogs: Boolean = false,
     /** 0 = no priority fee (the wallet may add its own). */
     val priorityMicroLamports: ULong = 0uL,
 )
@@ -33,6 +35,43 @@ class WithdrawChainState(
     val bondHeld: Boolean,
     /** The rent a 32-byte RigTombstone keeps when a rig that was used is closed. */
     val tombstoneRent: ULong,
+    /**
+     * The logs of the rig's sealed shifts that are still on-chain. They are found from the shift
+     * counter at the Rig address, which a closed rig's tombstone keeps: they outlive the rig.
+     */
+    val logs: List<SealedLog> = emptyList(),
+    /**
+     * The cluster's own clock (the Clock sysvar), read when a log looks due by the phone's: the
+     * program compares a log's 30 days with this clock and no other. Null: not read.
+     */
+    val clusterUnix: Long? = null,
+)
+
+/** A sealed shift's log, as far as taking its rent back goes. */
+data class SealedLog(
+    val shiftId: ULong,
+    /** Every lamport the log account holds: its rent. */
+    val lamports: ULong,
+    /** When the shift ended (unix seconds): the program keeps the log for 30 days from then. */
+    val endTs: Long,
+    /** The program would send this log's rent to the rig's wallet: it paid it, or the log predates payers. */
+    val paidByWallet: Boolean,
+    /** That shift's Focus Bond is still there: the program keeps the log until the bond is resolved. */
+    val bondHeld: Boolean = false,
+)
+
+/** The rent the rig's shift logs hold for the wallet, and what of it the program hands back now. */
+data class LogRent(
+    /** Logs whose rent is the wallet's, ripe or not. */
+    val logs: Int,
+    val lamports: ULong,
+    /** The shifts whose logs one transaction closes now, oldest first. */
+    val ripe: List<ULong>,
+    val ripeLamports: ULong,
+    /** When the next log that is still inside its 30 days is offered here; null when none is. */
+    val nextRipeAtUnix: Long?,
+    /** Ripe logs beyond the ones one transaction holds: there for the next visit. */
+    val ripeLeft: Int = 0,
 )
 
 /** What closing the Automation hands back. */
@@ -77,14 +116,17 @@ class WithdrawPlan(
     val revoke: Revoke?,
     /** Non-null: `close_rig` is in the transaction. */
     val rigClose: RigClose?,
+    /** The shifts whose logs `close_shift_log` closes in the transaction, and the rent they hand back. */
+    val logsClosed: List<ULong> = emptyList(),
+    val logRentLamports: ULong = 0uL,
 ) {
     val isEmpty: Boolean get() = instructions.isEmpty()
 }
 
 /**
- * Composes the two ways out, each only when asked for:
+ * Composes the ways out, each only when asked for:
  *
- * `[ORE automate(executor = none)?] [close_rig?]`
+ * `[ORE automate(executor = none)?] [close_shift_log…] [close_rig?]`
  *
  * - **Revoke** closes the wallet's ORE Automation. ORE sends every lamport in it back to the
  *   wallet (`automate.rs:88-97`), and nothing can be dug for the wallet until an Automation
@@ -93,6 +135,10 @@ class WithdrawPlan(
  *   requires Idle or Frozen. The phone asks for more: no open shift and no Focus Bond still
  *   locked, because closing a rig under either forfeits the bond. A rig that armed a shift or
  *   accepted a signed message leaves a 32-byte tombstone (§12.4), which keeps its own rent.
+ * - **Log rent** (`close_shift_log`, tag 31) closes the logs of shifts that ended more than 30
+ *   days ago. The program sends each log's rent to the address that paid it and to no other, so
+ *   only logs the wallet paid for (or that predate payers) are asked for; a log whose Focus Bond
+ *   is still there is left alone. Anyone may send it: it needs no signature but the fee payer's.
  *
  * Pure function of its inputs.
  */
@@ -128,7 +174,28 @@ object WithdrawComposer {
         )
     }
 
-    fun compose(authority: Pubkey, request: WithdrawRequest, state: WithdrawChainState): WithdrawPlan {
+    /**
+     * The rent the wallet's shift logs hold, and which of them can be closed at [nowUnix]; null
+     * when the rig has no log whose rent would come to the wallet.
+     */
+    fun logRent(state: WithdrawChainState, nowUnix: Long): LogRent? {
+        val mine = state.logs.filter { it.paidByWallet }
+        if (mine.isEmpty()) return null
+        val allRipe = mine.filter { !it.bondHeld && nowUnix >= it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS }.sortedBy { it.shiftId }
+        val ripe = allRipe.take(MAX_LOGS_PER_TRANSACTION)
+        return LogRent(
+            logs = mine.size,
+            lamports = mine.fold(0uL) { sum, log -> sum + log.lamports },
+            ripe = ripe.map { it.shiftId },
+            ripeLamports = ripe.fold(0uL) { sum, log -> sum + log.lamports },
+            // The moment this sheet offers it, which is the margin after the program would allow it.
+            nextRipeAtUnix = mine.filter { nowUnix < it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS }
+                .minOfOrNull { it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS },
+            ripeLeft = allRipe.size - ripe.size,
+        )
+    }
+
+    fun compose(authority: Pubkey, request: WithdrawRequest, state: WithdrawChainState, nowUnix: Long = 0): WithdrawPlan {
         val rig = state.rig
         if (rig != null && rig.authority != authority) throw WithdrawRefusedException(WithdrawRefusedException.OTHER_AUTHORITY)
         val ixs = mutableListOf<Instruction>()
@@ -136,15 +203,39 @@ object WithdrawComposer {
         val revoke = if (request.revoke) revoke(authority, state) else null
         if (revoke != null) ixs += OreInstructions.revoke(authority)
 
+        // The logs name the rig's address, not its account: they are closed with or without a live
+        // rig there, and here before close_rig.
+        val logs = if (request.closeLogs) logRent(state, nowUnix) else null
+        if (logs != null) {
+            val rigAddress = HeadsDownProgram.rig(authority).address
+            for (shiftId in logs.ripe) ixs += HeadsDownInstructions.closeShiftLog(rigAddress, shiftId, authority)
+        }
+
         var close: RigClose? = null
         if (request.closeRig && rig != null) {
             closeBlock(state)?.let { throw WithdrawRefusedException(it.message) }
             close = rigClose(state)
             ixs += HeadsDownInstructions.closeRig(authority, rig.sgtMint.takeIf { rig.tier == RigTier.SEEKER })
         }
-        return WithdrawPlan(ixs, revoke, close)
+        return WithdrawPlan(ixs, revoke, close, logs?.ripe.orEmpty(), logs?.ripeLamports ?: 0uL)
     }
 
     /** ORE's automate close and close_rig together stay far below this. */
     const val COMPUTE_UNITS = 60_000L
+
+    /** Each `close_shift_log` derives the bond's address (and, for an old log, the rig's) on-chain. */
+    const val COMPUTE_UNITS_PER_LOG = 40_000L
+
+    /** `SHIFT_LOG_TTL_SECS`: a log may be closed from 30 days after its shift ended. */
+    const val LOG_TTL_SECONDS = 30 * 86_400L
+
+    /**
+     * A log is only asked for this long after its 30 days. Ripeness is judged by the cluster's own
+     * clock when it could be read (never by a later one), and a transaction lands a little later
+     * still; the margin is for the clock of the node that answered.
+     */
+    const val LOG_CLOCK_MARGIN_SECONDS = 600L
+
+    /** Each log adds two addresses to the transaction; this many fit beside a revoke and a close_rig. */
+    const val MAX_LOGS_PER_TRANSACTION = 8
 }

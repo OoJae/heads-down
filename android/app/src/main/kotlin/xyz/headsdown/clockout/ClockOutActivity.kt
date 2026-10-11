@@ -142,6 +142,7 @@ class ClockOutActivity : ComponentActivity() {
                         onRetry = model::load,
                         onClose = ::finish,
                         onOpenTransaction = { openExplorerLink(it) },
+                        onBuy = model::setBuy,
                     )
                 }
             }
@@ -161,6 +162,9 @@ object ClockOutTags {
     const val SOL = "clock-out-sol"
     const val ORE = "clock-out-ore"
     const val CLAIM = "clock-out-claim"
+    const val BUY = "clock-out-buy"
+    const val BUY_CHOICE = "clock-out-buy-"
+    const val BUY_QUOTE = "clock-out-buy-quote"
     const val KEEP_CHOICE = "clock-out-keep"
     const val CLAIM_CHOICE = "clock-out-claim-all"
     const val END_EARLY = "clock-out-end-early"
@@ -188,6 +192,7 @@ object ClockOutLedger {
     const val BOND = "Focus Bond"
     const val SOL = "SOL back"
     const val ORE = "In your Miner"
+    const val BUY = "Buy ORE"
 
     const val SHIFT_NONE = "None open"
     const val SHIFT_COMPLETED = "Completed"
@@ -216,7 +221,7 @@ object ClockOutLedger {
     private fun skr(units: ULong): String = "${ClockOutCopy.skr(units)} SKR"
 
     val all: List<String> = listOf(
-        EYEBROW, TITLE, SHIFT, RENT, BOND, SOL, ORE, SHIFT_NONE, SHIFT_COMPLETED, SHIFT_ENDED_EARLY, SHIFT_STAYS_OPEN,
+        EYEBROW, TITLE, SHIFT, RENT, BOND, SOL, ORE, BUY, SHIFT_NONE, SHIFT_COMPLETED, SHIFT_ENDED_EARLY, SHIFT_STAYS_OPEN,
     ) + SheetWords.all
 }
 
@@ -230,6 +235,8 @@ fun ClockOutScreen(
     onClose: () -> Unit,
     cluster: String = BuildConfig.SOLANA_CHAIN,
     onOpenTransaction: (url: String) -> Unit = {},
+    /** Chooses how much SOL to spend on ORE (0: none). Only called when the build can buy. */
+    onBuy: (spendLamports: ULong) -> Unit = {},
 ) {
     // One control closes the sheet: the bar in the dock when nothing else needs it, the header's otherwise.
     val dockIsTaken = state is ClockOutState.Ready || state is ClockOutState.Unavailable
@@ -265,7 +272,7 @@ fun ClockOutScreen(
                 )
                 is ClockOutState.Unavailable -> SheetNotice(state.message, ClockOutTags.MESSAGE, NoticeTone.Problem)
                 is ClockOutState.Done -> Unit
-                is ClockOutState.Ready -> Ready(state, onClaimAll, onEndEarly)
+                is ClockOutState.Ready -> Ready(state, onClaimAll, onEndEarly, onBuy)
             }
         },
         dock = {
@@ -278,7 +285,11 @@ fun ClockOutScreen(
                 is ClockOutState.Ready -> BarButton(
                     label = when {
                         state.working -> SheetWords.WAITING
+                        // The bar names everything the approval covers, and nothing it does not.
+                        state.endEarly && state.buy.quote != null -> "End the shift and buy ORE"
                         state.endEarly -> "End the shift and clock out"
+                        state.buy.quote != null && !state.facts.somethingToSign(state.claimAll, state.endEarly) -> "Buy ORE"
+                        state.buy.quote != null -> "Clock out and buy ORE"
                         else -> "Clock out"
                     },
                     onClick = onConfirm,
@@ -295,7 +306,12 @@ fun ClockOutScreen(
 
 /** The ledger: one row for each thing the transaction does, each with its sentence underneath. */
 @Composable
-private fun ColumnScope.Ready(state: ClockOutState.Ready, onClaimAll: (Boolean) -> Unit, onEndEarly: (Boolean) -> Unit) {
+private fun ColumnScope.Ready(
+    state: ClockOutState.Ready,
+    onClaimAll: (Boolean) -> Unit,
+    onEndEarly: (Boolean) -> Unit,
+    onBuy: (ULong) -> Unit,
+) {
     val colors = Hd.colors
     val shown = state.shown
     val lines = ClockOutCopy.lines(shown)
@@ -358,8 +374,58 @@ private fun ColumnScope.Ready(state: ClockOutState.Ready, onClaimAll: (Boolean) 
         }
         if (state.claimAll) SheetNotice(lines.claim, ClockOutTags.CLAIM)
     }
+    if (state.buy.available) BuyOre(state.buy, enabled = !state.working, onBuy = onBuy)
     state.problem?.let { SheetNotice(it, ClockOutTags.PROBLEM, NoticeTone.Problem) }
-    if (!state.canSign) SheetText(ClockOutCopy.NOTHING_TO_SIGN, Modifier.testTag(ClockOutTags.NOTHING), color = colors.ash)
+    // While a quote is being read the bar waits for it: that is not "nothing to sign".
+    if (!state.canSign && !state.buy.quoting) SheetText(ClockOutCopy.NOTHING_TO_SIGN, Modifier.testTag(ClockOutTags.NOTHING), color = colors.ash)
+}
+
+/**
+ * "Buy ORE": off unless the user picks an amount. The row states the quote before the wallet
+ * opens (how much ORE, at what price, and the least the swap may deliver), and the wallet is then
+ * asked for exactly that.
+ */
+/** The font scale above which each buy chip gets a row of its own. */
+private const val BUY_ONE_PER_ROW_ABOVE = 1.3f
+
+@Composable
+private fun ColumnScope.BuyOre(buy: BuyChoice, enabled: Boolean, onBuy: (ULong) -> Unit) {
+    val quote = buy.quote
+    SheetRule()
+    Fact(
+        label = ClockOutLedger.BUY,
+        sentence = ClockOutCopy.BUY_OFFER,
+        tag = ClockOutTags.BUY,
+        figure = quote?.let { "about ${ClockOutLedger.ore(it.oreAtoms)}" },
+        figureColor = Hd.colors.seam,
+    )
+    // Two chips to a row; at a large font an amount of SOL needs the row to itself.
+    val perRow = if (LocalDensity.current.fontScale > BUY_ONE_PER_ROW_ABOVE) 1 else 2
+    Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(HdDimens.Rhythm)) {
+        for (row in (listOf(0uL) + buy.offers).chunked(perRow)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(HdDimens.Rhythm)) {
+                for (spend in row) {
+                    Choice(
+                        label = ClockOutCopy.buyLabel(spend),
+                        selected = spend == buy.spendLamports,
+                        // Tapping the amount already chosen does not ask the market again.
+                        onClick = { if (spend != buy.spendLamports) onBuy(spend) },
+                        modifier = Modifier.weight(1f).testTag(ClockOutTags.BUY_CHOICE + spend),
+                        enabled = enabled,
+                        compact = true,
+                    )
+                }
+            }
+        }
+    }
+    when {
+        buy.quoting -> SheetText(ClockOutCopy.BUY_QUOTING, Modifier.testTag(ClockOutTags.BUY_QUOTE), color = Hd.colors.ash)
+        quote != null -> {
+            SheetNotice(ClockOutCopy.buyQuote(quote), ClockOutTags.BUY_QUOTE)
+            SheetText(ClockOutCopy.BUY_FIRST_ORE, color = Hd.colors.ash)
+        }
+        buy.noQuote -> SheetNotice(ClockOutCopy.BUY_NO_QUOTE, ClockOutTags.BUY_QUOTE, NoticeTone.Problem)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

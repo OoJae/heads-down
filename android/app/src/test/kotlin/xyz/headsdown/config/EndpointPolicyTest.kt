@@ -94,6 +94,11 @@ class EndpointPolicyTest {
         // No registrar: guest rigs. No indexer: no morning haul.
         assertEquals(Disabled, release(EndpointKind.REGISTRAR, ""))
         assertEquals(Disabled, release(EndpointKind.INDEXER, ""))
+        // No swap API: the clock-out does not offer to buy.
+        assertEquals(Disabled, release(EndpointKind.SWAP, ""))
+        assertEquals(Secure, release(EndpointKind.SWAP, "https://api.jup.ag/swap/v1"))
+        assertTrue(refused(release(EndpointKind.SWAP, "http://127.0.0.1:8791")))
+        assertTrue(refused(release(EndpointKind.SWAP, "https://api.jup.ag/swap/v1?api-key=secret")))
     }
 
     @Test

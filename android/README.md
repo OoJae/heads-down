@@ -246,6 +246,27 @@ on-chain, so the phone fills it from its own shift journal. A real haul updates 
 `simulated` one is labelled and never does. With no haul the reveal says so and offers the
 labelled sample night only on request.
 
+**A night that is not sealed yet.** The indexer serves a haul for a sealed shift only, and a night
+is sealed by the clock-out: at the alarm there is none yet. Until 11 October the reveal then
+showed the shift before it (or "No haul yet" on a first night). Now, when the shift journal names a
+shift this phone armed, the reveal reads the wallet's Rig address first (it needs no indexer for
+that) and goes by what it finds:
+
+- **Open and over** (its window ended, or it broke): "Not sealed yet", what the phone recorded
+  (clock-in time, last heartbeat, rounds signed dark) and the "Clock out" bar. No haul of any
+  shift is shown.
+- **Sealed** (also when the rig was closed since: its tombstone keeps the shift counter): that
+  shift's haul is asked for by id every 5 seconds, for up to 3 minutes, because a haul is final
+  only once ORE has settled the last round the shift dug. A failed read among them is asked again.
+- **Still being worked** (open, inside its window, not broken), or not an on-chain shift at all
+  (a focus-only one): the last sealed night, as before.
+- **The chain could not be read:** "Not checked yet". The page does not guess, keeps the "Clock
+  out" bar (that sheet reads the chain itself) and asks again.
+
+Coming back to the page reads again, and nothing is asked for while it is not on screen. Run on the
+emulator against the local stack (`emulator-smoke.sh --wallet … --bond`); the alarm itself has not
+fired on a phone.
+
 **What a wallet's addresses can hold.** Anyone can send lamports to an address before its program
 creates the account there, so a Rig, Focus Bond, ShiftLog, Automation, Miner or token address
 that holds only lamports reads as "not created" (`ifCreated`), never as a broken account. The Rig
@@ -266,7 +287,10 @@ fresh read:
 - Sealing a shift writes its 128-byte ShiftLog, and the wallet that seals it pays the rent (about
   0.0013 SOL at today's rent). The screen states the amount, read from the cluster, and that
   `close_shift_log` can send it back to the payer from 30 days after the shift ended. The
-  clock-in disclosure says the same in words, because a clock-in seals the previous shift.
+  clock-in disclosure says the same in words, because a clock-in seals the previous shift. The
+  "Take it back" sheet has a "Shift logs" row: how many logs the wallet paid for, what they hold
+  and the day the first can come back; from that day it offers to close up to eight per
+  transaction. Unit-tested; no log on mainnet is 30 days old before 9 November 2026.
 - **end_shift** only when ending changes nothing for the worse: the shift would seal `completed`,
   or its outcome is already fixed (Broken, Frozen, or past its window). A shift inside its window
   is left open unless the user chooses "End the shift now". The screen states the lost streak and
@@ -406,7 +430,11 @@ tests to prove no lab class is compiled into release.
   phone is a debug build, and the registrar accepts only that build's signing certificate
   (docs/DEPLOY.md, section 10.4).
 - `ClockInPolicy`: build-time budgets and cost ceilings until the plan screen and price feed exist.
-- "Buy the rest at market" (the Jupiter leg) and the nightly ORE target.
+- The nightly ORE target, and with it the reveal's "Buy the rest at market" button (no haul
+  carries a target, so the button never shows for a real night). Buying ORE itself is on the
+  clock-out sheet ("Buy ORE": 0.001, 0.002 or 0.005 SOL through Jupiter, the quote stated before
+  the wallet opens) in a build given `-Pheadsdown.swapUrl=https://api.jup.ag/swap/v1`. It has been
+  simulated on mainnet (`MainnetSimulationTest`), not signed on a phone.
 - `StubOreRoundSource` remains for tests only.
 
 ## Security notes

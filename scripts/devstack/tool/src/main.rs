@@ -18,6 +18,7 @@
 //! | `smoke` | the phone-less end-to-end "trustless beat" | localnet |
 //! | `clock-in` | a Mac-held dev wallet arms a rig for a phone's Keystore P-256 key | localnet |
 //! | `fund` | airdrop SOL on the local validator | localnet |
+//! | `fund-skr` | mint test SKR from the local stand-in mint to a wallet | localnet |
 //! | `probe` | engine capability check (secp256r1 precompile really verifies, v1 getTransaction, SPL Token) | localnet |
 //!
 //! `--cluster` (env `HD_CLUSTER`, default `localnet`) is checked against the RPC's genesis hash
@@ -79,6 +80,9 @@ enum Cmd {
         /// Override ORE intermission_slots (default: mainnet's).
         #[arg(long)]
         intermission_slots: Option<u64>,
+        /// Add a stand-in SKR mint (at SKR's address) whose mint authority is this local key.
+        #[arg(long)]
+        skr_authority: Option<Address>,
     },
     /// Surfpool: apply the fork surgery live through surfnet_setAccount.
     Surgery {
@@ -88,6 +92,9 @@ enum Cmd {
         round_slots: Option<u64>,
         #[arg(long)]
         intermission_slots: Option<u64>,
+        /// Replace the SKR mint with a stand-in whose mint authority is this local key.
+        #[arg(long)]
+        skr_authority: Option<Address>,
     },
     /// initialize_config (signed by the upgrade authority) + fund the Executor PDA float.
     /// Idempotent: an existing Config is left alone and the float is topped up to its target.
@@ -366,6 +373,15 @@ enum Cmd {
         #[arg(default_value_t = 10.0)]
         sol: f64,
     },
+    /// Mint test SKR to a wallet from the local stand-in mint (localnet only).
+    FundSkr {
+        to: Address,
+        #[arg(default_value_t = 100.0)]
+        skr: f64,
+        /// The stand-in mint's authority keypair.
+        #[arg(long)]
+        authority: PathBuf,
+    },
     /// Print ORE and heads_down state.
     Status,
     /// Engine capability probe.
@@ -388,17 +404,18 @@ async fn main() -> Result<()> {
     let cluster = cli.cluster;
     let rpc = cli.rpc.clone().unwrap_or_else(|| cluster.default_rpc().to_string());
     match cli.cmd {
-        Cmd::Genesis { fixtures, out, entropy_secret, round_slots, intermission_slots } => {
+        Cmd::Genesis { fixtures, out, entropy_secret, round_slots, intermission_slots, skr_authority } => {
             genesis::genesis(&genesis::GenesisOpts {
                 fixtures,
                 out,
                 entropy_secret,
                 timing: genesis::Timing { round_slots, intermission_slots },
+                skr_authority,
             })
         }
-        Cmd::Surgery { entropy_secret, round_slots, intermission_slots } => {
+        Cmd::Surgery { entropy_secret, round_slots, intermission_slots, skr_authority } => {
             require_local(cluster, "surgery")?;
-            genesis::surgery(&rpc, &entropy_secret, genesis::Timing { round_slots, intermission_slots }).await
+            genesis::surgery(&rpc, &entropy_secret, genesis::Timing { round_slots, intermission_slots }, skr_authority).await
         }
         Cmd::Init {
             authority,
@@ -553,6 +570,11 @@ async fn main() -> Result<()> {
             require_local(cluster, "fund")?;
             cluster::connect(cluster, &rpc).await?;
             admin::fund(&rpc, &to, sol).await
+        }
+        Cmd::FundSkr { to, skr, authority } => {
+            require_local(cluster, "fund-skr")?;
+            cluster::connect(cluster, &rpc).await?;
+            admin::fund_skr(&rpc, &to, skr, &authority).await
         }
         Cmd::Status => {
             cluster::connect(cluster, &rpc).await?;

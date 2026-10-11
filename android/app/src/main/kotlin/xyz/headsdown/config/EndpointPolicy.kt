@@ -16,6 +16,9 @@ enum class EndpointKind(val secureScheme: String, val cleartextScheme: String) {
 
     /** The indexer's morning-haul API (contract B). */
     INDEXER("https", "http"),
+
+    /** The swap API behind "Buy ORE" at clock-out (Jupiter's quote and swap-instructions). */
+    SWAP("https", "http"),
 }
 
 sealed interface EndpointVerdict {
@@ -27,7 +30,7 @@ sealed interface EndpointVerdict {
 
     /**
      * An empty URL where the service is optional: a local-only crank (no digs), no registrar
-     * (every rig a guest), no indexer (no morning haul).
+     * (every rig a guest), no indexer (no morning haul), no swap API (no buy at clock-out).
      */
     data object Disabled : EndpointVerdict
 

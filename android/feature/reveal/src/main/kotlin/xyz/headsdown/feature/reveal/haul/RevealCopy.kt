@@ -32,6 +32,67 @@ data class RevealCopy(
         ) + stats.flatMap { listOf(it.label, it.value) }
 }
 
+/** How far a shift with no haul yet has come. */
+enum class NightStage {
+    /** Still open on-chain: the user has to clock out. */
+    NOT_SEALED,
+
+    /** The chain could not be read: open or sealed is not known. The clock-out reads it for itself. */
+    UNCHECKED,
+
+    /** Sealed, and its haul is being asked for. */
+    READING,
+
+    /** Asked for long enough: the screen stops asking. */
+    NOT_READY,
+    ;
+
+    /** The page holds the "Clock out" bar: the shift is open, or nothing says it is not. */
+    val offersClockOut: Boolean get() = this == NOT_SEALED || this == UNCHECKED
+}
+
+/** Every string the reveal shows for a shift that has no haul yet. Pure, so it is tested for honesty. */
+data class NightCopy(
+    val title: String,
+    /** What the phone itself recorded of the shift, most telling first. */
+    val facts: List<String>,
+    val statement: String,
+    /** What clocking out does, when that is the next thing to do. */
+    val clockOutDetail: String?,
+) {
+    val allText: List<String> get() = listOfNotNull(title, statement, clockOutDetail) + facts
+}
+
+object NightCopyBuilder {
+    fun build(night: OpenNight, stage: NightStage, zone: ZoneId): NightCopy = NightCopy(
+        title = when (stage) {
+            NightStage.NOT_SEALED -> "Not sealed yet"
+            NightStage.UNCHECKED -> "Not checked yet"
+            NightStage.READING -> "Reading the haul"
+            NightStage.NOT_READY -> "Haul not ready yet"
+        },
+        facts = listOfNotNull(
+            "Clocked in ${HaulFormat.clock(night.armedAtWallMillis, zone)}",
+            night.lastHeartbeatWallMillis?.let { "Last heartbeat ${HaulFormat.clock(it, zone)}" },
+            when (night.roundsSigned) {
+                0 -> "No round signed dark"
+                1 -> "1 round signed dark"
+                else -> "${HaulFormat.count(night.roundsSigned)} rounds signed dark"
+            },
+        ),
+        statement = when (stage) {
+            NightStage.NOT_SEALED ->
+                "This shift is still open on-chain. Its haul is read from the sealed shift, so there is none to show before you clock out."
+            NightStage.UNCHECKED ->
+                "This shift could not be checked on-chain just now: the phone may be offline. Clock out reads the chain itself and says what it finds."
+            NightStage.READING ->
+                "The shift is sealed. Its haul is final once ORE has settled the last round it dug: a minute or two."
+            NightStage.NOT_READY -> "The shift is sealed, and its haul could not be read yet. Open this screen again in a minute."
+        },
+        clockOutDetail = RevealCopyBuilder.CLOCK_OUT_DETAIL.takeIf { stage.offersClockOut },
+    )
+}
+
 object RevealCopyBuilder {
     const val CLOCK_OUT_BUTTON = "Clock out"
 
@@ -77,7 +138,7 @@ object RevealCopyBuilder {
             buyDetail = buy?.let {
                 "About ${HaulFormat.sol(it.estimatedLamports)} at the market quote, before price impact and fees."
             },
-            buyStubMessage = "The market buy leg is not connected yet. Nothing was bought.",
+            buyStubMessage = "Nothing was bought: this button is not connected. Where a build can buy ORE, it is on the clock-out sheet.",
             solPlacedNote = "SOL placed is what your Automation put on the board" +
                 (if (h.feesLamports > 0) ", plus ${HaulFormat.sol(h.feesLamports)} in executor fees" else "") +
                 ". The effective price counts only the SOL that did not come back, plus crank fees.",

@@ -2,11 +2,15 @@ package xyz.headsdown.clockout
 
 import xyz.headsdown.core.chain.accounts.OreClaimEstimate
 import xyz.headsdown.core.chain.clockout.BondOutcome
+import xyz.headsdown.core.chain.clockout.BuyOutcome
 import xyz.headsdown.core.chain.clockout.ClockOutPlan
 import xyz.headsdown.core.chain.clockout.ClockOutPreview
 import xyz.headsdown.core.chain.clockout.ShiftOutcome
+import xyz.headsdown.core.chain.swap.SwapSkip
 import xyz.headsdown.core.keys.ShiftEndReason
 import xyz.headsdown.rig.ClockInPolicy
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -94,6 +98,62 @@ object ClockOutCopy {
 
     const val NOTHING_TO_SIGN = "Nothing to sign right now: with these choices no shift is sealed, no bond comes back and no ORE is claimed."
 
+    /** Under "Buy ORE", before a choice is made: what the buy is and where the ORE goes. */
+    const val BUY_OFFER = "Swap a little SOL for ORE at the market price, in the same approval. The swap runs through Jupiter, " +
+        "and the ORE goes to your wallet, not to your Miner."
+
+    /** True for a first buy only, and the sheet cannot tell: said as a condition. */
+    const val BUY_FIRST_ORE = "If this wallet has never held ORE, the swap also opens its ORE token account: about 0.002 SOL of rent on top, " +
+        "which comes back when that account is closed."
+
+    const val BUY_QUOTING = "Reading the market price…"
+
+    /** The swap had a transaction of its own, and that one did not land. */
+    const val BUY_NOT_LANDED = "No ORE was bought: the swap did not go through on-chain."
+
+    const val BUY_NOT_CONFIRMED = "The swap for ORE could not be confirmed on-chain: check your wallet's activity for it."
+
+    const val BUY_NO_QUOTE = "No market quote right now, so no ORE will be bought. The rest of the clock-out is unchanged."
+
+    /** The chip for a spend: "Off", or the amount. */
+    fun buyLabel(spendLamports: ULong): String = if (spendLamports == 0uL) "Off" else "${ClockInPolicy.sol(spendLamports)} SOL"
+
+    /** What the quote on the sheet promises: the amount at the quote, its price, and the least the swap may deliver. */
+    fun buyQuote(q: BuyQuote): String {
+        val route = q.route.takeIf { it.isNotEmpty() }?.let { " Route: ${it.joinToString(", ")}." }.orEmpty()
+        return "${ClockInPolicy.sol(q.spendLamports)} SOL buys about ${ore(q.oreAtoms)} ORE right now: ${price(q.spendLamports, q.oreAtoms)} SOL per ORE. " +
+            "If the price moves and the swap would deliver less than ${ore(q.minOreAtoms)} ORE, nothing is bought.$route " +
+            "Heads Down adds no fee; the pools' own fees are in that price."
+    }
+
+    /** SOL per whole ORE of a quote, 3 decimals, rounded up: the user never pays less than is shown. */
+    fun price(spendLamports: ULong, oreAtoms: ULong): String {
+        if (oreAtoms == 0uL) return "?"
+        // (lamports / 1e9) / (atoms / 1e11) = lamports * 100 / atoms.
+        return BigDecimal(spendLamports.toString()).multiply(BigDecimal(100)).divide(BigDecimal(oreAtoms.toString()), 3, RoundingMode.UP).toPlainString()
+    }
+
+    /** What became of the buy, for the confirmed result; null when none was asked for. */
+    fun bought(buy: BuyOutcome): String? = when (buy) {
+        BuyOutcome.NotRequested -> null
+        is BuyOutcome.Included ->
+            "${ClockInPolicy.sol(buy.quote.request.inAmount)} SOL swapped for ORE: at least ${ore(buy.quote.minOutAmount)} ORE is in your wallet."
+        is BuyOutcome.Skipped -> "No ORE was bought: ${skipped(buy.reason)}."
+    }
+
+    fun skipped(reason: SwapSkip): String = when (reason) {
+        SwapSkip.NOT_AVAILABLE -> "this build has no market to buy from"
+        SwapSkip.NO_QUOTE -> "the market had no route for that amount"
+        SwapSkip.PRICE_MOVED -> "the price moved past what the sheet showed"
+        SwapSkip.PROVIDER_FAILED -> "the market quote could not be read or did not pass the app's checks"
+        SwapSkip.NEEDS_V0 -> "your wallet cannot sign the kind of transaction the swap needs"
+        SwapSkip.TABLE_UNAVAILABLE, SwapSkip.DOES_NOT_FIT -> "the swap could not be fitted into a transaction"
+        SwapSkip.SIMULATION_FAILED -> "the swap would have failed just now (most often: not enough SOL in the wallet for it)"
+        SwapSkip.DELIVERS_TOO_LITTLE -> "the swap would have delivered less than its minimum"
+        SwapSkip.TAKES_TOO_MUCH -> "the swap would have taken more SOL than you chose"
+        SwapSkip.ONE_TRANSACTION_ONLY -> "the swap needs a transaction of its own and your wallet signs one at a time"
+    }
+
     fun lines(f: ClockOutFacts, zone: ZoneId = ZoneId.systemDefault()): ClockOutLines = ClockOutLines(
         shift = shift(f.shift, zone),
         rent = rent(f),
@@ -177,10 +237,11 @@ object ClockOutCopy {
         ShiftEndReason.UNLOCKED -> "the phone was unlocked"
     }
 
-    /** What a confirmed clock-out did. [plan] is the one the wallet signed. */
-    fun done(plan: ClockOutPlan): String = done(plan.shift, plan.bond, plan.claimedSolLamports, plan.claimedOre)
+    /** What a confirmed clock-out did. [plan] is the one the wallet signed, [buy] what became of the buy. */
+    fun done(plan: ClockOutPlan, buy: BuyOutcome = BuyOutcome.NotRequested): String =
+        done(plan.shift, plan.bond, plan.claimedSolLamports, plan.claimedOre, bought(buy))
 
-    fun done(shift: ShiftOutcome, bond: BondOutcome, returnedSolLamports: ULong, claimedOre: OreClaimEstimate?): String {
+    fun done(shift: ShiftOutcome, bond: BondOutcome, returnedSolLamports: ULong, claimedOre: OreClaimEstimate?, bought: String? = null): String {
         val parts = buildList {
             (shift as? ShiftOutcome.Ends)?.let { add(if (it.completed) "Shift sealed as completed." else "Shift sealed as ended early.") }
             when (bond) {
@@ -190,6 +251,7 @@ object ClockOutCopy {
             }
             if (returnedSolLamports > 0uL) add("${ClockInPolicy.sol(returnedSolLamports)} SOL back in your wallet.")
             claimedOre?.let { add("About ${ore(it.received)} ORE claimed to your wallet.") }
+            bought?.let(::add)
         }
         return (listOf("Confirmed on-chain.") + parts).joinToString(" ")
     }

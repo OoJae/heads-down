@@ -25,6 +25,7 @@ import xyz.headsdown.config.EndpointKind
 import xyz.headsdown.config.EndpointPolicy
 import xyz.headsdown.config.EndpointVerdict
 import xyz.headsdown.core.chain.Ore
+import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.clockin.ClockInService
 import xyz.headsdown.core.chain.clockout.ClockOutService
@@ -35,6 +36,8 @@ import xyz.headsdown.core.chain.registrar.RigAttestationFlow
 import xyz.headsdown.core.chain.rpc.OkHttpJsonRpcTransport
 import xyz.headsdown.core.chain.rpc.RpcProtocolException
 import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
+import xyz.headsdown.core.chain.swap.JupiterSwapProvider
+import xyz.headsdown.core.chain.swap.OkHttpSwapHttp
 import xyz.headsdown.core.chain.withdraw.WithdrawService
 import xyz.headsdown.core.keys.PrefsCounterStore
 import xyz.headsdown.core.keys.RigCounter
@@ -60,6 +63,7 @@ import xyz.headsdown.feature.shift.RigSignerProvider
 import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.UplinkFactory
 import xyz.headsdown.haul.IndexerHaulRepository
+import xyz.headsdown.haul.ShiftOnChain
 import xyz.headsdown.rig.ChainClockIn
 import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.rig.CounterResync
@@ -116,9 +120,17 @@ object AppModule {
     @Provides @Singleton
     fun clockInService(rpc: SolanaJsonRpc): ClockInService = ClockInService(rpc)
 
-    /** No swap provider yet: the clock-out seals, releases and claims; it does not buy. */
+    /**
+     * The clock-out seals, releases and claims; with a SWAP_URL it can also buy ORE (Jupiter).
+     * An empty SWAP_URL builds an app that does not offer the buy. The swap API is HTTPS in every
+     * build: a local fork has no market, so there is no loopback form of it.
+     */
     @Provides @Singleton
-    fun clockOutService(rpc: SolanaJsonRpc): ClockOutService = ClockOutService(rpc)
+    fun clockOutService(rpc: SolanaJsonRpc, client: OkHttpClient): ClockOutService {
+        val url = BuildConfig.SWAP_URL
+        val verdict = EndpointPolicy.require(EndpointKind.SWAP, url, allowLoopbackCleartext = false)
+        return ClockOutService(rpc, swap = if (verdict == EndpointVerdict.Disabled) null else JupiterSwapProvider(OkHttpSwapHttp(url, client)))
+    }
 
     @Provides @Singleton
     fun withdrawService(rpc: SolanaJsonRpc): WithdrawService = WithdrawService(rpc)
@@ -225,11 +237,16 @@ object AppModule {
         binding: RigBindingStore,
         journal: ShiftJournal,
         widgets: RigWidgetUpdates,
+        rpc: SolanaJsonRpc,
     ): HaulRepository = IndexerHaulRepository(
         client = service(EndpointKind.INDEXER, BuildConfig.INDEXER_URL, client)?.let(::IndexerHaulClient),
         binding = binding,
-        firstPickup = journal::firstPickupFor,
+        lastShift = journal::last,
         widgets = widgets,
+        // The Rig address says whether the phone's last shift is running, over or sealed; the indexer only knows sealed ones.
+        onChain = { rig, shiftId ->
+            ShiftOnChain.of(HeadsDownAccounts.rigSlot(rig, rpc.getAccountInfo(rig)), shiftId, System.currentTimeMillis() / 1000)
+        },
     )
 
     /** An optional JSON service: null when its URL is empty, a startup failure when refused. */

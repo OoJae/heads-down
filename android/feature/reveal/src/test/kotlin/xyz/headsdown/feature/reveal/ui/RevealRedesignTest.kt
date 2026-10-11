@@ -241,7 +241,7 @@ class RevealRedesignTest {
     fun `the notice that nothing was bought is a polite live region`() {
         rule.setContent { RevealTheme { RevealScreen(sample, zone, animate = false) } }
         rule.onNodeWithTag(RevealTags.BUY).performScrollTo().assert(isButton).performClick()
-        rule.onNodeWithText("The market buy leg is not connected yet. Nothing was bought.").assert(isPolite)
+        rule.onNodeWithText("Nothing was bought: this button is not connected. Where a build can buy ORE, it is on the clock-out sheet.").assert(isPolite)
     }
 
     @Test

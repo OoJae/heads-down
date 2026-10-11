@@ -5,6 +5,9 @@ object WellKnown {
     val SYSTEM_PROGRAM = Pubkey.fromBase58("11111111111111111111111111111111")
     val COMPUTE_BUDGET = Pubkey.fromBase58("ComputeBudget111111111111111111111111111111")
     val INSTRUCTIONS_SYSVAR = Pubkey.fromBase58("Sysvar1nstructions1111111111111111111111111")
+
+    /** The Clock sysvar: 40 bytes, `unix_timestamp` (i64, little-endian) at offset 32. What programs compare times with. */
+    val CLOCK_SYSVAR = Pubkey.fromBase58("SysvarC1ock11111111111111111111111111111111")
     val SECP256R1_SIG_VERIFY = Pubkey.fromBase58("Secp256r1SigVerify1111111111111111111111111")
     val ED25519_SIG_VERIFY = Pubkey.fromBase58("Ed25519SigVerify111111111111111111111111111")
     val TOKEN_2022 = Pubkey.fromBase58("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")

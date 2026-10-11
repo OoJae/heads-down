@@ -139,8 +139,23 @@ data class ShiftLogAccount(
     val mode: Int,
     val startTs: Long,
     val endTs: Long,
+    /**
+     * v1.3: the first 16 bytes of the address that paid this log's rent (whoever sent
+     * `end_shift`), as 32 hex digits. All zero in a log sealed before v1.3, whose rent goes to
+     * the rig's authority. `close_shift_log` returns the rent to no other address.
+     */
+    val payerPrefix: String = NO_PAYER,
 ) {
     val completed: Boolean get() = breakReason == 0
+
+    /** The program would send this log's rent to [wallet], the authority of the log's rig. */
+    fun rentGoesTo(wallet: Pubkey): Boolean =
+        payerPrefix == NO_PAYER || payerPrefix == wallet.bytes.take(PAYER_PREFIX_BYTES).joinToString("") { "%02x".format(it) }
+
+    companion object {
+        const val PAYER_PREFIX_BYTES = 16
+        val NO_PAYER: String = "0".repeat(2 * PAYER_PREFIX_BYTES)
+    }
 }
 
 /** `StackTable.status`. */
@@ -439,6 +454,7 @@ object HeadsDownAccounts {
             mode = b.u8(89),
             startTs = b.i64(96),
             endTs = b.i64(104),
+            payerPrefix = b.bytes(112, ShiftLogAccount.PAYER_PREFIX_BYTES).joinToString("") { "%02x".format(it) },
         )
     }
 

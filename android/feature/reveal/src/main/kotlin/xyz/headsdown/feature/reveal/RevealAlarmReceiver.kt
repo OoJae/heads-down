@@ -43,8 +43,9 @@ class RevealAlarmReceiver : BroadcastReceiver() {
         )
         val notification = NotificationCompat.Builder(context, NotificationChannels.REVEAL)
             .setSmallIcon(NotificationR.drawable.ic_stat_rig)
-            .setContentTitle("Your haul is ready")
-            .setContentText("See how last night's shift went")
+            // At the alarm the shift is over and not sealed yet: the haul is read after the clock-out.
+            .setContentTitle("Your night shift is over")
+            .setContentText("Clock out to see what it dug")
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)

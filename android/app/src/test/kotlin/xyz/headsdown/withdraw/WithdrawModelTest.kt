@@ -11,6 +11,7 @@ import org.junit.Test
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.tx.Instruction
 import xyz.headsdown.core.chain.withdraw.CloseBlock
+import xyz.headsdown.core.chain.withdraw.LogRent
 import xyz.headsdown.core.chain.withdraw.PreparedWithdraw
 import xyz.headsdown.core.chain.withdraw.Revoke
 import xyz.headsdown.core.chain.withdraw.RigClose
@@ -57,7 +58,11 @@ class WithdrawModelTest {
             requests += request
             refuse?.let { throw WithdrawRefusedException(it) }
             if (nothing) return null
-            val plan = WithdrawPlan(oneIx, facts.revoke.takeIf { request.revoke }, facts.rigClose.takeIf { request.closeRig })
+            val logs = facts.logRent?.takeIf { request.closeLogs }
+            val plan = WithdrawPlan(
+                oneIx, facts.revoke.takeIf { request.revoke }, facts.rigClose.takeIf { request.closeRig },
+                logsClosed = logs?.ripe.orEmpty(), logRentLamports = logs?.ripeLamports ?: 0uL,
+            )
             return PreparedWithdraw(byteArrayOf(1), 100, authority, plan)
         }
     }
@@ -267,5 +272,33 @@ class WithdrawModelTest {
         assertEquals(before + 1, chain.requests.size)
         assertFalse(chain.requests.last().closeRig)
         assertTrue(model.state.value is WithdrawState.Done)
+    }
+
+    // --- shift-log rent ---
+
+    @Test
+    fun `log rent is never chosen by default, cannot be chosen before a log is ripe, and is signed only when asked`() = runTest {
+        val waiting = LogRent(logs = 7, lamports = 9_103_360uL, ripe = emptyList(), ripeLamports = 0uL, nextRipeAtUnix = 1_794_256_544L)
+        val chain = FakeChain(both.copy(logRent = waiting))
+        val model = WithdrawModel(chain, { authority }, this)
+        model.load()
+        advanceUntilIdle()
+        assertFalse((model.state.value as WithdrawState.Ready).closeLogs)
+        model.setCloseLogs(true) // inside the 30 days: there is nothing to close
+        assertFalse((model.state.value as WithdrawState.Ready).closeLogs)
+
+        chain.facts = both.copy(logRent = waiting.copy(ripe = listOf(1uL, 2uL), ripeLamports = 2_600_960uL))
+        model.load()
+        advanceUntilIdle()
+        assertFalse((model.state.value as WithdrawState.Ready).canSign)
+        model.setCloseLogs(true)
+        assertTrue((model.state.value as WithdrawState.Ready).canSign)
+        model.confirm(wallet())
+        advanceUntilIdle()
+        assertEquals(WithdrawRequest(closeLogs = true), chain.requests.single())
+        assertEquals(
+            "Confirmed on-chain. 2 shift logs closed: 0.00260096 SOL of rent back in your wallet.",
+            (model.state.value as WithdrawState.Done).message,
+        )
     }
 }

@@ -19,6 +19,8 @@ import xyz.headsdown.core.chain.ix.HeadsDownInstructions
 import xyz.headsdown.core.chain.ix.OreInstructions
 import xyz.headsdown.core.keys.RigSignalState
 import xyz.headsdown.core.wallet.WalletCapabilities
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * The two ways out, against an in-memory cluster: taking the SOL back out of the ORE Automation
@@ -212,5 +214,168 @@ class WithdrawTest {
             listOf(WellKnown.COMPUTE_BUDGET.toBase58(), WellKnown.COMPUTE_BUDGET.toBase58(), Ore.PROGRAM_ID.toBase58()),
             instructions(prepared).map { it.first },
         )
+    }
+
+    // --- shift-log rent ---
+
+    private val logRent = (128L + 128) * 6_960
+    private val day = 86_400L
+    private val now = 1_793_000_000L
+    private val margin = WithdrawComposer.LOG_CLOCK_MARGIN_SECONDS
+
+    /** A sealed shift's log. [payer]: who paid its rent (null: sealed before the program recorded it). */
+    private fun FakeChain.log(shiftId: Long, endedDaysAgo: Long, payer: Pubkey? = authority) = put(
+        HeadsDownProgram.shiftLog(rigAddress, shiftId.toULong()).address, HeadsDownProgram.ID,
+        TestAccounts.shiftLogBytes(rigAddress, shiftId, endTs = now - endedDaysAgo * day).also { bytes ->
+            payer?.bytes?.copyInto(bytes, destinationOffset = 112, startIndex = 0, endIndex = 16)
+        },
+        lamports = logRent,
+    )
+
+    /** The Clock sysvar as the cluster has it: `unix_timestamp` at offset 32. */
+    private fun FakeChain.clock(unix: Long = now) = put(
+        WellKnown.CLOCK_SYSVAR, Pubkey.fromBase58("Sysvar1111111111111111111111111111111111111"),
+        ByteBuffer.allocate(40).order(ByteOrder.LITTLE_ENDIAN).putLong(32, unix).array(),
+    )
+
+    private fun chainAt(unix: Long = now) = chain().clock(unix)
+
+    /** The service with the phone's clock at [phone]. */
+    private fun service(chain: FakeChain, phone: Long = now) = WithdrawService(chain.rpc()) { phone }
+
+    @Test
+    fun `the preview counts the rent the wallet's logs hold and says when the first can come back`() = runBlocking {
+        // Shifts 5, 6 and 7 are sealed; all three inside their 30 days.
+        val preview = service(chainAt().rig().log(5, 3).log(6, 2).log(7, 1)).preview(authority)
+        assertEquals(
+            LogRent(logs = 3, lamports = (3 * logRent).toULong(), ripe = emptyList(), ripeLamports = 0uL, nextRipeAtUnix = now - 3 * day + 30 * day + margin),
+            preview.logRent,
+        )
+        // No sealed shift, no log: nothing to say.
+        assertNull(service(chainAt().rig()).preview(authority).logRent)
+        assertNull(service(chainAt().automation()).preview(authority).logRent)
+    }
+
+    @Test
+    fun `only logs past their 30 days are closed, oldest first, each to the wallet that paid`() = runBlocking {
+        val chain = chainAt().rig().log(4, 45).log(5, 31).log(6, 29).log(7, 1)
+        val preview = service(chain).preview(authority)
+        assertEquals(listOf(4uL, 5uL), preview.logRent!!.ripe)
+        assertEquals((2 * logRent).toULong(), preview.logRent!!.ripeLamports)
+        assertEquals(0, preview.logRent!!.ripeLeft)
+        assertEquals(now + day + margin, preview.logRent!!.nextRipeAtUnix) // shift 6, tomorrow
+
+        val prepared = service(chain).prepare(authority, WithdrawRequest(closeLogs = true), v0)!!
+        assertEquals(listOf(4uL, 5uL), prepared.plan.logsClosed)
+        assertEquals((2 * logRent).toULong(), prepared.plan.logRentLamports)
+        val sent = instructions(prepared)
+        assertEquals(2, sent.size)
+        for ((i, shiftId) in listOf(4uL, 5uL).withIndex()) {
+            val expected = HeadsDownInstructions.closeShiftLog(rigAddress, shiftId, authority)
+            assertEquals(HeadsDownProgram.ID.toBase58(), sent[i].first)
+            assertTrue(expected.data.contentEquals(sent[i].second))
+        }
+        // Not asked for: not signed, however ripe.
+        assertNull(service(chain).prepare(authority, WithdrawRequest(), v0))
+    }
+
+    @Test
+    fun `a log on the day its 30 days end waits for the margin`() = runBlocking {
+        val state = { endTs: Long -> WithdrawChainState(null, 0uL, null, 0uL, false, 0uL, listOf(SealedLog(7uL, 1_781_760uL, endTs, paidByWallet = true))) }
+        val ttl = WithdrawComposer.LOG_TTL_SECONDS
+        assertTrue(WithdrawComposer.logRent(state(now - ttl), now)!!.ripe.isEmpty())
+        assertTrue(WithdrawComposer.logRent(state(now - ttl - margin + 1), now)!!.ripe.isEmpty())
+        assertEquals(listOf(7uL), WithdrawComposer.logRent(state(now - ttl - margin), now)!!.ripe)
+        // Until then the sheet names the moment it will offer the log, not one before it.
+        assertEquals(now + margin, WithdrawComposer.logRent(state(now - ttl), now)!!.nextRipeAtUnix)
+    }
+
+    @Test
+    fun `ripeness is judged by the cluster's clock, so a phone that runs fast cannot sink the transaction`() = runBlocking {
+        // The phone is two days ahead: by its clock shift 6 ended 31 days ago, by the cluster's 29.
+        val chain = chainAt(now).automation().rig().log(5, 40).log(6, 29)
+        val fast = service(chain, phone = now + 2 * day)
+        assertEquals(listOf(5uL), fast.preview(authority).logRent!!.ripe)
+        val prepared = fast.prepare(authority, WithdrawRequest(revoke = true, closeLogs = true), v0)!!
+        assertEquals(listOf(5uL), prepared.plan.logsClosed)
+        // A phone that runs slow asks for less, never for more.
+        assertTrue(service(chainAt(now).rig().log(5, 31), phone = now - 5 * day).preview(authority).logRent!!.ripe.isEmpty())
+        // The cluster's clock cannot be read: no log is called ripe, and the row is left out.
+        assertNull(service(chain().rig().log(5, 40)).preview(authority).logRent)
+    }
+
+    @Test
+    fun `a log somebody else paid for, or whose bond is still there, is not asked for`() = runBlocking {
+        val crank = Pubkey.fromBase58("5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk")
+        // Shift 3: sealed by the crank, which paid its rent. Shift 4: its Focus Bond was never resolved.
+        // Shift 5: sealed before the program recorded a payer, so its rent is the rig's wallet's.
+        val chain = chainAt().rig().log(3, 60, payer = crank).log(4, 50).bond(4).log(5, 40, payer = null)
+        val rent = service(chain).preview(authority).logRent!!
+        assertEquals(2, rent.logs) // 4 and 5 are the wallet's; 3 is the crank's
+        assertEquals(listOf(5uL), rent.ripe)
+        val prepared = service(chain).prepare(authority, WithdrawRequest(closeLogs = true), v0)!!
+        assertEquals(listOf(5uL), prepared.plan.logsClosed)
+        assertEquals(1, instructions(prepared).size)
+    }
+
+    @Test
+    fun `one transaction closes at most eight logs, says how many are left, and still takes the SOL back and closes the rig`() = runBlocking {
+        var chain = chainAt().automation().rig(shiftId = 12)
+        for (id in 1L..12L) chain = chain.log(id, 40 + id)
+        assertEquals(4, service(chain).preview(authority).logRent!!.ripeLeft)
+        val prepared = service(chain).prepare(authority, WithdrawRequest(revoke = true, closeRig = true, closeLogs = true), legacy)!!
+        assertEquals((1uL..8uL).toList(), prepared.plan.logsClosed)
+        val sent = instructions(prepared)
+        // ORE's automate, eight close_shift_log, close_rig: in that order, in a packet.
+        assertEquals(10, sent.size)
+        assertEquals(Ore.PROGRAM_ID.toBase58(), sent.first().first)
+        assertTrue(HeadsDownInstructions.closeRig(authority).data.contentEquals(sent.last().second))
+        assertTrue(prepared.transactions.single().size <= 1232)
+        // The four that are left are still there for the next visit.
+        assertEquals(12, service(chain).preview(authority).logRent!!.logs)
+    }
+
+    @Test
+    fun `the logs of a rig that was closed are still found, from the counter its tombstone keeps`() = runBlocking {
+        // The rig armed seven shifts and was closed: 32 bytes are left at its address.
+        val tombstone = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put(0, 10); put(1, 1); put(2, HeadsDownProgram.rig(authority).bump.toByte())
+            putLong(8, 7); putLong(16, 912); putLong(24, 436_538)
+        }.array()
+        val chain = chainAt().put(rigAddress, HeadsDownProgram.ID, tombstone, lamports = tombstoneRent).log(6, 45).log(7, 20)
+        val preview = service(chain).preview(authority)
+        assertFalse(preview.hasRig)
+        assertEquals(2, preview.logRent!!.logs)
+        assertEquals(listOf(6uL), preview.logRent!!.ripe)
+        val prepared = service(chain).prepare(authority, WithdrawRequest(closeLogs = true), v0)!!
+        assertEquals(listOf(6uL), prepared.plan.logsClosed)
+        assertTrue(HeadsDownInstructions.closeShiftLog(rigAddress, 6uL, authority).data.contentEquals(instructions(prepared).single().second))
+    }
+
+    @Test
+    fun `whatever goes wrong reading the logs, the SOL can still be taken back`() = runBlocking {
+        // Something that is not a log sits at shift 6's log address; shift 5's log is sound.
+        val chain = chainAt().automation().rig()
+            .put(HeadsDownProgram.shiftLog(rigAddress, 6uL).address, HeadsDownProgram.ID, ByteArray(128) { 0x55 }, lamports = logRent)
+            .log(5, 40)
+        val preview = service(chain).preview(authority)
+        assertEquals("the one that decodes is counted, the other is left out", 1, preview.logRent!!.logs)
+        assertEquals((automationRent + 18_000_000).toULong(), preview.revoke!!.lamports)
+
+        // A revoke alone does not read a single log: one read of the rig and the Automation, and the bond's.
+        chain.requests.clear()
+        val prepared = service(chain).prepare(authority, WithdrawRequest(revoke = true), v0)!!
+        assertEquals(1, instructions(prepared).size)
+        val logAddress = HeadsDownProgram.shiftLog(rigAddress, 5uL).address.toBase58()
+        assertFalse(chain.requests.any { it.toString().contains(logAddress) })
+    }
+
+    @Test
+    fun `another wallet's rig has no log rent to offer`() = runBlocking {
+        val other = Pubkey.fromBase58("9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW")
+        val chain = chainAt().rig().log(5, 40)
+        // The rig at this wallet's address is its own by construction; a log names its payer.
+        assertEquals(1, service(chain).preview(authority).logRent!!.logs)
+        assertNull(service(chain).preview(other).logRent)
     }
 }
