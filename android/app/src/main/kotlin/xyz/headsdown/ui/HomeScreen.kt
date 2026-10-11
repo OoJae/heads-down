@@ -108,6 +108,9 @@ object HomeTags {
     const val CLOCK_IN = "home-clock-in"
     const val PREVIEW_REVEAL = "home-preview-reveal"
     const val CLOCK_OUT = "home-clock-out"
+
+    /** "Clock out" right under "Shift ended: ...", where the eye is after a pickup. */
+    const val CLOCK_OUT_NOW = "home-clock-out-now"
     const val WITHDRAW = "home-withdraw"
     const val ADD_WIDGET = "home-add-widget"
     const val SENSOR_LAB = "home-sensor-lab"
@@ -387,7 +390,10 @@ fun HomeScreen(
                     Modifier.fillMaxWidth().padding(start = HdDimens.Margin, end = HdDimens.Margin, top = 20.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    RigState(look)
+                    // After a pickup the shift is over and not yet sealed. The way to seal it is
+                    // offered here, under the sentence that says it ended: the only bar on screen
+                    // says "Clock in", and the first person to use the app clocked in three times.
+                    RigState(look, onClockOut = onClockOut.takeIf { state is ShiftState.Broken })
                     ShiftFacts(snapshot, shiftWindow, loading)
                 }
             },
@@ -563,7 +569,7 @@ private fun PoweredByOre() {
 
 /** The rig in one word, with the sentence that says what to do about it. */
 @Composable
-private fun RigState(look: RigLook) {
+private fun RigState(look: RigLook, onClockOut: (() -> Unit)? = null) {
     val colors = Hd.colors
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -593,6 +599,7 @@ private fun RigState(look: RigLook) {
             modifier = if (look.problem) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier,
             color = if (look.problem) colors.ember else colors.chalk,
         )
+        if (onClockOut != null) TextAction("Clock out", onClick = onClockOut, modifier = Modifier.testTag(HomeTags.CLOCK_OUT_NOW))
     }
 }
 
