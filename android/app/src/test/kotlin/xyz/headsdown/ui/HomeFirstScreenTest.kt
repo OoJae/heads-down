@@ -1,6 +1,9 @@
 package xyz.headsdown.ui
 
 import android.app.Application
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
@@ -317,6 +320,21 @@ class HomeFirstScreenTest : ScreenTest() {
         assertTrue("whole, just above the dock: $limits, dock at ${dock.top}", limits.bottom <= dock.top && dock.top - limits.bottom <= 12.dp)
         // And nothing of the section's body: that starts under the fold.
         assertTrue(bounds(HomeTags.CLOCK_IN_AMOUNTS).top >= dock.top)
+    }
+
+    @Test fun `setup is called unfinished only once the phone's settings were read and say so`() {
+        var loading by mutableStateOf(true)
+        show {
+            HomeScreen(
+                snapshot = Screens.idle.snapshot, onboarding = OnboardingState(introSeen = true), health = Screens.idle.health,
+                onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {}, loading = loading,
+            )
+        }
+        // Not known yet: no "Finish setup" flashing by for someone whose rig is set up.
+        rule.onNodeWithTag(HomeTags.SETUP).assertTextEquals("Setup")
+        loading = false
+        rule.waitForIdle()
+        rule.onNodeWithTag(HomeTags.SETUP).assertTextEquals("Finish setup").assertIsDisplayed()
     }
 
     @Test fun `until the first refresh the shift window is two still lines, and its numerals keep their place`() {

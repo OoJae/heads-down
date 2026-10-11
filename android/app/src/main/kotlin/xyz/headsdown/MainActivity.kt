@@ -104,8 +104,10 @@ class MainActivity : ComponentActivity() {
 /**
  * THE ONE PLACE where the app provides CompositionLocals to every screen under the theme. Nothing
  * is provided yet: the hero draws the design module's still slab and the haptics are silent.
- * The live hero (`LocalHeroRenderer provides …`) and the motor (`LocalHdHaptics provides …`) are
- * wired here, and nowhere else.
+ * The live hero (`LocalHeroRenderer provides …`, with whatever it needs to be live: its config,
+ * its tilt source) and the motor (`LocalHdHaptics provides …`) are wired here, and nowhere else.
+ * The screens give the hero the clear box between the brand row and the line under it, the
+ * screen's full width; nothing but the page's own scroller clips what is drawn past that box.
  */
 @Composable
 private fun AppLocals(content: @Composable () -> Unit) {

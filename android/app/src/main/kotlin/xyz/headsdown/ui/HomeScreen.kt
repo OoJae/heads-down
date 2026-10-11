@@ -349,7 +349,8 @@ fun HomeScreen(
                     contentDescription = HomeCopy.hero(state),
                 )
             },
-            overlay = { BrandRow(setupLabel = if (onboarding.allDone) "Setup" else "Finish setup", onOpenSetup = onOpenSetup) },
+            // Until the phone's settings are read nothing says setup is unfinished: it is not known yet.
+            overlay = { BrandRow(setupLabel = if (onboarding.allDone || loading) "Setup" else "Finish setup", onOpenSetup = onOpenSetup) },
             mark = { PoweredByOre() },
             // The hero's zone ends on a rule: the stage above it, the facts below.
             ruled = true,
