@@ -17,9 +17,21 @@ class ShiftController @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val repository: ShiftStatusRepository,
 ) {
-    fun arm(spec: ShiftSpec) {
+    /**
+     * Starts the shift. False when Android refused to start the service because the app is no
+     * longer in the foreground (Android 12 and later throw then): nothing was started, and the
+     * caller keeps whatever it needs to try again from the foreground.
+     */
+    fun arm(spec: ShiftSpec): Boolean {
         repository.requestArm(spec)
-        ContextCompat.startForegroundService(context, serviceIntent(ShiftForegroundService.ACTION_ARM))
+        return try {
+            ContextCompat.startForegroundService(context, serviceIntent(ShiftForegroundService.ACTION_ARM))
+            true
+        } catch (_: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException is one. The staged shift is taken back.
+            repository.takePendingArm()
+            false
+        }
     }
 
     fun end() {

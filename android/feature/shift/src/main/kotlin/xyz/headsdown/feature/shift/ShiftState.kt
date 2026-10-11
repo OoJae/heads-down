@@ -121,5 +121,13 @@ val ShiftState.spec: ShiftSpec?
 val ShiftState.isHot: Boolean get() = this is ShiftState.Down
 
 /** A shift is in progress (the foreground service must be alive for it). */
+/**
+ * Armed so recently that a tap may have been aimed at what stood there a moment before: "Clock
+ * in" turns into "End shift" in the same place when a shift is armed under the user's thumb.
+ * [nowElapsedMillis] is `SystemClock.elapsedRealtime()`, the clock [ShiftState.Armed.since] is on.
+ */
+fun ShiftState.justArmed(nowElapsedMillis: Long, withinMillis: Long = 2_000L): Boolean =
+    this is ShiftState.Armed && nowElapsedMillis - since in 0 until withinMillis
+
 val ShiftState.isRunning: Boolean
     get() = this is ShiftState.Armed || this is ShiftState.Down || this is ShiftState.Cooling

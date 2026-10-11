@@ -99,5 +99,8 @@ object WalletFailures {
         "No compatible wallet found.",
     )
 
+    /** The wallet itself said it signed nothing: no transaction of that session can be on its way. */
+    val NOTHING_SIGNED = setOf("User did not authorize signing", "Too many payloads to sign")
+
     fun sanitize(message: String?): String = if (message != null && message in KNOWN) message else GENERIC
 }

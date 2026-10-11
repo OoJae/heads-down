@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -109,6 +110,22 @@ class ClockInRecoveryTest {
         assertTrue(decide(rig(shiftId = 5), at = now + 8 * 3600) is Recovery.Drop)
         assertTrue(decide(rig(shiftId = 5), key = null) is Recovery.Drop)
         assertTrue(decide(rig(shiftId = 5), key = byteArrayOf(0x02) + ByteArray(32) { 0x44 }) is Recovery.Drop)
+    }
+
+    @Test
+    fun `a new clock-in is not built over the one that landed a moment ago`() {
+        // The Rig the new transaction was composed from sits on the pending shift, open: the
+        // composer put end_shift in front and would arm the one after it.
+        assertTrue(ClockInRecovery.landedUnder(pending(), authority, myKey, endsPreviousShift = true, expectedShiftId = 6uL))
+        // Not landed yet: the new clock-in is for the same shift, and at most one of the two can arm.
+        assertFalse(ClockInRecovery.landedUnder(pending(), authority, myKey, endsPreviousShift = false, expectedShiftId = 5uL))
+        // An older shift is open (last night's, never clocked out): sealing that one is what a clock-in does.
+        assertFalse(ClockInRecovery.landedUnder(pending(), authority, myKey, endsPreviousShift = true, expectedShiftId = 5uL))
+        // The pending shift came and went: the Rig is past it and idle.
+        assertFalse(ClockInRecovery.landedUnder(pending(), authority, myKey, endsPreviousShift = false, expectedShiftId = 6uL))
+        // Another wallet, or another rig key, is another rig.
+        assertFalse(ClockInRecovery.landedUnder(pending(), Pubkey(ByteArray(32) { 9 }), myKey, endsPreviousShift = true, expectedShiftId = 6uL))
+        assertFalse(ClockInRecovery.landedUnder(pending(), authority, byteArrayOf(0x02) + ByteArray(32) { 0x44 }, endsPreviousShift = true, expectedShiftId = 6uL))
     }
 
     @Test
