@@ -69,7 +69,7 @@ whatever is no longer true.
 | Deck URL | `https://oojae.github.io/heads-down/deck/` (as a file: `https://oojae.github.io/heads-down/deck/heads-down-deck.pdf`) | 18 slides, published 2026-10-11 from `site/deck/` (`docs/pitch/DECK.md` is its script; `scripts/pitch/render-deck.sh` prints the PDF). Two of its app pictures are from the Redmi (11 October) and the others from the emulator; each caption says which |
 | Video URL | `[TBD: video URL]` | filmed from `docs/pitch/DEMO_SCRIPT.md` |
 | Repositories | `https://github.com/OoJae/heads-down` | public since 2026-10-01 |
-| APK URL | `[TBD: APK URL]` | Still to do. No APK is hosted. A debug-signed mainnet build of the redesigned app was made on 2026-10-11; the founder agreed to host it as a GitHub release once it has clocked out on the Redmi. Needed: a release signing key (none exists; the build that ran on the phone is debug-signed), the registrar set to accept that key's certificate (today it accepts only the founder's debug certificate, `docs/DEPLOY.md` §10.4), a place to host the file, and one install from a clean state on the Redmi 14C |
+| APK URL | `https://github.com/OoJae/heads-down/releases/download/v0.1.0-clock-in/heads-down-0.1.0-clock-in.apk` | Published 2026-10-11 as the pre-release `v0.1.0-clock-in` ([notes](https://github.com/OoJae/heads-down/releases/tag/v0.1.0-clock-in)): the debug-signed mainnet build with the demo policy and no debug screens, from commit 395cc41; sha256 `5bfc9bee331ac1ab3a2cb3440a2f2448bc4562adb4e9508848691417fee5a17e`. That exact file was installed over the earlier build on the Redmi and clocked out and took SOL back there. Not done: an install from a clean state on the Redmi (it would destroy the rig's key), and a release signing key |
 
 ### `skrIntegration`
 
@@ -290,8 +290,9 @@ described the state before the deploy.
 - [ ] The final deck file and the video's own transcript scanned for the same wording by hand;
       the script only sees these drafts.
 - [x] Repo public (`https://github.com/OoJae/heads-down`).
-- [ ] APK installs from a clean state on the Redmi. Not possible yet: no APK is hosted and no
-      release signing key exists (see the APK row in section 2).
+- [ ] APK installs from a clean state on the Redmi. The hosted APK installed over the earlier
+      build there (2026-10-11); a clean install was not tried, because clearing the app destroys
+      the rig's key (see the APK row in section 2).
 - [x] The dashboard's data is real. The indexer it reads serves the dataset `mainnet`, not the
       simulator (read 2026-10-10 20:44 UTC: 1 rig, 5 rounds dug, 5,000,000 lamports deployed,
       0 ORE mined; on 2026-10-11 at 20:09 UTC: 1 rig, 20 rounds dug). Look at the page itself

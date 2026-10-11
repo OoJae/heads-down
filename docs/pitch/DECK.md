@@ -14,8 +14,9 @@ longer sentences are in the speaker notes.
 - The app pictures: `site/deck/img/redmi-*.png` are screenshots from the founder's Redmi 14C on
   mainnet on the evening of 2026-10-11; `site/deck/img/app-*.png` are the same build (the
   localdev flavour) on an Android 14 emulator against the local fork of mainnet, taken the same
-  day. Each caption says which. On the phone the redesigned build clocked in three times and dug
-  ten rounds; its clock-out and its way out have run on the emulator only.
+  day. Each caption says which. On the phone the redesigned build clocked in three times, dug ten
+  rounds, clocked out and took its SOL back to the lamport; the morning reveal has run on the
+  emulator only.
 - `[TBD: founder]`: only the founder can supply it (the photo, the personal line).
 
 **Status chips used on slides.** **Built** = code plus passing tests in the repo. **Built, not on a
@@ -135,9 +136,9 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
     `3VfbzUZHzAYj468iXo2bnsqRfAcrTMt76dHzWFT51ZnrvseFF1bYEzo6fAqurTG8tB9AM1cPRYsXtJK2R25LuTUm`, SOL back
     `46NXJnX54wUdTgBVBGwfid8NQeqRL3LkGCyFkhtqJuVVHwp6R2UbnNxxhTSv8FHgtuyJupEPRQi4Frqf4NAjDcFF`:
     0.00502704 SOL, to the lamport."
-- **Visual:** The seven steps as rows, a status chip on each. Beside them the home screen armed,
-  on the Redmi (`site/deck/img/redmi-home-armed.png`), and the clock-out sheet on the emulator
-  (`site/deck/img/app-clock-out.png`).
+- **Visual:** The seven steps as rows, a status chip on each. Beside them, from the Redmi, the
+  home screen armed (`site/deck/img/redmi-home-armed.png`) and the clock-out sheet
+  (`site/deck/img/redmi-clock-out.png`).
 - **Speaker notes:** "The habit hangs on three things people already do every night: bedtime, the
   charger and the alarm. If the OS kills the app, the rig goes cold and nothing is spent. On the
   tenth of October my Redmi did all of this on mainnet except the morning reveal: one approval in
@@ -183,13 +184,13 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
     only for a hot rig and for ORE."
   - "The rules: one action, in the thumb zone. The most a shift can place beside it, before the
     wallet opens. Nothing moves by itself."
-  - "The first two: the app on the Redmi 14C, on mainnet, 11 Oct 2026, where this build clocked
-    in three times and dug ten rounds. The last two: the same build on an Android 14 emulator
-    against the local fork of mainnet; the reveal shows the sample night the app offers before a
-    first haul, and says so on screen."
+  - "The first three: the app on the Redmi 14C, on mainnet, 11 Oct 2026, where this build clocked
+    in three times, dug ten rounds, clocked out and took its SOL back to the lamport. The last:
+    the same build on an Android 14 emulator; the reveal shows the sample night the app offers
+    before a first haul, and says so on screen."
 - **Visual:** Four screenshots in a row (`site/deck/img/redmi-home-cold.png`,
-  `redmi-home-armed.png`, `app-take-back.png`, `app-reveal.png`): cold and armed on the Redmi,
-  Take it back and the morning reveal on the emulator.
+  `redmi-home-armed.png`, `redmi-take-back.png`, `app-reveal.png`): cold, armed and Take it back
+  on the Redmi, the morning reveal on the emulator.
 - **Speaker notes:** "The first build was a plain dark screen with pill buttons. After it worked
   on mainnet I redesigned it around one idea: this app does its job face-down, so its mark is the
   underside. The slab on the home screen is drawn by one small shader and is held level with the
@@ -197,9 +198,10 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   teaches the one gesture the product needs. Gold is rationed: it is light, or an amount of ORE,
   never a button. Every sentence and every test tag of the screens that ran on mainnet stayed as
   it was, so the app's tests and the end-to-end run on the emulator, with Solana Mobile's test
-  wallet, pass unchanged. The first two pictures are my phone, on the evening of the eleventh:
-  this build clocked in three times there and dug ten rounds. The other two are the emulator,
-  where its clock-out and the way out have run; on the phone those two ran with the first build."
+  wallet, pass unchanged. The first three pictures are my phone, on the evening of the eleventh:
+  this build clocked in three times there, dug ten rounds, clocked out and took its SOL back,
+  and the wallet received what the sheet had said, to the lamport. The reveal is the emulator:
+  the morning reveal has not yet opened at an alarm on the phone."
 - **Serves:** Public: UX, Presentation & Demo. Align: UI, UX.
 - **Sources:** `android/core/design/` (tokens, type, components), `android/README.md` ("The
   Underside"), `android/app/src/main/kotlin/xyz/headsdown/ui/slab/` (the slab),

@@ -6,6 +6,7 @@
 An entry for [Clock In](https://solanamobile.radiant.nexus/), the third Solana Mobile hackathon.
 Native Android, built on the Solana Mobile Stack and Mobile Wallet Adapter. Runs on any Android
 phone with a Solana wallet; Seeker owners get a tier verified on-chain by their Seeker Genesis Token.
+[Download the APK](https://github.com/OoJae/heads-down/releases/tag/v0.1.0-clock-in) (a demo build: read the release's notes on what it does with real SOL).
 
 <p>
   <img src="site/deck/img/app-first-launch.png" width="190" alt="The app's first screen: a dark slab seen from below, the words Turn it over, and the button Set up my rig">
@@ -64,7 +65,7 @@ built; the Stack and Gift screens are not yet.
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains. Running on Railway against mainnet |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 477 tests. Running on Railway against mainnet |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain. [Running on Railway](https://dashboard-production-b80c.up.railway.app) on the indexer's mainnet data |
-| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget, all drawn from one design module (`core/design`) around a shader-drawn slab that stays level with the real world. 1,330 JVM unit tests. Five short shifts on one physical phone, on mainnet, on 10 and 11 October 2026: two on the first build and three on the redesigned one (clock-in, digs and pickups; its clock-out and its way out have run on an Android 14 emulator only) |
+| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget, all drawn from one design module (`core/design`) around a shader-drawn slab that stays level with the real world. 1,330 JVM unit tests. Five short shifts on one physical phone, on mainnet, on 10 and 11 October 2026: two on the first build and three on the redesigned one, which also clocked out and took its SOL back there, to the lamport |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
 **Deployed on mainnet on 10 October 2026.** The program is at
@@ -116,8 +117,8 @@ screen to the lamport. On that emulator the test wallet showed the name and icon
 identity page; on the phone, Jupiter's wallet showed "Could not verify request" on its connect
 prompt and still connected and signed. No SKR instruction has been sent on mainnet, and the
 BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift, and its
-clock-out cannot buy ORE yet. There is no release signing key and no APK to download: the
-registrar accepts only the founder's debug-signed build. With one rig the crank pays more in fees
+clock-out cannot buy ORE yet. There is no release signing key: the APK to download is the
+founder's debug-signed build ([release](https://github.com/OoJae/heads-down/releases/tag/v0.1.0-clock-in)), the only one the registrar accepts. With one rig the crank pays more in fees
 than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports net, and each
 skipped attempt and the BREAK their whole fee: 60,473 lamports net over nine transactions.
 Whether the 4,480,400 lamports that ORE holds in the wallet's Miner account can ever be taken

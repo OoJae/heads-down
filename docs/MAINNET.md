@@ -390,6 +390,8 @@ Same policy as before. Times are UTC; the numbering goes on.
 | 39 | 18:01:39 | 455,742,671 | [`3mAz8uEu…`](https://solscan.io/tx/3mAz8uEusptEoc3tz3rPSGymfNKhjN3RnTwmoaMKDx1cKfdhrZVLgjoF5AoQ1b8vNPYeSj2Zd1JXRKSLMDSGnQhZ) | crank | The first attempt for round 436,537, landing six slots after the second: `RigSkipped`, error 7 `StaleHeartbeat` |
 | 40 | 18:02:28 | 455,742,890 | [`483ABMie…`](https://solscan.io/tx/483ABMieQ5p49ExYdxc8Pxmtskpq3Vsq7N1iTi5NSeFCvCBsUDQ2X2XFG3zWCKm7FF1oEd8ttHzM1K4WG8mU24A2) | crank | `checkpoint` of 436,537 (0.000891 SOL), then `dig` for round 436,538: the fifth dig, and the shift's budget |
 | 41 | 18:04:16 | 455,743,392 | [`4iyVhabE…`](https://solscan.io/tx/4iyVhabEtyoPQZhNUCi8sDffuSHxJobTtj7yYq6rrMhYHRaBkDbhDNbx8LeWSCi3isA4onZjGEjRTEn2mmkjr8Ds) | crank | A BREAK the phone signed when it was picked up: `ShiftBroken` (shift 7, reason 1 `pickup`) |
+| 42 | 20:35:44 | 455,784,931 | [`4VrBjPok…`](https://solscan.io/tx/4VrBjPokVddo3FQf4dALc8ed59BYbceoyt1e7r1gH4Qq5BDKjKfGzpoapaHrNBu3eGMiFUfB8QZx6G98vQ8UfTmh) | wallet | The clock-out, from the final build's sheet: `end_shift` (`ShiftEnded` and `ShiftEndedV2` for shift 7). The wallet paid the log's rent, 1,300,480 lamports, and the fee |
+| 43 | 20:37:41 | 455,785,468 | [`31hLL494…`](https://solscan.io/tx/31hLL494mPMcjH4cjjQ7KigH6P9eAqokGh7CWvUTnpxFmhRQ5bVb2tzCA8FaDjs4SGGY9eB4cFfxPuGCf628dzYG) | wallet | "Take it back": one ORE `automate` that closes the Automation and sends its 5,967,540 lamports to the wallet |
 
 What it showed:
 
@@ -425,11 +427,13 @@ What it showed:
   shift before it and paid a ShiftLog's rent, 1,300,480 lamports, which the program gives back
   from 30 days after the shift ended (no tool sends that instruction yet). Changed in the app:
   "Clock out" now stands directly under "Shift ended".
-- **Shift 7 is open.** At 20:03 UTC the Rig was Cooling with shift 7 open and its window over:
-  not clocked out, and round 436,538 not yet checkpointed (the crank's sweep is due some seven
-  hours after the round).
-- **Clock-out and "Take it back" have not run on the phone with the redesigned build.** They ran
-  with the first build on 10 October, and with this one on the emulator.
+- **Clock-out and "Take it back" ran on the phone with the final build** (transactions 42 and
+  43), which had been installed over the evening's earlier one. The sheet said the Automation
+  held 0.00596754 SOL; the wallet held 28,545,479 lamports before and 34,508,019 after, which is
+  that amount less the 5,000-lamport fee, to the lamport. The ORE was left in the Miner. The Rig
+  is Idle with no shift open. Round 436,538 was not yet checkpointed at that point; with the
+  Automation closed, what it returns goes to the Miner's own balance when the crank's sweep
+  settles it.
 
 **5. A wallet can refuse the token it handed out, and the library hides it.** Jupiter Mobile
 refused, on 11 October, the sign-in token it had given the app on 10 October. clientlib-ktx
