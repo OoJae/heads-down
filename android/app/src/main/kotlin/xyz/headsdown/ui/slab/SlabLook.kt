@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
+import xyz.headsdown.core.design.HdPalette
 
 /** What the rig is doing, as far as the slab shows it. */
 enum class SlabState {
@@ -44,24 +45,26 @@ data class SlabPalette(
     val isLight: Boolean,
 ) {
     companion object {
+        // The values are the design module's: this file writes no colour of its own. The edge is the
+        // face lifted a little toward chalk; the light under the slab is the same in both palettes.
         val Dark = SlabPalette(
-            pit = Color(0xFF0C0C0D),
-            face = Color(0xFF18181A),
-            faceEdge = Color(0xFF34343A),
-            emitGold = Color(0xFFF2B233),
-            emitEmber = Color(0xFFE8622A),
-            rim = Color(0xFFEFEAE0),
-            ink = Color(0xFFEFEAE0),
+            pit = HdPalette.Dark.pit,
+            face = HdPalette.Dark.slab,
+            faceEdge = lerp(HdPalette.Dark.slab, HdPalette.Dark.chalk, 0.13f),
+            emitGold = HdPalette.Dark.seamLight,
+            emitEmber = HdPalette.Dark.ember,
+            rim = HdPalette.Dark.chalk,
+            ink = HdPalette.Dark.chalk,
             isLight = false,
         )
         val Light = SlabPalette(
-            pit = Color(0xFFF1ECE2),
-            face = Color(0xFF151413),
-            faceEdge = Color(0xFF3A3835),
-            emitGold = Color(0xFFF2B233),
-            emitEmber = Color(0xFFE8622A),
-            rim = Color(0xFFEFEAE0),
-            ink = Color(0xFF151413),
+            pit = HdPalette.Light.pit,
+            face = HdPalette.Light.chalk,
+            faceEdge = lerp(HdPalette.Light.chalk, HdPalette.Dark.chalk, 0.17f),
+            emitGold = HdPalette.Light.seamLight,
+            emitEmber = HdPalette.Dark.ember,
+            rim = HdPalette.Dark.chalk,
+            ink = HdPalette.Light.chalk,
             isLight = true,
         )
     }

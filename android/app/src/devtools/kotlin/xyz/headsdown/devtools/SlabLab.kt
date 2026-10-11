@@ -73,6 +73,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import xyz.headsdown.core.design.HdPalette
 
 /**
  * DEBUG AND LOCALDEV BUILDS ONLY (src/devtools; release does not compile this file). Entry point
@@ -305,7 +306,7 @@ private fun SlabLabScreen(
     sensor: (accelerometerOnly: Boolean) -> SensorTiltSource,
 ) {
     val palette = if (model.light) SlabPalette.Light else SlabPalette.Dark
-    val ink = if (model.light) Color(0xFF151413) else Color(0xFFEFEAE0)
+    val ink = if (model.light) HdPalette.Light.chalk else HdPalette.Dark.chalk
     val scope = rememberCoroutineScope()
     val tilt = remember(model.accelerometerOnly) { sensor(model.accelerometerOnly) }
     val debug = model.debug
@@ -491,10 +492,10 @@ private fun Choices(label: String, ink: Color, content: ChoiceScope.() -> Unit) 
             val shape = RoundedCornerShape(6.dp)
             Text(
                 text,
-                color = if (selected) Color(0xFF0C0C0D) else ink,
+                color = if (selected) HdPalette.Dark.pit else ink,
                 fontSize = 12.sp,
                 modifier = Modifier
-                    .background(if (selected) Color(0xFFF2B233) else Color.Transparent, shape)
+                    .background(if (selected) HdPalette.Dark.seamLight else Color.Transparent, shape)
                     .border(1.dp, ink.copy(alpha = 0.35f), shape)
                     .clickable(onClick = onClick)
                     .padding(horizontal = 9.dp, vertical = 7.dp),
