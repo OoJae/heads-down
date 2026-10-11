@@ -234,7 +234,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
   ([one of the two](https://solscan.io/tx/4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM)).
   `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 214, registrar 116, `p256-introspect` 30, `sgt-verify` host 69,
-  indexer 477, dashboard 48, Android 855. `docs/pitch/DECK.md` slide 14
+  indexer 477, dashboard 48, Android 1,324. `docs/pitch/DECK.md` slide 15
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
   of a confirmed finding with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 
