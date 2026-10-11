@@ -193,8 +193,9 @@ What the table does not say by itself:
   4,480,400 lamports. Its fields: `checkpoint_id` 435,227, `round_id` 435,228, `rewards_sol` 0,
   `rewards_ore` 0, `lifetime_deployed` 5,000,000, `lifetime_rewards_sol` 3,564,000,
   `lifetime_rewards_ore` 0.
-- No ORE came out of the four rounds that are settled. Round 435,228 is not checkpointed, so what
-  it sends back is not known.
+- No ORE came out of the four rounds that were settled that evening. Round 435,228 was not
+  checkpointed then; the next evening's first dig settled it, and it sent back the same 89.1%
+  ("The second evening", transaction 16).
 - The Executor PDA holds 1,465,240 lamports: 3,000 more for each of the five digs.
 
 ## What it cost
@@ -208,7 +209,7 @@ it back": 11,193,320 less.
 | Rig [`DUmg1GrZ…`](https://solscan.io/account/DUmg1GrZhaELtpjY1KpA5ov6ANn4msoUPn4mLV2TWZgL) | 2,600,960 | 1,788,160 when the rig is closed. 812,800 stay behind (below) |
 | Two ShiftLogs, [`2wKGfqoT…`](https://solscan.io/account/2wKGfqoT2cesX9swmHv6ZgWRRP7eeV3Ntp8se6VoSQb3) and [`AeNsTaCL…`](https://solscan.io/account/AeNsTaCLqN3cRjbUwy5D7FHN6MeCA6DXWg8y2pEHE7XZ) | 2,600,960 (2 x 1,300,480) | Yes, from 30 days after each shift ended: the program's `close_shift_log` returns it to the wallet that paid. Neither the app nor the crank sends that instruction yet |
 | Fees of the four wallet transactions | 25,000 | No |
-| Mining | 1,486,000 so far | 5,050,000 went out, 3,564,000 came back |
+| Mining | 1,486,000 that evening | 5,050,000 went out, 3,564,000 came back. Round 435,228 sent 891,000 more into the wallet's Automation the next evening |
 | **Total** | **11,193,320** | |
 
 - *The mining line.* Each dig took 1,010,000 lamports from the Automation: 1,000,000 onto four
@@ -221,8 +222,9 @@ it back": 11,193,320 less.
   evening's slot time, around 12:30 on 11 October. ORE forfeits what a round owes a Miner if
   nobody checkpoints it before then (ORE.md, F8). The crank's checkpoint sweep is written to do
   that from round 435,640 on (the first multiple of 20 that is at least 400 rounds after
-  435,228), while the crank runs and the Rig account stays open. Whether it has happened, and
-  what the round sends back, is not known.
+  435,228), while the crank runs and the Rig account stays open. It did not come to that: the
+  founder clocked in again a few hours later, and the first dig of that shift checkpointed round
+  435,228 at 01:02 UTC on 11 October. ORE sent back 891,000 lamports ("The second evening").
 - *The tombstone.* The app's screen for closing the rig said "Your rig can be closed: 0.00178816
   SOL of account rent comes back". That is the Rig's 2,600,960 lamports less 812,800. Since v1.3,
   `close_rig` does not delete a rig that has armed a shift or accepted a phone-signed message: it
@@ -321,6 +323,44 @@ landed from another wallet for the phone's key while the app was in front (armed
 seconds), one that was already on-chain when the Quick Settings tile was tapped (armed, and the
 wallet was not opened), and one that could never land (forgotten). Both emulator end-to-end
 runs pass with it. **Not yet seen on the phone.**
+
+## The second evening (11 October 2026)
+
+The founder clocked in again a few hours later, with the same build and the same policy. Times
+are UTC on 11 October. The numbering goes on from the first shift's table.
+
+| # | Time | Slot | Transaction | Signed by | What it did |
+|---|---|---|---|---|---|
+| 14 | 00:51:27 | 455,459,349 | [`5ou3WreP…`](https://solscan.io/tx/5ou3WrePYwPt5qzzcHtMQYiwjLcvzQVMrWrW391RrPqDaKzFPH1VBPyruU7ygexYaU2o8U8tzVqyeodmNJkx7F5g) | wallet | Clock-in: ORE `automate`, `set_caps`, `arm_shift` (`ShiftArmed`) |
+| 15 | 00:52:10 | 455,459,548 | [`3M473Ned…`](https://solscan.io/tx/3M473NedEXu1czdcb8f71p9Aaqmgrk3pvLaYgSpJ8eWYnkGysw3zsAYceXHDzHnAyfYRooBNUfFNTfuJMffhFkTe) | wallet | A second clock-in 43 seconds later, for the reason in item 4 above: `end_shift` for the shift just armed, then `set_caps` and `arm_shift` (shift 4) |
+| 16 | 01:02:19 | 455,462,352 | [`3HNQyTrx…`](https://solscan.io/tx/3HNQyTrxKZTJrXwQy283QAfHfWDSgPCbNHfCUzFoXL9NgtCUkBF3kpYVZaprjZ6JMpwomf5Qvgb3r4esuRfnT5L) | crank | ORE `checkpoint` of round 435,228, the first evening's last dig (`Sending 0.000891 SOL to automation`), then `dig` for round 435,569 |
+| 17 | 01:03:23 | 455,462,644 | [`4TLGYzT1…`](https://solscan.io/tx/4TLGYzT1WFq4ErKvZwNBWErREqhapZaNdjyxopVU6iBzUqh2EVofAbqPEurm4WYE29AiBTyAJutwXyTQEVmfzdxw) | crank | `checkpoint` of round 435,569 (0.000891 SOL), then `dig` for round 435,570 |
+| 18 | 01:04:26 | 455,462,932 | [`5RF9F4R5…`](https://solscan.io/tx/5RF9F4R5NmkMdMZt8DwWtgxgm5DQuLjPBJXBPMMYYf4vBi7b6fomspSBkcJMYeQp7hq6jtmzww5ZnQkBf5GR9dbV) | crank | `checkpoint` of round 435,570 (0.000891 SOL), then `dig` for round 435,571 |
+| 19 | 01:05:33 | 455,463,244 | [`4zMvxL9G…`](https://solscan.io/tx/4zMvxL9GDT3hazn3QqKKdfeYLxwtBYt9mShScu4zSFmqAkUUZsDg9nxRzyH7DahT79Y4Y1Bf71NHnYsrnmr1h8am) | crank | `checkpoint` of round 435,571 (0.000891 SOL), then `dig` for round 435,572 |
+| 20 | 01:06:29 | 455,463,504 | [`zXq1efeP…`](https://solscan.io/tx/zXq1efePF71DmZZDoCUMJWTQacphwTESmsstWhyf5yDMYdpZUFPXs16o5XHxvMnRowsRG1fxUqQT6NoKKFXQ9KU) | crank | `checkpoint` of round 435,572 (0.00091575 SOL), then `dig` for round 435,573: the fifth dig, and the shift's budget |
+| 21 | 01:12:13 | 455,465,093 | [`WrpqfU18…`](https://solscan.io/tx/WrpqfU18cEGEfRNxGjMvuPx3fMuCtZkLEURaHNSsQYJSkLcoV14dxXqSXqGJ7TiAGHfhKnQG92SpCwnZPznampW) | crank | A BREAK the phone signed: `ShiftBroken` (shift 4, reason 2 `screen_on`) |
+| 22 | 01:35:09 | 455,471,408 | [`4oYkP3LH…`](https://solscan.io/tx/4oYkP3LHFxgnuUMwxvwxUjMKzQ4eh9Rf7Ga2529Q1gNErBz89ivXxaEuwWJHhyJbALPPcN9Mjiyb6MoKVe33GiUs) | crank | A second BREAK the phone signed, after it was laid down again: `ShiftBroken` (shift 4, reason 2) |
+| 23 | 08:13:30 | 455,581,102 | [`22dBJyxT…`](https://solscan.io/tx/22dBJyxTfjzAHZv31t8Z7RATgqL323qAZN2nqt8kD7cyrpTKktSsWPU2A6FB8qQJHyHqTh9QcP1QqfzBagx2GNEa) | crank | The crank's checkpoint sweep, with no phone involved: ORE `checkpoint` of round 435,573 (0.000891 SOL to the Automation) |
+
+What it adds to the first evening:
+
+- **Five digs in five consecutive rounds.** With the 80-slot window and the 40-slot retry no
+  round was missed and no second attempt landed. With the first evening that is nine rounds dug
+  of nine since the window was widened. It is still one rig and two evenings.
+- **The first shift's last round is settled, and nothing came of it.** Transaction 16 checkpointed
+  round 435,228 and ORE sent back 0.000891 SOL, the 89.1% of squares that did not win. So no
+  ORE came out of any of the first shift's five rounds, and its mining cost the wallet 5 x 119,000
+  = 595,000 lamports, besides the executor fees. The 0.000891 SOL went into the Automation the
+  second clock-in had set up again, where it is the wallet's to take back.
+- **The checkpoint sweep ran on mainnet.** The second shift's last round was left without a
+  checkpoint when the shift's budget was used up. The crank settled it seven hours later
+  (transaction 23), at the first sweep after the round was 400 rounds old, before ORE would have
+  forfeited it.
+- **Round 435,572 sent back 0.00091575 SOL, not 0.000891.** Why it differs was not looked into.
+- **The shift is still open.** At 16:25 UTC on 11 October the Rig was Cooling with shift 4 open
+  and its plan window over. It has not been clocked out, and the Automation has not been emptied.
+- **Not an overnight run.** The phone was in use that night; the shift lasted about twenty
+  minutes. A whole night is still in the list below.
 
 ## Not run yet
 

@@ -59,9 +59,8 @@ time).
   would have dug nothing that evening. The demo build raises the plan to 1.0 and the wallet
   ceiling to 1.2. **Disclose it in the VO and a caption.** What it cost that evening: each
   0.001 SOL dig also paid the 10,000-lamport executor fee, and for each of the four rounds
-  settled so far ORE sent 0.000891 SOL back. The fifth round, 435,228, was not checkpointed at
-  20:44 UTC on 10 October, so what comes back from it is not known. No ORE came out of the four
-  that are settled.
+  settled that evening ORE sent 0.000891 SOL back. The fifth round, 435,228, was settled by the
+  next evening's first dig and sent back the same. No ORE came out of the five.
 
 **B. Local devstack (rehearsal and fallback).** `scripts/devstack/up.sh` (docs/DEVSTACK.md): a
 local validator with the live ORE binary and accounts loaded, the program, the crank and the
