@@ -258,9 +258,9 @@ private val PageGap = 16.dp
  */
 private val PageMaxWidth = 420.dp
 
-/** A child of a screen-wide column, held to the page's width and centred in what is left over. */
-private fun ColumnScope.inPageColumn(): Modifier =
-    Modifier.widthIn(max = PageMaxWidth).fillMaxWidth().align(Alignment.CenterHorizontally)
+/** A child of the screen-wide [column], held to the page's width and centred in what is left over. */
+private fun Modifier.inPageColumn(column: ColumnScope): Modifier =
+    with(column) { this@inPageColumn.widthIn(max = PageMaxWidth).fillMaxWidth().align(Alignment.CenterHorizontally) }
 
 /**
  * A page of the reveal: [content] in a column that scrolls, over a dock that holds the one [bar].
@@ -271,8 +271,8 @@ private fun ColumnScope.inPageColumn(): Modifier =
 private fun Page(content: @Composable ColumnScope.() -> Unit, bar: @Composable (Modifier) -> Unit) {
     PinnedBarScreen(
         contentPadding = PagePadding,
-        content = { Column(inPageColumn(), verticalArrangement = Arrangement.spacedBy(PageGap), content = content) },
-        dock = { ActionDock { bar(inPageColumn()) } },
+        content = { Column(Modifier.inPageColumn(this), verticalArrangement = Arrangement.spacedBy(PageGap), content = content) },
+        dock = { ActionDock { bar(Modifier.inPageColumn(this)) } },
     )
 }
 
@@ -625,11 +625,11 @@ private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
         verticalArrangement = Arrangement.Top,
         content = {
             // The weights need the screen's own column, so each child is put in the page's by itself.
-            BrandRow(onDone = null, modifier = inPageColumn())
+            BrandRow(onDone = null, modifier = Modifier.inPageColumn(this))
             Spacer(Modifier.weight(1f))
-            Hero(cold, inPageColumn().padding(top = PageGap).height(112.dp))
+            Hero(cold, Modifier.inPageColumn(this).padding(top = PageGap).height(112.dp))
             Spacer(Modifier.weight(1f))
-            Column(inPageColumn().padding(top = PageGap), verticalArrangement = Arrangement.spacedBy(PageGap)) {
+            Column(Modifier.inPageColumn(this).padding(top = PageGap), verticalArrangement = Arrangement.spacedBy(PageGap)) {
                 DisplayText("No haul yet", Modifier.semantics { heading() })
                 Sentence("Your first haul appears after your first mined shift.")
                 if (onShowSample != null) {
@@ -642,7 +642,7 @@ private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
                 }
             }
         },
-        dock = { ActionDock { DoneBar(onDone, inPageColumn()) } },
+        dock = { ActionDock { DoneBar(onDone, Modifier.inPageColumn(this)) } },
     )
 }
 
