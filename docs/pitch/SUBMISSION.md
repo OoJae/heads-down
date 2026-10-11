@@ -65,10 +65,10 @@ whatever is no longer true.
 | `portingFeatures` | "No. All code was written in this repository for this project." | `[founder to confirm]` |
 | `newMobileDevelopment` | "Yes. A native Android app in Kotlin and Jetpack Compose (minSdk 31, targetSdk 36), written in this repository: a Quick Settings tile, a foreground shift service, Android Keystore P-256 signing and Mobile Wallet Adapter 2.2.0. It is not a PWA or WebView wrapper." | `android/README.md` |
 | `skrIntegration` | Version A below (at most 950 characters); B is a shorter text that is also true | `docs/SKR.md` §8 |
-| Deck URL | `[TBD: deck URL]` | built from `docs/pitch/DECK.md` |
+| Deck URL | `https://oojae.github.io/heads-down/deck/` (as a file: `https://oojae.github.io/heads-down/deck/heads-down-deck.pdf`) | 18 slides, published 2026-10-11 from `site/deck/` (`docs/pitch/DECK.md` is its script; `scripts/pitch/render-deck.sh` prints the PDF). Its app pictures are from the emulator and say so: replace them, and the sentences that say the redesigned build has not run on the Redmi, once it has |
 | Video URL | `[TBD: video URL]` | filmed from `docs/pitch/DEMO_SCRIPT.md` |
 | Repositories | `https://github.com/OoJae/heads-down` | public since 2026-10-01 |
-| APK URL | `[TBD: APK URL]` | Still to do. No APK is hosted. Needed: a release signing key (none exists; the build that ran on the phone is debug-signed), the registrar set to accept that key's certificate (today it accepts only the founder's debug certificate, `docs/DEPLOY.md` §10.4), a place to host the file, and one install from a clean state on the Redmi 14C |
+| APK URL | `[TBD: APK URL]` | Still to do. No APK is hosted. A debug-signed mainnet build of the redesigned app with the clock-in fix was made on 2026-10-11 and is not hosted: it has not run on the Redmi yet, and hosting it is the founder's call. Needed: a release signing key (none exists; the build that ran on the phone is debug-signed), the registrar set to accept that key's certificate (today it accepts only the founder's debug certificate, `docs/DEPLOY.md` §10.4), a place to host the file, and one install from a clean state on the Redmi 14C |
 
 ### `skrIntegration`
 
@@ -158,8 +158,9 @@ code with passing tests in the repo. **Designed** means specified, not built. **
   with Jupiter Mobile, one transaction carried ORE `automate`, the registrar's voucher, rig
   registration, caps and arming
   ([transaction](https://solscan.io/tx/4DvPBhh4UiEhezYPmjcJvHeqSGGfCAj9prnKEFPMGaGRe9sGg7r9A2SMPVTo4UYXjeEkHUc1WCA7VRdznZuPaQht)).
-  The Quick Settings tile as the way in has run on an emulator, with Solana Mobile's test
-  wallet; whether the phone's clock-in started from the tile was not recorded.
+  The Quick Settings tile as the way in has run on an emulator only (11 October 2026: tapped
+  with a clock-in already on-chain, it armed the shift and did not open the wallet); the phone's
+  clock-ins were started from the app's "Clock in" button.
   `android/INTERFACE-NOTES.md` §4
 - **On a phone, on mainnet (10 October 2026):** heartbeats need no wallet prompt. The rig key
   signs them, and on-chain caps bound what it can do. Heartbeats signed by the key in the Redmi's
@@ -282,8 +283,8 @@ described the state before the deploy.
 - [ ] `python3 docs/pitch/check_pitch.py` passes. It checks the wording against `docs/ECONOMICS.md`
       §4, text addressed to the people or tools scoring the submission, every repo path cited,
       both `skrIntegration` lengths (at most 950), slide, question and post counts, and the VO
-      length. Last run 2026-10-10: PASS (the script prints both lengths). Run it again after the
-      last edit.
+      length. Last run 2026-10-11, after the deck and the second evening were written in: PASS
+      (the script prints both lengths). Run it again after the last edit.
 - [ ] The final deck file and the video's own transcript scanned for the same wording by hand;
       the script only sees these drafts.
 - [x] Repo public (`https://github.com/OoJae/heads-down`).
