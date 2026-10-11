@@ -71,6 +71,22 @@ object ClockInRecovery {
         if (!rig.shiftOpen || rig.state !in LIVE) return Recovery.Drop("that shift has ended")
         return Recovery.Arm(pending.spec, rig.hbCounter, rig.streak)
     }
+
+    /**
+     * Whether a clock-in being built now would seal the shift of the [pending] one. The Rig the
+     * new transaction was composed from is then sitting on the pending shift, open: the composer
+     * put an `end_shift` in front ([endsPreviousShift]) and the shift it would arm
+     * ([expectedShiftId]) is the pending one plus one. The pending clock-in landed after the last
+     * look at the chain, so nothing new must be signed: it is to be armed, not sealed.
+     */
+    fun landedUnder(
+        pending: PendingClockIn,
+        authority: Pubkey,
+        rigKey: ByteArray,
+        endsPreviousShift: Boolean,
+        expectedShiftId: ULong,
+    ): Boolean = pending.authority == authority && pending.rigKey.contentEquals(rigKey) &&
+        endsPreviousShift && expectedShiftId == pending.spec.shiftId.toULong() + 1uL
 }
 
 /** Where the [PendingClockIn] is kept: written before the wallet is asked to sign, so it outlives this process. */

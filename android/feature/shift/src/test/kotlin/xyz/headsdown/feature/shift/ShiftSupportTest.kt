@@ -52,6 +52,21 @@ class ShiftSupportTest {
     }
 
     @Test
+    fun `a shift armed a moment ago is not ended by a tap that was on its way to Clock in`() {
+        val spec = ShiftSpec(1, ShiftMode.NIGHT)
+        val armedAt = 50_000L
+        assertTrue(ShiftState.Armed(spec, armedAt).justArmed(armedAt))
+        assertTrue(ShiftState.Armed(spec, armedAt).justArmed(armedAt + 1_999))
+        // Two seconds on, "End shift" means what it says.
+        assertFalse(ShiftState.Armed(spec, armedAt).justArmed(armedAt + 2_000))
+        // Only an armed rig: one that is down or cooling has been running for a while.
+        assertFalse(ShiftState.Down(spec, armedAt, armedAt).justArmed(armedAt))
+        assertFalse(ShiftState.Idle.justArmed(armedAt))
+        // A clock that reads earlier than the arming (it cannot, but nothing must follow from it).
+        assertFalse(ShiftState.Armed(spec, armedAt).justArmed(armedAt - 1))
+    }
+
+    @Test
     fun `snapshot maps onto notification phases`() {
         val spec = ShiftSpec(1, ShiftMode.FOCUS_ONLY, plannedRounds = 20)
         val cases = mapOf(

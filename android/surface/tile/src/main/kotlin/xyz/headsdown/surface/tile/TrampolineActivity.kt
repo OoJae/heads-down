@@ -1,8 +1,10 @@
 package xyz.headsdown.surface.tile
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import dagger.hilt.android.AndroidEntryPoint
@@ -11,6 +13,7 @@ import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.core.wallet.PreparedTransactions
 import xyz.headsdown.core.wallet.WalletAccount
 import xyz.headsdown.core.wallet.WalletCapabilities
+import xyz.headsdown.core.wallet.WalletFailures
 import xyz.headsdown.core.wallet.WalletResult
 import xyz.headsdown.core.wallet.WalletSession
 import xyz.headsdown.feature.shift.ShiftController
@@ -19,6 +22,7 @@ import xyz.headsdown.feature.shift.ShiftSpec
 import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.feature.shift.ShiftStatusRepository
 import xyz.headsdown.feature.shift.isRunning
+import xyz.headsdown.feature.shift.justArmed
 import javax.inject.Inject
 
 /**
@@ -66,6 +70,19 @@ fun interface ClockInTransactions {
      * [patienceMillis].
      */
     suspend fun recover(patienceMillis: Long = 0): ShiftSpec? = null
+
+    /**
+     * The shift returned by [confirmed] or [recover] has been started. Only now is its record
+     * forgotten: a caller that left the foreground could not start it and must find it again.
+     */
+    fun armed() {}
+
+    /**
+     * The wallet itself said it signed nothing for the clock-in [prepare] just built (the user
+     * declined). That attempt cannot land, so its record is forgotten and no look at the chain
+     * can ever arm it; a record it had replaced, of a clock-in still on its way, comes back.
+     */
+    suspend fun notSigned() {}
 }
 
 /**
@@ -106,12 +123,17 @@ class TrampolineActivity : ComponentActivity() {
                     recovered(RECREATED_PATIENCE_MILLIS)
                     return@launch
                 }
-                when (repository.snapshot.value.state) {
+                when (val state = repository.snapshot.value.state) {
                     ShiftState.Idle, is ShiftState.Broken -> clockIn()
-                    is ShiftState.Armed, is ShiftState.Down, is ShiftState.Cooling -> {
-                        shifts.end()
-                        toast("Shift ended. Rig cold.")
-                    }
+                    is ShiftState.Armed, is ShiftState.Down, is ShiftState.Cooling ->
+                        if (state.justArmed(SystemClock.elapsedRealtime())) {
+                            // Armed under the tap that opened this window (picked up from the
+                            // chain a moment ago): that tap asked to clock in, not to end.
+                            toast("Clocked in. Lay your phone face-down.")
+                        } else {
+                            shifts.end()
+                            toast("Shift ended. Rig cold.")
+                        }
                     // The clock-in transaction unfreezes a frozen rig first: the wallet signs both.
                     is ShiftState.Frozen -> clockIn()
                 }
@@ -134,20 +156,35 @@ class TrampolineActivity : ComponentActivity() {
         }
         when (result) {
             WalletResult.NoWalletInstalled -> toast("Install a Solana wallet (Solflare, Phantom or Seed Vault) to clock in.")
-            // The session can fail after the wallet sent: the chain is asked before saying so.
-            // A refusal by our own composer says why (it is fixed text); anything else is the wallet's.
-            is WalletResult.Failed -> if (!recovered()) toast(clockInTransactions.refusal() ?: "Wallet: ${result.reason}")
+            is WalletResult.Failed -> {
+                val armed = if (result.reason in WalletFailures.NOTHING_SIGNED) {
+                    // The wallet says it signed nothing: there is no transaction to look for.
+                    clockInTransactions.notSigned()
+                    false
+                } else {
+                    // The session can fail after the wallet sent: the chain is asked before saying so.
+                    recovered()
+                }
+                // A refusal by our own composer says why (it is fixed text); anything else is the wallet's.
+                if (!armed) {
+                    toast(clockInTransactions.refusal() ?: if (result.reason == WalletFailures.RECONNECT) result.reason else "Wallet: ${result.reason}")
+                }
+            }
             is WalletResult.Success -> when (val session = result.value) {
                 is WalletSession.NothingToSign -> {
                     // Nothing on-chain to arm on this cluster: a zero-SOL focus shift still counts.
-                    shifts.arm(ShiftSpec(shiftId = System.currentTimeMillis() / 1000, mode = ShiftMode.FOCUS_ONLY))
-                    toast("Rig armed (focus only). Lay your phone face-down.")
+                    if (start(ShiftSpec(shiftId = System.currentTimeMillis() / 1000, mode = ShiftMode.FOCUS_ONLY))) {
+                        toast("Rig armed (focus only). Lay your phone face-down.")
+                    }
                 }
                 is WalletSession.Submitted ->
                     if (session.report.allConfirmed) {
-                        shifts.arm(clockInTransactions.confirmed(session.account, session.prepared))
-                        val note = clockInTransactions.note(session.prepared)
-                        toast(if (note == null) "Clocked in. Lay your phone face-down." else "Clocked in. $note Lay your phone face-down.")
+                        // Not in front any more (the wait for confirmation can be long): nothing
+                        // starts here, the record stays, and the home screen arms it on its return.
+                        if (start(clockInTransactions.confirmed(session.account, session.prepared))) {
+                            val note = clockInTransactions.note(session.prepared)
+                            toast(if (note == null) "Clocked in. Lay your phone face-down." else "Clocked in. $note Lay your phone face-down.")
+                        }
                     } else if (!recovered()) {
                         toast("Clock-in did not confirm on-chain. Nothing was armed.")
                     }
@@ -156,14 +193,26 @@ class TrampolineActivity : ComponentActivity() {
     }
 
     /**
-     * Arms the shift of a clock-in the wallet was handed earlier, if the chain shows it landed.
-     * True when a shift was armed. Runs here because a shift can only start from the foreground.
+     * Looks for a clock-in the wallet was handed earlier and, if the chain shows it landed, arms
+     * its shift. True when there was one: the wallet is then not asked again, and no failure is
+     * shown, whether or not this window was still in front to start the shift itself.
      */
     private suspend fun recovered(patienceMillis: Long = 0): Boolean {
         if (repository.snapshot.value.state.isRunning) return false
         val spec = clockInTransactions.recover(patienceMillis) ?: return false
-        shifts.arm(spec)
-        toast("Clocked in. Lay your phone face-down.")
+        if (start(spec)) toast("Clocked in. Lay your phone face-down.")
+        return true
+    }
+
+    /**
+     * Starts the shift, if this window is still in front: a shift can only start from the
+     * foreground, and the waits above outlast a press of Home. True when it started; its record
+     * is forgotten only then.
+     */
+    private fun start(spec: ShiftSpec): Boolean {
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return false
+        if (!shifts.arm(spec)) return false
+        clockInTransactions.armed()
         return true
     }
 

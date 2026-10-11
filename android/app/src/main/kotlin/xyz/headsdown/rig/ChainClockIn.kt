@@ -140,6 +140,9 @@ class ChainClockIn @Inject constructor(
     /** One look at the chain at a time: the home screen and the trampoline both ask. */
     private val recovering = Mutex()
 
+    /** The record the last [prepare] wrote over, if any: it comes back when the wallet signs nothing. */
+    @Volatile private var replaced: PendingClockIn? = null
+
     override fun refusal(): String? = lastRefusal
 
     override fun note(prepared: PreparedClockIn): String? = prepared.note
@@ -161,6 +164,15 @@ class ChainClockIn @Inject constructor(
             lastRefusal = e.reason.message
             throw e
         }
+        // The read this transaction was built from is newer than the last look at the chain. If
+        // it shows the clock-in this phone already handed the wallet, landed and open, building
+        // over it would seal that shift and charge a second one. Nothing is signed: the session
+        // ends with nothing sent, the record stays, and the look after it arms that shift.
+        val waiting = pending.load()
+        if (waiting != null && ClockInRecovery.landedUnder(waiting, authority, key, prepared.plan.endsPreviousShift, prepared.plan.expectedShiftId)) {
+            lastRefusal = ALREADY_LANDED
+            throw IllegalStateException("the clock-in already handed to the wallet has landed")
+        }
         // Before any message for this Rig is signed, the local sequence must be above chain's.
         counter.raiseFloor(prepared.plan.hbCounterFloor)
         val spec = ShiftSpec(
@@ -173,6 +185,7 @@ class ChainClockIn @Inject constructor(
         )
         // Written down before the wallet is asked to sign: from here the transaction can land
         // whether or not this app is still there to hear so.
+        replaced = waiting
         pending.save(PendingClockIn(authority, key, spec, prepared.lastValidBlockHeight, System.currentTimeMillis() / 1000))
         return PreparedClockIn(
             prepared.transactions,
@@ -185,7 +198,6 @@ class ChainClockIn @Inject constructor(
     override suspend fun confirmed(account: WalletAccount, prepared: PreparedClockIn): ShiftSpec {
         val authority = Pubkey(account.publicKey)
         binding.save(authority)
-        pending.clear() // its outcome is known
         // The shift id the phone signs for is the one this clock-in armed: the Rig's id before the
         // transaction, plus one. A re-read can only confirm it. It is never adopted from the RPC:
         // a node answering with a later id would have the phone sign BREAKs for a shift that has
@@ -222,7 +234,8 @@ class ChainClockIn @Inject constructor(
                     binding.save(waiting.authority)
                     counter.raiseFloor(decision.hbCounter)
                     widgets.onStreak(decision.streak.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
-                    pending.clear()
+                    // The record stays until the shift has been started ([armed]): a caller that
+                    // is no longer in the foreground cannot start it, and must find it again.
                     return decision.spec
                 }
                 is Recovery.Drop -> {
@@ -230,14 +243,25 @@ class ChainClockIn @Inject constructor(
                     return null
                 }
                 Recovery.Wait -> {
-                    if (SystemClock.elapsedRealtime() - started + RECOVER_POLL_MILLIS > patienceMillis) return null
+                    if (SystemClock.elapsedRealtime() - started >= patienceMillis) return null
                     delay(RECOVER_POLL_MILLIS)
                 }
             }
         }
     }
 
+    override fun armed() = pending.clear()
+
+    override suspend fun notSigned() = recovering.withLock {
+        // The attempt the wallet declined cannot land. One it had replaced still can.
+        replaced?.let(pending::save) ?: pending.clear()
+        replaced = null
+    }
+
     private companion object {
         const val RECOVER_POLL_MILLIS = 2_000L
+
+        /** Shown only if the look that follows cannot read the chain; fixed words, like every refusal. */
+        const val ALREADY_LANDED = "Your last clock-in went through. Open Heads Down and it is picked up."
     }
 }

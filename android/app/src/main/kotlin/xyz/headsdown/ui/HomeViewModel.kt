@@ -3,6 +3,7 @@ package xyz.headsdown.ui
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.glance.appwidget.GlanceAppWidgetManager
@@ -16,6 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import xyz.headsdown.core.chain.registrar.AttestationOutcome
+import xyz.headsdown.core.wallet.SignInProof
+import xyz.headsdown.core.wallet.SiwsRequest
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
 import xyz.headsdown.feature.oemkeepalive.KeepAliveStep
 import xyz.headsdown.feature.oemkeepalive.LastShift
@@ -23,9 +27,6 @@ import xyz.headsdown.feature.oemkeepalive.OemProfile
 import xyz.headsdown.feature.oemkeepalive.ShiftHealth
 import xyz.headsdown.feature.oemkeepalive.ShiftHealthCheck
 import xyz.headsdown.feature.reveal.RevealScheduler
-import xyz.headsdown.core.chain.registrar.AttestationOutcome
-import xyz.headsdown.core.wallet.SignInProof
-import xyz.headsdown.core.wallet.SiwsRequest
 import xyz.headsdown.feature.shift.CrankLinkMonitor
 import xyz.headsdown.feature.shift.CrankLinkStatus
 import xyz.headsdown.feature.shift.ShiftController
@@ -33,13 +34,14 @@ import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.ShiftSnapshot
 import xyz.headsdown.feature.shift.ShiftStatusRepository
 import xyz.headsdown.feature.shift.isRunning
+import xyz.headsdown.feature.shift.justArmed
 import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.rig.FocusBondSetting
-import xyz.headsdown.rig.ShiftWindow
+import xyz.headsdown.rig.RigBindingStore
 import xyz.headsdown.rig.RigKeyRepository
 import xyz.headsdown.rig.RigKeyStatus
-import xyz.headsdown.rig.RigBindingStore
 import xyz.headsdown.rig.RigOnboarding
+import xyz.headsdown.rig.ShiftWindow
 import xyz.headsdown.rig.VoucherStore
 import xyz.headsdown.surface.tile.ClockInTransactions
 import xyz.headsdown.surface.tile.TileAddOutcome
@@ -147,7 +149,9 @@ class HomeViewModel @Inject constructor(
         if (shift.value.state.isRunning) return
         val spec = clockIn.recover(PICK_UP_PATIENCE_MILLIS) ?: return
         if (shift.value.state.isRunning) return
-        shifts.arm(spec)
+        // Left the foreground meanwhile: nothing starts, the record stays, the next resume finds it.
+        if (!shifts.arm(spec)) return
+        clockIn.armed()
         refresh() // the rig is bound now
     }
 
@@ -231,7 +235,12 @@ class HomeViewModel @Inject constructor(
 
     fun exactAlarmSettingsIntent() = reveal.exactAlarmSettingsIntent()
 
-    fun endShift() = shifts.end()
+    fun endShift() {
+        // A shift armed under the thumb (picked up from the chain while "Clock in" stood where
+        // "End shift" now is) is not ended by the tap that was on its way to "Clock in".
+        if (shift.value.state.justArmed(SystemClock.elapsedRealtime())) return
+        shifts.end()
+    }
 
     fun freeze() = shifts.freeze()
 
