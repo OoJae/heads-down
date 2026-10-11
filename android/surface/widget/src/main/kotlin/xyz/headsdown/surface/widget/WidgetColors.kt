@@ -27,10 +27,11 @@ object WidgetColorPolicy {
 }
 
 /**
- * COMPATIBILITY SHIM: the widget's old colour names, ARGB as `Long`, with the values of "The
- * Underside" (`:core:design`). The same shim as the app's `HdColors` (an app unit test keeps them
- * equal). The `*_ON_LIGHT` variants are for dynamic colour in day mode: the light palette's ember
- * and gold, at least 4.5:1 on light Material surfaces.
+ * The widget's colours, ARGB as `Long`, with the values of "The Underside" (`:core:design`,
+ * [HdArgb]): the pit, the slab, the hairline on the pit, chalk, ash, ember and the ORE gold. The
+ * names are the ones from before the redesign, kept because tests in this module and in the app
+ * compare them by name. The `*_ON_LIGHT` variants are the light palette's ember and gold, for a
+ * widget that follows the wallpaper in day mode: at least 4.5:1 on light Material surfaces.
  */
 object WidgetPalette {
     const val CHARCOAL = HdArgb.PIT.toLong() and OPAQUE
@@ -41,10 +42,17 @@ object WidgetPalette {
     const val ASH = HdArgb.CHALK.toLong() and OPAQUE
     const val ASH_MUTED = HdArgb.ASH.toLong() and OPAQUE
 
+    /** The gold as light: the lit pixels and the seam line of a hot rig. */
+    const val SEAM_LIGHT = HdArgb.SEAM_LIGHT.toLong() and OPAQUE
+
     const val EMBER_ON_LIGHT = HdArgb.Day.EMBER.toLong() and OPAQUE
     const val ORE_GOLD_ON_LIGHT = HdArgb.Day.SEAM.toLong() and OPAQUE
 
-    // Colours the new system has no role for (HdCompat): they leave with the layouts that name them.
+    // NOT DRAWN ANY MORE. The frozen blue and the cooling orange of the old widget (HdCompat):
+    // a cooling rig is ember now and a frozen one is chalk, each beside its word. The four names
+    // stay only because WidgetColorsTest here and ThemeContrastTest in the app still compare
+    // them with HdCompat; they go when those comparisons go. WidgetBrandTest fails if anything
+    // in this module reads them again.
     const val FROST = HdCompat.FROST.toLong() and OPAQUE
     const val COOLING = HdCompat.COOLING.toLong() and OPAQUE
     const val COOLING_ON_LIGHT = HdCompat.COOLING_DAY.toLong() and OPAQUE
@@ -54,7 +62,13 @@ object WidgetPalette {
 /** An ARGB `Int` widened to the unsigned `Long` Compose's `Color(Long)` takes. */
 private const val OPAQUE = 0xFFFFFFFFL
 
-/** Accent colours for one [WidgetColorMode]. */
+/**
+ * The accents of one [WidgetColorMode], and which of them a rig state wears.
+ *
+ * The rules are the design system's: ember says armed and cooling, never alone (the word is
+ * beside it); gold is ink only for an amount of ORE, and otherwise it is light, the lit pixels
+ * and the line under a hot rig; a frozen rig has no colour of its own, so its word is plain ink.
+ */
 class WidgetAccents(private val mode: WidgetColorMode) {
     private fun accent(onDark: Long, onLight: Long): ColorProvider = when (mode) {
         WidgetColorMode.BRAND -> ColorProvider(Color(onDark))
@@ -62,15 +76,29 @@ class WidgetAccents(private val mode: WidgetColorMode) {
     }
 
     val ember = accent(WidgetPalette.EMBER, WidgetPalette.EMBER_ON_LIGHT)
-    val gold = accent(WidgetPalette.ORE_GOLD, WidgetPalette.ORE_GOLD_ON_LIGHT)
-    val cooling = accent(WidgetPalette.COOLING, WidgetPalette.COOLING_ON_LIGHT)
-    val frost = accent(WidgetPalette.FROST, WidgetPalette.FROST_ON_LIGHT)
 
-    fun forHeat(heat: RigHeat, muted: ColorProvider): ColorProvider = when (heat) {
-        RigHeat.HOT, RigHeat.ARMED -> ember
-        RigHeat.COOLING -> cooling
-        RigHeat.FROZEN -> frost
+    /** ORE gold as ink: an amount of ORE and nothing else. */
+    val gold = accent(WidgetPalette.ORE_GOLD, WidgetPalette.ORE_GOLD_ON_LIGHT)
+
+    /**
+     * The gold as light. On a light Material You surface the light itself would be under 2:1
+     * (1.8:1 on Material's baseline surface) and vanish, so there it is drawn in the gold that
+     * reads as ink.
+     */
+    val light = accent(WidgetPalette.SEAM_LIGHT, WidgetPalette.ORE_GOLD_ON_LIGHT)
+
+    /** The ink of the rig word ("Rig hot", "Cooling", ...). [ink] is the surface's text colour. */
+    fun word(heat: RigHeat, ink: ColorProvider, muted: ColorProvider): ColorProvider = when (heat) {
+        RigHeat.ARMED, RigHeat.COOLING -> ember
+        RigHeat.HOT, RigHeat.FROZEN -> ink
         RigHeat.COLD -> muted
+    }
+
+    /** The colour of the lit heat pixels, as on the app's slab: gold when hot, ember before and after, ash when frozen. */
+    fun lights(heat: RigHeat, muted: ColorProvider): ColorProvider = when (heat) {
+        RigHeat.HOT -> light
+        RigHeat.ARMED, RigHeat.COOLING -> ember
+        RigHeat.FROZEN, RigHeat.COLD -> muted
     }
 }
 
@@ -90,7 +118,7 @@ object WidgetColors {
         secondaryContainer = Color(WidgetPalette.CHARCOAL),
     )
 
-    /** Charcoal in day and night alike: this rig lives on a nightstand. */
+    /** The pit in day and night alike: this rig lives on a nightstand. */
     val brand: ColorProviders = ColorProviders(light = brandScheme, dark = brandScheme)
 
     fun providers(mode: WidgetColorMode): ColorProviders = when (mode) {
