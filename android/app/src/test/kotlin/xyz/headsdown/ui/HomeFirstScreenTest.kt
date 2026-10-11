@@ -2,6 +2,8 @@ package xyz.headsdown.ui
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
@@ -248,6 +250,104 @@ class HomeFirstScreenTest : ScreenTest() {
         }
         assertEquals("two rows", 2, chips.map { it.top }.toSet().size)
         assertTrue("two in each", chips[0].top == chips[1].top && chips[2].top == chips[3].top && chips[0].right <= chips[1].left)
+    }
+
+    // ------------------------------------------------------------------ every font scale between
+
+    /** The font scales Android's own slider stops at, and the two ends. */
+    private val scales = listOf(1f, 1.15f, 1.3f, 1.5f, 1.8f, 2f)
+
+    /** Every state in [cases] at every scale in [scales], with a phone's bars, in one composition. */
+    private fun atEveryScale(cases: List<HomeCase>, onboarding: OnboardingState = Screens.setUp, check: (HomeCase, Float) -> Unit) {
+        var scale by mutableFloatStateOf(scales.first())
+        var shown by mutableStateOf(cases.first())
+        show({ scale }, bars = true) { key(shown, scale) { Screens.Home(shown, onboarding = onboarding) } }
+        for (s in scales) {
+            for (case in cases) {
+                scale = s
+                shown = case
+                rule.waitForIdle()
+                check(case, s)
+            }
+        }
+    }
+
+    @Test fun `at every font scale from 1 to 2 the first screenful holds in every state, on a phone with its bars`() {
+        atEveryScale(Screens.homeCases) { case, scale ->
+            assertFirstScreenful(case, scale, bars = true)
+            assertAmountsWhole()
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h568dp-xhdpi")
+    fun `on a small screen the first screenful holds in every state, with or without the slab`() {
+        var shown by mutableStateOf(Screens.idle)
+        show(bars = true) { key(shown) { Screens.Home(shown) } }
+        for (case in Screens.homeCases) {
+            shown = case
+            rule.waitForIdle()
+            val dock = bounds(HomeTags.DOCK)
+            for (tag in listOf(HomeTags.RIG_WORD, HomeTags.ROUNDS_DARK)) {
+                val box = bounds(tag)
+                assertTrue("${case.name}: $tag is whole above the dock: $box, ${dock.top}", box.top >= STATUS_BAR && box.bottom <= dock.top && box.left >= 0.dp && box.right <= 320.dp)
+                rule.onNodeWithTag(tag).assertIsDisplayed()
+            }
+            rule.onNodeWithText("Your phone's night shift").assert(isHeading()).assertIsDisplayed()
+            rule.onNodeWithTag(barTag(case)).assertIsDisplayed()
+        }
+    }
+
+    /**
+     * The heading and the action at the end of the brand's line never run into each other: at the
+     * normal font they share the line with a clear gap, and when the line has no room for both
+     * (a larger font, the longer label) the heading has a line of its own under it.
+     */
+    private fun assertBrandRowClear(what: String) {
+        val heading = rule.onNodeWithText("Your phone's night shift").getUnclippedBoundsInRoot()
+        val name = rule.onNodeWithText("HEADS DOWN").getUnclippedBoundsInRoot()
+        val action = bounds(HomeTags.SETUP)
+        for ((label, box) in listOf("the heading" to heading, "the name" to name)) {
+            val beside = box.top < action.bottom && action.top < box.bottom
+            assertTrue("$what: $label ($box) is clear of the action ($action)", !beside || box.right + 16.dp <= action.left + 0.5.dp)
+            assertTrue("$what: $label is inside the margins: $box", box.left >= 20.dp && box.right <= 340.dp)
+        }
+        assertTrue("$what: the action is inside the margins and a finger tall: $action", action.left >= 20.dp && action.right <= 340.dp && action.height >= 48.dp)
+        assertTrue("$what: the name is over the heading", name.bottom <= heading.top + 0.5.dp)
+        rule.onNodeWithTag(HomeTags.SETUP).assertIsDisplayed()
+    }
+
+    @Test fun `the brand's heading never runs into Setup, at any font scale`() {
+        atEveryScale(listOf(Screens.idle)) { _, scale ->
+            rule.onNodeWithTag(HomeTags.SETUP).assertTextEquals("Setup")
+            assertBrandRowClear("\"Setup\" at $scale")
+        }
+    }
+
+    @Test fun `nor into the longer Finish setup`() {
+        // In every state: the longer label makes the band taller at a large font, and the rig's
+        // state must still be whole above the dock (a running shift's two bars are the tightest).
+        atEveryScale(Screens.homeCases, onboarding = OnboardingState(introSeen = true)) { case, scale ->
+            // Until the phone's settings are read nothing says setup is unfinished.
+            rule.onNodeWithTag(HomeTags.SETUP).assertTextEquals(if (case.loading) "Setup" else "Finish setup")
+            assertBrandRowClear("${case.name}, \"Finish setup\" at $scale")
+            assertFirstScreenful(case, scale, bars = true)
+            assertAmountsWhole()
+        }
+    }
+
+    @Test fun `at the normal font the heading sits under the name, beside either label`() {
+        var onboarding by mutableStateOf(Screens.setUp)
+        show(bars = true) { Screens.Home(Screens.idle, onboarding = onboarding) }
+        for (state in listOf(Screens.setUp, OnboardingState(introSeen = true))) {
+            onboarding = state
+            rule.waitForIdle()
+            val heading = rule.onNodeWithText("Your phone's night shift").getUnclippedBoundsInRoot()
+            val name = rule.onNodeWithText("HEADS DOWN").getUnclippedBoundsInRoot()
+            val action = bounds(HomeTags.SETUP)
+            assertTrue("one line: $name over $heading, beside $action", heading.left == name.left && heading.top < action.bottom && heading.bottom > action.top)
+            assertBrandRowClear(if (state.allDone) "Setup" else "Finish setup")
+        }
     }
 
     // ------------------------------------------------------------------ the page under it

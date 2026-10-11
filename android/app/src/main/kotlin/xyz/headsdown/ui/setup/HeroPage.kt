@@ -5,14 +5,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -21,15 +19,18 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -40,8 +41,9 @@ import kotlin.math.roundToInt
 
 /**
  * The space a page scrolls in: how tall it is (everything above the dock, the status bar's strip
- * included) and how much of its top the status bar covers. Zero height means "not known": the
- * page is being composed where nothing bounds it (a preview without a screen).
+ * included) and how much of its top is covered: by the status bar, and by whatever the page pins
+ * under it. Zero height means "not known": the page is being composed where nothing bounds it (a
+ * preview without a screen).
  */
 @Immutable
 internal data class PageViewport(val heightPx: Int, val topInsetPx: Int)
@@ -51,53 +53,99 @@ internal data class PageViewport(val heightPx: Int, val topInsetPx: Int)
  * the screen's top edge), [dock] (an `ActionDock`) stays at the bottom, and [aboveDock] floats
  * over the page's lower edge without moving anything in it.
  *
- * It is `PinnedBarScreen` with two differences a hero needs: nothing is padded for the status bar
+ * It is `PinnedBarScreen` with the differences a hero needs: nothing is padded for the status bar
  * (the first thing in [content] does that for itself), and [content] is told the height of the
  * space it scrolls in, in the same measure pass, so the hero can take a share of exactly that.
- * A screen reader reaches the page first, then what floats above the dock, then the dock.
+ *
+ * [pinned] stays at the top of the page, under the status bar, whatever the page has scrolled to:
+ * for a page that turns itself away from its own top and still has to offer what is up there.
+ * Over the hero it has no ground of its own; once the page has moved it stands on the pit, over
+ * a hairline. A screen reader reaches it first, then the page, then what floats above the dock,
+ * then the dock.
  */
 @Composable
 internal fun HeroPage(
     scrollState: ScrollState,
     modifier: Modifier = Modifier,
+    pinned: (@Composable () -> Unit)? = null,
     aboveDock: @Composable BoxScope.() -> Unit = {},
     dock: @Composable () -> Unit,
     content: @Composable ColumnScope.(PageViewport) -> Unit,
 ) {
-    val density = LocalDensity.current
-    val topInset = WindowInsets.safeDrawing.getTop(density)
+    val topInset = WindowInsets.safeDrawing.getTop(LocalDensity.current)
     Column(modifier.fillMaxSize().background(Hd.colors.pit)) {
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        SubcomposeLayout(Modifier.weight(1f).fillMaxWidth()) { constraints ->
+            val width = constraints.maxWidth
             val height = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
-            val viewport = remember(height, topInset) { PageViewport(height, topInset) }
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .semantics { isTraversalGroup = true }
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                    .verticalScroll(scrollState),
-            ) { content(viewport) }
-            // At the top of the page the hero's zone runs under the status bar. Once the page has
-            // moved, sentences would pass under the clock and the battery: the strip closes over
-            // them. It follows the scroll position, read while drawing; it is not an animation.
-            if (topInset > 0) {
-                val pit = Hd.colors.pit
-                val closedAfter = with(density) { STATUS_STRIP_CLOSES_OVER.toPx() }
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(with(density) { topInset.toDp() })
-                        .graphicsLayer { alpha = (scrollState.value / closedAfter).coerceIn(0f, 1f) }
-                        .background(pit),
-                )
+            // The band is measured first: the page is told how much of its top it covers.
+            val band = subcompose(PageSlot.Band) { TopBand(topInset, scrollState, pinned) }
+                .first()
+                .measure(Constraints.fixedWidth(width))
+            val viewport = PageViewport(height, band.height)
+            val page = subcompose(PageSlot.Page) {
+                Box(Modifier.fillMaxSize()) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .semantics { isTraversalGroup = true }
+                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                            .verticalScroll(scrollState),
+                    ) { content(viewport) }
+                    aboveDock()
+                }
+            }.first().measure(constraints)
+            layout(page.width, page.height) {
+                page.place(0, 0)
+                band.place(0, 0)
             }
-            aboveDock()
         }
         dock()
     }
 }
 
-/** How far the page has to move before the strip under the status bar is fully closed. */
+private enum class PageSlot { Band, Page }
+
+/**
+ * The top of a hero page: the status bar's strip and, under it, what the page pins there. At the
+ * top of the page the hero's zone runs under it and it is clear. Once the page has moved,
+ * sentences would pass under the clock and the battery: the band closes over them. It follows
+ * the scroll position, read while drawing; it is not an animation.
+ */
+@Composable
+private fun TopBand(topInsetPx: Int, scrollState: ScrollState, pinned: (@Composable () -> Unit)?) {
+    val pit = Hd.colors.pit
+    val hairline = Hd.colors.hairline
+    val ruled = pinned != null
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val closed = (scrollState.value / STATUS_STRIP_CLOSES_OVER.toPx()).coerceIn(0f, 1f)
+                if (closed > 0f) {
+                    drawRect(pit, alpha = closed)
+                    if (ruled) {
+                        val rule = HdDimens.Hairline.toPx()
+                        drawRect(hairline, Offset(0f, size.height - rule), Size(size.width, rule), alpha = closed)
+                    }
+                }
+            }
+            .padding(top = with(LocalDensity.current) { topInsetPx.toDp() })
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .then(
+                if (pinned == null) {
+                    Modifier
+                } else {
+                    // Above the page in the reading order, as it is on the screen.
+                    Modifier.semantics {
+                        isTraversalGroup = true
+                        traversalIndex = -1f
+                    }
+                },
+            ),
+    ) { pinned?.invoke() }
+}
+
+/** How far the page has to move before the band at its top is fully closed. */
 private val STATUS_STRIP_CLOSES_OVER = 24.dp
 
 /**
@@ -105,13 +153,15 @@ private val STATUS_STRIP_CLOSES_OVER = 24.dp
  * the height the rest leaves, between [minShare] and [maxShare] of the viewport:
  *
  * - [overlay] lies over the top of the zone, under the status bar (the brand row);
- * - [mark] lies over its lower left corner;
+ * - [mark] lies over its lower left corner, as long as [mustFit] still fits on the first screenful
+ *   with it there; when it does not, the mark follows [mustFit];
  * - [hero] is given the clear box between the two, so whatever draws it cannot run under them;
  * - [notice] (a banner about something that happened) comes directly under the zone, as long as
  *   [mustFit] still fits on the first screenful under it; when it does not (a long banner at a
  *   large font), the banner follows [mustFit] instead of pushing it off the screen;
  * - [mustFit] stays on the first screenful: when it is tall the zone shrinks for it, below
- *   [minShare] if it has to, until only the two bands are left and the slab is not drawn;
+ *   [minShare] if it has to, until only the two bands are left and the slab is not drawn, and
+ *   then until only the overlay is;
  * - [rest] follows and may fall below the fold.
  *
  * With [ruled] the zone ends on a hairline across the screen.
@@ -160,13 +210,19 @@ internal fun HeroFirstScreen(
         val rulePlaceable = slot(FirstScreenSlot.Rule).measure(Constraints.fixed(width, if (ruled) HdDimens.Hairline.roundToPx() else 0))
 
         val top = viewport.topInsetPx
-        val bands = top + overlayPlaceable.height + markPlaceable.height
+        val head = top + overlayPlaceable.height
         // The first screenful, less what is left for the next thing on the page to show itself in.
         val screenful = (viewport.heightPx - (peek?.roundToPx() ?: 0)).coerceAtLeast(0)
+        // The mark keeps its corner while the zone, shrunk to its two bands, still leaves mustFit
+        // above the dock (the peek is given up before the mark is moved). When it does not (the
+        // largest font and a tall overlay), the mark follows mustFit: there is no hero left for it
+        // to sit under, and mustFit comes first.
+        val markInZone = viewport.heightPx <= 0 || head + markPlaceable.height + mustPlaceable.height <= viewport.heightPx
+        val bands = head + if (markInZone) markPlaceable.height else 0
         // The notice goes first while the zone, shrunk to its bands, still leaves room for both.
         val noticeFirst = viewport.heightPx <= 0 || bands + noticePlaceable.height + mustPlaceable.height <= screenful
         val must = mustPlaceable.height + if (noticeFirst) noticePlaceable.height else 0
-        val after = restPlaceable.height + if (noticeFirst) 0 else noticePlaceable.height
+        val after = restPlaceable.height + (if (noticeFirst) 0 else noticePlaceable.height) + (if (markInZone) 0 else markPlaceable.height)
         val zone = if (viewport.heightPx <= 0) {
             bands + UNBOUNDED_SLAB.roundToPx()
         } else {
@@ -191,27 +247,38 @@ internal fun HeroFirstScreen(
         }
 
         layout(width, height) {
-            heroPlaceable.place(0, top + overlayPlaceable.height)
+            heroPlaceable.place(0, head)
             overlayPlaceable.place(0, top)
-            markPlaceable.place(0, zone - markPlaceable.height)
+            if (markInZone) markPlaceable.place(0, zone - markPlaceable.height)
             rulePlaceable.place(0, zone)
+            var y = zone
             if (noticeFirst) {
-                noticePlaceable.place(0, zone)
-                mustPlaceable.place(0, zone + noticePlaceable.height)
-                restPlaceable.place(0, zone + must)
-            } else {
-                mustPlaceable.place(0, zone)
-                noticePlaceable.place(0, zone + mustPlaceable.height)
-                restPlaceable.place(0, zone + mustPlaceable.height + noticePlaceable.height)
+                noticePlaceable.place(0, y)
+                y += noticePlaceable.height
             }
+            mustPlaceable.place(0, y)
+            y += mustPlaceable.height
+            if (!markInZone) {
+                markPlaceable.place(0, y)
+                y += markPlaceable.height
+            }
+            if (!noticeFirst) {
+                noticePlaceable.place(0, y)
+                y += noticePlaceable.height
+            }
+            restPlaceable.place(0, y)
         }
     }
 }
 
 private enum class FirstScreenSlot { Hero, Overlay, Mark, Rule, Notice, MustFit, Rest }
 
-/** The least the slab is drawn in. With less room than this (a very large font) it is not drawn at all. */
-private val SMALLEST_SLAB = 56.dp
+/**
+ * The least the slab is drawn in. With less room than this (a very large font, a very short
+ * screen) it is not drawn at all: in 56dp it was a mark some 60dp wide between two lines of text,
+ * which reads as a smudge and not as the slab.
+ */
+private val SMALLEST_SLAB = 72.dp
 
 /** The slab's box where no viewport is known. */
 private val UNBOUNDED_SLAB = 200.dp

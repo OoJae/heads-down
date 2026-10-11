@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -233,6 +234,9 @@ fun SetupContent(
     HeroPage(
         scrollState = scroll,
         modifier = modifier,
+        // The page turns itself to the steps, away from its own top. What is up there (the brand,
+        // and the only way past setup) stays in sight, pinned, wherever the page is.
+        pinned = { SetupHeader(showSkip = state.introSeen && !state.allDone, onSkip = actions.onFinish) },
         dock = {
             ActionDock(Modifier.testTag(SetupTags.DOCK)) {
                 if (loading && state.introSeen) {
@@ -311,7 +315,8 @@ fun SetupContent(
                     contentDescription = if (turned) SetupCopy.HERO_TURNED else SetupCopy.HERO_FACE_DOWN,
                 )
             },
-            overlay = { SetupHeader(showSkip = state.introSeen && !state.allDone, onSkip = actions.onFinish) },
+            // The header is pinned over the page (the viewport already counts it as covered).
+            overlay = {},
             // The statement and the lead keep their place under the slab they are about; what it is
             // not comes straight after, on the same screenful wherever the font leaves room.
             mustFit = {
@@ -378,18 +383,23 @@ fun SetupContent(
     }
 }
 
-/** The brand, and the way past setup once the introduction was read. Laid over the top of the hero. */
+/**
+ * The brand, and the way past setup once the introduction was read. Pinned to the top of the
+ * page: over the hero when the page is at its top, over the steps once it has turned to them.
+ */
 @Composable
 private fun SetupHeader(showSkip: Boolean, onSkip: () -> Unit) {
-    FlowRow(
-        Modifier.fillMaxWidth().padding(start = HdDimens.Margin, end = HdDimens.Margin, top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        itemVerticalAlignment = Alignment.CenterVertically,
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = HdDimens.Margin, vertical = 4.dp)
+            .defaultMinSize(minHeight = HdDimens.Touch),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.height(HdDimens.Touch), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            BrandGlyph(Modifier.size(28.dp))
-            Label("HEADS DOWN", color = Hd.colors.chalk)
-        }
+        BrandGlyph(Modifier.size(28.dp))
+        // On a narrow line the name gives way: it wraps under itself, and the action is never cut.
+        Label("HEADS DOWN", Modifier.weight(1f), color = Hd.colors.chalk)
         if (showSkip) TextAction(SetupCopy.SKIP, onClick = onSkip, modifier = Modifier.testTag(SetupTags.SKIP))
     }
 }
@@ -466,22 +476,29 @@ private fun Step(
                     Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         BasicText(guide.title, style = Hd.type.button.copy(color = Hd.colors.chalk))
                         Body(guide.detail, color = Hd.colors.ash)
-                        val action = guide.action
                         // "Allow background running" is the dock's bar; the other settings open from here.
-                        if (action != null && action != KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS) {
-                            TextAction(
-                                SetupCopy.OPEN_SETTINGS,
-                                onClick = { actions.onOpenKeepAlive(action) },
-                                modifier = Modifier.testTag(SetupTags.OPEN_SETTINGS + action.name),
-                            )
-                        }
+                        val opens = guide.action?.takeIf { it != KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS }
                         // Once it is the dock's bar it is not offered twice.
-                        if (action == KeepAliveStep.AUTOSTART && !state.autostartConfirmed && primary.action != SetupAction.ConfirmAutostart) {
-                            TextAction(
-                                SetupPrimary.CONFIRM_AUTOSTART,
-                                onClick = actions.onConfirmAutostart,
-                                modifier = Modifier.testTag(SetupTags.CONFIRM_AUTOSTART),
-                            )
+                        val confirms = guide.action == KeepAliveStep.AUTOSTART && !state.autostartConfirmed &&
+                            primary.action != SetupAction.ConfirmAutostart
+                        if (opens != null || confirms) {
+                            // What this sub-step offers, on one line while the line has room for both.
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                                if (opens != null) {
+                                    TextAction(
+                                        SetupCopy.OPEN_SETTINGS,
+                                        onClick = { actions.onOpenKeepAlive(opens) },
+                                        modifier = Modifier.testTag(SetupTags.OPEN_SETTINGS + opens.name),
+                                    )
+                                }
+                                if (confirms) {
+                                    TextAction(
+                                        SetupPrimary.CONFIRM_AUTOSTART,
+                                        onClick = actions.onConfirmAutostart,
+                                        modifier = Modifier.testTag(SetupTags.CONFIRM_AUTOSTART),
+                                    )
+                                }
+                            }
                         }
                     }
                 }

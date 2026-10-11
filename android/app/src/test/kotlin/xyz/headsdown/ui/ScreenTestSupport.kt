@@ -126,9 +126,9 @@ object Screens {
     val setupCases = listOf(firstLaunch, firstStep, keepAliveXiaomi, autostartLeft, tileByHand, rigKey, creatingKey, keyFailed, outOfTurn, allDone, setupLoading)
 
     @Composable
-    fun Home(case: HomeCase, onFreeze: () -> Unit = {}, onClockIn: () -> Unit = {}) = HomeScreen(
+    fun Home(case: HomeCase, onFreeze: () -> Unit = {}, onClockIn: () -> Unit = {}, onboarding: OnboardingState = setUp) = HomeScreen(
         snapshot = case.snapshot,
-        onboarding = setUp,
+        onboarding = onboarding,
         health = case.health,
         onClockIn = onClockIn,
         onEndShift = {},
@@ -184,10 +184,13 @@ abstract class ScreenTest {
      * three-button navigation bar. That is tighter than the phone, where the hero's zone may
      * still use the strip under the status bar.
      */
-    protected fun show(fontScale: Float = 1f, bars: Boolean = false, content: @Composable () -> Unit) {
+    protected fun show(fontScale: Float = 1f, bars: Boolean = false, content: @Composable () -> Unit) = show({ fontScale }, bars, content)
+
+    /** The same, at a font scale the test can change while the screen is up ([fontScale] reads a state). */
+    protected fun show(fontScale: () -> Float, bars: Boolean = false, content: @Composable () -> Unit) {
         rule.setContent {
             val device = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(device.density, fontScale)) {
+            CompositionLocalProvider(LocalDensity provides Density(device.density, fontScale())) {
                 HeadsDownTheme {
                     Box(Modifier.fillMaxSize().padding(top = if (bars) STATUS_BAR else 0.dp, bottom = if (bars) NAVIGATION_BAR else 0.dp)) { content() }
                 }

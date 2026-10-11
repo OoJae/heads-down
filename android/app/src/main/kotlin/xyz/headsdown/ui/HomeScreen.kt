@@ -1,5 +1,6 @@
 package xyz.headsdown.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -14,15 +15,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.BasicText
@@ -39,6 +39,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -49,6 +51,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import xyz.headsdown.core.design.BrandGlyph
@@ -231,7 +234,7 @@ private val SECTION_GAP = 12.dp
 
 /**
  * Above this font scale a pair no longer fits side by side: the four Focus Bond chips become two
- * rows, the two facts one to a line, and the heading leaves the brand's line.
+ * rows, and the two facts go one to a line.
  */
 private const val LARGE_TEXT_ABOVE = 1.3f
 
@@ -294,6 +297,8 @@ fun HomeScreen(
     var freezeAsked by rememberSaveable { mutableStateOf(false) }
     val askingFreeze = freezeAsked && running
     LaunchedEffect(running) { if (!running) freezeAsked = false }
+    // The question dims the page like a sheet, so Back closes it like one: it keeps the shift.
+    BackHandler(enabled = askingFreeze) { freezeAsked = false }
 
     HeroPage(
         scrollState = scroll,
@@ -458,42 +463,75 @@ fun HomeScreen(
 
 /**
  * The brand and the way to setup, over the top of the hero: the mark, the name over the heading,
- * and the action at the far end. On a large font the heading takes a line of its own under them,
- * so the band stays short and the rig's state stays on the first screenful.
+ * and the action at the far end.
+ *
+ * Where each goes is measured, not guessed from the font scale. The heading keeps its place under
+ * the name while the line has room for it beside the action with a gap between the two. When it
+ * has not (a larger font, or the longer "Finish setup") it takes the line under the row, at the
+ * margin; it is never run into the action. A name that is too long for what the action leaves
+ * wraps under itself, word by word, before the action is moved: only when not even its longest
+ * word fits there does the action go under the name, and the heading under that. Each step keeps
+ * the band as short as it can be, because the rig's state has to stay on the first screenful.
  */
 @Composable
 private fun BrandRow(setupLabel: String, onOpenSetup: () -> Unit) {
-    val largeText = LocalDensity.current.fontScale > LARGE_TEXT_ABOVE
-    val heading: @Composable () -> Unit = {
-        BasicText(
-            "Your phone's night shift",
-            Modifier.semantics { heading() },
-            style = Hd.type.caption.copy(color = Hd.colors.ash),
-        )
-    }
-    Column(Modifier.fillMaxWidth().padding(start = HdDimens.Margin, end = HdDimens.Margin, top = 4.dp, bottom = HdDimens.Rhythm)) {
-        // The action stays on the name's line while it fits there, and drops under it when it does not.
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                Modifier.defaultMinSize(minHeight = HdDimens.Touch),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BrandGlyph(Modifier.size(28.dp))
-                Column {
-                    Label("HEADS DOWN", color = Hd.colors.chalk)
-                    if (!largeText) heading()
+    Layout(
+        content = {
+            BrandGlyph(Modifier.layoutId(BrandSlot.Glyph).size(28.dp))
+            Label("HEADS DOWN", Modifier.layoutId(BrandSlot.Name), color = Hd.colors.chalk)
+            BasicText(
+                "Your phone's night shift",
+                Modifier.layoutId(BrandSlot.Heading).semantics { heading() },
+                style = Hd.type.caption.copy(color = Hd.colors.ash),
+            )
+            TextAction(setupLabel, onClick = onOpenSetup, modifier = Modifier.layoutId(BrandSlot.Action).testTag(HomeTags.SETUP))
+        },
+        modifier = Modifier.fillMaxWidth().padding(start = HdDimens.Margin, end = HdDimens.Margin, top = 4.dp, bottom = HdDimens.Rhythm),
+    ) { measurables, constraints ->
+        fun slot(id: BrandSlot) = measurables.first { it.layoutId == id }
+        val width = constraints.maxWidth
+        val glyph = slot(BrandSlot.Glyph).measure(Constraints())
+        val action = slot(BrandSlot.Action).measure(Constraints(maxWidth = width))
+        val indent = glyph.width + 12.dp.roundToPx()
+        // What the line has left for words beside the action, a clear gap kept between them.
+        val beside = width - indent - BRAND_GAP.roundToPx() - action.width
+        // The name shares the line with the action while its longest word fits there.
+        val nameBeside = slot(BrandSlot.Name).minIntrinsicWidth(Constraints.Infinity) <= beside
+        val nameOnOneLine = slot(BrandSlot.Name).maxIntrinsicWidth(Constraints.Infinity) <= beside
+        val name = slot(BrandSlot.Name).measure(Constraints(maxWidth = (if (nameBeside) beside else width - indent).coerceAtLeast(0)))
+        val headingBeside = nameOnOneLine && slot(BrandSlot.Heading).maxIntrinsicWidth(Constraints.Infinity) <= beside
+        val heading = slot(BrandSlot.Heading).measure(Constraints(maxWidth = if (headingBeside) beside else width))
+        val touch = HdDimens.Touch.roundToPx()
+
+        // The first line: the mark and the name, with the action at its end when it fits there.
+        val words = name.height + if (headingBeside) heading.height else 0
+        val line = maxOf(touch, words, if (nameBeside) action.height else 0)
+        val height = line + (if (nameBeside) 0 else action.height) + (if (headingBeside) 0 else heading.height)
+        layout(width, height) {
+            glyph.placeRelative(0, (line - glyph.height) / 2)
+            name.placeRelative(indent, (line - words) / 2)
+            when {
+                headingBeside -> {
+                    heading.placeRelative(indent, (line - words) / 2 + name.height)
+                    action.placeRelative(width - action.width, (line - action.height) / 2)
+                }
+                nameBeside -> {
+                    action.placeRelative(width - action.width, (line - action.height) / 2)
+                    heading.placeRelative(0, line)
+                }
+                else -> {
+                    action.placeRelative(0, line)
+                    heading.placeRelative(0, line + action.height)
                 }
             }
-            TextAction(setupLabel, onClick = onOpenSetup, modifier = Modifier.testTag(HomeTags.SETUP))
         }
-        if (largeText) heading()
     }
 }
+
+private enum class BrandSlot { Glyph, Name, Heading, Action }
+
+/** The least clear space between the brand's words and the action at the end of their line. */
+private val BRAND_GAP = 16.dp
 
 /** The line this rig stands on, at the hero's lower left: a stroke of ORE gold, then the words. */
 @Composable
@@ -565,6 +603,8 @@ private fun ShiftFacts(snapshot: ShiftSnapshot, shiftWindow: String?, loading: B
         TileRenderer.elapsed(now - since)
     }
     val rounds = snapshot.darkRounds.toString()
+    // The time is on its way: its place is kept, so "Rounds dark" does not jump when it lands.
+    val waiting = loading && (snapshot.state is ShiftState.Idle || snapshot.state is ShiftState.Broken)
 
     if (LocalDensity.current.fontScale > LARGE_TEXT_ABOVE) {
         // A large font wraps both labels of the pair and the block grows by two lines. One fact
@@ -574,6 +614,10 @@ private fun ShiftFacts(snapshot: ShiftSnapshot, shiftWindow: String?, loading: B
             when {
                 darkFor != null -> StatRow("Dark for", darkFor, clock)
                 until != null -> StatRow(HomeCopy.RUNS_UNTIL, until, clock)
+                waiting -> Row(clock.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Body(HomeCopy.RUNS_UNTIL, color = Hd.colors.ash)
+                    Box(Modifier.width(72.dp)) { SkeletonLine(height = 16.dp) }
+                }
             }
             StatRow("Rounds dark", rounds, Modifier.testTag(HomeTags.ROUNDS_DARK))
         }
@@ -585,8 +629,7 @@ private fun ShiftFacts(snapshot: ShiftSnapshot, shiftWindow: String?, loading: B
         when {
             darkFor != null -> StatBlock("Dark for", darkFor, clock)
             until != null -> StatBlock(HomeCopy.RUNS_UNTIL, until, clock)
-            // The time is on its way: its place is kept, so "Rounds dark" does not jump when it lands.
-            loading && (snapshot.state is ShiftState.Idle || snapshot.state is ShiftState.Broken) ->
+            waiting ->
                 Column(clock, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Label(HomeCopy.RUNS_UNTIL)
                     SkeletonLine(widthFraction = 0.5f, height = 24.dp)

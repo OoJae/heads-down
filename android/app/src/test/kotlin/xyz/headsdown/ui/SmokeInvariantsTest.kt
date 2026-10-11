@@ -10,8 +10,11 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import org.junit.Assert.assertEquals
@@ -22,6 +25,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import xyz.headsdown.core.keys.KeySecurityLevel
+import xyz.headsdown.feature.oemkeepalive.OemFamily
+import xyz.headsdown.feature.oemkeepalive.OemProfile
+import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.ui.setup.SetupActions
 import xyz.headsdown.ui.setup.SetupContent
 import xyz.headsdown.ui.setup.SetupTags
@@ -76,6 +83,56 @@ class SmokeInvariantsTest : ScreenTest() {
         assertEquals(listOf("intro", "notifications"), taps)
         assertTrue(uiHas("Allow background running"))
         assertFalse(uiHas("Allow notifications"))
+    }
+
+    @Test
+    fun `I1 - the script's whole walk through setup - each label it looks for is the bar, once, and its tap lands`() {
+        // The emulator the script was written against: Android 14 (exact alarms are allowed from
+        // the start, there is a tile prompt), a stock keep-alive with no Autostart step.
+        var state by mutableStateOf(OnboardingState(exactAlarmsAllowed = true, oem = OemProfile(OemFamily.OTHER)))
+        val did = mutableListOf<String>()
+        val actions = SetupActions(
+            onMarkIntroSeen = { did += "Set up my rig"; state = state.copy(introSeen = true) },
+            onAllowNotifications = { did += "Allow notifications"; state = state.copy(notificationsGranted = true) },
+            onOpenKeepAlive = { did += "Allow background running"; state = state.copy(batteryUnrestricted = true) },
+            onAddTile = { did += "Add the tile"; state = state.copy(tileAdded = true) },
+            onCreateRigKey = {
+                did += "Create rig key"
+                state = state.copy(rigKey = RigKeyStatus.Ready(KeySecurityLevel.SOFTWARE_OR_UNKNOWN, "ab", 0))
+            },
+        )
+        show(bars = true) { SetupContent(state, actions) }
+        // In the order of emulator-smoke.sh, section 1. It never taps "Allow exact alarm", "Skip
+        // for now" or "Start using Heads Down": the walk has to end by itself.
+        val script = listOf("Set up my rig", "Allow notifications", "Allow background running", "Add the tile", "Create rig key")
+        for (label in script) {
+            // The script sleeps two seconds or more between its steps.
+            rule.mainClock.advanceTimeBy(2_000)
+            rule.waitForIdle()
+            assertFalse("$label: the script would think this is the home screen", uiHas("Rounds dark"))
+            // `ui has` and `ui find`: on screen now, no scrolling. `ui tap`: the first match from the top.
+            val seen = uiMatches(label).filter { it.visible }
+            assertEquals("$label: ${uiTexts().map { it.text }}", 1, seen.size)
+            val bar = rule.onNodeWithTag(if (label == script.first()) INTRO_CONTINUE_TAG else SetupTags.PRIMARY).fetchSemanticsNode().boundsInRoot
+            assertTrue("$label is the bar's own label", bar.contains(seen.single().bounds.center))
+            // The tap itself, where the script puts it: the middle of that text, through whatever is over it.
+            rule.onRoot().performTouchInput { click(seen.single().bounds.center) }
+            rule.waitForIdle()
+            assertEquals("the tap on \"$label\" reached it", label, did.last())
+        }
+        assertEquals(script, did)
+        assertTrue("every step is done: the root shows the home screen by itself", state.allDone)
+        // The script then taps "Continue" if it sees one. Nothing here says it.
+        assertFalse(uiTexts().any { "continue" in it.text.lowercase() })
+    }
+
+    @Test
+    fun `I1 - Set up my rig is there from the first frame, before the phone's settings were read`() {
+        show(bars = true) { SetupContent(OnboardingState(), SetupActions(), loading = true) }
+        assertTrue(uiHas("Set up my rig"))
+        assertEquals(1, uiMatches("Set up my rig").size)
+        assertFalse(uiHas("Rounds dark"))
+        rule.onNodeWithTag(INTRO_CONTINUE_TAG).assertTextEquals("Set up my rig").assertIsDisplayed()
     }
 
     // ------------------------------------------------------------------ I2

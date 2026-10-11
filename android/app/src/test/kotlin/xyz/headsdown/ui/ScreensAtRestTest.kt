@@ -173,6 +173,28 @@ class ScreensAtRestTest : ScreenTest() {
     }
 
     @Test
+    fun `Back closes the freeze question like the sheet it looks like, and keeps the shift`() {
+        var frozen = 0
+        var back: androidx.activity.OnBackPressedDispatcher? = null
+        show {
+            back = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            Screens.Home(Screens.armed, onFreeze = { frozen++ })
+        }
+        val dispatcher = checkNotNull(back)
+        assertFalse("the home screen itself takes no Back", dispatcher.hasEnabledCallbacks())
+        rule.onNodeWithTag(HomeTags.FREEZE).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(HomeTags.FREEZE_CONFIRM).assertIsDisplayed()
+        assertTrue(dispatcher.hasEnabledCallbacks())
+
+        rule.runOnUiThread { dispatcher.onBackPressed() }
+        rule.waitForIdle()
+        rule.onAllNodesWithTag(HomeTags.FREEZE_CONFIRM).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+        assertEquals("nothing was frozen", 0, frozen)
+        assertFalse("and the next Back leaves the app as it always did", dispatcher.hasEnabledCallbacks())
+    }
+
+    @Test
     fun `turning the page to the steps comes to rest`() {
         var state by androidx.compose.runtime.mutableStateOf(OnboardingState())
         rule.mainClock.autoAdvance = false

@@ -2,6 +2,8 @@ package xyz.headsdown.ui
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
@@ -17,6 +19,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.isHeading
@@ -41,6 +44,7 @@ import xyz.headsdown.rig.RigKeyStatus
 import xyz.headsdown.ui.setup.SetupActions
 import xyz.headsdown.ui.setup.SetupContent
 import xyz.headsdown.ui.setup.SetupCopy
+import xyz.headsdown.ui.setup.SetupPrimary
 import xyz.headsdown.ui.setup.SetupStep
 import xyz.headsdown.ui.setup.SetupTags
 
@@ -203,9 +207,69 @@ class SetupContentTest : ScreenTest() {
         rule.onAllNodesWithText("Open settings").assertCountEquals(2)
         rule.onAllNodesWithText("Allow background running").assertCountEquals(1)
         rule.onAllNodesWithText("I turned Autostart on").assertCountEquals(1)
-        // "Skip for now" is offered once there are steps, at the top of the page.
-        rule.onNodeWithTag(SetupTags.SKIP).performScrollTo().assertTextEquals("Skip for now").performClick()
+        // "Skip for now" is offered once there are steps. The page has turned itself to them,
+        // away from its own top, and the way past setup is still in sight: nothing is scrolled.
+        rule.onNodeWithTag(SetupTags.SKIP).assertTextEquals("Skip for now").assertIsDisplayed().performClick()
         assertEquals(1, skipped)
+    }
+
+    @Test
+    fun `the way past setup stays in sight wherever the page has turned itself to, at every font`() {
+        var scale by mutableFloatStateOf(1f)
+        var shown by mutableStateOf(Screens.firstStep)
+        show({ scale }, bars = true) { key(shown, scale) { Screens.Setup(shown) } }
+        // Every state with steps still to do: the page opens turned to them, away from its own top.
+        val cases = Screens.setupCases.filter { it.state.introSeen && !it.state.allDone }
+        assertTrue("the open states: ${cases.map { it.name }}", cases.size >= 8)
+        for (s in listOf(1f, 1.3f, 2f)) {
+            for (case in cases) {
+                scale = s
+                shown = case
+                rule.waitForIdle()
+                val what = "${case.name} at font scale $s"
+                val dock = rule.onNodeWithTag(SetupTags.DOCK).getUnclippedBoundsInRoot()
+                val skip = rule.onNodeWithTag(SetupTags.SKIP).assertTextEquals("Skip for now").assertIsDisplayed().assertHasClickAction().getUnclippedBoundsInRoot()
+                assertTrue("$what: whole, under the status bar, a finger tall: $skip", skip.top >= STATUS_BAR && skip.bottom <= dock.top && skip.left >= 20.dp && skip.right <= 340.dp && skip.height >= 48.dp)
+                // The name beside it wraps under itself before it runs into the action.
+                val name = rule.onNodeWithText("HEADS DOWN").assertIsDisplayed().getUnclippedBoundsInRoot()
+                assertTrue("$what: the name ($name) is clear of the action ($skip)", name.left >= 20.dp && name.right + 12.dp <= skip.left + 0.5.dp)
+                // The page is at the steps: the step the bar acts on starts under the pinned
+                // header, not behind it, and ends above the dock when it is short enough to.
+                val header = maxOf(skip.bottom, name.bottom)
+                SetupPrimary.currentStep(case.state, case.selected)?.takeIf { !case.loading }?.let { step ->
+                    val row = rule.onNodeWithTag(SetupTags.STEP + step.number).getUnclippedBoundsInRoot()
+                    assertTrue("$what: step ${step.number} starts under the header ($header): $row", row.top >= header)
+                    assertTrue("$what: step ${step.number} starts on screen: $row", row.top < dock.top - 48.dp)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `the pinned header is read before the page, and first launch has the brand there and nothing to skip`() {
+        var shown by mutableStateOf(Screens.firstLaunch)
+        show(bars = true) { key(shown) { Screens.Setup(shown) } }
+        val first = SemanticsMatcher.expectValue(SemanticsProperties.TraversalIndex, -1f)
+        val name = rule.onNodeWithText("HEADS DOWN").assertIsDisplayed().assert(hasAnyAncestor(first)).getUnclippedBoundsInRoot()
+        rule.onAllNodesWithTag(SetupTags.SKIP).assertCountEquals(0)
+        // The slab starts under the brand's line, not behind it.
+        assertTrue(rule.onNodeWithTag(SetupTags.HERO).getUnclippedBoundsInRoot().top >= name.bottom)
+
+        shown = Screens.firstStep
+        rule.waitForIdle()
+        rule.onNodeWithTag(SetupTags.SKIP).assertIsDisplayed().assert(hasAnyAncestor(first))
+        // One of each on the whole page: the header is not in the page a second time.
+        rule.onAllNodesWithText("HEADS DOWN").assertCountEquals(1)
+        rule.onAllNodesWithText("Skip for now").assertCountEquals(1)
+    }
+
+    @Test
+    fun `a sub-step's two actions share a line at the normal font, each a finger tall`() {
+        show { Screens.Setup(Screens.keepAliveXiaomi) }
+        val open = rule.onNodeWithTag(SetupTags.OPEN_SETTINGS + KeepAliveStep.AUTOSTART.name).performScrollTo().getUnclippedBoundsInRoot()
+        val confirm = rule.onNodeWithTag(SetupTags.CONFIRM_AUTOSTART).getUnclippedBoundsInRoot()
+        assertTrue("side by side: $open, $confirm", open.top == confirm.top && open.right + 16.dp <= confirm.left && confirm.right <= 340.dp)
+        assertTrue(open.height >= 48.dp && confirm.height >= 48.dp)
     }
 
     @Test
