@@ -59,6 +59,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -229,7 +230,18 @@ fun ClockOutScreen(
                 title = ClockOutLedger.TITLE.takeUnless { state is ClockOutState.Done },
                 closeTag = ClockOutTags.CLOSE.takeIf { dockIsTaken },
                 onClose = onClose,
-            )
+            ) {
+                // The confirmed result takes the title's place: its statement stands where the title stood.
+                if (state is ClockOutState.Done) {
+                    Confirmed(
+                        message = state.message,
+                        tag = ClockOutTags.MESSAGE,
+                        transactionUrl = ExplorerLinks.tx(state.signature, cluster),
+                        transactionTag = ClockOutTags.TRANSACTION,
+                        onOpenTransaction = onOpenTransaction,
+                    )
+                }
+            }
             when (state) {
                 ClockOutState.Loading -> {
                     SheetMessage("Reading your rig from the chain…", ClockOutTags.MESSAGE, quiet = true)
@@ -240,13 +252,7 @@ fun ClockOutScreen(
                     ClockOutTags.MESSAGE,
                 )
                 is ClockOutState.Unavailable -> SheetNotice(state.message, ClockOutTags.MESSAGE, NoticeTone.Problem)
-                is ClockOutState.Done -> Confirmed(
-                    message = state.message,
-                    tag = ClockOutTags.MESSAGE,
-                    transactionUrl = ExplorerLinks.tx(state.signature, cluster),
-                    transactionTag = ClockOutTags.TRANSACTION,
-                    onOpenTransaction = onOpenTransaction,
-                )
+                is ClockOutState.Done -> Unit
                 is ClockOutState.Ready -> Ready(state, onClaimAll, onEndEarly)
             }
         },
@@ -411,10 +417,17 @@ internal val LocalSheetArrival = staticCompositionLocalOf<SheetArrival?> { null 
 /**
  * The top of a sheet: its name in small capitals, the way out beside it while the dock is taken
  * by another action ([closeTag] not null), and under them the [title]. Without a title the small
- * name is the screen's heading.
+ * name is the screen's heading, and [inPlaceOfTitle] is drawn where the title would be: the
+ * confirmed result, whose statement then starts on the line the title stood on.
  */
 @Composable
-internal fun SheetHeader(eyebrow: String, title: String?, closeTag: String?, onClose: () -> Unit) {
+internal fun SheetHeader(
+    eyebrow: String,
+    title: String?,
+    closeTag: String?,
+    onClose: () -> Unit,
+    inPlaceOfTitle: @Composable () -> Unit = {},
+) {
     Column {
         Row(
             Modifier.fillMaxWidth().heightIn(min = HdDimens.Touch),
@@ -435,7 +448,7 @@ internal fun SheetHeader(eyebrow: String, title: String?, closeTag: String?, onC
                 TextAction(SheetWords.CLOSE, onClose, Modifier.offset { IntOffset(slack, 0) }.testTag(closeTag))
             }
         }
-        if (title != null) DisplayText(title, Modifier.semantics { heading() })
+        if (title != null) DisplayText(title, Modifier.semantics { heading() }) else inPlaceOfTitle()
     }
 }
 
@@ -474,11 +487,11 @@ internal fun SheetMessage(text: String, tag: String, quiet: Boolean = false) {
  */
 @Composable
 internal fun Fact(label: String, sentence: String, tag: String, figure: String? = null, figureColor: Color = Hd.colors.chalk) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Unit)) {
         FlowRow(
             Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(HdDimens.Unit),
         ) {
             // The padding is the least room between the two: with less, the amount takes the next line.
             Label(label, Modifier.alignByBaseline().padding(end = 16.dp))
@@ -573,13 +586,13 @@ internal fun Confirmed(
     val type = Hd.type
     val density = LocalDensity.current
     val text = remember(message, colors, type, density) {
-        with(density) {
-            // The display face stops growing at 1.3x, as DisplayText holds it; the body grows as asked.
-            val display = type.display.fontSize
-            val statement = minOf(display.toDp(), display.value.dp * HdType.DISPLAY_SCALE_CAP).toPx()
-            val body = type.body.fontSize.toPx()
-            confirmedText(message, type.display, statementEm = statement / body, gapEm = STATEMENT_GAP.toPx() / body, ore = colors.seam)
-        }
+        // The display face is sized as DisplayText sizes a title, with the system's font scale held
+        // at 1.3x, so the statement is exactly as large as the title it replaces; the body grows as asked.
+        val held = if (density.fontScale <= HdType.DISPLAY_SCALE_CAP) density else Density(density.density, HdType.DISPLAY_SCALE_CAP)
+        val statement = with(held) { type.display.fontSize.toPx() }
+        val body = with(density) { type.body.fontSize.toPx() }
+        val gap = with(density) { STATEMENT_GAP.toPx() }
+        confirmedText(message, type.display, statementEm = statement / body, gapEm = gap / body, ore = colors.seam)
     }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }

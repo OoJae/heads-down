@@ -153,7 +153,18 @@ fun WithdrawScreen(
                 title = WithdrawLedger.TITLE.takeUnless { state is WithdrawState.Done },
                 closeTag = WithdrawTags.CLOSE.takeIf { dockIsTaken },
                 onClose = onClose,
-            )
+            ) {
+                // The confirmed result takes the title's place: its statement stands where the title stood.
+                if (state is WithdrawState.Done) {
+                    Confirmed(
+                        message = state.message,
+                        tag = WithdrawTags.MESSAGE,
+                        transactionUrl = ExplorerLinks.tx(state.signature, cluster),
+                        transactionTag = WithdrawTags.TRANSACTION,
+                        onOpenTransaction = onOpenTransaction,
+                    )
+                }
+            }
             when (state) {
                 WithdrawState.Loading -> {
                     SheetMessage("Reading the chain…", WithdrawTags.MESSAGE, quiet = true)
@@ -164,13 +175,7 @@ fun WithdrawScreen(
                     state.problem?.let { SheetNotice(it, WithdrawTags.PROBLEM, NoticeTone.Problem) }
                 }
                 is WithdrawState.Unavailable -> SheetNotice(state.message, WithdrawTags.MESSAGE, NoticeTone.Problem)
-                is WithdrawState.Done -> Confirmed(
-                    message = state.message,
-                    tag = WithdrawTags.MESSAGE,
-                    transactionUrl = ExplorerLinks.tx(state.signature, cluster),
-                    transactionTag = WithdrawTags.TRANSACTION,
-                    onOpenTransaction = onOpenTransaction,
-                )
+                is WithdrawState.Done -> Unit
                 is WithdrawState.Ready -> Ready(state, onRevoke, onCloseRig)
             }
         },
