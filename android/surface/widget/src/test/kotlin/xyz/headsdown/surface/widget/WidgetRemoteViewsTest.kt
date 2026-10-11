@@ -13,9 +13,11 @@ import android.widget.TextView
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.glance.ExperimentalGlanceApi
 import androidx.glance.GlanceTheme
 import androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 import androidx.glance.appwidget.GlanceRemoteViews
+import androidx.glance.appwidget.compose
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -379,6 +381,38 @@ class WidgetRemoteViewsTest {
             assertEquals("$size", HdArgb.ASH, rig(size, RigWidgetState()).text("No haul yet").currentTextColor)
         }
         assertEquals(HdArgb.ASH, widget.text("HEADS DOWN").currentTextColor)
+    }
+
+    @OptIn(ExperimentalGlanceApi::class)
+    @Test
+    fun `the widget the app provides draws the stored rig at every declared size`() {
+        // RigWidget.provideGlance itself: the store, the boot count, the colour policy, the layout for the size.
+        val activity = activity(1f)
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val store = WidgetStateStore.get(context)
+        val before = store.state.value
+        try {
+            assertTrue("nobody turned the brand off", store.preferBrandColors)
+            store.update { state(RigHeat.COOLING).copy(rig = WidgetRig(RigHeat.COOLING, darkSinceWallMillis = System.currentTimeMillis() - 72 * 60_000L, darkRounds = 3)) }
+            for (size in RigWidget.SIZES) {
+                val widget = inflate(activity, runBlocking { RigWidget().compose(context, size = size) }, size)
+                assertTrue("$size: ${widget.strings}", "Cooling" in widget.strings)
+                assertEquals("$size", HdArgb.EMBER, widget.text("Cooling").currentTextColor)
+                assertNotNull("$size runs the chronometer", widget.chronometer)
+                if (size in full) assertEquals("$size", HdArgb.SEAM, widget.text("Last haul 0.0194 ORE").currentTextColor)
+            }
+            // A cold rig that never ran: the first night's instruction, and no clock.
+            store.update { RigWidgetState() }
+            val cold = inflate(activity, runBlocking { RigWidget().compose(context, size = RigWidget.TALL) }, RigWidget.TALL)
+            assertEquals(listOf("HEADS DOWN", "Rig cold", "Clock in, then lay it face-down", "No haul yet", "Streak —"), cold.strings)
+            assertNull(cold.chronometer)
+            assertEquals(emptyList<String>(), cold.problems())
+            // The Crew placeholder provides its three texts whatever the store holds.
+            val crew = inflate(activity, runBlocking { CrewWidget().compose(context, size = CrewWidget.SIZE) }, CrewWidget.SIZE)
+            assertEquals(listOf(CrewPlaceholderCopy.TITLE, CrewPlaceholderCopy.TAG, CrewPlaceholderCopy.LINE), crew.strings)
+        } finally {
+            store.update { before }
+        }
     }
 
     @Test

@@ -156,6 +156,28 @@ class WidgetBrandTest {
     }
 
     @Test
+    fun `every string of the module passes the banned-word rule`() {
+        // The pattern of HonestCopy (feature/reveal), which this module does not depend on.
+        val banned = Regex(
+            "\\b(earn\\w*|yield\\w*|stak(e|es|ed|ing)|passive income|proof of focus|focus mining|profit\\w*|guarantee\\w*|risk-free|free ore|" +
+                "lotter(y|ies)|jackpot\\w*|gambl\\w*|bet|bets|betting|apy|apr|returns|interest)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        assertEquals(listOf("stake", "bet"), banned.findAll("Stake it and bet").map { it.value.lowercase() }.toList())
+        val context: Context = ApplicationProvider.getApplicationContext()
+        // The picker's labels and descriptions and the static previews: every string resource of this module.
+        val resources = R.string::class.java.fields.map { it.name to context.getString(it.getInt(null)) }
+        assertTrue("the scan saw the string resources: ${resources.map { it.first }}", resources.size >= 13)
+        assertTrue(resources.map { it.first }.containsAll(listOf("hd_widget_rig_label", "hd_widget_rig_description", "hd_widget_crew_label", "hd_widget_crew_description", "hd_widget_preview_crew_line")))
+        val runtime = listOf(CrewPlaceholderCopy.TITLE, CrewPlaceholderCopy.TAG, CrewPlaceholderCopy.LINE, CrewPlaceholderCopy.DESCRIPTION).map { "CrewPlaceholderCopy" to it }
+        for ((name, value) in resources + runtime) {
+            assertEquals("$name: $value", emptyList<String>(), banned.findAll(value).map { it.value }.toList())
+            // No price and no ticker on a home screen: an amount is ORE and nothing else.
+            assertFalse("$name: $value", value.contains('$') || Regex("\\b(SOL|USD|USDC)\\b").containsMatchIn(value))
+        }
+    }
+
+    @Test
     fun `widget text follows the system font scale up to the cap and no further`() {
         /** The type at a system font scale, and how many dp tall it has the system draw [sp]. */
         class At(system: Float, max: Float = WidgetType.MAX_SCALE) {
