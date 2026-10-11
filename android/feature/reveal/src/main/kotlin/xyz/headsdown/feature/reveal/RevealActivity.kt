@@ -18,10 +18,15 @@ import androidx.core.content.getSystemService
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulSummary
+import xyz.headsdown.feature.reveal.haul.NightReport
+import xyz.headsdown.feature.reveal.haul.NightStage
 import xyz.headsdown.feature.reveal.share.RevealShare
 import xyz.headsdown.feature.reveal.share.ShareGrid
 import xyz.headsdown.feature.reveal.ui.RevealRoute
@@ -40,6 +45,11 @@ import javax.inject.Inject
  * shared one. Sharing and clocking out ask to unlock first, because neither the share sheet nor
  * a wallet can show over the lock screen. "Buy the rest at market" is a stub until the Jupiter
  * leg is wired.
+ *
+ * At the alarm the night's shift is still open on-chain, and a haul is read from a sealed shift.
+ * The reveal then says so and offers the clock-out; when the user comes back from it, it reads
+ * that shift's haul, asking again until ORE has settled the last round it dug. An older shift's
+ * haul is never shown in the night's place.
  */
 @AndroidEntryPoint
 class RevealActivity : ComponentActivity() {
@@ -49,6 +59,7 @@ class RevealActivity : ComponentActivity() {
     @Inject lateinit var clockOut: ClockOutNavigator
 
     private var state by mutableStateOf<RevealUiState>(RevealUiState.Loading)
+    private var reading: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // The reveal is dark whatever the phone's own theme: light icons over the pit on both bars.
@@ -56,11 +67,7 @@ class RevealActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         NotificationManagerCompat.from(this).cancel(RevealAlarmReceiver.NOTIFICATION_ID)
         HighRefreshRate.request(this)
-        lifecycleScope.launch {
-            // Offline, no indexer, no finished shift: all "no haul yet". Never a sample by default.
-            val haul = runCatching { haulRepository.latest() }.getOrNull()
-            state = if (haul == null) RevealUiState.NoHaul else RevealUiState.Ready(haul)
-        }
+        read()
         // "Remove animations" in accessibility settings: show the final board at once.
         val animate = ValueAnimator.areAnimatorsEnabled()
         setContent {
@@ -82,6 +89,48 @@ class RevealActivity : ComponentActivity() {
                     state = RevealUiState.Ready(FakeHaulRepository.sampleNight(System.currentTimeMillis(), ZoneId.systemDefault()))
                 },
             )
+        }
+    }
+
+    /** Back from the clock-out (or the wallet): the shift this page was waiting on may be sealed now. */
+    override fun onResume() {
+        super.onResume()
+        if (state is RevealUiState.Night && reading?.isActive != true) read()
+    }
+
+    /**
+     * Reads the night. Offline, no indexer, no finished shift: all "no haul yet", never a sample
+     * by default. A sealed shift whose haul is not final is asked for again, for [READ_FOR_MILLIS].
+     */
+    private fun read() {
+        reading?.cancel()
+        reading = lifecycleScope.launch {
+            var asked = 0L
+            while (true) {
+                val report = try {
+                    haulRepository.night()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    NightReport.None
+                }
+                when (report) {
+                    is NightReport.Haul -> state = RevealUiState.Ready(report.summary)
+                    is NightReport.NotSealed -> state = RevealUiState.Night(report.night, NightStage.NOT_SEALED)
+                    is NightReport.NotReadYet -> {
+                        val more = asked < READ_FOR_MILLIS
+                        state = RevealUiState.Night(report.night, if (more) NightStage.READING else NightStage.NOT_READY)
+                        if (more) {
+                            delay(READ_EVERY_MILLIS)
+                            asked += READ_EVERY_MILLIS
+                            continue
+                        }
+                    }
+                    // A haul already on the screen (the sample, on request) is not taken away by a failed read.
+                    NightReport.None -> if (state !is RevealUiState.Ready) state = RevealUiState.NoHaul
+                }
+                break
+            }
         }
     }
 
@@ -116,5 +165,13 @@ class RevealActivity : ComponentActivity() {
         } else {
             open()
         }
+    }
+
+    private companion object {
+        /** How often a sealed shift's haul is asked for while it is not final. */
+        const val READ_EVERY_MILLIS = 5_000L
+
+        /** How long: a round resets about a minute after it ends, and the indexer follows within seconds. */
+        const val READ_FOR_MILLIS = 180_000L
     }
 }

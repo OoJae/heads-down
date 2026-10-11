@@ -1,5 +1,6 @@
 package xyz.headsdown.haul
 
+import kotlinx.coroutines.CancellationException
 import xyz.headsdown.core.chain.Pubkey
 import xyz.headsdown.core.chain.indexer.HaulMode
 import xyz.headsdown.core.chain.indexer.IndexerHaul
@@ -7,38 +8,91 @@ import xyz.headsdown.core.chain.indexer.IndexerHaulClient
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulSummary
+import xyz.headsdown.feature.reveal.haul.NightReport
+import xyz.headsdown.feature.reveal.haul.OpenNight
 import xyz.headsdown.feature.reveal.haul.RoundReplay
 import xyz.headsdown.feature.reveal.haul.StreakUpdate
 import xyz.headsdown.feature.shift.RigBindingProvider
+import xyz.headsdown.feature.shift.ShiftRecord
 import xyz.headsdown.surface.widget.RigWidgetUpdates
 import xyz.headsdown.surface.widget.WidgetHaul
 import java.math.BigDecimal
 import java.math.RoundingMode
+
+/** Where the rig's on-chain shift counter stands against a shift this phone worked. */
+enum class ShiftOnChain {
+    /** That shift is the rig's current one, and it is open: nobody has sealed it. */
+    OPEN,
+
+    /** The rig is past it, or it is the current one and closed: it is sealed. */
+    SEALED,
+
+    /** The rig never reached that shift id: it was not an on-chain shift (a focus-only one has a local id). */
+    NOT_ON_CHAIN,
+}
 
 /**
  * The morning haul from the indexer (contract B), for the rig this phone is bound to.
  *
  * - No indexer configured, no bound rig, or no finished shift (404): null, "no haul yet".
  * - `first_pickup_ts` is not observable on-chain: it comes from the shift service's own journal
- *   ([firstPickup]) when the journal still holds that shift.
+ *   ([lastShift]) when the journal still holds that shift.
  * - A real (not `simulated`) haul updates the widget's last haul and streak.
+ * - The indexer serves sealed shifts only. A shift this phone worked after the last sealed one
+ *   is reported as itself ([night]), never covered by the older haul.
  */
 class IndexerHaulRepository(
     /** Null when this build has no indexer (an empty indexer URL). */
     private val client: IndexerHaulClient?,
     private val binding: RigBindingProvider,
-    /** The journaled first pickup (wall millis) for a shift id, or null. */
-    private val firstPickup: (shiftId: Long) -> Long?,
+    /** The shift service's journal: the most recent shift this phone armed, or null. */
+    private val lastShift: () -> ShiftRecord?,
     private val widgets: RigWidgetUpdates,
+    /** Reads the Rig: where [shiftId] stands on-chain. Throws when the chain cannot be read. */
+    private val onChain: suspend (rig: Pubkey, shiftId: Long) -> ShiftOnChain = { _, _ -> ShiftOnChain.NOT_ON_CHAIN },
 ) : HaulRepository {
 
     override suspend fun latest(): HaulSummary? {
         val indexer = client ?: return null
         val bound = binding.current()
         if (!bound.isRegistered) return null
-        val haul = indexer.latest(Pubkey(bound.rigAddress)) ?: return null
+        return indexer.latest(Pubkey(bound.rigAddress))?.let(::shown)
+    }
+
+    override suspend fun night(): NightReport {
+        val indexer = client ?: return NightReport.None
+        val bound = binding.current()
+        if (!bound.isRegistered) return NightReport.None
+        val rig = Pubkey(bound.rigAddress)
+        val latest = indexer.latest(rig)
+        val mine = lastShift()
+        val latestId = latest?.shiftId?.toLongOrNull()
+        // No shift of this phone's after the last sealed one: that one is the night.
+        if (mine == null || (latestId != null && latestId >= mine.shiftId)) return report(latest)
+        val night = OpenNight(mine.shiftId, mine.armedAtWallMillis, mine.lastHeartbeatWallMillis, mine.darkRounds.coerceAtLeast(0))
+        val where = try {
+            onChain(rig, mine.shiftId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The indexer answered and the node did not: asked again, not guessed.
+            return NightReport.NotReadYet(night)
+        }
+        return when (where) {
+            ShiftOnChain.OPEN -> NightReport.NotSealed(night)
+            ShiftOnChain.SEALED ->
+                indexer.byShift(rig, mine.shiftId.toULong())?.let(::shown)?.let(NightReport::Haul) ?: NightReport.NotReadYet(night)
+            ShiftOnChain.NOT_ON_CHAIN -> report(latest)
+        }
+    }
+
+    private fun report(haul: IndexerHaul?): NightReport = haul?.let(::shown)?.let(NightReport::Haul) ?: NightReport.None
+
+    /** The haul as the reveal shows it; a real one also reaches the widget. */
+    private fun shown(haul: IndexerHaul): HaulSummary? {
         val shiftId = haul.shiftId.toLongOrNull() ?: return null
-        val summary = HaulMapping.toSummary(haul, haul.firstPickupTs?.let { it * 1000 } ?: firstPickup(shiftId))
+        val journaled = lastShift()?.takeIf { it.shiftId == shiftId }?.firstPickupWallMillis
+        val summary = HaulMapping.toSummary(haul, haul.firstPickupTs?.let { it * 1000 } ?: journaled)
         if (!haul.simulated) {
             widgets.onHaul(WidgetHaul(summary.oreMinedAtoms, summary.endedAtWallMillis))
             widgets.onStreak(haul.streakAfter.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())

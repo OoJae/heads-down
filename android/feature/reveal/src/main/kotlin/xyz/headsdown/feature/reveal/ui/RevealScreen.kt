@@ -77,6 +77,9 @@ import xyz.headsdown.feature.reveal.board.BoardReplay
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HaulSummary
+import xyz.headsdown.feature.reveal.haul.NightCopyBuilder
+import xyz.headsdown.feature.reveal.haul.NightStage
+import xyz.headsdown.feature.reveal.haul.OpenNight
 import xyz.headsdown.feature.reveal.haul.RevealCopy
 import xyz.headsdown.feature.reveal.haul.RevealCopyBuilder
 import xyz.headsdown.feature.reveal.haul.RevealStat
@@ -93,6 +96,7 @@ object RevealTags {
     const val STREAK = "reveal-streak"
     const val EXPLORER = "reveal-explorer"
     const val SHOW_SAMPLE = "reveal-show-sample"
+    const val NIGHT_STATEMENT = "reveal-night-statement"
 }
 
 /** The sentences this screen writes itself (the haul's own are in `RevealCopy`). All pass `HonestCopy`. */
@@ -112,6 +116,9 @@ sealed interface RevealUiState {
     data object Loading : RevealUiState
     data object NoHaul : RevealUiState
     data class Ready(val summary: HaulSummary) : RevealUiState
+
+    /** The phone's last shift has no haul yet: not sealed, or sealed and still being read. */
+    data class Night(val night: OpenNight, val stage: NightStage) : RevealUiState
 }
 
 @Composable
@@ -146,6 +153,7 @@ fun RevealRoute(
             onOpenExplorer = onOpenExplorer,
             onClockOut = onClockOut,
         )
+        is RevealUiState.Night -> Night(state.night, state.stage, zone, onDone, onClockOut)
     }
 }
 
@@ -646,6 +654,51 @@ private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
     )
 }
 
+/**
+ * The phone's last shift has no haul yet. The page says which shift, in what the phone itself
+ * recorded of it, and why there is nothing more: it is still open on-chain (then the dock holds
+ * "Clock out"), or it is sealed and its haul is being read. It never shows an older shift's haul
+ * in this one's place. Laid out as [NoHaul] is: the slab hangs cold, the words stand by the thumb.
+ */
+@Composable
+private fun Night(night: OpenNight, stage: NightStage, zone: ZoneId, onDone: () -> Unit, onClockOut: (() -> Unit)?) {
+    val copy = remember(night, stage, zone) { NightCopyBuilder.build(night, stage, zone) }
+    val cold = remember { HeroSpec(SlabState.Cold, heat = 0) }
+    val clockOut = onClockOut?.takeIf { stage == NightStage.NOT_SEALED }
+    PinnedBarScreen(
+        contentPadding = PagePadding,
+        verticalArrangement = Arrangement.Top,
+        content = {
+            BrandRow(onDone = onDone.takeIf { clockOut != null }, modifier = Modifier.inPageColumn(this))
+            Spacer(Modifier.weight(1f))
+            Hero(cold, Modifier.inPageColumn(this).padding(top = PageGap).height(112.dp))
+            Spacer(Modifier.weight(1f))
+            Column(Modifier.inPageColumn(this).padding(top = PageGap), verticalArrangement = Arrangement.spacedBy(PageGap)) {
+                DisplayText(copy.title, Modifier.semantics { heading() })
+                Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Unit)) {
+                    copy.facts.forEach { BasicText(it, style = Hd.type.figure.copy(color = Hd.colors.ash)) }
+                }
+                // Said again by a screen reader when it changes: sealed, then read, with no tap in between.
+                BasicText(
+                    copy.statement,
+                    Modifier.testTag(RevealTags.NIGHT_STATEMENT).semantics { liveRegion = LiveRegionMode.Polite },
+                    style = Hd.type.body.copy(color = Hd.colors.chalk),
+                )
+                if (clockOut != null) copy.clockOutDetail?.let { Sentence(it) }
+            }
+        },
+        dock = {
+            ActionDock {
+                if (clockOut != null) {
+                    BarButton(RevealCopyBuilder.CLOCK_OUT_BUTTON, onClick = clockOut, modifier = Modifier.inPageColumn(this).testTag(RevealTags.CLOCK_OUT))
+                } else {
+                    DoneBar(onDone, Modifier.inPageColumn(this))
+                }
+            }
+        },
+    )
+}
+
 private val PREVIEW_NOW = 1_790_000_000_000L
 private val PREVIEW_ZONE: ZoneId = ZoneId.of("Africa/Lagos")
 
@@ -679,3 +732,15 @@ private fun RevealLoadingPreview() = RevealTheme { Loading(onDone = {}) }
 @Preview(name = "No haul yet", widthDp = 360, heightDp = 800, backgroundColor = HdArgb.PREVIEW_PIT, showBackground = true)
 @Composable
 private fun RevealNoHaulPreview() = RevealTheme { NoHaul(onDone = {}, onShowSample = {}) }
+
+@Preview(name = "Last night, not sealed", widthDp = 360, heightDp = 800, backgroundColor = HdArgb.PREVIEW_PIT, showBackground = true)
+@Composable
+private fun RevealNightPreview() = RevealTheme {
+    Night(
+        OpenNight(shiftId = 8, armedAtWallMillis = PREVIEW_NOW - 8 * 3_600_000L, lastHeartbeatWallMillis = PREVIEW_NOW - 120_000L, roundsSigned = 371),
+        NightStage.NOT_SEALED,
+        PREVIEW_ZONE,
+        onDone = {},
+        onClockOut = {},
+    )
+}

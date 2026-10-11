@@ -106,4 +106,24 @@ class RevealCopyTest {
         assertTrue(HonestCopy.violations("better, between, learned, alphabet, instead").isEmpty())
         assertTrue(HonestCopy.violations("dig, haul, bond, accumulate ORE by the cheaper route").isEmpty())
     }
+
+    @Test
+    fun `a night without a haul is told in what the phone recorded, and never as a haul`() {
+        val open = OpenNight(shiftId = 8, armedAtWallMillis = now - 8 * 3_600_000L, lastHeartbeatWallMillis = now - 180_000L, roundsSigned = 371)
+        val c = NightCopyBuilder.build(open, NightStage.NOT_SEALED, zone)
+        assertEquals("Not sealed yet", c.title)
+        assertEquals(listOf("Clocked in 23:05", "Last heartbeat 07:02", "371 rounds signed dark"), c.facts)
+        assertTrue(c.statement.startsWith("This shift is still open on-chain."))
+        assertEquals(RevealCopyBuilder.CLOCK_OUT_DETAIL, c.clockOutDetail)
+        // Sealed: there is nothing left to approve, so the clock-out is not described any more.
+        assertNull(NightCopyBuilder.build(open, NightStage.READING, zone).clockOutDetail)
+        assertNull(NightCopyBuilder.build(open, NightStage.NOT_READY, zone).clockOutDetail)
+        // A shift the phone never signed a round of says exactly that.
+        val cold = NightCopyBuilder.build(OpenNight(shiftId = 1, armedAtWallMillis = now), NightStage.NOT_SEALED, zone)
+        assertEquals(listOf("Clocked in 07:05", "No round signed dark"), cold.facts)
+        assertEquals("1 round signed dark", NightCopyBuilder.build(open.copy(roundsSigned = 1), NightStage.READING, zone).facts.last())
+        for (stage in NightStage.entries) {
+            NightCopyBuilder.build(open, stage, zone).allText.forEach { assertTrue(it, HonestCopy.violations(it).isEmpty()) }
+        }
+    }
 }

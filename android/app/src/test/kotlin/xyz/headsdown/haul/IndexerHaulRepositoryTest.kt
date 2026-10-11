@@ -17,9 +17,13 @@ import xyz.headsdown.core.chain.http.OkHttpJsonHttp
 import xyz.headsdown.core.chain.indexer.IndexerHaulClient
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HonestCopy
+import xyz.headsdown.feature.reveal.haul.NightReport
+import xyz.headsdown.feature.reveal.haul.OpenNight
 import xyz.headsdown.feature.reveal.haul.RevealCopyBuilder
 import xyz.headsdown.feature.shift.RigBinding
 import xyz.headsdown.feature.shift.RigBindingProvider
+import xyz.headsdown.feature.shift.ShiftMode
+import xyz.headsdown.feature.shift.ShiftRecord
 import xyz.headsdown.surface.widget.RigWidgetUpdates
 import xyz.headsdown.surface.widget.WidgetHaul
 import xyz.headsdown.surface.widget.WidgetRig
@@ -56,8 +60,25 @@ class IndexerHaulRepositoryTest {
     @After
     fun close() = server.close()
 
-    private fun summary(simulated: Boolean = false, firstPickup: String = "null") = """{
-        "rig":"$rig","shift_id":7,"mode":"night","start_ts":$start,"end_ts":$end,"start_round":422700,"end_round":422703,
+    /** The journal after shift [id]: armed at [start], 371 heartbeats, the last two minutes before [end]. */
+    private fun journaled(id: Long, pickup: Long? = null) = ShiftRecord(
+        shiftId = id,
+        mode = ShiftMode.NIGHT,
+        armedAtWallMillis = start * 1000,
+        lastHeartbeatWallMillis = (end - 120) * 1000,
+        darkRounds = 371,
+        endedAtWallMillis = null,
+        endReason = null,
+        firstPickupWallMillis = pickup,
+    )
+
+    private val nightEight = OpenNight(shiftId = 8, armedAtWallMillis = start * 1000, lastHeartbeatWallMillis = (end - 120) * 1000, roundsSigned = 371)
+
+    private fun repo(last: ShiftRecord?, onChain: suspend (Pubkey, Long) -> ShiftOnChain = { _, _ -> error("the Rig is not read") }) =
+        IndexerHaulRepository(indexer, bound, { last }, widgets, onChain)
+
+    private fun summary(simulated: Boolean = false, firstPickup: String = "null", shiftId: Long = 7) = """{
+        "rig":"$rig","shift_id":$shiftId,"mode":"night","start_ts":$start,"end_ts":$end,"start_round":422700,"end_round":422703,
         "rounds":[
           {"round_id":422700,"dark":true,"dug_mask":1023,"winning_square":3,"motherlode":false,"split":true},
           {"round_id":422701,"dark":true,"dug_mask":0,"winning_square":9,"motherlode":false,"split":false},
@@ -77,7 +98,7 @@ class IndexerHaulRepositoryTest {
     fun `a real haul reaches the reveal and the widget, with the phone's first pickup`() = runBlocking {
         respond(200, summary())
         val pickup = (end - 120) * 1000
-        val repo = IndexerHaulRepository(indexer, bound, firstPickup = { id -> if (id == 7L) pickup else null }, widgets = widgets)
+        val repo = IndexerHaulRepository(indexer, bound, lastShift = { journaled(7, pickup) }, widgets = widgets)
         val h = repo.latest()!!
         assertEquals("/v1/rigs/$rig/haul/latest", server.takeRequest().url.encodedPath)
         assertEquals(HaulProvenance.ON_CHAIN, h.provenance)
@@ -115,9 +136,12 @@ class IndexerHaulRepositoryTest {
     @Test
     fun `an indexer pickup wins, and a pickup from another night is dropped`() = runBlocking {
         respond(200, summary(firstPickup = "${end + 60}"))
-        assertEquals((end + 60) * 1000, IndexerHaulRepository(indexer, bound, { 1L }, widgets).latest()!!.firstPickupWallMillis)
+        assertEquals((end + 60) * 1000, IndexerHaulRepository(indexer, bound, { journaled(7, 1L) }, widgets).latest()!!.firstPickupWallMillis)
         respond(200, summary())
-        assertNull(IndexerHaulRepository(indexer, bound, { (start - 3 * 86_400) * 1000 }, widgets).latest()!!.firstPickupWallMillis)
+        assertNull(IndexerHaulRepository(indexer, bound, { journaled(7, (start - 3 * 86_400) * 1000) }, widgets).latest()!!.firstPickupWallMillis)
+        // The journal has moved on to another shift: its pickup is not this haul's.
+        respond(200, summary())
+        assertNull(IndexerHaulRepository(indexer, bound, { journaled(8, (end - 120) * 1000) }, widgets).latest()!!.firstPickupWallMillis)
     }
 
     @Test
@@ -129,5 +153,74 @@ class IndexerHaulRepositoryTest {
         respond(503, "")
         assertTrue(runCatching { IndexerHaulRepository(indexer, bound, { null }, widgets).latest() }.isFailure)
         assertTrue(widgets.hauls.isEmpty())
+    }
+
+    // --- the night the reveal opens on ---
+
+    @Test
+    fun `a night that is still open on-chain is reported as itself, not as the shift before it`() = runBlocking {
+        // The indexer's latest is shift 7, sealed the evening before. This phone worked shift 8 since.
+        respond(200, summary(shiftId = 7))
+        val asked = mutableListOf<Long>()
+        val report = repo(journaled(8)) { address, id ->
+            assertEquals(rig, address)
+            asked += id
+            ShiftOnChain.OPEN
+        }.night()
+        assertEquals(NightReport.NotSealed(nightEight), report)
+        assertEquals(listOf(8L), asked)
+        // The older haul was not shown, so it did not reach the widget as last night's either.
+        assertTrue(widgets.hauls.isEmpty() && widgets.streaks.isEmpty())
+    }
+
+    @Test
+    fun `a first night, with no sealed shift at all, is not sealed rather than no haul`() = runBlocking {
+        respond(404, """{"error":"no finished shift for this rig"}""")
+        assertEquals(NightReport.NotSealed(nightEight.copy(shiftId = 1)), repo(journaled(1)) { _, _ -> ShiftOnChain.OPEN }.night())
+    }
+
+    @Test
+    fun `once sealed the night's own haul is asked for by its shift id, until it is final`() = runBlocking {
+        val repo = repo(journaled(8)) { _, _ -> ShiftOnChain.SEALED }
+        // Sealed a moment ago: the indexer's latest is not final yet, and neither is shift 8 by id.
+        respond(404, """{"error":"shift 8 ended but its haul is not final yet"}""")
+        respond(404, """{"error":"shift 8 ended but its haul is not final yet"}""")
+        assertEquals(NightReport.NotReadYet(nightEight), repo.night())
+        assertEquals("/v1/rigs/$rig/haul/latest", server.takeRequest().url.encodedPath)
+        assertEquals("/v1/rigs/$rig/haul/8", server.takeRequest().url.encodedPath)
+        // The round settled: the haul is the night's.
+        respond(200, summary(shiftId = 8))
+        val report = repo.night() as NightReport.Haul
+        assertEquals(8L, report.summary.shiftId)
+        assertEquals(listOf(23), widgets.streaks)
+    }
+
+    @Test
+    fun `a sealed night is the latest haul, and the Rig is not read for it`() = runBlocking {
+        respond(200, summary(shiftId = 8))
+        assertEquals(8L, (repo(journaled(8)).night() as NightReport.Haul).summary.shiftId)
+        // No journal (a new install of an old rig): the latest sealed shift is all there is.
+        respond(200, summary(shiftId = 8))
+        assertEquals(8L, (repo(null).night() as NightReport.Haul).summary.shiftId)
+        respond(404, """{"error":"no finished shift for this rig"}""")
+        assertEquals(NightReport.None, repo(null).night())
+    }
+
+    @Test
+    fun `a shift that never was on-chain hides nothing, and an unreadable Rig is asked again`() = runBlocking {
+        // A focus-only shift from the tile has a local id far above the rig's counter.
+        respond(200, summary(shiftId = 7))
+        val focus = journaled(1_790_640_000)
+        assertEquals(7L, (repo(focus) { _, _ -> ShiftOnChain.NOT_ON_CHAIN }.night() as NightReport.Haul).summary.shiftId)
+        // The node did not answer: the older haul is not shown in the night's place.
+        respond(200, summary(shiftId = 7))
+        assertEquals(NightReport.NotReadYet(nightEight), repo(journaled(8)) { _, _ -> throw java.io.IOException("offline") }.night())
+        assertEquals(1, widgets.hauls.size)
+    }
+
+    @Test
+    fun `no indexer or no bound rig is no night`() = runBlocking {
+        assertEquals(NightReport.None, IndexerHaulRepository(null, bound, { journaled(8) }, widgets).night())
+        assertEquals(NightReport.None, IndexerHaulRepository(indexer, { RigBinding.UNREGISTERED }, { journaled(8) }, widgets).night())
     }
 }

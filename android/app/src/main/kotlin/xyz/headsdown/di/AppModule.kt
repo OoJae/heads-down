@@ -25,6 +25,7 @@ import xyz.headsdown.config.EndpointKind
 import xyz.headsdown.config.EndpointPolicy
 import xyz.headsdown.config.EndpointVerdict
 import xyz.headsdown.core.chain.Ore
+import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
 import xyz.headsdown.core.chain.accounts.OreAccounts
 import xyz.headsdown.core.chain.clockin.ClockInService
 import xyz.headsdown.core.chain.clockout.ClockOutService
@@ -60,6 +61,7 @@ import xyz.headsdown.feature.shift.RigSignerProvider
 import xyz.headsdown.feature.shift.ShiftJournal
 import xyz.headsdown.feature.shift.UplinkFactory
 import xyz.headsdown.haul.IndexerHaulRepository
+import xyz.headsdown.haul.ShiftOnChain
 import xyz.headsdown.rig.ChainClockIn
 import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.rig.CounterResync
@@ -225,11 +227,22 @@ object AppModule {
         binding: RigBindingStore,
         journal: ShiftJournal,
         widgets: RigWidgetUpdates,
+        rpc: SolanaJsonRpc,
     ): HaulRepository = IndexerHaulRepository(
         client = service(EndpointKind.INDEXER, BuildConfig.INDEXER_URL, client)?.let(::IndexerHaulClient),
         binding = binding,
-        firstPickup = journal::firstPickupFor,
+        lastShift = journal::last,
         widgets = widgets,
+        // The Rig's own counter says whether the phone's last shift is sealed; the indexer only knows sealed ones.
+        onChain = { rig, shiftId ->
+            val account = HeadsDownAccounts.rigOrNull(rig, rpc.getAccountInfo(rig))
+            val id = shiftId.toULong()
+            when {
+                account == null || account.shiftId < id -> ShiftOnChain.NOT_ON_CHAIN
+                account.shiftId == id && account.shiftOpen -> ShiftOnChain.OPEN
+                else -> ShiftOnChain.SEALED
+            }
+        },
     )
 
     /** An optional JSON service: null when its URL is empty, a startup failure when refused. */

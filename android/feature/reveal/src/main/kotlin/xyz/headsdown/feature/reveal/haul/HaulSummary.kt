@@ -109,8 +109,47 @@ data class HaulSummary(
     val motherlodeNearMiss: RoundReplay? get() = rounds.firstOrNull { it.motherlode && it.dug && !it.hit }
 }
 
+/**
+ * A shift this phone worked that has no haul yet, in what the phone itself recorded of it. A haul
+ * is read from a sealed shift: until the user clocks out there is none, and an older shift's
+ * haul is not this night's.
+ */
+data class OpenNight(
+    val shiftId: Long,
+    val armedAtWallMillis: Long,
+    /** The last heartbeat this phone signed, if it signed any. */
+    val lastHeartbeatWallMillis: Long? = null,
+    /** Rounds this phone signed a heartbeat for. The sealed shift's own count may differ. */
+    val roundsSigned: Int = 0,
+) {
+    init {
+        require(roundsSigned >= 0)
+    }
+}
+
+/** What the reveal has to show for the rig's most recent shift. */
+sealed interface NightReport {
+    /** Sealed and read: the haul. */
+    data class Haul(val summary: HaulSummary) : NightReport
+
+    /** The phone's last shift is still open on-chain: clocking out seals it. */
+    data class NotSealed(val night: OpenNight) : NightReport
+
+    /** Sealed (or not readable just now), and its haul cannot be read yet. Worth asking again. */
+    data class NotReadYet(val night: OpenNight) : NightReport
+
+    /** No shift, no indexer, no rig. */
+    data object None : NightReport
+}
+
 /** The data interface the reveal reads. The indexer-backed implementation replaces the fake. */
 fun interface HaulRepository {
     /** The most recent finished shift's haul, or null if there is none yet. */
     suspend fun latest(): HaulSummary?
+
+    /**
+     * What the reveal opens on. A source that knows of no shift but the finished ones has
+     * nothing else to say than [latest].
+     */
+    suspend fun night(): NightReport = latest()?.let(NightReport::Haul) ?: NightReport.None
 }

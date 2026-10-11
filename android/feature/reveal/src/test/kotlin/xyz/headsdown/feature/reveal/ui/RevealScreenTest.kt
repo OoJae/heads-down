@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -25,6 +26,8 @@ import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HaulSummary
 import xyz.headsdown.feature.reveal.haul.HonestCopy
+import xyz.headsdown.feature.reveal.haul.NightStage
+import xyz.headsdown.feature.reveal.haul.OpenNight
 import xyz.headsdown.feature.reveal.haul.RevealCopyBuilder
 import xyz.headsdown.feature.reveal.haul.RoundReplay
 import java.time.LocalDateTime
@@ -184,6 +187,80 @@ class RevealScreenTest {
         withOffer = false
         rule.waitForIdle()
         rule.onAllNodesWithTag(RevealTags.SHOW_SAMPLE).assertCountEquals(0)
+    }
+
+    @Test
+    fun `a night that is not sealed says so, shows what the phone recorded and offers the clock-out`() {
+        val open = OpenNight(shiftId = 8, armedAtWallMillis = now - 8 * 3_600_000L, lastHeartbeatWallMillis = now - 180_000L, roundsSigned = 371)
+        var state by mutableStateOf<RevealUiState>(RevealUiState.Night(open, NightStage.NOT_SEALED))
+        var opened = 0
+        var done = 0
+        rule.setContent {
+            RevealRoute(
+                state = state, zone = zone, animate = false,
+                onReplayStarted = {}, onReplayFinished = {}, onBuyRest = {}, onShare = {}, onDone = { done++ },
+                onClockOut = { opened++ },
+            )
+        }
+        rule.onNodeWithText("Not sealed yet").assertIsDisplayed()
+        rule.onNodeWithText("Clocked in 23:05").assertExists()
+        rule.onNodeWithText("Last heartbeat 07:02").assertExists()
+        rule.onNodeWithText("371 rounds signed dark").assertExists()
+        rule.onNodeWithText(RevealCopyBuilder.CLOCK_OUT_DETAIL).assertExists()
+        // No haul of any shift is on this page: no amount of ORE, no price, no streak.
+        rule.onAllNodesWithTag(RevealTags.STREAK).assertCountEquals(0)
+        rule.onAllNodesWithTag(RevealTags.VERDICT).assertCountEquals(0)
+        assertTrue(screenTexts().none { "ORE mined" in it || "Morning haul" in it })
+        rule.onNodeWithTag(RevealTags.CLOCK_OUT).performClick()
+        assertEquals(1, opened)
+        // The dock is taken by "Clock out": the way out is the text action at the top.
+        rule.onNodeWithTag(RevealTags.DONE).performClick()
+        assertEquals(1, done)
+
+        // Sealed: nothing left to sign here, and the page says what it is waiting for.
+        state = RevealUiState.Night(open, NightStage.READING)
+        rule.waitForIdle()
+        rule.onNodeWithText("Reading the haul").assertIsDisplayed()
+        rule.onAllNodesWithTag(RevealTags.CLOCK_OUT).assertCountEquals(0)
+        rule.onAllNodesWithText(RevealCopyBuilder.CLOCK_OUT_DETAIL).assertCountEquals(0)
+        rule.onNodeWithTag(RevealTags.DONE).assertIsDisplayed()
+
+        state = RevealUiState.Night(open, NightStage.NOT_READY)
+        rule.waitForIdle()
+        rule.onNodeWithText("Haul not ready yet").assertIsDisplayed()
+        rule.onAllNodesWithTag(RevealTags.CLOCK_OUT).assertCountEquals(0)
+
+        // Read: the page becomes that night's reveal.
+        state = RevealUiState.Ready(night.copy(provenance = HaulProvenance.ON_CHAIN, shiftId = 8))
+        rule.waitForIdle()
+        rule.onNodeWithText("Morning haul").assertIsDisplayed()
+    }
+
+    @Test
+    fun `every stage of a night without a haul keeps the honesty rules, whatever the phone recorded`() {
+        val nights = listOf(
+            OpenNight(shiftId = 1, armedAtWallMillis = now),
+            OpenNight(shiftId = 8, armedAtWallMillis = now, lastHeartbeatWallMillis = now + 60_000L, roundsSigned = 1),
+            OpenNight(shiftId = 9, armedAtWallMillis = now, lastHeartbeatWallMillis = now + 60_000L, roundsSigned = 1_234),
+        )
+        var state by mutableStateOf<RevealUiState>(RevealUiState.Loading)
+        rule.setContent {
+            RevealRoute(
+                state = state, zone = zone, animate = false,
+                onReplayStarted = {}, onReplayFinished = {}, onBuyRest = {}, onShare = {}, onDone = {},
+                onClockOut = {},
+            )
+        }
+        for (open in nights) {
+            for (stage in NightStage.entries) {
+                state = RevealUiState.Night(open, stage)
+                rule.waitForIdle()
+                val texts = screenTexts()
+                assertTrue(texts.size >= 5)
+                texts.forEach { s -> assertTrue("banned words in: $s", HonestCopy.violations(s).isEmpty()) }
+            }
+        }
+        rule.onNodeWithText("1,234 rounds signed dark").assertExists()
     }
 
     @Test
