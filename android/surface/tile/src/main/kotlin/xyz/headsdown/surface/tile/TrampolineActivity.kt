@@ -166,7 +166,9 @@ class TrampolineActivity : ComponentActivity() {
                     recovered()
                 }
                 // A refusal by our own composer says why (it is fixed text); anything else is the wallet's.
-                if (!armed) toast(clockInTransactions.refusal() ?: "Wallet: ${result.reason}")
+                if (!armed) {
+                    toast(clockInTransactions.refusal() ?: if (result.reason == WalletFailures.RECONNECT) result.reason else "Wallet: ${result.reason}")
+                }
             }
             is WalletResult.Success -> when (val session = result.value) {
                 is WalletSession.NothingToSign -> {

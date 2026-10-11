@@ -97,7 +97,14 @@ object WalletFailures {
         "Execution exception",
         "Sign in failed, no sign in result returned by wallet",
         "No compatible wallet found.",
+        RECONNECT,
     )
+
+    /**
+     * The wallet refused the sign-in it had given this app earlier; the stored token is gone, and
+     * the next try gets the wallet's own approval. A whole sentence: it is shown as it is.
+     */
+    const val RECONNECT = "Your wallet asks to connect again. Tap once more."
 
     /** The wallet itself said it signed nothing: no transaction of that session can be on its way. */
     val NOTHING_SIGNED = setOf("User did not authorize signing", "Too many payloads to sign")

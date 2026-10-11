@@ -43,23 +43,21 @@ class TokenRefusalTest {
     }
 
     @Test
-    fun `a refused token is dropped and the wallet is asked once more`() {
-        assertTrue(WalletAnswer.askAgain(presented = true, entered = false, code = ProtocolContract.ERROR_AUTHORIZATION_FAILED))
-        // Whatever code a wallet chooses for it: before the session is entered nothing was signed.
-        assertTrue(WalletAnswer.askAgain(presented = true, entered = false, code = -32602))
+    fun `a refused token is told apart from every other failure`() {
+        assertTrue(WalletAnswer.refusedToken(presented = true, entered = false, code = ProtocolContract.ERROR_AUTHORIZATION_FAILED))
+        // Whatever code a wallet chooses for it: before the session is entered, the token is all it can be about.
+        assertTrue(WalletAnswer.refusedToken(presented = true, entered = false, code = -32602))
+        // Past the authorization an error is about what was to be signed: the token is kept.
+        assertFalse(WalletAnswer.refusedToken(presented = true, entered = true, code = ProtocolContract.ERROR_NOT_SIGNED))
+        assertFalse(WalletAnswer.refusedToken(presented = true, entered = true, code = ProtocolContract.ERROR_AUTHORIZATION_FAILED))
+        // No token was presented, or the wallet never answered (closed by the user, never came up).
+        assertFalse(WalletAnswer.refusedToken(presented = false, entered = false, code = ProtocolContract.ERROR_AUTHORIZATION_FAILED))
+        assertFalse(WalletAnswer.refusedToken(presented = true, entered = false, code = null))
     }
 
     @Test
-    fun `nothing is asked twice once the session is past the authorization`() {
-        // From there on the wallet may have signed, or sent: a second call could sign twice.
-        assertFalse(WalletAnswer.askAgain(presented = true, entered = true, code = ProtocolContract.ERROR_NOT_SIGNED))
-        assertFalse(WalletAnswer.askAgain(presented = true, entered = true, code = ProtocolContract.ERROR_AUTHORIZATION_FAILED))
-    }
-
-    @Test
-    fun `without a token, or without an answer, the wallet is not opened a second time`() {
-        assertFalse(WalletAnswer.askAgain(presented = false, entered = false, code = ProtocolContract.ERROR_AUTHORIZATION_FAILED))
-        // The user closed the wallet, or it never came up: no answer, no second try.
-        assertFalse(WalletAnswer.askAgain(presented = true, entered = false, code = null))
+    fun `the sentence that asks for one more tap is shown whole`() {
+        assertEquals(WalletFailures.RECONNECT, WalletFailures.sanitize(WalletFailures.RECONNECT))
+        assertFalse(WalletFailures.RECONNECT in WalletFailures.NOTHING_SIGNED)
     }
 }

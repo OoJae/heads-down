@@ -93,11 +93,11 @@ internal object WalletAnswer {
     }
 
     /**
-     * Ask the wallet once more, without the stored token: only if one was [presented], the wallet
-     * answered with an error ([code] is not null), and the session never [entered] the part where
-     * something is signed. A wallet the user closed, or that never came up, gave no answer.
+     * The wallet refused the stored token: one was [presented], the wallet answered with an error
+     * ([code] is not null), and the session never [entered] the part where something is signed.
+     * A wallet the user closed, or that never came up, gave no answer, and refused nothing.
      */
-    fun askAgain(presented: Boolean, entered: Boolean, code: Int?): Boolean = presented && !entered && code != null
+    fun refusedToken(presented: Boolean, entered: Boolean, code: Int?): Boolean = presented && !entered && code != null
 }
 
 /**
@@ -106,7 +106,7 @@ internal object WalletAnswer {
  * - One wallet confirmation per user action; all calls need an [ActivityResultSender] made
  *   in `Activity.onCreate` (MWA cannot run from a Service: see the tile's trampoline).
  * - The auth token is restored from and persisted to [AuthTokenVault]; it is never logged. A
- *   token the wallet refuses is dropped and the wallet is asked once more ([withStoredToken]).
+ *   token the wallet refuses is dropped, and the failure asks for one more try ([withStoredToken]).
  * - [signAndSend] reports success only after [ConfirmationPoller] saw each signature
  *   confirmed with `err == null`. A wallet "sent" response is not success.
  * - With a [submitter] (the `localdev` build), the wallet only signs (`signTransactions`) and the
@@ -123,6 +123,9 @@ class HeadsDownWallet(
     init {
         adapter.blockchain = chain
     }
+
+    /** The last call ended with the wallet refusing the stored token ([withStoredToken]). */
+    @Volatile private var tokenRefused = false
 
     suspend fun connect(sender: ActivityResultSender): WalletResult<WalletAccount> {
         return when (val result = withStoredToken { adapter.connect(sender) }) {
@@ -304,15 +307,19 @@ class HeadsDownWallet(
     }
 
     /**
-     * One wallet call with the stored token, and one more without it if the wallet refused the
-     * token. Jupiter Mobile refused one a day after handing it out, and clientlib-ktx 2.2.0 does
-     * not say "Auth token invalid" then ([WalletAnswer]): the refusal read "Failed establishing
-     * local association with wallet", the token was never dropped, and every later call failed
-     * the same way.
+     * One wallet call with the stored token. A wallet may refuse the token it handed out: Jupiter
+     * Mobile did, a day later, and clientlib-ktx 2.2.0 does not say "Auth token invalid" then
+     * ([WalletAnswer]): the refusal read "Failed establishing local association with wallet", the
+     * token was never dropped, and every later call failed the same way.
      *
-     * [entered] says whether the session got past the authorization. Only before that is it
-     * certain that the wallet signed nothing, so only then is the wallet asked again: this time
-     * it shows its own approval and hands out a new token.
+     * A refused token is dropped here, and the failure says so ([WalletFailures.RECONNECT]): the
+     * next call presents none, and the wallet shows its own approval and hands out a new one. The
+     * call is not made a second time from here. That was tried on the phone (11 October 2026):
+     * started while the wallet's first window was still closing, the second session was cancelled
+     * at once; the tap that followed it, with no token, went through.
+     *
+     * [entered] says whether the session got past the authorization. After that an error is about
+     * what was to be signed, not about the token, and the token is kept.
      */
     private suspend fun <T> withStoredToken(
         entered: () -> Boolean = { false },
@@ -320,11 +327,14 @@ class HeadsDownWallet(
     ): TransactionResult<T> {
         restoreToken()
         val presented = adapter.authToken != null
-        val first = call()
-        if (first !is TransactionResult.Failure || !WalletAnswer.askAgain(presented, entered(), WalletAnswer.code(first.e))) return first
-        runCatching { vault.clear(chain.fullName) }
-        adapter.authToken = null
-        return call()
+        tokenRefused = false
+        val result = call()
+        if (result is TransactionResult.Failure && WalletAnswer.refusedToken(presented, entered(), WalletAnswer.code(result.e))) {
+            runCatching { vault.clear(chain.fullName) }
+            adapter.authToken = null
+            tokenRefused = true
+        }
+        return result
     }
 
     /**
@@ -343,6 +353,7 @@ class HeadsDownWallet(
     }
 
     private fun <T> failed(result: TransactionResult.Failure<T>): WalletResult.Failed {
+        if (tokenRefused) return WalletResult.Failed(WalletFailures.RECONNECT)
         val message = WalletAnswer.message(WalletAnswer.code(result.e), result.message)
         // A failed authorization may mean the stored token was revoked: drop it.
         if (message == "Auth token invalid") runCatching { vault.clear(chain.fullName) }
