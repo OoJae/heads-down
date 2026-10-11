@@ -177,6 +177,168 @@ class LayDownGlowTest {
         assertEquals(GlowFrame.None, cleared)
     }
 
+    /** The warm part of a frame, and the black part: what the room and the eye actually get. */
+    private fun light(frame: GlowFrame) = frame.alpha * (1f - frame.black)
+    private fun shade(frame: GlowFrame) = frame.alpha * frame.black
+
+    @Test
+    fun `put back down after a lift, the black comes up slowly and never as a step`() {
+        turn(45f, 180f, 600)
+        run(180f, 3_000)
+        run(140f, 400)
+        assertEquals(GlowPhase.Lifted, state.phase)
+        frames.clear()
+        run(180f, 20)
+        assertEquals(GlowPhase.Dimming, state.phase)
+        run(180f, LayDownGlowMachine.FADE_MILLIS / 2)
+        assertEquals(GlowPhase.Dimming, state.phase)
+        assertFalse("minimum brightness before the black is complete", frames.last().minimumBrightness)
+        assertTrue(frames.last().alpha in 0.4f..0.6f)
+        run(180f, LayDownGlowMachine.FADE_MILLIS)
+        assertEquals(GlowPhase.Dark, state.phase)
+        for (i in 1 until frames.size) {
+            assertEquals("light on the way back down at $i", 0f, light(frames[i]), 0f)
+            assertTrue("the black stepped at $i", frames[i].alpha - frames[i - 1].alpha <= 0.05f)
+            assertTrue(frames[i].alpha >= frames[i - 1].alpha)
+        }
+        // Lifted halfway through the dimming, it lets go from exactly where it was.
+        run(140f, 400)
+        run(180f, 20 + LayDownGlowMachine.FADE_MILLIS / 2)
+        val before = LayDownGlowMachine.frame(state, now)
+        val after = run(140f, 20)
+        assertEquals(GlowPhase.Lifted, state.phase)
+        assertEquals(before.alpha, after.alpha, 0.05f)
+        assertEquals(1f, after.black, 0f)
+    }
+
+    @Test
+    fun `a rig armed with the phone already turned over gets no light, only the dark`() {
+        // Over a face in bed, at 140 degrees, when the rig is armed: nothing, however long.
+        run(140f, 10_000)
+        assertEquals(GlowPhase.Lifted, state.phase)
+        assertTrue(frames.all { it.alpha == 0f && !it.minimumBrightness })
+        // Rolled further, to face-down: black, slowly, with no light on the way.
+        frames.clear()
+        turn(140f, 180f, 300)
+        run(180f, 2_000)
+        assertEquals(GlowPhase.Dark, state.phase)
+        assertTrue(frames.all { light(it) == 0f })
+        assertTrue(frames.last().minimumBrightness)
+        // Only a phone that has been seen turned up can glow: and then it does.
+        run(60f, 500)
+        assertEquals(GlowState(updatedMillis = state.updatedMillis, primed = true), state)
+        frames.clear()
+        turn(60f, 180f, 600)
+        run(180f, 600)
+        assertEquals(GlowPhase.Holding, state.phase)
+        assertTrue(frames.any { light(it) > 0.8f })
+    }
+
+    @Test
+    fun `an app that comes back to a phone lying face-down goes dark without a second glow`() {
+        // The controller starts from nothing on every resume; the phone has not moved.
+        run(180f, 3_000)
+        assertEquals(GlowPhase.Dark, state.phase)
+        assertTrue(frames.all { light(it) == 0f })
+        for (i in 1 until frames.size) assertTrue(frames[i].alpha - frames[i - 1].alpha <= 0.05f)
+    }
+
+    @Test
+    fun `disarmed, the phone is not remembered as having been turned up`() {
+        run(45f, 500)
+        assertTrue(state.primed)
+        run(45f, 20, armed = false)
+        assertEquals(GlowState(), state)
+        // Armed again while already over the face: no light.
+        run(150f, 2_000)
+        assertTrue(frames.all { it.alpha == 0f })
+    }
+
+    @Test
+    fun `whatever the hand does, the overlay never steps and no light returns after the fade`() {
+        // Random handling at the sensor's rate: slow turns, fast flips, jitter, holds at every angle.
+        val random = java.util.Random(20261011)
+        repeat(300) { run ->
+            state = GlowState()
+            frames.clear()
+            var theta = random.nextFloat() * 180f
+            var previous = LayDownGlowMachine.frame(state, now)
+            var fading = false
+            var lightAtFade = 0f
+            var target = theta
+            var speed = 0f
+            repeat(1_500) { i ->
+                if (i % (10 + random.nextInt(120)) == 0) {
+                    target = when (random.nextInt(6)) {
+                        0 -> 180f
+                        1 -> 150f + random.nextFloat() * 30f
+                        2 -> 110f + random.nextFloat() * 20f
+                        else -> random.nextFloat() * 180f
+                    }
+                    speed = 20f + random.nextFloat() * 900f // degrees per second
+                }
+                val step = speed * 0.02f
+                theta = if (target > theta) minOf(target, theta + step) else maxOf(target, theta - step)
+                val jittered = (theta + (random.nextFloat() - 0.5f) * 1.5f).coerceIn(0f, 180f)
+                now += 20
+                state = LayDownGlowMachine.step(state, jittered, true, now)
+                val frame = LayDownGlowMachine.frame(state, now)
+                val where = "run $run step $i (${state.phase} at $jittered)"
+                assertTrue(where, frame.alpha in 0f..1f && frame.warmth in 0f..1f && frame.black in 0f..1f)
+                // Nothing steps: a fiftieth of a second never changes the light or the black by more than this.
+                assertTrue("$where: the light stepped", kotlin.math.abs(light(frame) - light(previous)) <= 0.11f)
+                assertTrue("$where: the black stepped", kotlin.math.abs(shade(frame) - shade(previous)) <= 0.11f)
+                if (frame.minimumBrightness) {
+                    assertTrue("$where: minimum brightness off the table", jittered >= LayDownGlowMachine.LIFT_DEGREES)
+                    assertEquals(where, 1f, shade(frame), 0f)
+                }
+                // Once the fade has begun, the light only ever falls until the phone has been turned up.
+                when (state.phase) {
+                    GlowPhase.Fading, GlowPhase.Dimming, GlowPhase.Dark, GlowPhase.Lifted -> {
+                        if (!fading) {
+                            fading = true
+                            lightAtFade = light(previous)
+                        }
+                        assertTrue("$where: light came back", light(frame) <= lightAtFade + 1e-4f)
+                        lightAtFade = light(frame)
+                    }
+                    GlowPhase.Idle -> fading = false
+                    GlowPhase.Rising, GlowPhase.Holding -> assertFalse("$where: a second glow without turning up", fading)
+                }
+                previous = frame
+            }
+        }
+    }
+
+    @Test
+    fun `a hand trembling at the threshold does not make the light flicker`() {
+        // The whole pipeline the composable runs: the gravity filter, then the machine. A phone
+        // held at 142 degrees with a 1 degree tremor at 9 Hz, for five seconds.
+        val filter = GravityFilter()
+        run(45f, 200)
+        var nanos = now * 1_000_000L
+        var lowest = 1f
+        var highest = 0f
+        repeat(400) { i ->
+            nanos += 20_000_000L
+            val seconds = i * 0.02
+            val degrees = 142.0 + 1.0 * Math.sin(2.0 * Math.PI * 9.0 * seconds)
+            val r = Math.toRadians(degrees)
+            filter.add(0f, (9.81 * Math.sin(r)).toFloat(), (9.81 * Math.cos(r)).toFloat(), nanos)
+            val theta = Math.toDegrees(Math.acos(filter.z.toDouble().coerceIn(-1.0, 1.0))).toFloat()
+            state = LayDownGlowMachine.step(state, theta, true, nanos / 1_000_000L)
+            val frame = LayDownGlowMachine.frame(state, nanos / 1_000_000L)
+            // Once the rise has settled, in the last three seconds.
+            if (i >= 250) {
+                lowest = minOf(lowest, light(frame))
+                highest = maxOf(highest, light(frame))
+            }
+        }
+        assertEquals(GlowPhase.Rising, state.phase)
+        assertTrue("the light is there at 142 degrees", lowest > 0.1f)
+        assertTrue("the light swung by ${highest - lowest}", highest - lowest < 0.03f)
+    }
+
     @Test
     fun `minimum brightness is asked only while the phone is down`() {
         // A whole evening of handling: down, up, half down, down again.

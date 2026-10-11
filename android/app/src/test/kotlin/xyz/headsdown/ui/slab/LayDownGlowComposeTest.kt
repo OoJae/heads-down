@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -108,6 +109,59 @@ class LayDownGlowComposeTest {
         rule.waitForIdle()
         assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f)
         assertTrue(tilt.listeners.isEmpty())
+    }
+
+    @Test
+    fun `disarming while dark gives the brightness back at once, without waiting for a sample`() {
+        val tilt = FakeTilt()
+        var armed by mutableStateOf(true)
+        rule.setContent {
+            CompositionLocalProvider(LocalSlabConfig provides live, LocalTiltSource provides tilt) {
+                LayDownGlow(armed = armed, modifier = Modifier.fillMaxSize())
+            }
+        }
+        rule.runOnIdle {
+            tilt.hold(45.0, 200)
+            tilt.hold(180.0, 4_000)
+        }
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF, brightness, 0f)
+        // No sample follows: the sensor could be silent from here on.
+        rule.runOnIdle { armed = false }
+        rule.waitForIdle()
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f)
+        // Armed again with the phone still lying there: dark again, and the brightness follows.
+        rule.runOnIdle { armed = true }
+        rule.runOnIdle { tilt.hold(180.0, 2_000) }
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF, brightness, 0f)
+    }
+
+    @Test
+    fun `pausing the activity while dark gives the brightness back and stops listening`() {
+        val tilt = FakeTilt()
+        rule.setContent {
+            CompositionLocalProvider(LocalSlabConfig provides live, LocalTiltSource provides tilt) {
+                LayDownGlow(armed = true, modifier = Modifier.fillMaxSize())
+            }
+        }
+        rule.runOnIdle {
+            tilt.hold(45.0, 200)
+            tilt.hold(180.0, 4_000)
+        }
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF, brightness, 0f)
+
+        // The screen timed out, or another app came to the front.
+        rule.activityRule.scenario.moveToState(Lifecycle.State.STARTED)
+        rule.waitForIdle()
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f)
+        assertTrue("still listening while paused", tilt.listeners.isEmpty())
+
+        // Back, with the phone still face-down: it listens again and goes dark again.
+        rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        rule.waitForIdle()
+        assertEquals(1, tilt.listeners.size)
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f)
+        rule.runOnIdle { tilt.hold(180.0, 2_000) }
+        assertEquals(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF, brightness, 0f)
     }
 
     @Test
