@@ -64,6 +64,7 @@ import xyz.headsdown.ui.slab.SlabHero
 import xyz.headsdown.ui.slab.SlabLook
 import xyz.headsdown.ui.slab.SlabMotion
 import xyz.headsdown.ui.slab.SlabPalette
+import xyz.headsdown.ui.slab.SlabProbe
 import xyz.headsdown.ui.slab.SlabRenderer
 import xyz.headsdown.ui.slab.SlabState
 import xyz.headsdown.ui.slab.SlabWindow
@@ -238,6 +239,19 @@ class FrameMeter(private val window: Window) {
     }
 }
 
+/**
+ * What the hero itself did over a stretch of time, from its own counters: a moving slab must be
+ * drawn again and never composed again, and there is one shader for as long as it is on screen.
+ */
+internal class HeroCount {
+    private val draws = SlabProbe.draws
+    private val compositions = SlabProbe.compositions
+    private val shaders = SlabProbe.shadersBuilt
+
+    fun since(): String = "Hero: ${SlabProbe.draws - draws} draws, ${SlabProbe.compositions - compositions} recompositions, " +
+        "${SlabProbe.shadersBuilt - shaders} new shaders (${SlabProbe.shadersBuilt} built since the app started)."
+}
+
 class SlabLabActivity : ComponentActivity() {
     private val model = SlabLabModel()
     private var meter: FrameMeter? = null
@@ -377,8 +391,10 @@ private fun SlabLabScreen(
                                 model.readout = "Running the 10 s orbit…"
                                 delay(1_500)
                                 frames.reset()
+                                val hero = HeroCount()
                                 delay(10_000)
-                                model.readout = "ORBIT ${model.renderer} x${debug.passes} " + frames.summary(10f, refreshHz())
+                                model.readout = "ORBIT ${model.renderer} x${debug.passes} " +
+                                    frames.summary(10f, refreshHz()) + " " + hero.since()
                                 // Back to rest, so the result is not overwritten by the live readout.
                                 model.pose = LabPose.Rest
                                 model.running = false
@@ -393,10 +409,11 @@ private fun SlabLabScreen(
                                 model.readout = "Counting frames at rest for 5 s: hands off…"
                                 delay(2_000)
                                 frames.reset()
+                                val hero = HeroCount()
                                 delay(5_000)
                                 val n = frames.frames()
                                 val verdict = if (n <= 2) "PASS" else "FAIL"
-                                model.readout = "REST ${model.pose} $verdict: $n frames in 5 s. Pass: at most 2."
+                                model.readout = "REST ${model.pose} $verdict: $n frames in 5 s. Pass: at most 2. " + hero.since()
                                 model.running = false
                             }
                         }
