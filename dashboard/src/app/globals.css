@@ -1,65 +1,102 @@
 /*
- * Heads Down palette (android/app/.../ui/theme/Theme.kt): charcoal night, ember = rig hot,
- * ORE gold = hauls. DARK BY DEFAULT; light only when the viewer picks it.
+ * "The Underside": a dark slab with light underneath. The same palette as the Android app
+ * (android/core/design, HdArgb): the pit, the slab, chalk ink, ash, ember and the ORE gold.
+ * DARK BY DEFAULT; light only when the viewer picks it.
  *
- * Chart marks use separately validated steps (dataviz validate_palette.js, all checks PASS):
- *   dark  on #1C1D20: guest #E8590F, seeker #3987E5, haul #C98500
- *   light on #FFFFFF: guest #C2410C, seeker #2A78D6, haul #B07A00
+ * What the roles mean here:
+ *   - surfaces rise by lightness and are edged by a hairline (ink at 12%); nothing casts a shadow;
+ *   - ember says something is wrong; it is not decoration;
+ *   - gold is the line of light under what is selected, the focus ring and a caution;
+ *   - a link is ink over a gold underline;
+ *   - slabs and squares: 6px corners, 4px chips, 2px meters.
+ *
+ * Chart marks keep their own steps, checked with the dataviz palette validator against the card
+ * they are drawn on (lightness band, chroma floor, separation of the series drawn side by side
+ * with and without full color vision, 3:1 contrast: all pass in both modes). Contrast, WCAG 2.x:
+ *   dark  on #18181A: guest #E8590F 4.95, seeker #3987E5 4.87, haul #C98500 5.77
+ *   light on #E4DDD0: guest #C2410C 3.84, seeker #2A78D6 3.27, haul #9E6C00 3.38
+ * (the light haul step was #B07A00, which is 2.76 on the new card, so it was darkened).
  * Text never wears a data color; identity comes from the swatch beside it.
  */
+
+/*
+ * IBM Plex Mono, for labels and for figures read off the chain. IBM's own Latin-1 files, as
+ * published and unmodified (fonts/LICENSE.txt, SIL Open Font License 1.1). A character outside
+ * the range below falls through to the system's monospace.
+ */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E,
+    U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/IBMPlexMono-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E,
+    U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
 :root {
   color-scheme: dark;
-  --bg: #121314;
-  --surface: #1c1d20;
-  --surface-2: #232428;
-  --outline: #2e2f33;
-  --grid: #2e2f33;
-  --text: #ece7e1;
-  --text-2: #b9b2aa;
-  --text-muted: #9a948d;
-  --ember: #ff6a1a;
-  --ember-dim: #7a3514;
+  --bg: #0c0c0d;
+  --surface: #18181a;
+  --surface-2: #29292a;
+  --outline: rgb(239 234 224 / 0.12);
+  --grid: rgb(239 234 224 / 0.12);
+  --text: #efeae0;
+  --text-2: color-mix(in srgb, var(--text) 78%, var(--bg));
+  --text-muted: #98938a;
+  --ember: #e8622a;
+  --ember-dim: color-mix(in srgb, var(--ember) 30%, var(--bg));
   --gold: #f2b233;
-  --frost: #8fb8de;
+  --frost: var(--text);
   --viz-guest: #e8590f;
   --viz-seeker: #3987e5;
   --viz-haul: #c98500;
   --viz-context: #55565c;
-  --heat-on: #121314;
+  --heat-on: #0c0c0d;
   --sim-a: #3a2a0a;
   --sim-b: #2b2007;
   --sim-text: #ffd27a;
   --ok: #3fb97a;
   --warn: #f2b233;
-  --focus: #8fb8de;
-  --radius: 12px;
+  --focus: #f2b233;
+  --radius: 6px;
+  --radius-chip: 4px;
+  --radius-meter: 2px;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f6f4f1;
-  --surface: #ffffff;
-  --surface-2: #f1eeea;
-  --outline: #dcd7d0;
-  --grid: #e6e2dc;
-  --text: #1a1714;
-  --text-2: #4a443e;
-  --text-muted: #6b645c;
-  --ember: #c2410c;
-  --ember-dim: #fbd5c0;
-  --gold: #8a5a00;
-  --frost: #2a78d6;
+  --bg: #f1ece2;
+  --surface: #e4ddd0;
+  --surface-2: #d3cdc1;
+  --outline: rgb(21 20 19 / 0.12);
+  --grid: rgb(21 20 19 / 0.12);
+  --text: #151413;
+  --text-muted: #625c54;
+  --ember: #a83a0c;
+  --gold: #7d5100;
   --viz-guest: #c2410c;
   --viz-seeker: #2a78d6;
-  --viz-haul: #b07a00;
+  --viz-haul: #9e6c00;
   --viz-context: #b8b3ac;
   --heat-on: #ffffff;
   --sim-a: #fff1cc;
   --sim-b: #ffe8a8;
   --sim-text: #5c3d00;
-  --ok: #1d7a4c;
-  --warn: #8a5a00;
-  --focus: #2a78d6;
+  --ok: #1a6e45;
+  --warn: #7d5100;
+  --focus: #7d5100;
 }
 
 * {
@@ -75,15 +112,18 @@ body {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--sans);
   font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Ink over a gold line: the color no longer tells a link from a sentence, so the line does. */
 a {
   color: var(--frost);
-  text-underline-offset: 2px;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 a:focus-visible,
@@ -91,7 +131,7 @@ button:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
 }
 
 .wrap {
@@ -114,7 +154,7 @@ button:focus-visible,
   align-items: center;
   gap: 8px 16px;
   padding-top: 10px;
-  padding-bottom: 10px;
+  padding-bottom: 0;
 }
 .brand {
   font-weight: 700;
@@ -124,50 +164,78 @@ button:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 44px;
+  flex: none;
+  white-space: nowrap;
 }
-.brand-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--ember);
-  box-shadow: 0 0 10px var(--ember);
+/* The mark: a slab over its line of light. It does not move. */
+.brand-mark {
+  display: block;
+  flex: none;
+}
+.brand-hull {
+  fill: var(--text);
+}
+.brand-seam {
+  fill: var(--gold);
 }
 .brand small {
   color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
   font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .nav {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   flex: 1 1 100%;
   order: 3;
+  min-width: 0;
   scrollbar-width: none;
 }
 .nav a {
   color: var(--text-2);
   text-decoration: none;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 10px 8px 12px;
   white-space: nowrap;
   font-size: 14px;
 }
+.nav a:hover {
+  color: var(--text);
+}
+/* The section you are in sits over the line of light. */
 .nav a[aria-current="page"] {
   color: var(--text);
-  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 var(--gold);
+}
+.nav a:focus-visible {
+  outline-offset: -2px;
 }
 .theme-toggle {
+  flex: none;
   margin-left: auto;
-  background: var(--surface);
+  background: transparent;
   color: var(--text-2);
-  border: 1px solid var(--outline);
-  border-radius: 8px;
+  border: 1px solid var(--text-muted);
+  border-radius: var(--radius);
   padding: 4px 10px;
+  min-height: 32px;
   font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+/* One row from tablet width up: the sections scroll sideways before the theme switch is pushed to a row of its own. */
 @media (min-width: 760px) {
+  .site-header .wrap {
+    flex-wrap: nowrap;
+  }
   .nav {
     flex: 0 1 auto;
     order: 0;
@@ -181,6 +249,7 @@ main {
 h1 {
   font-size: 24px;
   line-height: 1.25;
+  letter-spacing: -0.01em;
   margin: 8px 0 4px;
 }
 h2 {
@@ -216,29 +285,32 @@ h2 {
 .live-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  font-family: var(--mono);
   font-size: 12px;
+  letter-spacing: 0.04em;
   color: var(--text-2);
   border: 1px solid var(--outline);
-  border-radius: 999px;
-  padding: 2px 8px;
+  border-radius: var(--radius-chip);
+  padding: 3px 8px;
 }
+/* A square, not a dot. */
 .live-chip::before {
   content: "";
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: var(--ok);
 }
 .sim-badge {
   display: inline-block;
+  font-family: var(--mono);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--sim-text);
   background: var(--sim-b);
   border: 1px solid var(--gold);
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   padding: 0 4px;
   vertical-align: middle;
 }
@@ -278,30 +350,55 @@ h2 {
   gap: 2px;
   min-height: 132px;
 }
+/* A label: mono capitals, drawn by the style sheet (the words themselves stay as written). */
 .tile-label {
-  font-size: 13px;
-  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
 }
+/* A long label wraps beside its swatch; the swatch and the badge keep their size and sit on its first line. */
+.tile-label > span:not(.swatch):not(.sim-badge) {
+  min-width: 0;
+}
+.tile-label > .swatch {
+  margin-top: 4px;
+}
+.tile-label > .sim-badge {
+  flex: none;
+  margin-top: 1px;
+}
+/* A figure read off the chain: mono, every digit the same width. */
 .tile-value {
-  font-size: 28px;
-  font-weight: 650;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  margin-top: 6px;
   overflow-wrap: anywhere;
+}
+@media (min-width: 760px) {
+  .tile-value {
+    font-size: 26px;
+  }
 }
 .tile-sub {
   font-size: 13px;
   color: var(--text-muted);
+  margin-top: 2px;
 }
 .swatch {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
   flex: none;
 }
 .sw-guest {
@@ -317,11 +414,14 @@ h2 {
   background: var(--viz-context);
 }
 .tile-status {
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-2);
-  border: 1px dashed var(--outline);
-  border-radius: 6px;
+  border: 1px dashed var(--text-muted);
+  border-radius: var(--radius-chip);
   padding: 1px 6px;
   align-self: flex-start;
 }
@@ -339,6 +439,9 @@ h2 {
 .evidence span {
   overflow-wrap: anywhere;
 }
+.evidence a {
+  text-decoration-thickness: 1px;
+}
 .evidence .noproof {
   color: var(--text-muted);
 }
@@ -353,6 +456,7 @@ h2 {
 }
 .chart .tick {
   fill: var(--text-muted);
+  font-family: var(--mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -370,17 +474,17 @@ h2 {
 .chart .bar:hover .mark {
   filter: brightness(1.18);
 }
+/* A slab over the chart: lifted by its lightness and an ash edge, not by a shadow. */
 .tooltip {
   position: absolute;
   pointer-events: none;
   background: var(--surface-2);
-  border: 1px solid var(--outline);
+  border: 1px solid var(--text-muted);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius-chip);
   padding: 6px 10px;
   font-size: 12px;
   line-height: 1.4;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
   transform: translate(-50%, calc(-100% - 10px));
   white-space: nowrap;
   z-index: 5;
@@ -433,37 +537,39 @@ th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+td.num {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
 .heat {
   text-align: center;
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   border: 2px solid var(--surface);
   min-width: 64px;
 }
 .heat.immature {
   color: var(--text-muted);
+  font-family: var(--sans);
   background: repeating-linear-gradient(45deg, transparent 0 5px, var(--surface-2) 5px 10px);
 }
 
 /* ---- meters ---------------------------------------------------------------------- */
+/* A groove cut into the slab, down to the page behind it; the fill is the data. */
 .meter {
   height: 8px;
-  border-radius: 999px;
-  background: var(--ember-dim);
+  border-radius: var(--radius-meter);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--outline);
   overflow: hidden;
   margin: 6px 0 2px;
-}
-:root[data-theme="light"] .meter {
-  background: #fbe3d6;
 }
 .meter > span {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--viz-guest);
-}
-.meter.seeker {
-  background: color-mix(in oklab, var(--viz-seeker) 30%, var(--surface));
 }
 .meter.seeker > span {
   background: var(--viz-seeker);
@@ -483,16 +589,16 @@ th.num {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--outline);
-  border-radius: 8px;
+  border: 1px solid var(--text-muted);
+  border-radius: var(--radius);
   padding: 8px 12px;
   text-decoration: none;
   font-size: 14px;
 }
 .btn:hover {
-  border-color: var(--ember);
+  border-color: var(--text);
 }
 .pill-ok {
   color: var(--ok);
@@ -508,7 +614,7 @@ th.num {
 }
 code,
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 0.92em;
 }
 dl.defs dt {
@@ -519,22 +625,13 @@ dl.defs dd {
   margin: 2px 0 0;
   color: var(--text-2);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .brand-dot {
-    animation: glow 3.2s ease-in-out infinite;
-  }
-  @keyframes glow {
-    50% {
-      box-shadow: 0 0 2px var(--ember);
-    }
-  }
-}
 @media (forced-colors: active) {
   .swatch,
   .meter > span,
   .hbar-fill,
   .sq,
-  .round-strip rect {
+  .round-strip rect,
+  .brand-mark path {
     forced-color-adjust: none;
   }
 }
@@ -576,7 +673,7 @@ button.btn {
   padding: 4px 6px;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-chip);
   color: var(--text);
   font: inherit;
   text-align: left;
@@ -603,13 +700,14 @@ button.btn {
   height: 14px;
   min-width: 2px;
   background: var(--viz-guest);
-  border-radius: 0 4px 4px 0; /* square at the baseline, 4px rounded data end */
+  border-radius: 0 2px 2px 0; /* square at the baseline, a 2px corner at the data end */
 }
 .hbar-muted .hbar-fill {
   background: var(--viz-context);
 }
 .hbar-value {
-  font-size: 13px;
+  font-family: var(--mono);
+  font-size: 12.5px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -627,6 +725,7 @@ button.btn {
 }
 .haul-title {
   font-size: 28px;
+  letter-spacing: -0.01em;
   margin: 2px 0;
 }
 h3 {
@@ -698,7 +797,7 @@ h3 {
 }
 .sq {
   aspect-ratio: 1;
-  border-radius: 4px;
+  border-radius: 2px;
   background: var(--surface-2);
   display: grid;
   place-items: center;
@@ -722,6 +821,8 @@ h3 {
   margin: 12px 0 6px;
 }
 .streak {
-  font-size: 22px;
-  font-weight: 650;
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }

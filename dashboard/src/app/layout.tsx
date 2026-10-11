@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#121314",
+  themeColor: "#0C0C0D",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
@@ -48,7 +48,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <header className="site-header">
           <div className="wrap">
             <Link className="brand" href="/">
-              <span className="brand-dot" aria-hidden="true" />
+              {/* The mark: a slab over its line of light. The two paths are HdGlyph's (android/core/design);
+                  scripts/brand/render.py --check fails if they stop being so. Still: nothing here moves. */}
+              <svg className="brand-mark" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+                <path className="brand-hull" d="M2,5h20v4l-3,4h-14l-3,-4z" />
+                <path className="brand-seam" d="M4,17h16v2h-16z" />
+              </svg>
               Heads Down <small>traction</small>
             </Link>
             <Nav />
