@@ -69,12 +69,34 @@ object HeadsDownIdentity {
     }
 }
 
+/** Whether a failed wallet call was the wallet refusing the token this app presented. */
+internal object TokenRefusal {
+    /**
+     * What clientlib-ktx 2.2.0 reports when the wallet answers the authorization with an error:
+     * the first by its own bug (see [HeadsDownWallet]), the other two where it does map the error.
+     */
+    private val REFUSALS = setOf(
+        "Failed establishing local association with wallet",
+        "Auth token invalid",
+        "Remote exception",
+    )
+
+    /**
+     * Ask the wallet once more, without the token: only if one was [presented], the session never
+     * [entered] the part where something is signed, and the failure is one of the refusals. A
+     * cancelled or timed-out session is not: the user closed the wallet, or it never came up.
+     */
+    fun askAgain(presented: Boolean, entered: Boolean, message: String): Boolean =
+        presented && !entered && message in REFUSALS
+}
+
 /**
  * Mobile Wallet Adapter (clientlib-ktx 2.2.0) for Heads Down.
  *
  * - One wallet confirmation per user action; all calls need an [ActivityResultSender] made
  *   in `Activity.onCreate` (MWA cannot run from a Service: see the tile's trampoline).
- * - The auth token is restored from and persisted to [AuthTokenVault]; it is never logged.
+ * - The auth token is restored from and persisted to [AuthTokenVault]; it is never logged. A
+ *   token the wallet refuses is dropped and the wallet is asked once more ([withStoredToken]).
  * - [signAndSend] reports success only after [ConfirmationPoller] saw each signature
  *   confirmed with `err == null`. A wallet "sent" response is not success.
  * - With a [submitter] (the `localdev` build), the wallet only signs (`signTransactions`) and the
@@ -93,8 +115,7 @@ class HeadsDownWallet(
     }
 
     suspend fun connect(sender: ActivityResultSender): WalletResult<WalletAccount> {
-        restoreToken()
-        return when (val result = adapter.connect(sender)) {
+        return when (val result = withStoredToken { adapter.connect(sender) }) {
             is TransactionResult.Success -> onAuthorized(result.authResult)
             is TransactionResult.NoWalletFound -> WalletResult.NoWalletInstalled
             is TransactionResult.Failure -> failed(result.message)
@@ -108,13 +129,12 @@ class HeadsDownWallet(
      * proof is verified server-side (`POST /siws/verify`), not trusted locally.
      */
     suspend fun signIn(sender: ActivityResultSender, request: SiwsRequest): WalletResult<SignInProof> {
-        restoreToken()
         // 2.2.0 added a String-address overload, so the null address must be typed.
         val payload = SignInWithSolana.Payload(
             request.domain, null as ByteArray?, request.statement, request.uri.toUri(), request.version, request.chainId,
             request.nonce, request.issuedAt, request.expirationTime, null, null, null,
         )
-        return when (val result = adapter.signIn(sender, payload)) {
+        return when (val result = withStoredToken { adapter.signIn(sender, payload) }) {
             is TransactionResult.Success -> {
                 val account = when (val auth = onAuthorized(result.authResult)) {
                     is WalletResult.Success -> auth.value
@@ -140,12 +160,15 @@ class HeadsDownWallet(
         lastValidBlockHeight: Long,
     ): WalletResult<SubmissionReport> {
         require(transactions.isNotEmpty()) { "nothing to send" }
-        restoreToken()
-        val result = adapter.transact(sender) {
-            if (submitter == null) {
-                SignedOrSent.Sent(signAndSendTransactions(transactions.toTypedArray()).signatures.map(Base58::encode))
-            } else {
-                SignedOrSent.Signed(signTransactions(transactions.toTypedArray()).signedPayloads.toList())
+        var entered = false
+        val result = withStoredToken({ entered }) {
+            adapter.transact(sender) {
+                entered = true
+                if (submitter == null) {
+                    SignedOrSent.Sent(signAndSendTransactions(transactions.toTypedArray()).signatures.map(Base58::encode))
+                } else {
+                    SignedOrSent.Signed(signTransactions(transactions.toTypedArray()).signedPayloads.toList())
+                }
             }
         }
         return when (result) {
@@ -193,35 +216,38 @@ class HeadsDownWallet(
         sender: ActivityResultSender,
         prepare: suspend (account: WalletAccount, capabilities: WalletCapabilities) -> T?,
     ): WalletResult<WalletSession<T>> {
-        restoreToken()
-        val result = adapter.transact(sender) { auth ->
-            val first = auth.accounts.firstOrNull() ?: return@transact SessionStep.NoAccount
-            val account = WalletAccount(first.publicKey, first.accountLabel)
-            val capabilities = try {
-                getCapabilities().let {
-                    WalletCapabilities.fromMwa(it.supportedTransactionVersions, it.maxTransactionsPerSigningRequest)
+        var entered = false
+        val result = withStoredToken({ entered }) {
+            adapter.transact(sender) { auth ->
+                entered = true
+                val first = auth.accounts.firstOrNull() ?: return@transact SessionStep.NoAccount
+                val account = WalletAccount(first.publicKey, first.accountLabel)
+                val capabilities = try {
+                    getCapabilities().let {
+                        WalletCapabilities.fromMwa(it.supportedTransactionVersions, it.maxTransactionsPerSigningRequest)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    WalletCapabilities.LEGACY_ONLY // every MWA wallet signs legacy transactions
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                WalletCapabilities.LEGACY_ONLY // every MWA wallet signs legacy transactions
+                val prepared = try {
+                    prepare(account, capabilities)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    return@transact SessionStep.PrepareFailed
+                } ?: return@transact SessionStep.Empty(account)
+                val limit = capabilities.maxTransactionsPerRequest
+                if (limit in 1 until prepared.transactions.size) return@transact SessionStep.TooMany
+                if (submitter != null) {
+                    // The wallet signs only; the app submits after the session closes.
+                    val signed = signTransactions(prepared.transactions.toTypedArray())
+                    return@transact SessionStep.Signed(account, prepared, signed.signedPayloads.toList())
+                }
+                val sent = signAndSendTransactions(prepared.transactions.toTypedArray())
+                SessionStep.Sent(account, prepared, sent.signatures.map(Base58::encode))
             }
-            val prepared = try {
-                prepare(account, capabilities)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                return@transact SessionStep.PrepareFailed
-            } ?: return@transact SessionStep.Empty(account)
-            val limit = capabilities.maxTransactionsPerRequest
-            if (limit in 1 until prepared.transactions.size) return@transact SessionStep.TooMany
-            if (submitter != null) {
-                // The wallet signs only; the app submits after the session closes.
-                val signed = signTransactions(prepared.transactions.toTypedArray())
-                return@transact SessionStep.Signed(account, prepared, signed.signedPayloads.toList())
-            }
-            val sent = signAndSendTransactions(prepared.transactions.toTypedArray())
-            SessionStep.Sent(account, prepared, sent.signatures.map(Base58::encode))
         }
         return when (result) {
             is TransactionResult.Success -> {
@@ -265,6 +291,30 @@ class HeadsDownWallet(
 
     private fun restoreToken() {
         adapter.authToken = runCatching { vault.load(chain.fullName)?.value }.getOrNull()
+    }
+
+    /**
+     * One wallet call with the stored token, and one more without it if the wallet refused the
+     * token. Jupiter Mobile refused one a day after handing it out, and clientlib-ktx 2.2.0 does
+     * not say "Auth token invalid" then: its catch around the association also wraps the
+     * authorization, so the refusal reads "Failed establishing local association with wallet",
+     * the token was never dropped, and every later call failed the same way.
+     *
+     * [entered] says whether the session got past the authorization. Only before that is it
+     * certain that the wallet signed nothing, so only then is the wallet asked again: this time
+     * it shows its own approval and hands out a new token.
+     */
+    private suspend fun <T> withStoredToken(
+        entered: () -> Boolean = { false },
+        call: suspend () -> TransactionResult<T>,
+    ): TransactionResult<T> {
+        restoreToken()
+        val presented = adapter.authToken != null
+        val first = call()
+        if (first !is TransactionResult.Failure || !TokenRefusal.askAgain(presented, entered(), first.message)) return first
+        runCatching { vault.clear(chain.fullName) }
+        adapter.authToken = null
+        return call()
     }
 
     /**
