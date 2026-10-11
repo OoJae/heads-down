@@ -118,6 +118,12 @@ class RevealCopyTest {
         // Sealed: there is nothing left to approve, so the clock-out is not described any more.
         assertNull(NightCopyBuilder.build(open, NightStage.READING, zone).clockOutDetail)
         assertNull(NightCopyBuilder.build(open, NightStage.NOT_READY, zone).clockOutDetail)
+        // Not read: the page says that, and not that the shift is open or sealed.
+        val unchecked = NightCopyBuilder.build(open, NightStage.UNCHECKED, zone)
+        assertEquals("Not checked yet", unchecked.title)
+        assertTrue(unchecked.statement.startsWith("This shift could not be checked on-chain just now"))
+        assertEquals(RevealCopyBuilder.CLOCK_OUT_DETAIL, unchecked.clockOutDetail)
+        assertEquals(listOf(NightStage.NOT_SEALED, NightStage.UNCHECKED), NightStage.entries.filter { it.offersClockOut })
         // A shift the phone never signed a round of says exactly that.
         val cold = NightCopyBuilder.build(OpenNight(shiftId = 1, armedAtWallMillis = now), NightStage.NOT_SEALED, zone)
         assertEquals(listOf("Clocked in 07:05", "No round signed dark"), cold.facts)

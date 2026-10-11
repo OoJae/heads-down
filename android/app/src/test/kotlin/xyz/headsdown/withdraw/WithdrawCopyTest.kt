@@ -166,6 +166,12 @@ class WithdrawCopyTest {
             WithdrawCopy.logsDetail(f),
         )
         assertTrue(WithdrawCopy.logsDetail(f.copy(logRent = ripe.copy(ripe = listOf(1uL), ripeLamports = 1_300_480uL)))!!.startsWith("Closes 1 log and sends 0.00130048 SOL"))
+        // More ripe than one transaction takes: the row says so, so the rest is not thought lost.
+        val many = ripe.copy(logs = 12, ripe = (1uL..8uL).toList(), ripeLamports = 10_403_840uL, ripeLeft = 4, nextRipeAtUnix = null)
+        assertTrue(
+            WithdrawCopy.logs(f.copy(logRent = many), utc)!!
+                .endsWith("0.01040384 SOL of it can come back now (8 logs at a time; 4 more are ready after these)."),
+        )
         assertTrue(f.canCloseLogs)
         assertTrue(f.somethingToSign(revoke = false, closeRig = false, closeLogs = true))
         assertEquals("Take the log rent back", WithdrawCopy.button(revoke = false, closeRig = false, closeLogs = true))

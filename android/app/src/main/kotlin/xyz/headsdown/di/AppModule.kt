@@ -243,15 +243,9 @@ object AppModule {
         binding = binding,
         lastShift = journal::last,
         widgets = widgets,
-        // The Rig's own counter says whether the phone's last shift is sealed; the indexer only knows sealed ones.
+        // The Rig address says whether the phone's last shift is running, over or sealed; the indexer only knows sealed ones.
         onChain = { rig, shiftId ->
-            val account = HeadsDownAccounts.rigOrNull(rig, rpc.getAccountInfo(rig))
-            val id = shiftId.toULong()
-            when {
-                account == null || account.shiftId < id -> ShiftOnChain.NOT_ON_CHAIN
-                account.shiftId == id && account.shiftOpen -> ShiftOnChain.OPEN
-                else -> ShiftOnChain.SEALED
-            }
+            ShiftOnChain.of(HeadsDownAccounts.rigSlot(rig, rpc.getAccountInfo(rig)), shiftId, System.currentTimeMillis() / 1000)
         },
     )
 

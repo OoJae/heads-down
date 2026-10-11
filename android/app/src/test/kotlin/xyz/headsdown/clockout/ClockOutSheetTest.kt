@@ -703,6 +703,11 @@ class ClockOutSheetTest : SheetTestBase() {
         rule.onNodeWithTag(ClockOutTags.BUY_QUOTE).assertTextEquals(ClockOutCopy.BUY_NO_QUOTE)
         rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsEnabled().assertTextEquals("Clock out")
 
+        // Ending early with a buy: the bar names both things the approval covers.
+        state = ClockOutState.Ready(insideWindow, endEarly = true, buy = quoted)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ClockOutTags.CONFIRM).assertIsEnabled().assertTextEquals("End the shift and buy ORE")
+
         // The wallet is open: the choice cannot be changed under it.
         state = ClockOutState.Ready(completed, buy = quoted, working = true)
         rule.waitForIdle()

@@ -5,6 +5,7 @@ import xyz.headsdown.core.chain.clockout.BuyLeg
 import xyz.headsdown.core.chain.clockout.ClockOutRequest
 import xyz.headsdown.core.chain.clockout.ClockOutService
 import xyz.headsdown.core.chain.clockout.PreparedClockOut
+import xyz.headsdown.core.chain.swap.SwapQuote
 import xyz.headsdown.core.wallet.WalletCapabilities
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,14 +46,25 @@ class ChainClockOut @Inject constructor(private val service: ClockOutService) : 
 
     override suspend fun preview(authority: Pubkey): ClockOutFacts = ClockOutFacts.from(service.preview(authority))
 
-    override suspend fun quoteBuy(spendLamports: ULong): BuyQuote? =
-        service.quoteBuy(spendLamports, BUY_SLIPPAGE_BPS)?.takeIf { it.minOutAmount > 0uL }?.let {
-            BuyQuote(spendLamports, it.outAmount, it.minOutAmount, it.request.slippageBps, it.route)
-        }
+    /**
+     * The minimum the sheet states is not the quote's own: when the wallet opens, the swap is
+     * built from a fresh quote, and a fresh quote one atom below this one must not cancel the
+     * buy. So the user is shown, and agrees to, [BUY_QUOTE_ROOM_BPS] less than this quote's
+     * minimum. A fresh quote is used only if its own on-chain minimum is at least that
+     * (`SwapLegBuilder`), so the swap can never deliver less than the sheet said.
+     */
+    override suspend fun quoteBuy(spendLamports: ULong): BuyQuote? {
+        val quote = service.quoteBuy(spendLamports, BUY_SLIPPAGE_BPS) ?: return null
+        val agreed = SwapQuote.minOut(quote.minOutAmount, BUY_QUOTE_ROOM_BPS)
+        return if (agreed == 0uL) null else BuyQuote(spendLamports, quote.outAmount, agreed, quote.request.slippageBps, quote.route)
+    }
 
     override suspend fun prepare(authority: Pubkey, request: ClockOutRequest, capabilities: WalletCapabilities): PreparedClockOut? =
         service.prepare(authority, request, capabilities)
 }
 
-/** 1%: the most the price may move against the user between the quote on the sheet and the fill. */
-const val BUY_SLIPPAGE_BPS = 100
+/** 0.5%: the most the fill may fall short of the quote the swap is built from, enforced on-chain. */
+const val BUY_SLIPPAGE_BPS = 50
+
+/** 1%: how far a fresh quote may be below the one on the sheet before the buy is left out. */
+const val BUY_QUOTE_ROOM_BPS = 100

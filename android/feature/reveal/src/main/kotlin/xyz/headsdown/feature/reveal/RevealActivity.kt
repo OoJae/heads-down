@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -43,8 +44,9 @@ import javax.inject.Inject
  *
  * The drumroll plays with the board replay; the Motherlode flourish only if the rig really
  * shared one. Sharing and clocking out ask to unlock first, because neither the share sheet nor
- * a wallet can show over the lock screen. "Buy the rest at market" is a stub until the Jupiter
- * leg is wired.
+ * a wallet can show over the lock screen. "Buy the rest at market" is offered only for a haul
+ * with a nightly ORE target, which none carries yet, and does nothing: buying ORE is on the
+ * clock-out sheet.
  *
  * At the alarm the night's shift is still open on-chain, and a haul is read from a sealed shift.
  * The reveal then says so and offers the clock-out; when the user comes back from it, it reads
@@ -79,7 +81,7 @@ class RevealActivity : ComponentActivity() {
                 onReplayFinished = { haul ->
                     if (haul.sharedMotherlode) haptics.play(HapticCue.MOTHERLODE_FLOURISH, HapticMoment.REVEAL)
                 },
-                onBuyRest = { /* Stub: the Jupiter buy leg is wired later. The screen says nothing was bought. */ },
+                onBuyRest = { /* Not connected: the screen says nothing was bought, and where buying is. */ },
                 onShare = ::share,
                 onDone = ::finish,
                 onOpenExplorer = ::openExplorer,
@@ -92,44 +94,69 @@ class RevealActivity : ComponentActivity() {
         }
     }
 
-    /** Back from the clock-out (or the wallet): the shift this page was waiting on may be sealed now. */
+    /**
+     * Back from the clock-out (or the wallet, or the lock screen): the shift this page was waiting
+     * on may be sealed now, and a read that failed may succeed. A haul on the screen stays.
+     */
     override fun onResume() {
         super.onResume()
-        if (state is RevealUiState.Night && reading?.isActive != true) read()
+        if (state !is RevealUiState.Ready && reading?.isActive != true) read()
+    }
+
+    /** Nothing is asked for while the page is not on screen. */
+    override fun onStop() {
+        reading?.cancel()
+        super.onStop()
     }
 
     /**
-     * Reads the night. Offline, no indexer, no finished shift: all "no haul yet", never a sample
-     * by default. A sealed shift whose haul is not final is asked for again, for [READ_FOR_MILLIS].
+     * Reads the night. No indexer, no rig, no finished shift: "no haul yet", never a sample by
+     * default. A sealed shift whose haul is not final, and a chain that could not be read, are
+     * asked for again every [READ_EVERY_MILLIS] until [READ_FOR_MILLIS] have passed.
      */
     private fun read() {
         reading?.cancel()
         reading = lifecycleScope.launch {
-            var asked = 0L
+            val started = SystemClock.elapsedRealtime()
             while (true) {
                 val report = try {
                     haulRepository.night()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
-                    NightReport.None
+                    null
                 }
-                when (report) {
-                    is NightReport.Haul -> state = RevealUiState.Ready(report.summary)
-                    is NightReport.NotSealed -> state = RevealUiState.Night(report.night, NightStage.NOT_SEALED)
-                    is NightReport.NotReadYet -> {
-                        val more = asked < READ_FOR_MILLIS
-                        state = RevealUiState.Night(report.night, if (more) NightStage.READING else NightStage.NOT_READY)
-                        if (more) {
-                            delay(READ_EVERY_MILLIS)
-                            asked += READ_EVERY_MILLIS
-                            continue
-                        }
+                val more = SystemClock.elapsedRealtime() - started < READ_FOR_MILLIS
+                val again = when (report) {
+                    is NightReport.Haul -> {
+                        state = RevealUiState.Ready(report.summary)
+                        false
                     }
-                    // A haul already on the screen (the sample, on request) is not taken away by a failed read.
-                    NightReport.None -> if (state !is RevealUiState.Ready) state = RevealUiState.NoHaul
+                    is NightReport.NotSealed -> {
+                        state = RevealUiState.Night(report.night, NightStage.NOT_SEALED)
+                        false
+                    }
+                    is NightReport.NotReadYet -> {
+                        state = RevealUiState.Night(report.night, if (more) NightStage.READING else NightStage.NOT_READY)
+                        true
+                    }
+                    is NightReport.Unread -> {
+                        state = RevealUiState.Night(report.night, NightStage.UNCHECKED)
+                        true
+                    }
+                    NightReport.None -> {
+                        state = RevealUiState.NoHaul
+                        false
+                    }
+                    // The read itself failed. What the page already says about a night stays; a page
+                    // that has nothing yet says so, and the read is tried again.
+                    null -> {
+                        if (state is RevealUiState.Loading) state = RevealUiState.NoHaul
+                        true
+                    }
                 }
-                break
+                if (!again || !more) break
+                delay(READ_EVERY_MILLIS)
             }
         }
     }
@@ -171,7 +198,7 @@ class RevealActivity : ComponentActivity() {
         /** How often a sealed shift's haul is asked for while it is not final. */
         const val READ_EVERY_MILLIS = 5_000L
 
-        /** How long: a round resets about a minute after it ends, and the indexer follows within seconds. */
+        /** For how long, by the phone's own clock: a round resets about a minute after it ends, and the indexer follows within seconds. */
         const val READ_FOR_MILLIS = 180_000L
     }
 }

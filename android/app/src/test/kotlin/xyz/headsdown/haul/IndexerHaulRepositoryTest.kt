@@ -13,8 +13,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import xyz.headsdown.core.chain.HeadsDownProgram
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.accounts.HeadsDownAccounts
+import xyz.headsdown.core.chain.accounts.RigSlot
+import xyz.headsdown.core.chain.accounts.RigTombstoneAccount
 import xyz.headsdown.core.chain.http.OkHttpJsonHttp
 import xyz.headsdown.core.chain.indexer.IndexerHaulClient
+import xyz.headsdown.core.chain.rpc.AccountInfo
+import xyz.headsdown.core.keys.RigSignalState
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HonestCopy
 import xyz.headsdown.feature.reveal.haul.NightReport
@@ -27,6 +32,8 @@ import xyz.headsdown.feature.shift.ShiftRecord
 import xyz.headsdown.surface.widget.RigWidgetUpdates
 import xyz.headsdown.surface.widget.WidgetHaul
 import xyz.headsdown.surface.widget.WidgetRig
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.time.ZoneId
 
 /** The morning haul from a fake indexer (contract B over TLS) to the reveal and the widget. */
@@ -158,69 +165,122 @@ class IndexerHaulRepositoryTest {
     // --- the night the reveal opens on ---
 
     @Test
-    fun `a night that is still open on-chain is reported as itself, not as the shift before it`() = runBlocking {
-        // The indexer's latest is shift 7, sealed the evening before. This phone worked shift 8 since.
-        respond(200, summary(shiftId = 7))
+    fun `a night that is over and not sealed is reported as itself, and the indexer is not even asked`() = runBlocking {
         val asked = mutableListOf<Long>()
         val report = repo(journaled(8)) { address, id ->
             assertEquals(rig, address)
             asked += id
-            ShiftOnChain.OPEN
+            ShiftOnChain.ENDED_OPEN
         }.night()
         assertEquals(NightReport.NotSealed(nightEight), report)
         assertEquals(listOf(8L), asked)
-        // The older haul was not shown, so it did not reach the widget as last night's either.
+        // At the alarm the chain is the whole answer: no older haul was read, shown or sent to the widget.
+        assertEquals(0, server.requestCount)
         assertTrue(widgets.hauls.isEmpty() && widgets.streaks.isEmpty())
-    }
-
-    @Test
-    fun `a first night, with no sealed shift at all, is not sealed rather than no haul`() = runBlocking {
-        respond(404, """{"error":"no finished shift for this rig"}""")
-        assertEquals(NightReport.NotSealed(nightEight.copy(shiftId = 1)), repo(journaled(1)) { _, _ -> ShiftOnChain.OPEN }.night())
+        // A first night, with no sealed shift at all, is the same: not sealed, rather than "no haul yet".
+        assertEquals(NightReport.NotSealed(nightEight.copy(shiftId = 1)), repo(journaled(1)) { _, _ -> ShiftOnChain.ENDED_OPEN }.night())
     }
 
     @Test
     fun `once sealed the night's own haul is asked for by its shift id, until it is final`() = runBlocking {
         val repo = repo(journaled(8)) { _, _ -> ShiftOnChain.SEALED }
-        // Sealed a moment ago: the indexer's latest is not final yet, and neither is shift 8 by id.
-        respond(404, """{"error":"shift 8 ended but its haul is not final yet"}""")
+        // Sealed a moment ago: ORE has not settled the last round it dug.
         respond(404, """{"error":"shift 8 ended but its haul is not final yet"}""")
         assertEquals(NightReport.NotReadYet(nightEight), repo.night())
-        assertEquals("/v1/rigs/$rig/haul/latest", server.takeRequest().url.encodedPath)
         assertEquals("/v1/rigs/$rig/haul/8", server.takeRequest().url.encodedPath)
+        // One failed read among many is the same as "not yet": asked again, never "no haul".
+        respond(503, "")
+        assertEquals(NightReport.NotReadYet(nightEight), repo.night())
         // The round settled: the haul is the night's.
         respond(200, summary(shiftId = 8))
         val report = repo.night() as NightReport.Haul
         assertEquals(8L, report.summary.shiftId)
         assertEquals(listOf(23), widgets.streaks)
+        assertEquals(3, server.requestCount) // never /haul/latest: that could be an older night's
     }
 
     @Test
-    fun `a sealed night is the latest haul, and the Rig is not read for it`() = runBlocking {
+    fun `a shift still being worked does not hide the last sealed night`() = runBlocking {
+        // Shift 9 was armed this evening; the reveal is opened from the home screen.
         respond(200, summary(shiftId = 8))
-        assertEquals(8L, (repo(journaled(8)).night() as NightReport.Haul).summary.shiftId)
-        // No journal (a new install of an old rig): the latest sealed shift is all there is.
+        val report = repo(journaled(9)) { _, _ -> ShiftOnChain.RUNNING }.night() as NightReport.Haul
+        assertEquals(8L, report.summary.shiftId)
+        assertEquals("/v1/rigs/$rig/haul/latest", server.takeRequest().url.encodedPath)
+        // And with no sealed night before it, there is simply none yet.
+        respond(404, """{"error":"no finished shift for this rig"}""")
+        assertEquals(NightReport.None, repo(journaled(1)) { _, _ -> ShiftOnChain.RUNNING }.night())
+    }
+
+    @Test
+    fun `no journal, or a shift that never was on-chain, shows the last sealed night`() = runBlocking {
+        // A new install of an old rig: the Rig is not read, the latest sealed shift is all there is.
         respond(200, summary(shiftId = 8))
         assertEquals(8L, (repo(null).night() as NightReport.Haul).summary.shiftId)
         respond(404, """{"error":"no finished shift for this rig"}""")
         assertEquals(NightReport.None, repo(null).night())
-    }
-
-    @Test
-    fun `a shift that never was on-chain hides nothing, and an unreadable Rig is asked again`() = runBlocking {
         // A focus-only shift from the tile has a local id far above the rig's counter.
         respond(200, summary(shiftId = 7))
         val focus = journaled(1_790_640_000)
         assertEquals(7L, (repo(focus) { _, _ -> ShiftOnChain.NOT_ON_CHAIN }.night() as NightReport.Haul).summary.shiftId)
-        // The node did not answer: the older haul is not shown in the night's place.
-        respond(200, summary(shiftId = 7))
-        assertEquals(NightReport.NotReadYet(nightEight), repo(journaled(8)) { _, _ -> throw java.io.IOException("offline") }.night())
-        assertEquals(1, widgets.hauls.size)
+    }
+
+    @Test
+    fun `a chain that cannot be read is said to be unread, not sealed and not empty`() = runBlocking {
+        val report = repo(journaled(8)) { _, _ -> throw java.io.IOException("offline") }.night()
+        assertEquals(NightReport.Unread(nightEight), report)
+        assertEquals(0, server.requestCount)
+        assertTrue(widgets.hauls.isEmpty())
     }
 
     @Test
     fun `no indexer or no bound rig is no night`() = runBlocking {
         assertEquals(NightReport.None, IndexerHaulRepository(null, bound, { journaled(8) }, widgets).night())
         assertEquals(NightReport.None, IndexerHaulRepository(indexer, { RigBinding.UNREGISTERED }, { journaled(8) }, widgets).night())
+    }
+
+    // --- where a shift stands, from what the Rig address holds ---
+
+    private val now = 1_790_650_000L
+
+    private fun live(shiftId: Long, state: RigSignalState = RigSignalState.DOWN, open: Boolean = true, windowEnd: Long = now + 3_600): RigSlot {
+        val pda = HeadsDownProgram.rig(authority)
+        val key = byteArrayOf(0x03) + ByteArray(32) { 0x21 }
+        val data = ByteBuffer.allocate(384).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put(0, 2); put(1, 1); put(2, pda.bump.toByte())
+            position(8); put(authority.bytes)
+            position(40); put(key)
+            put(75, state.wire.toByte())
+            put(178, 3)
+            putLong(192, windowEnd)
+            putLong(200, shiftId)
+            put(336, if (open) 1 else 0)
+        }.array()
+        return RigSlot.Live(HeadsDownAccounts.rig(pda.address, AccountInfo(1uL, HeadsDownProgram.ID, data, false)))
+    }
+
+    @Test
+    fun `an open shift is running inside its window and over after it, or once it broke`() {
+        assertEquals(ShiftOnChain.RUNNING, ShiftOnChain.of(live(8), 8, now))
+        assertEquals(ShiftOnChain.RUNNING, ShiftOnChain.of(live(8, RigSignalState.ARMED), 8, now))
+        assertEquals(ShiftOnChain.RUNNING, ShiftOnChain.of(live(8, windowEnd = now), 8, now))
+        // The alarm: the window is over, the rig is still Down on-chain, nobody has sealed it.
+        assertEquals(ShiftOnChain.ENDED_OPEN, ShiftOnChain.of(live(8, windowEnd = now - 180), 8, now))
+        // A pickup at three in the morning: broken inside its window, and over all the same.
+        assertEquals(ShiftOnChain.ENDED_OPEN, ShiftOnChain.of(live(8, RigSignalState.BROKEN), 8, now))
+        assertEquals(ShiftOnChain.ENDED_OPEN, ShiftOnChain.of(live(8, RigSignalState.COOLING), 8, now))
+        assertEquals(ShiftOnChain.ENDED_OPEN, ShiftOnChain.of(live(8, RigSignalState.FROZEN), 8, now))
+    }
+
+    @Test
+    fun `a shift the rig has closed or moved past is sealed, also when the rig itself was closed since`() {
+        assertEquals(ShiftOnChain.SEALED, ShiftOnChain.of(live(8, RigSignalState.IDLE, open = false), 8, now))
+        assertEquals(ShiftOnChain.SEALED, ShiftOnChain.of(live(9), 8, now))
+        val pda = HeadsDownProgram.rig(authority).address
+        assertEquals(ShiftOnChain.SEALED, ShiftOnChain.of(RigSlot.Closed(RigTombstoneAccount(pda, shiftId = 8uL, hbCounter = 52uL, lastDugRound = 0uL)), 8, now))
+        // An id the rig never reached is not a shift of this rig's: nothing is sealed, nothing is open.
+        assertEquals(ShiftOnChain.NOT_ON_CHAIN, ShiftOnChain.of(live(7), 8, now))
+        assertEquals(ShiftOnChain.NOT_ON_CHAIN, ShiftOnChain.of(RigSlot.Closed(RigTombstoneAccount(pda, 7uL, 52uL, 0uL)), 8, now))
+        assertEquals(ShiftOnChain.NOT_ON_CHAIN, ShiftOnChain.of(RigSlot.Empty, 8, now))
+        assertEquals(ShiftOnChain.NOT_ON_CHAIN, ShiftOnChain.of(live(7), 1_790_640_000, now))
     }
 }

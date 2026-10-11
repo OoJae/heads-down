@@ -154,8 +154,8 @@ android {
 
     defaultConfig {
         applicationId = "xyz.headsdown"
-        versionCode = 2
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.1.1"
         buildConfigField("String", "SOLANA_CHAIN", "\"solana:$cluster\"")
         buildConfigField("String", "SOLANA_RPC_URL", "\"$rpcUrl\"")
         buildConfigField("String", "CRANK_WS_URL", "\"$crankUrl\"")

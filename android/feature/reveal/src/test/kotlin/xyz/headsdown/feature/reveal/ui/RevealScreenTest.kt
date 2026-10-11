@@ -91,7 +91,7 @@ class RevealScreenTest {
         rule.onNodeWithTag(RevealTags.BUY).performScrollTo().performClick()
         assertEquals(1, taps)
         rule.onNodeWithTag(RevealTags.BUY_STUB).performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText("The market buy leg is not connected yet. Nothing was bought.").assertExists()
+        rule.onNodeWithText("Nothing was bought: this button is not connected. Where a build can buy ORE, it is on the clock-out sheet.").assertExists()
     }
 
     @Test
@@ -229,6 +229,15 @@ class RevealScreenTest {
         rule.waitForIdle()
         rule.onNodeWithText("Haul not ready yet").assertIsDisplayed()
         rule.onAllNodesWithTag(RevealTags.CLOCK_OUT).assertCountEquals(0)
+
+        // The chain could not be read: the page does not call the shift sealed, and the way to the
+        // clock-out (which reads the chain itself) stays.
+        state = RevealUiState.Night(open, NightStage.UNCHECKED)
+        rule.waitForIdle()
+        rule.onNodeWithText("Not checked yet").assertIsDisplayed()
+        assertTrue(screenTexts().none { "is sealed" in it })
+        rule.onNodeWithTag(RevealTags.CLOCK_OUT).performClick()
+        assertEquals(2, opened)
 
         // Read: the page becomes that night's reveal.
         state = RevealUiState.Ready(night.copy(provenance = HaulProvenance.ON_CHAIN, shiftId = 8))

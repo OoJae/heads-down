@@ -108,6 +108,11 @@ object ClockOutCopy {
 
     const val BUY_QUOTING = "Reading the market price…"
 
+    /** The swap had a transaction of its own, and that one did not land. */
+    const val BUY_NOT_LANDED = "No ORE was bought: the swap did not go through on-chain."
+
+    const val BUY_NOT_CONFIRMED = "The swap for ORE could not be confirmed on-chain: check your wallet's activity for it."
+
     const val BUY_NO_QUOTE = "No market quote right now, so no ORE will be bought. The rest of the clock-out is unchanged."
 
     /** The chip for a spend: "Off", or the amount. */

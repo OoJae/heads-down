@@ -35,8 +35,16 @@ class WithdrawChainState(
     val bondHeld: Boolean,
     /** The rent a 32-byte RigTombstone keeps when a rig that was used is closed. */
     val tombstoneRent: ULong,
-    /** The logs of the rig's sealed shifts that are still on-chain. */
+    /**
+     * The logs of the rig's sealed shifts that are still on-chain. They are found from the shift
+     * counter at the Rig address, which a closed rig's tombstone keeps: they outlive the rig.
+     */
     val logs: List<SealedLog> = emptyList(),
+    /**
+     * The cluster's own clock (the Clock sysvar), read when a log looks due by the phone's: the
+     * program compares a log's 30 days with this clock and no other. Null: not read.
+     */
+    val clusterUnix: Long? = null,
 )
 
 /** A sealed shift's log, as far as taking its rent back goes. */
@@ -60,8 +68,10 @@ data class LogRent(
     /** The shifts whose logs one transaction closes now, oldest first. */
     val ripe: List<ULong>,
     val ripeLamports: ULong,
-    /** When the next log that is still inside its 30 days can be closed; null when none is. */
+    /** When the next log that is still inside its 30 days is offered here; null when none is. */
     val nextRipeAtUnix: Long?,
+    /** Ripe logs beyond the ones one transaction holds: there for the next visit. */
+    val ripeLeft: Int = 0,
 )
 
 /** What closing the Automation hands back. */
@@ -171,15 +181,17 @@ object WithdrawComposer {
     fun logRent(state: WithdrawChainState, nowUnix: Long): LogRent? {
         val mine = state.logs.filter { it.paidByWallet }
         if (mine.isEmpty()) return null
-        val ripe = mine.filter { !it.bondHeld && nowUnix >= it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS }
-            .sortedBy { it.shiftId }
-            .take(MAX_LOGS_PER_TRANSACTION)
+        val allRipe = mine.filter { !it.bondHeld && nowUnix >= it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS }.sortedBy { it.shiftId }
+        val ripe = allRipe.take(MAX_LOGS_PER_TRANSACTION)
         return LogRent(
             logs = mine.size,
             lamports = mine.fold(0uL) { sum, log -> sum + log.lamports },
             ripe = ripe.map { it.shiftId },
             ripeLamports = ripe.fold(0uL) { sum, log -> sum + log.lamports },
-            nextRipeAtUnix = mine.filter { nowUnix < it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS }.minOfOrNull { it.endTs + LOG_TTL_SECONDS },
+            // The moment this sheet offers it, which is the margin after the program would allow it.
+            nextRipeAtUnix = mine.filter { nowUnix < it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS }
+                .minOfOrNull { it.endTs + LOG_TTL_SECONDS + LOG_CLOCK_MARGIN_SECONDS },
+            ripeLeft = allRipe.size - ripe.size,
         )
     }
 
@@ -191,8 +203,9 @@ object WithdrawComposer {
         val revoke = if (request.revoke) revoke(authority, state) else null
         if (revoke != null) ixs += OreInstructions.revoke(authority)
 
-        // Before close_rig: the logs name the rig's address, not its account, and outlive it.
-        val logs = if (request.closeLogs && rig != null) logRent(state, nowUnix) else null
+        // The logs name the rig's address, not its account: they are closed with or without a live
+        // rig there, and here before close_rig.
+        val logs = if (request.closeLogs) logRent(state, nowUnix) else null
         if (logs != null) {
             val rigAddress = HeadsDownProgram.rig(authority).address
             for (shiftId in logs.ripe) ixs += HeadsDownInstructions.closeShiftLog(rigAddress, shiftId, authority)
@@ -216,7 +229,11 @@ object WithdrawComposer {
     /** `SHIFT_LOG_TTL_SECS`: a log may be closed from 30 days after its shift ended. */
     const val LOG_TTL_SECONDS = 30 * 86_400L
 
-    /** The phone's clock is not the chain's: a log is only asked for this long after its 30 days. */
+    /**
+     * A log is only asked for this long after its 30 days. Ripeness is judged by the cluster's own
+     * clock when it could be read (never by a later one), and a transaction lands a little later
+     * still; the margin is for the clock of the node that answered.
+     */
     const val LOG_CLOCK_MARGIN_SECONDS = 600L
 
     /** Each log adds two addresses to the transaction; this many fit beside a revoke and a close_rig. */

@@ -285,8 +285,9 @@ fun ClockOutScreen(
                 is ClockOutState.Ready -> BarButton(
                     label = when {
                         state.working -> SheetWords.WAITING
-                        state.endEarly -> "End the shift and clock out"
                         // The bar names everything the approval covers, and nothing it does not.
+                        state.endEarly && state.buy.quote != null -> "End the shift and buy ORE"
+                        state.endEarly -> "End the shift and clock out"
                         state.buy.quote != null && !state.facts.somethingToSign(state.claimAll, state.endEarly) -> "Buy ORE"
                         state.buy.quote != null -> "Clock out and buy ORE"
                         else -> "Clock out"

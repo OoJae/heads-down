@@ -43,6 +43,8 @@ import xyz.headsdown.feature.reveal.board.BoardReplay
 import xyz.headsdown.feature.reveal.haul.Board
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
+import xyz.headsdown.feature.reveal.haul.NightStage
+import xyz.headsdown.feature.reveal.haul.OpenNight
 import xyz.headsdown.feature.reveal.haul.RoundReplay
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -172,10 +174,20 @@ class RevealLayoutTest {
             "a haul of the user's own" to RevealUiState.Ready(mine),
             "a night that placed nothing" to RevealUiState.Ready(closed),
             "a night of long figures" to RevealUiState.Ready(heavy),
+            "a night that is not sealed" to RevealUiState.Night(openNight, NightStage.NOT_SEALED),
+            "a sealed night being read" to RevealUiState.Night(openNight, NightStage.READING),
+            "a sealed night not ready" to RevealUiState.Night(openNight, NightStage.NOT_READY),
+            "a night that could not be checked" to RevealUiState.Night(openNight, NightStage.UNCHECKED),
         )
 
-    private fun dockTag(shown: RevealUiState): String =
-        if (shown is RevealUiState.Ready && shown.summary.provenance != HaulProvenance.SAMPLE) RevealTags.CLOCK_OUT else RevealTags.DONE
+    /** A whole night as the phone recorded it: the longest facts the page can carry. */
+    private val openNight = OpenNight(shiftId = 8, armedAtWallMillis = 1_790_640_000_000L, lastHeartbeatWallMillis = 1_790_668_000_000L, roundsSigned = 1_371)
+
+    private fun dockTag(shown: RevealUiState): String = when {
+        shown is RevealUiState.Ready && shown.summary.provenance != HaulProvenance.SAMPLE -> RevealTags.CLOCK_OUT
+        shown is RevealUiState.Night && shown.stage.offersClockOut -> RevealTags.CLOCK_OUT
+        else -> RevealTags.DONE
+    }
 
     private fun figure(text: String): SemanticsNode = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
 

@@ -135,8 +135,11 @@ sealed interface NightReport {
     /** The phone's last shift is still open on-chain: clocking out seals it. */
     data class NotSealed(val night: OpenNight) : NightReport
 
-    /** Sealed (or not readable just now), and its haul cannot be read yet. Worth asking again. */
+    /** Sealed, and its haul cannot be read yet. Worth asking again. */
     data class NotReadYet(val night: OpenNight) : NightReport
+
+    /** The chain could not be read: whether the shift is sealed is not known. Worth asking again. */
+    data class Unread(val night: OpenNight) : NightReport
 
     /** No shift, no indexer, no rig. */
     data object None : NightReport

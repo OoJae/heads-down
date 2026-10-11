@@ -159,8 +159,8 @@ fun RevealRoute(
 
 /**
  * The morning haul reveal: the night replayed on the board, the ORE that came of it, the counts,
- * the effective price against market with an honest verdict, the "buy the rest at market" leg
- * (stubbed until the Jupiter leg lands), the streak and a spoiler-free share grid.
+ * the effective price against market with an honest verdict, the "buy the rest at market" button
+ * (not connected: buying ORE is on the clock-out sheet), the streak and a spoiler-free share grid.
  *
  * A scrolling page over a dock. The dock holds the one thing to do next: "Clock out" for a haul
  * of the user's own (then "Done" is a text action at the top), "Done" for everything else.
@@ -656,15 +656,15 @@ private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
 
 /**
  * The phone's last shift has no haul yet. The page says which shift, in what the phone itself
- * recorded of it, and why there is nothing more: it is still open on-chain (then the dock holds
- * "Clock out"), or it is sealed and its haul is being read. It never shows an older shift's haul
+ * recorded of it, and why there is nothing more: it is still open on-chain or could not be
+ * checked (then the dock holds "Clock out"), or it is sealed and its haul is being read. It never shows an older shift's haul
  * in this one's place. Laid out as [NoHaul] is: the slab hangs cold, the words stand by the thumb.
  */
 @Composable
 private fun Night(night: OpenNight, stage: NightStage, zone: ZoneId, onDone: () -> Unit, onClockOut: (() -> Unit)?) {
     val copy = remember(night, stage, zone) { NightCopyBuilder.build(night, stage, zone) }
     val cold = remember { HeroSpec(SlabState.Cold, heat = 0) }
-    val clockOut = onClockOut?.takeIf { stage == NightStage.NOT_SEALED }
+    val clockOut = onClockOut?.takeIf { stage.offersClockOut }
     PinnedBarScreen(
         contentPadding = PagePadding,
         verticalArrangement = Arrangement.Top,

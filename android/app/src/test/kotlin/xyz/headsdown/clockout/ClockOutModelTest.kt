@@ -479,4 +479,102 @@ class ClockOutModelTest {
         val done = model.state.value as ClockOutState.Done
         assertTrue(done.message, done.message.endsWith("No ORE was bought: the price moved past what the sheet showed."))
     }
+
+    // --- what landed, when the wallet signed more than the clock-out ---
+
+    private val landed = ConfirmationOutcome.Confirmed("sig", 1, Commitment.CONFIRMED)
+    private val failed = ConfirmationOutcome.FailedOnChain("sig2", 1, "custom program error: 0x1771")
+    private val lost = ConfirmationOutcome.TimedOut("sig3", 40)
+
+    /** A wallet that signs whatever is prepared and reports [outcomes], one per transaction. */
+    private fun walletReporting(vararg outcomes: ConfirmationOutcome): ClockOutSigner = { prepare ->
+        when (val prepared = prepare(account, caps)) {
+            null -> WalletResult.Success(WalletSession.NothingToSign(account))
+            else -> WalletResult.Success(WalletSession.Submitted(account, prepared, SubmissionReport(outcomes.toList())))
+        }
+    }
+
+    private suspend fun kotlinx.coroutines.test.TestScope.quoted(chain: FakeChain, onSealed: () -> Unit = {}): ClockOutModel {
+        val model = ClockOutModel(chain, { authority }, this, onShiftSealed = onSealed)
+        model.load()
+        advanceUntilIdle()
+        model.setBuy(1_000_000uL)
+        advanceUntilIdle()
+        return model
+    }
+
+    @Test
+    fun `a clock-out that landed is done even when the swap in its own transaction did not`() = runTest {
+        var sealed = 0
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = true) } }
+        val model = quoted(chain) { sealed++ }
+        model.confirm(walletReporting(landed, failed))
+        advanceUntilIdle()
+        val done = model.state.value as ClockOutState.Done
+        assertTrue(done.message, done.message.startsWith("Confirmed on-chain. Shift sealed as completed."))
+        assertTrue(done.message, done.message.endsWith(ClockOutCopy.BUY_NOT_LANDED))
+        assertFalse(done.message.contains("swapped for ORE"))
+        assertEquals("the phone stops signing for the sealed shift", 1, sealed)
+        assertEquals("sig", done.signature)
+
+        // The swap's fate is not known: said so, and the clock-out is still done.
+        val unsure = quoted(buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = true) } })
+        unsure.confirm(walletReporting(landed, lost))
+        advanceUntilIdle()
+        assertTrue((unsure.state.value as ClockOutState.Done).message.endsWith(ClockOutCopy.BUY_NOT_CONFIRMED))
+    }
+
+    @Test
+    fun `a swap that landed is not hidden by a clock-out that did not, and trying again does not buy twice`() = runTest {
+        var sealed = 0
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = true) } }
+        val model = quoted(chain) { sealed++ }
+        model.confirm(walletReporting(failed, landed))
+        advanceUntilIdle()
+        val back = model.state.value as ClockOutState.Ready
+        assertEquals(
+            "0.001 SOL swapped for ORE: at least 0.00095524 ORE is in your wallet. But the clock-out did not go through on-chain: try it again. The buy is off now.",
+            back.problem,
+        )
+        assertEquals(BuyChoice(offers = BuyChoice.OFFERS), back.buy)
+        assertEquals(0, sealed)
+        // The second approval is the clock-out alone.
+        chain.bought = { BuyOutcome.NotRequested }
+        model.confirm(walletReporting(landed))
+        advanceUntilIdle()
+        assertNull(chain.requests.last().buy)
+        assertEquals(1, sealed)
+        assertFalse((model.state.value as ClockOutState.Done).message.contains("swapped"))
+    }
+
+    @Test
+    fun `one transaction that carried the buy and failed names the buy, changes nothing and turns the buy off`() = runTest {
+        var sealed = 0
+        val chain = buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = false) } }
+        val model = quoted(chain) { sealed++ }
+        model.confirm(walletReporting(failed))
+        advanceUntilIdle()
+        val back = model.state.value as ClockOutState.Ready
+        assertEquals(ClockOutModel.NOT_LANDED_WITH_BUY, back.problem)
+        assertNull(back.buy.quote)
+        assertEquals(0uL, back.buy.spendLamports)
+        assertEquals(0, sealed)
+        assertFalse("the chain's own error text is not ours to show", back.problem!!.contains("0x1771"))
+
+        // Not known whether it landed: nothing is claimed either way, and a retry cannot buy again unasked.
+        val unsure = quoted(buying().apply { bought = { BuyOutcome.Included(swapQuote(), ownTransaction = false) } })
+        unsure.confirm(walletReporting(lost))
+        advanceUntilIdle()
+        val waiting = unsure.state.value as ClockOutState.Ready
+        assertEquals(ClockOutModel.NOT_CONFIRMED, waiting.problem)
+        assertNull(waiting.buy.quote)
+
+        // A clock-out with no buy that failed says what it always said.
+        val plain = ClockOutModel(buying(), { authority }, this)
+        plain.load()
+        advanceUntilIdle()
+        plain.confirm(walletReporting(failed))
+        advanceUntilIdle()
+        assertEquals(ClockOutModel.NOT_LANDED, (plain.state.value as ClockOutState.Ready).problem)
+    }
 }

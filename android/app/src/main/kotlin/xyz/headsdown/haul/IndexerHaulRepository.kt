@@ -2,9 +2,11 @@ package xyz.headsdown.haul
 
 import kotlinx.coroutines.CancellationException
 import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.accounts.RigSlot
 import xyz.headsdown.core.chain.indexer.HaulMode
 import xyz.headsdown.core.chain.indexer.IndexerHaul
 import xyz.headsdown.core.chain.indexer.IndexerHaulClient
+import xyz.headsdown.core.keys.RigSignalState
 import xyz.headsdown.feature.reveal.haul.HaulProvenance
 import xyz.headsdown.feature.reveal.haul.HaulRepository
 import xyz.headsdown.feature.reveal.haul.HaulSummary
@@ -16,19 +18,47 @@ import xyz.headsdown.feature.shift.RigBindingProvider
 import xyz.headsdown.feature.shift.ShiftRecord
 import xyz.headsdown.surface.widget.RigWidgetUpdates
 import xyz.headsdown.surface.widget.WidgetHaul
+import java.io.IOException
 import java.math.BigDecimal
 import java.math.RoundingMode
 
-/** Where the rig's on-chain shift counter stands against a shift this phone worked. */
+/** Where a shift this phone worked stands on-chain, read from the wallet's Rig address. */
 enum class ShiftOnChain {
-    /** That shift is the rig's current one, and it is open: nobody has sealed it. */
-    OPEN,
+    /** The rig's current shift, open, inside its window and not broken: it is still being worked. */
+    RUNNING,
 
-    /** The rig is past it, or it is the current one and closed: it is sealed. */
+    /** The rig's current shift, open, and over (its window ended, or it broke): only the clock-out is missing. */
+    ENDED_OPEN,
+
+    /** The rig is past it, or it is the current one and closed, or the rig itself was closed since: sealed. */
     SEALED,
 
     /** The rig never reached that shift id: it was not an on-chain shift (a focus-only one has a local id). */
     NOT_ON_CHAIN,
+    ;
+
+    companion object {
+        private val WORKING = setOf(RigSignalState.ARMED, RigSignalState.DOWN)
+
+        /** [slot] is what the Rig address holds now; [nowUnix] the phone's clock. */
+        fun of(slot: RigSlot, shiftId: Long, nowUnix: Long): ShiftOnChain {
+            val id = shiftId.toULong()
+            return when (slot) {
+                RigSlot.Empty -> NOT_ON_CHAIN
+                // A rig is closed only with no shift open, and its tombstone keeps the counter.
+                is RigSlot.Closed -> if (slot.tombstone.shiftId >= id) SEALED else NOT_ON_CHAIN
+                is RigSlot.Live -> {
+                    val rig = slot.rig
+                    when {
+                        rig.shiftId < id -> NOT_ON_CHAIN
+                        rig.shiftId > id || !rig.shiftOpen -> SEALED
+                        rig.state in WORKING && nowUnix <= rig.planWindowEndTs -> RUNNING
+                        else -> ENDED_OPEN
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -38,8 +68,9 @@ enum class ShiftOnChain {
  * - `first_pickup_ts` is not observable on-chain: it comes from the shift service's own journal
  *   ([lastShift]) when the journal still holds that shift.
  * - A real (not `simulated`) haul updates the widget's last haul and streak.
- * - The indexer serves sealed shifts only. A shift this phone worked after the last sealed one
- *   is reported as itself ([night]), never covered by the older haul.
+ * - The indexer serves sealed shifts only. A shift this phone worked and that is over but not
+ *   sealed is reported as itself ([night]), never covered by an older haul. The chain is asked
+ *   first: at the alarm it is the whole answer, and it does not need the indexer.
  */
 class IndexerHaulRepository(
     /** Null when this build has no indexer (an empty indexer URL). */
@@ -48,7 +79,7 @@ class IndexerHaulRepository(
     /** The shift service's journal: the most recent shift this phone armed, or null. */
     private val lastShift: () -> ShiftRecord?,
     private val widgets: RigWidgetUpdates,
-    /** Reads the Rig: where [shiftId] stands on-chain. Throws when the chain cannot be read. */
+    /** Reads the Rig address: where [shiftId] stands on-chain. Throws when the chain cannot be read. */
     private val onChain: suspend (rig: Pubkey, shiftId: Long) -> ShiftOnChain = { _, _ -> ShiftOnChain.NOT_ON_CHAIN },
 ) : HaulRepository {
 
@@ -64,25 +95,29 @@ class IndexerHaulRepository(
         val bound = binding.current()
         if (!bound.isRegistered) return NightReport.None
         val rig = Pubkey(bound.rigAddress)
-        val latest = indexer.latest(rig)
-        val mine = lastShift()
-        val latestId = latest?.shiftId?.toLongOrNull()
-        // No shift of this phone's after the last sealed one: that one is the night.
-        if (mine == null || (latestId != null && latestId >= mine.shiftId)) return report(latest)
+        // No shift of this phone's on record (a new install of an old rig): the last sealed one is the night.
+        val mine = lastShift() ?: return report(indexer.latest(rig))
         val night = OpenNight(mine.shiftId, mine.armedAtWallMillis, mine.lastHeartbeatWallMillis, mine.darkRounds.coerceAtLeast(0))
         val where = try {
             onChain(rig, mine.shiftId)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // The indexer answered and the node did not: asked again, not guessed.
-            return NightReport.NotReadYet(night)
+            // Open or sealed is not known: said so, asked again, and not guessed.
+            return NightReport.Unread(night)
         }
         return when (where) {
-            ShiftOnChain.OPEN -> NightReport.NotSealed(night)
-            ShiftOnChain.SEALED ->
-                indexer.byShift(rig, mine.shiftId.toULong())?.let(::shown)?.let(NightReport::Haul) ?: NightReport.NotReadYet(night)
-            ShiftOnChain.NOT_ON_CHAIN -> report(latest)
+            ShiftOnChain.ENDED_OPEN -> NightReport.NotSealed(night)
+            ShiftOnChain.SEALED -> {
+                val haul = try {
+                    indexer.byShift(rig, mine.shiftId.toULong())
+                } catch (_: IOException) {
+                    null // one failed read of many: the same as "not final yet"
+                }
+                haul?.let(::shown)?.let(NightReport::Haul) ?: NightReport.NotReadYet(night)
+            }
+            // Still being worked, or never an on-chain shift: the last sealed night is the one to show.
+            ShiftOnChain.RUNNING, ShiftOnChain.NOT_ON_CHAIN -> report(indexer.latest(rig))
         }
     }
 

@@ -105,9 +105,11 @@ object WithdrawCopy {
             "Sealing your shifts stored ${r.logs} logs on-chain, and your wallet paid ${sol(r.lamports)} SOL of rent for them."
         }
         val next = r.nextRipeAtUnix?.let { DAY.format(Instant.ofEpochSecond(it).atZone(zone)) }
+        // One transaction holds so many: said when more are ready than it takes.
+        val more = if (r.ripeLeft > 0) " (${r.ripe.size} logs at a time; ${r.ripeLeft} more are ready after these)" else ""
         val back = when {
-            r.ripe.isNotEmpty() && next != null -> " ${sol(r.ripeLamports)} SOL of it can come back now, the next from $next."
-            r.ripe.isNotEmpty() -> " ${sol(r.ripeLamports)} SOL of it can come back now."
+            r.ripe.isNotEmpty() && next != null -> " ${sol(r.ripeLamports)} SOL of it can come back now$more, the next from $next."
+            r.ripe.isNotEmpty() -> " ${sol(r.ripeLamports)} SOL of it can come back now$more."
             next != null -> " The first can come back from $next."
             else -> ""
         }
