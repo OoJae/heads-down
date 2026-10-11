@@ -322,7 +322,8 @@ over) is forgotten. Rehearsed on the Android 14 emulator against the local fork:
 landed from another wallet for the phone's key while the app was in front (armed within
 seconds), one that was already on-chain when the Quick Settings tile was tapped (armed, and the
 wallet was not opened), and one that could never land (forgotten). Both emulator end-to-end
-runs pass with it. **Not yet seen on the phone.**
+runs pass with it. On the phone the failure has not happened again ("The third evening"), so the
+repair itself has still only run on the emulator.
 
 ## The second evening (11 October 2026)
 
@@ -361,6 +362,92 @@ What it adds to the first evening:
   and its plan window over. It has not been clocked out, and the Automation has not been emptied.
 - **Not an overnight run.** The phone was in use that night; the shift lasted about twenty
   minutes. A whole night is still in the list below.
+
+## The third evening (11 October 2026): the redesigned app on the phone
+
+The redesigned build (the new screens, the slab, the clock-in fix of item 4) was installed over
+the old one on the Redmi 14C, keeping the rig's key, and the founder ran three shifts with it.
+Same policy as before. Times are UTC; the numbering goes on.
+
+| # | Time | Slot | Transaction | Signed by | What it did |
+|---|---|---|---|---|---|
+| 24 | 17:46:53 | 455,738,644 | [`5MVVyjii…`](https://solscan.io/tx/5MVVyjiiCAdpcT7GohYhpHypHNVK1Vh6auYxMrerWQJi1bZuwMHRoQMTF1q5EWUKCzgQsaa6QYSfsprv1QdUXTju) | wallet | Clock-in from the redesigned build, after the wallet had refused its day-old token once (item 5 below): `end_shift` for shift 4, `set_caps`, `arm_shift` (shift 5) |
+| 25 | 17:47:22 | 455,738,773 | [`2rNsYwEr…`](https://solscan.io/tx/2rNsYwErmm6LXHc9KTvmXHMHRQEMouJtrpXC4CcLZZ48fTWm4WeweK53jr1AXrr88bgrwGWHajuJkpRQMLSeCj48) | crank | A BREAK the phone signed 29 seconds later: `ShiftBroken` (shift 5, reason 7 `unplugged`). The charger had come out |
+| 26 | 17:50:24 | 455,739,603 | [`33zJjHKh…`](https://solscan.io/tx/33zJjHKhrsHQR8QZHg9VssA4M18LxcW9NCc4w2YxVtCVGcgqM25tJfKSimkj9YDcV8RGXcNXoCj19UkxQZXZEDY9) | wallet | Clock-in: `end_shift` for shift 5, `set_caps`, `arm_shift` (shift 6) |
+| 27 | 17:51:52 | 455,740,007 | [`4EtZGBZw…`](https://solscan.io/tx/4EtZGBZw3NyrABZ8tAt8kzGos6tnTEesnppbrNKssrWCkMtwJkQA2yUAUfGhe5HsBpAmkPkKEAnAFrY21rirrTWv) | crank | `dig` for round 436,528 |
+| 28 | 17:52:53 | 455,740,284 | [`3RjxNU5H…`](https://solscan.io/tx/3RjxNU5H2dD1V4eQ2hUmqX5tyrrdVLFerU5rvsoNdwtVTFuoor5LPJ122Wc7jgsdFqGGM5pgDBEUPiFTNipZiXi2) | crank | `checkpoint` of 436,528 (0.000891 SOL), then `dig` for round 436,529 |
+| 29 | 17:54:06 | 455,740,621 | [`2Y3Z22Mm…`](https://solscan.io/tx/2Y3Z22Mm1icqi3AFVx2wernm4vjSAJ5bUzF4v6hiMWyWtJQKxej7vCXas8VHu9nE3MTcGMhVuAMeswL5Zz53aCx1) | crank | `checkpoint` of 436,529 (0.000891 SOL), then `dig` for round 436,530: the crank's second attempt, sent 40 slots after the first |
+| 30 | 17:54:06 | 455,740,622 | [`2ygAza8z…`](https://solscan.io/tx/2ygAza8zeAwdUdLe9WE4roYMEajS5C8Pj3Rhzoc9XV9SYmgYFsi5qAJu2XD7AQd6dqca3nwaCeKsD2eu6Mtz97zN) | crank | The first attempt for round 436,530, landing one slot after the second: no deploy ran (`RigSkipped`, error 7 `StaleHeartbeat`) |
+| 31 | 17:55:01 | 455,740,877 | [`2Wxoynua…`](https://solscan.io/tx/2WxoynuaFjrDFsfGRvYViigE6hap3PSbuMwug3YppQify8Mi8TAMnyeAHEKZm369HxoRdJVnjnhB9KMPYbSvuyzu) | crank | `checkpoint` of 436,530 (0.000891 SOL), then `dig` for round 436,531 |
+| 32 | 17:56:01 | 455,741,155 | [`4F2ykhuf…`](https://solscan.io/tx/4F2ykhufxJ3eNuDAKfyCtHj5BjVGndjQZGA6mrZz4P4r1a18xWxgrwZ3z5XrPxU9UcCBAKcWNRt3AErSEdkckTmX) | crank | `checkpoint` of 436,531 (0.000891 SOL), then `dig` for round 436,532: the fifth dig, and the shift's budget |
+| 33 | 17:56:05 | 455,741,172 | [`5SVHu8GF…`](https://solscan.io/tx/5SVHu8GFqNafoK6RptMo6Zfs2DN4REtjpxp3YLnmhhN5WUXfc8HRaYscPg7GorteuXmgjXwU3k6aLR12ByXMFDAZ) | crank | A BREAK the phone signed: `ShiftBroken` (shift 6, reason 2 `screen_on`) |
+| 34 | 17:57:13 | 455,741,485 | [`4cRAwhxt…`](https://solscan.io/tx/4cRAwhxtvLgi4e5os3sgXkkPQQNPJNKPo6DjhX73KM5sLoAZEtKMukjaErBFQpcPtJa5bw63bQk2UDHnSL1bzVDS) | wallet | Clock-in: `end_shift` for shift 6, `set_caps`, `arm_shift` (shift 7), and the Automation topped up to the shift's budget |
+| 35 | 17:58:14 | 455,741,753 | [`3p4ZTnhz…`](https://solscan.io/tx/3p4ZTnhzGrLRrpFQKUgdd2yvFsLPUDUvGN8DTKGQzoJtYRSUqmZAtTutpUMnWsLAhx8s8rVTqvVhrBWgRnYbzL8e) | crank | `checkpoint` of 436,532 (0.00091575 SOL), then `dig` for round 436,534 |
+| 36 | 17:59:22 | 455,742,059 | [`2sjn1wiV…`](https://solscan.io/tx/2sjn1wiVnLS9n7co92nNxFD3PriCvBfFFJyj68A9X87hGUfdLFs3F6ZbTQn8LAahoZW1zYdGpKTQY9SMmcmwi1m2) | crank | `checkpoint` of 436,534 (0.000891 SOL), then `dig` for round 436,535 |
+| 37 | 18:00:26 | 455,742,340 | [`3PphFbmJ…`](https://solscan.io/tx/3PphFbmJyAfurvbL9fS7txwotV4yRAuGwpVmVfpNNkwnduHF5SaWbRJckPZfs6sZ9irDwVPJy8igEpVH7qtzxxhy) | crank | `checkpoint` of 436,535 (0.00091575 SOL), then `dig` for round 436,536 |
+| 38 | 18:01:38 | 455,742,665 | [`55P8Ezk3…`](https://solscan.io/tx/55P8Ezk3cTVv8qh5zS4TaZDnA4UKSNrX69zmt5LgA7k5JH41RCfqkCn8cHQw7Y1AiKrPU7NWiDQ1PvHQpGQUdRy3) | crank | `checkpoint` of 436,536 (0.000891 SOL), then `dig` for round 436,537: the second attempt again |
+| 39 | 18:01:39 | 455,742,671 | [`3mAz8uEu…`](https://solscan.io/tx/3mAz8uEusptEoc3tz3rPSGymfNKhjN3RnTwmoaMKDx1cKfdhrZVLgjoF5AoQ1b8vNPYeSj2Zd1JXRKSLMDSGnQhZ) | crank | The first attempt for round 436,537, landing six slots after the second: `RigSkipped`, error 7 `StaleHeartbeat` |
+| 40 | 18:02:28 | 455,742,890 | [`483ABMie…`](https://solscan.io/tx/483ABMieQ5p49ExYdxc8Pxmtskpq3Vsq7N1iTi5NSeFCvCBsUDQ2X2XFG3zWCKm7FF1oEd8ttHzM1K4WG8mU24A2) | crank | `checkpoint` of 436,537 (0.000891 SOL), then `dig` for round 436,538: the fifth dig, and the shift's budget |
+| 41 | 18:04:16 | 455,743,392 | [`4iyVhabE…`](https://solscan.io/tx/4iyVhabEtyoPQZhNUCi8sDffuSHxJobTtj7yYq6rrMhYHRaBkDbhDNbx8LeWSCi3isA4onZjGEjRTEn2mmkjr8Ds) | crank | A BREAK the phone signed when it was picked up: `ShiftBroken` (shift 7, reason 1 `pickup`) |
+
+What it showed:
+
+- **After each approval the app armed by itself.** Three clock-ins, each approved once in Jupiter,
+  and each time the phone went on to work the shift. After the first, a screenshot taken four
+  seconds after the transaction landed shows the home screen reading "Armed". The failure of
+  item 4 did not happen. Its repair, arming a clock-in from the chain when the wallet's answer
+  is lost, was therefore not exercised on the phone: it has run on the emulator only.
+- **Ten digs in ten rounds.** Shift 6 dug rounds 436,528 to 436,532 and shift 7 dug 436,534 to
+  436,538 (its clock-in landed during 436,533). No round the phone was down for was missed. With
+  the first two evenings: 19 of 19 since the dig window was widened to 80 slots.
+- **Twice the first attempt landed after the second** (transactions 30 and 39). The crank signs a
+  second attempt when the first has not landed 40 slots after it was sent. Both times the first
+  then landed too, one and six slots after the second, and the program refused it as it refuses
+  any heartbeat it has already taken: 11,025 and 11,042 lamports of the crank's fees for nothing.
+  Two in ten digs that evening, none in nine before. A second attempt that reused the first's
+  signed transaction could not land twice; the crank signs a new one. Not changed.
+- **The first shift lasted 29 seconds.** The charger came out and the phone signed the BREAK a
+  Night Shift signs for that (reason 7). No dig, and the next clock-in paid for sealing it.
+- **Three clock-ins, where one and a clock-out were meant.** After a pickup the home screen's
+  only bar read "Clock in", and the link that seals a shift was a screen further down. The
+  founder clocked in again each time, and then asked how to clock out. Each clock-in sealed the
+  shift before it and paid a ShiftLog's rent, 1,300,480 lamports, which the program gives back
+  from 30 days after the shift ended (no tool sends that instruction yet). Changed in the app:
+  "Clock out" now stands directly under "Shift ended".
+- **Shift 7 is open.** At 20:03 UTC the Rig was Cooling with shift 7 open and its window over:
+  not clocked out, and round 436,538 not yet checkpointed (the crank's sweep is due some seven
+  hours after the round).
+- **Clock-out and "Take it back" have not run on the phone with the redesigned build.** They ran
+  with the first build on 10 October, and with this one on the emulator.
+
+**5. A wallet can refuse the token it handed out, and the library hides it.** Jupiter Mobile
+refused, on 11 October, the sign-in token it had given the app on 10 October. clientlib-ktx
+2.2.0 reports every error the wallet answers with, a refused token and a declined signing
+request alike, as "Failed establishing local association with wallet": its catch around the
+connection also wraps the whole session. So the app never learned that the token was the
+problem, kept it, and every clock-in failed with that message. Fixed the same evening: the
+wallet's own answer is read from the exception's cause; a refused token is dropped, and the app
+says "Your wallet asks to connect again. Tap once more." A first version called the wallet a
+second time by itself; on the phone that second session was cancelled at once ("Request was
+cancelled"), because it started while the wallet's first window was still closing, so it was
+taken out. Seen on the phone: with the token dropped, the next tap connected, signed and armed
+(transaction 24). Anyone using the app on two consecutive days would have met this.
+
+**6. The slab on the Redmi 14C.** Measured with the app's own lab screen, 60 Hz, battery saver
+off, the phone warm (thermal status 2): in its worst case (hot rig, all five rows lit, seen from
+underneath, turning for ten seconds) the shader drew 600 frames of 600, with 14.4 to 14.8 ms of
+GPU time at the 95th percentile. That is over the 12 ms mark set for it beforehand, so by that
+mark it fails; the drawn fallback took 18.8 ms in the same test, so the shader is what ships. At
+rest it drew 0 frames in five seconds. On the home screen with a cold rig, dragged for ten
+seconds, GPU time was 4 ms at the 95th percentile.
+
+An independent review of the clock-in repair (three reviewers, each finding checked by a second
+one) confirmed four further cases, all fixed and covered by tests the same evening: a second
+tap in the seconds while the first clock-in lands could still build over it; the record of a
+pending clock-in was forgotten before the shift had actually started, and a shift could be
+started from a window that had left the foreground, which Android refuses; a clock-in the
+wallet said it had not signed stayed on record; and a shift armed under the thumb could be
+ended by the tap that was on its way to "Clock in".
 
 ## Not run yet
 

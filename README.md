@@ -15,8 +15,9 @@ phone with a Solana wallet; Seeker owners get a tier verified on-chain by their 
 </p>
 
 The app on an Android 14 emulator against a local fork of mainnet, 11 October 2026; the last
-screen is the sample night the app offers before a first haul. The same build has not run on a
-phone yet (below). [The deck](https://oojae.github.io/heads-down/deck/) is 18 slides
+screen is the sample night the app offers before a first haul. The same build ran three short
+shifts on the Redmi 14C that evening, on mainnet
+([docs/MAINNET.md](docs/MAINNET.md#the-third-evening-11-october-2026-the-redesigned-app-on-the-phone)). [The deck](https://oojae.github.io/heads-down/deck/) is 18 slides
 ([PDF](https://oojae.github.io/heads-down/deck/heads-down-deck.pdf)).
 
 ## How it works
@@ -63,7 +64,7 @@ built; the Stack and Gift screens are not yet.
 | [`registrar`](registrar/README.md) | Verifies Android Key Attestation chains and issues the voucher the program checks. 116 tests, 19 of them on real attestation chains. Running on Railway against mainnet |
 | [`services/indexer`](services/indexer/README.md) | Chain data into Postgres, a public read API, the morning haul. 477 tests. Running on Railway against mainnet |
 | [`dashboard`](dashboard/README.md) | Public numbers, each one recomputable from the chain. [Running on Railway](https://dashboard-production-b80c.up.railway.app) on the indexer's mainnet data |
-| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget, all drawn from one design module (`core/design`) around a shader-drawn slab that stays level with the real world. 1,324 JVM unit tests. One short shift on one physical phone, on mainnet, on 10 October 2026, on the build before the redesign; the redesigned build has run end to end on an Android 14 emulator and not yet on the phone |
+| [`android`](android/README.md) | The app: Kotlin and Compose, Quick Settings tile, foreground shift service, accelerometer-only face-down detection (no gyroscope needed), Keystore rig key, morning reveal, clock-out, taking SOL back and closing the rig, widget, all drawn from one design module (`core/design`) around a shader-drawn slab that stays level with the real world. 1,330 JVM unit tests. Five short shifts on one physical phone, on mainnet, on 10 and 11 October 2026: two on the first build and three on the redesigned one (clock-in, digs and pickups; its clock-out and its way out have run on an Android 14 emulator only) |
 | [`ml`](ml/foreman/README.md) | The on-device models: a pickup-or-bump classifier and a shift planner (trained on synthetic data so far), and a cost forecaster that lost to the simple on-chain rule and only advises |
 
 **Deployed on mainnet on 10 October 2026.** The program is at
@@ -95,8 +96,9 @@ rounds settled that evening, nor of the fifth, which the next evening's first di
 first clock-in armed a shift that a second clock-in sealed about five minutes later with no round dug in it: the wallet had
 sent the transaction and the app never heard so, so the phone stayed cold and the founder
 approved a second clock-in. It happened again the next night. The app now writes down what it
-hands the wallet and finds it on-chain by itself; that fix has run on the emulator and not yet
-on the phone ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found), item 4). The
+hands the wallet and finds it on-chain by itself; that repair has run on the emulator, and on
+the phone the failure has not come back in three clock-ins since
+([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found), item 4). The
 crank's first dig landed after its round had ended and was skipped; three of
 the crank's settings were changed on the running service that evening
 ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found)).

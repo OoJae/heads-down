@@ -12,9 +12,10 @@
     first-clock-in-tx (slides 4, 16) · first-dig-tx (6, 16) · digs-landed (16) · break-tx (6, 16)
     replay-skipped-tx (6, 16) · clock-out-tx (4, 16) · shift-summary (16, 18)
 
-  PICTURES. img/app-*.png are screenshots of the real app (the localdev build) on an Android 14
-  emulator against the local fork of mainnet, taken on 11 October 2026 by walking the app with adb;
-  each caption says so. img/app-reveal.png is the reveal's sample night, which the app offers
+  PICTURES. img/redmi-*.png are screenshots of the app on the founder's Redmi 14C, on mainnet, on
+  the evening of 11 October 2026. img/app-*.png are screenshots of the same build (the localdev
+  flavour) on an Android 14 emulator against the local fork of mainnet, taken the same day by
+  walking the app with adb. Each caption says which it is. img/app-reveal.png is the reveal's sample night, which the app offers
   before a first haul and marks as not the user's data. img/eff_price_vs_budget.png is a copy of ml/forecaster/figures/. The two
   img/dashboard-*.png are unmodified captures of the live dashboard by
   scripts/pitch/shoot-dashboard.sh; after a new capture, bring the captions of slides 13 and 16 to
@@ -411,8 +412,8 @@
         </table>
       </div>
       <figure class="phone">
-        <img src="img/app-home-armed.png" alt="The home screen with the rig armed: ember light under the slab, the word Armed, and Lay your phone face-down to start the shift" style="height:540px">
-        <figcaption>Armed (emulator)</figcaption>
+        <img src="img/redmi-home-armed.png" alt="The home screen on the Redmi 14C with the rig armed: ember light under the slab, the word Armed, and Lay your phone face-down to start the shift" style="height:540px">
+        <figcaption>Armed, on the Redmi</figcaption>
       </figure>
       <figure class="phone">
         <img src="img/app-clock-out.png" alt="The clock-out sheet with End the shift now chosen: what sealing the shift early means, the rent of its log, and the button End the shift and clock out" style="height:540px">
@@ -425,11 +426,11 @@
     </div>
   </div>
   <footer class="foot">
-    <p class="src"><b>Source</b>docs/MAINNET.md (the first shift, every transaction) · android/README.md · scripts/devstack/emulator-smoke.sh (the pictures: emulator, Solana Mobile's test wallet)</p>
+    <p class="src"><b>Source</b>docs/MAINNET.md (the first shift, every transaction) · android/README.md · scripts/devstack/emulator-smoke.sh (the clock-out picture: emulator, Solana Mobile's test wallet)</p>
     <p class="brand">Powered by ORE</p>
     <p class="num">04 / 18</p>
   </footer>
-  <aside class="notes">The habit hangs on three things people already do every night: bedtime, the charger and the alarm. If the OS kills the app, the rig goes cold and nothing is spent. On the tenth of October my Redmi did all of this on mainnet except the morning reveal: one approval in Jupiter's wallet, heartbeats signed by a key in the phone's secure hardware, five digs, a BREAK when I picked it up and unlocked it, a clock-out, and the SOL back. Two honest notes. On the phone I tapped Clock in inside the app; the tile's path has run on the emulator. And that evening the app did not hear that its first clock-in had landed, so I approved a second one; the app now finds a landed clock-in on-chain by itself, which has run on the emulator and not yet on the phone. The digs ran under a price ceiling I raised for the demo.</aside>
+  <aside class="notes">The habit hangs on three things people already do every night: bedtime, the charger and the alarm. If the OS kills the app, the rig goes cold and nothing is spent. On the tenth of October my Redmi did all of this on mainnet except the morning reveal: one approval in Jupiter's wallet, heartbeats signed by a key in the phone's secure hardware, five digs, a BREAK when I picked it up and unlocked it, a clock-out, and the SOL back. Two honest notes. On the phone I tapped Clock in inside the app; the tile's path has run on the emulator. And that evening the app did not hear that its first clock-in had landed, so I approved a second one; the app now finds a landed clock-in on-chain by itself. That repair has run on the emulator; on the phone the failure has not come back in the three clock-ins since. The digs ran under a price ceiling I raised for the demo.</aside>
 </section>
 
 <!-- 5 -->
@@ -448,31 +449,31 @@
       </ul>
       <div class="gallery">
         <figure class="phone">
-          <img src="img/app-home-cold.png" alt="The home screen with the rig cold: a dark slab with no light under it, the words Rig cold, when a shift would run until, and the button Clock in with Up to 0.02 SOL tonight under it">
-          <figcaption>Cold</figcaption>
+          <img src="img/redmi-home-cold.png" alt="The home screen on the Redmi 14C with the rig cold: a dark slab with no light under it, the words Rig cold, when a shift would run until, and the button Clock in with Up to 0.005 SOL tonight under it">
+          <figcaption>Cold, on the Redmi</figcaption>
         </figure>
         <figure class="phone">
-          <img src="img/app-home-armed.png" alt="The home screen with the rig armed: ember light under the slab, the word Armed, and Lay your phone face-down to start the shift">
-          <figcaption>Armed</figcaption>
+          <img src="img/redmi-home-armed.png" alt="The home screen on the Redmi 14C with the rig armed: ember light under the slab, the word Armed, and Lay your phone face-down to start the shift">
+          <figcaption>Armed, on the Redmi</figcaption>
         </figure>
         <figure class="phone">
           <img src="img/app-take-back.png" alt="The Take it back sheet: what the ORE Automation holds, to the lamport, the choice Take it back to my wallet with what that does, the rig's rent, and the button Take SOL back">
-          <figcaption>Take it back</figcaption>
+          <figcaption>Take it back (emulator)</figcaption>
         </figure>
         <figure class="phone">
           <img src="img/app-reveal.png" alt="The morning reveal on the app's sample night, marked Sample night, not your data: the board of 25 squares glowing gold where the rig dug, and ORE mined as the large gold figure">
-          <figcaption>The reveal (the app's sample night)</figcaption>
+          <figcaption>The reveal, sample night (emulator)</figcaption>
         </figure>
       </div>
     </div>
-    <p class="muted" style="font-size:22px;line-height:1.3">The real app on an Android 14 emulator against the local fork of mainnet, 11 Oct 2026. The reveal shows the sample night the app offers before a first haul, and says so on screen. The redesigned build has not run on the Redmi yet.</p>
+    <p class="muted" style="font-size:22px;line-height:1.3">The first two: the app on the Redmi 14C, on mainnet, 11 Oct 2026, where this build clocked in three times and dug ten rounds. The last two: the same build on an Android 14 emulator against the local fork of mainnet; the reveal shows the sample night the app offers before a first haul, and says so on screen.</p>
   </div>
   <footer class="foot">
-    <p class="src"><b>Source</b>android/core/design/ (tokens, type, components) · android/app/src/main/kotlin/xyz/headsdown/ui/slab/ (the slab) · scripts/devstack/emulator-smoke.sh (the end-to-end run on the emulator)</p>
+    <p class="src"><b>Source</b>android/core/design/ (tokens, type, components) · android/app/src/main/kotlin/xyz/headsdown/ui/slab/ (the slab) · docs/MAINNET.md (the third evening: the phone) · scripts/devstack/emulator-smoke.sh (the emulator)</p>
     <p class="brand">Powered by ORE</p>
     <p class="num">05 / 18</p>
   </footer>
-  <aside class="notes">The first build was a plain dark screen with pill buttons. After it worked on mainnet I redesigned it around one idea: this app does its job face-down, so its mark is the underside. The slab on the home screen is drawn by one small shader and is held level with the real world by the same accelerometer that runs the shift, so tilting the phone to look under it teaches the one gesture the product needs. Gold is rationed: it is light, or an amount of ORE, never a button. Every sentence and every test tag of the screens that ran on mainnet stayed as it was, so the app's tests and the end-to-end run on the emulator, with Solana Mobile's test wallet, pass unchanged. What you see here is that emulator; the redesigned build has not run on my phone yet.</aside>
+  <aside class="notes">The first build was a plain dark screen with pill buttons. After it worked on mainnet I redesigned it around one idea: this app does its job face-down, so its mark is the underside. The slab on the home screen is drawn by one small shader and is held level with the real world by the same accelerometer that runs the shift, so tilting the phone to look under it teaches the one gesture the product needs. Gold is rationed: it is light, or an amount of ORE, never a button. Every sentence and every test tag of the screens that ran on mainnet stayed as it was, so the app's tests and the end-to-end run on the emulator, with Solana Mobile's test wallet, pass unchanged. The first two pictures are my phone, on the evening of the eleventh: this build clocked in three times there and dug ten rounds. The other two are the emulator, where its clock-out and the way out have run; on the phone those two ran with the first build.</aside>
 </section>
 
 <!-- 6 -->
@@ -660,12 +661,12 @@
       </ul>
       <div class="side">
         <div class="card fact">
-          <p class="n">1,324</p>
+          <p class="n">1,330</p>
           <p class="l">JVM unit tests passed; 5 more are skipped</p>
         </div>
         <div class="card fact">
           <p class="t">Redmi 14C</p>
-          <p class="l">Android 16, HyperOS 3, accelerometer only. On 10 Oct 2026: setup, a TEE rig key, attestation, and a short shift on mainnet.</p>
+          <p class="l">Android 16, HyperOS 3, accelerometer only. On 10 and 11 Oct 2026: setup, a TEE rig key, attestation, and five short shifts on mainnet, three of them on the redesigned build.</p>
           <span class="chip main">On mainnet</span>
         </div>
       </div>
@@ -676,11 +677,11 @@
     </div>
   </div>
   <footer class="foot">
-    <p class="src"><b>Source</b>android/README.md · android/INTERFACE-NOTES.md §4 (one legacy packet) · docs/MAINNET.md · docs/SECURITY_REVIEW.md §5 (1,324 tests)</p>
+    <p class="src"><b>Source</b>android/README.md · android/INTERFACE-NOTES.md §4 (one legacy packet) · docs/MAINNET.md · docs/SECURITY_REVIEW.md §5 (1,330 tests)</p>
     <p class="brand">Powered by ORE</p>
     <p class="num">11 / 18</p>
   </footer>
-  <aside class="notes">Only the launcher activity, the tile service and the two widget receivers are exported. The trampoline reads no intent extras. Release builds strip every android.util.Log call, backups are off, RPC is HTTPS-only and the crank uplink WSS-only. The app shows success only after the transaction is confirmed with no error. The phone is a Redmi 14C: accelerometer only, no gyroscope. On mainnet the wallet sends the clock-in itself, and twice the app did not hear that it had landed; it now writes down what it hands the wallet and arms the shift it prepared once the Rig shows it on-chain. That has run on the emulator, not yet on the phone.</aside>
+  <aside class="notes">Only the launcher activity, the tile service and the two widget receivers are exported. The trampoline reads no intent extras. Release builds strip every android.util.Log call, backups are off, RPC is HTTPS-only and the crank uplink WSS-only. The app shows success only after the transaction is confirmed with no error. The phone is a Redmi 14C: accelerometer only, no gyroscope. On mainnet the wallet sends the clock-in itself, and twice the app did not hear that it had landed; it now writes down what it hands the wallet and arms the shift it prepared once the Rig shows it on-chain. That repair has run on the emulator; on the phone the failure has not come back in three clock-ins. The same evening Jupiter refused the sign-in token it had given the app the day before, and the wallet library reported that as a failed connection: the app now reads the wallet's real answer, drops a refused token and asks for one more tap.</aside>
 </section>
 
 <!-- 12 -->
@@ -756,7 +757,7 @@
       </div>
       <figure class="shot" style="width:620px">
         <div class="frame" style="height:560px"><img src="img/dashboard-milestones.png" alt="The live dashboard's ORE milestones page: 1 registered rig against a target of 250, and 0 SGT-verified rigs against a target of 50" style="margin-top:-176px"></div>
-        <figcaption>The live dashboard, mainnet data, 11 Oct 2026, 16:35 UTC: 1 rig, the founder's.</figcaption>
+        <figcaption>The live dashboard, mainnet data, 11 Oct 2026, 20:09 UTC: 1 rig, the founder's.</figcaption>
       </figure>
     </div>
   </div>
@@ -807,7 +808,7 @@
       <div class="tile"><p class="n">214</p><p class="t">crank</p><p class="d">plus 14 on the fork, 1 end to end</p></div>
       <div class="tile"><p class="n">116</p><p class="t">registrar</p><p class="d">19 on real Google attestation chains</p></div>
       <div class="tile"><p class="n">477</p><p class="t">indexer</p><p class="d">chain data to a public API</p></div>
-      <div class="tile"><p class="n">1,324</p><p class="t">Android app</p><p class="d">JVM unit tests; 5 more skipped</p></div>
+      <div class="tile"><p class="n">1,330</p><p class="t">Android app</p><p class="d">JVM unit tests; 5 more skipped</p></div>
       <div class="tile"><p class="n">69</p><p class="t">sgt-verify</p><p class="d">host tests of the Seeker check</p></div>
       <div class="tile"><p class="n">48</p><p class="t">dashboard</p><p class="d">every number from chain data</p></div>
       <div class="tile"><p class="n">30</p><p class="t">p256-introspect</p><p class="d">the heartbeat's signature check</p></div>
@@ -848,11 +849,12 @@
           <tr><td>Clock-out</td><td class="v"><span data-slot="clock-out-tx"><a class="sig" href="https://solscan.io/tx/3VfbzUZHzAYj468iXo2bnsqRfAcrTMt76dHzWFT51ZnrvseFF1bYEzo6fAqurTG8tB9AM1cPRYsXtJK2R25LuTUm" title="3VfbzUZHzAYj468iXo2bnsqRfAcrTMt76dHzWFT51ZnrvseFF1bYEzo6fAqurTG8tB9AM1cPRYsXtJK2R25LuTUm">3Vfb…uTUm</a></span></td></tr>
           <tr><td>SOL taken back: 0.00502704 SOL, what the screen said, to the lamport</td><td class="v"><a class="sig" href="https://solscan.io/tx/46NXJnX54wUdTgBVBGwfid8NQeqRL3LkGCyFkhtqJuVVHwp6R2UbnNxxhTSv8FHgtuyJupEPRQi4Frqf4NAjDcFF" title="46NXJnX54wUdTgBVBGwfid8NQeqRL3LkGCyFkhtqJuVVHwp6R2UbnNxxhTSv8FHgtuyJupEPRQi4Frqf4NAjDcFF">46NX…DcFF</a></td></tr>
           <tr><td>The shift: 6 rounds dark, 0.005 SOL placed on 20 squares</td><td class="v"><span data-slot="shift-summary">no ORE won</span></td></tr>
+          <tr><td>Since then, on 11 Oct: 4 more shifts, 15 digs in 15 rounds</td><td class="v">docs/MAINNET.md</td></tr>
         </table>
       </div>
       <figure class="shot" style="width:600px">
-        <div class="frame" style="height:452px"><img src="img/dashboard-overview.png" alt="The live dashboard's overview, marked On-chain data, Solana mainnet: 1 rig, 0 Seeker-verified, 1 guest rig, 1 nightly active rig, 10 rounds dug" style="margin-top:-330px"></div>
-        <figcaption>The live dashboard, 11 Oct 2026, 16:35 UTC. The rig is the founder's; 10 rounds dug over two evenings.</figcaption>
+        <div class="frame" style="height:452px"><img src="img/dashboard-overview.png" alt="The live dashboard's overview, marked On-chain data, Solana mainnet: 1 rig, 0 Seeker-verified, 1 guest rig, 1 nightly active rig, 20 rounds dug" style="margin-top:-330px"></div>
+        <figcaption>The live dashboard, 11 Oct 2026, 20:09 UTC. The rig is the founder's; 20 rounds dug over three evenings.</figcaption>
       </figure>
     </div>
     <div class="open">
@@ -916,7 +918,7 @@
           <li>The program, its bytes equal to the build</li>
           <li>Crank, registrar, indexer, dashboard running</li>
           <li>The Redmi's TEE rig key, attested</li>
-          <li>Its first shift, under the raised demo ceiling: <span data-slot="shift-summary">5 digs, a BREAK, a clock-out, SOL back to the lamport</span></li>
+          <li>Its first shift, under the raised demo ceiling: <span data-slot="shift-summary">5 digs, a BREAK, a clock-out, SOL back to the lamport</span>; 15 more digs since</li>
         </ul>
       </div>
       <div class="card">

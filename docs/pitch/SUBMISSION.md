@@ -65,10 +65,10 @@ whatever is no longer true.
 | `portingFeatures` | "No. All code was written in this repository for this project." | `[founder to confirm]` |
 | `newMobileDevelopment` | "Yes. A native Android app in Kotlin and Jetpack Compose (minSdk 31, targetSdk 36), written in this repository: a Quick Settings tile, a foreground shift service, Android Keystore P-256 signing and Mobile Wallet Adapter 2.2.0. It is not a PWA or WebView wrapper." | `android/README.md` |
 | `skrIntegration` | Version A below (at most 950 characters); B is a shorter text that is also true | `docs/SKR.md` §8 |
-| Deck URL | `https://oojae.github.io/heads-down/deck/` (as a file: `https://oojae.github.io/heads-down/deck/heads-down-deck.pdf`) | 18 slides, published 2026-10-11 from `site/deck/` (`docs/pitch/DECK.md` is its script; `scripts/pitch/render-deck.sh` prints the PDF). Its app pictures are from the emulator and say so: replace them, and the sentences that say the redesigned build has not run on the Redmi, once it has |
+| Deck URL | `https://oojae.github.io/heads-down/deck/` (as a file: `https://oojae.github.io/heads-down/deck/heads-down-deck.pdf`) | 18 slides, published 2026-10-11 from `site/deck/` (`docs/pitch/DECK.md` is its script; `scripts/pitch/render-deck.sh` prints the PDF). Two of its app pictures are from the Redmi (11 October) and the others from the emulator; each caption says which |
 | Video URL | `[TBD: video URL]` | filmed from `docs/pitch/DEMO_SCRIPT.md` |
 | Repositories | `https://github.com/OoJae/heads-down` | public since 2026-10-01 |
-| APK URL | `[TBD: APK URL]` | Still to do. No APK is hosted. A debug-signed mainnet build of the redesigned app with the clock-in fix was made on 2026-10-11 and is not hosted: it has not run on the Redmi yet, and hosting it is the founder's call. Needed: a release signing key (none exists; the build that ran on the phone is debug-signed), the registrar set to accept that key's certificate (today it accepts only the founder's debug certificate, `docs/DEPLOY.md` §10.4), a place to host the file, and one install from a clean state on the Redmi 14C |
+| APK URL | `[TBD: APK URL]` | Still to do. No APK is hosted. A debug-signed mainnet build of the redesigned app was made on 2026-10-11; the founder agreed to host it as a GitHub release once it has clocked out on the Redmi. Needed: a release signing key (none exists; the build that ran on the phone is debug-signed), the registrar set to accept that key's certificate (today it accepts only the founder's debug certificate, `docs/DEPLOY.md` §10.4), a place to host the file, and one install from a clean state on the Redmi 14C |
 
 ### `skrIntegration`
 
@@ -235,7 +235,7 @@ code with passing tests in the repo. **Designed** means specified, not built. **
   ([one of the two](https://solscan.io/tx/4EJvGg7akbzgQRbT2cYteaHCogpnEaBpP2ncTHLFS1mtCWt5e9aVFJEmeiFgbaShHC7H7t2EkpwxQYKpcWq6PUpM)).
   `docs/pitch/DEMO_SCRIPT.md` §4
 - Tests: program 171, crank 214, registrar 116, `p256-introspect` 30, `sgt-verify` host 69,
-  indexer 477, dashboard 48, Android 1,324. `docs/pitch/DECK.md` slide 15
+  indexer 477, dashboard 48, Android 1,330. `docs/pitch/DECK.md` slide 15
 - A security review before deployment: 114 findings, 18 confirmed by a reproducing test, each fix
   of a confirmed finding with its regression test, and the open items written down. `docs/SECURITY_REVIEW.md`
 

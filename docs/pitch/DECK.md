@@ -11,10 +11,11 @@ longer sentences are in the speaker notes.
   filled in below: every transaction is in `docs/MAINNET.md` with what it did. In the built deck
   the spans that carry them keep their names (`data-slot="first-clock-in-tx"`, `first-dig-tx`,
   `digs-landed`, `break-tx`, `replay-skipped-tx`, `clock-out-tx`, `shift-summary`).
-- The app pictures (`site/deck/img/app-*.png`) are screenshots of the real app, the localdev
-  build, on an Android 14 emulator against the local fork of mainnet, taken on 2026-10-11. Each
-  caption says "emulator". The redesigned build has not run on the Redmi yet; when it has, the
-  pictures and the sentences that say so are to be replaced together.
+- The app pictures: `site/deck/img/redmi-*.png` are screenshots from the founder's Redmi 14C on
+  mainnet on the evening of 2026-10-11; `site/deck/img/app-*.png` are the same build (the
+  localdev flavour) on an Android 14 emulator against the local fork of mainnet, taken the same
+  day. Each caption says which. On the phone the redesigned build clocked in three times and dug
+  ten rounds; its clock-out and its way out have run on the emulator only.
 - `[TBD: founder]`: only the founder can supply it (the photo, the personal line).
 
 **Status chips used on slides.** **Built** = code plus passing tests in the repo. **Built, not on a
@@ -134,9 +135,9 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
     `3VfbzUZHzAYj468iXo2bnsqRfAcrTMt76dHzWFT51ZnrvseFF1bYEzo6fAqurTG8tB9AM1cPRYsXtJK2R25LuTUm`, SOL back
     `46NXJnX54wUdTgBVBGwfid8NQeqRL3LkGCyFkhtqJuVVHwp6R2UbnNxxhTSv8FHgtuyJupEPRQi4Frqf4NAjDcFF`:
     0.00502704 SOL, to the lamport."
-- **Visual:** The seven steps as rows, a status chip on each. Beside them two screenshots of the
-  app on the emulator: the home screen armed (`site/deck/img/app-home-armed.png`) and the
-  clock-out sheet (`site/deck/img/app-clock-out.png`).
+- **Visual:** The seven steps as rows, a status chip on each. Beside them the home screen armed,
+  on the Redmi (`site/deck/img/redmi-home-armed.png`), and the clock-out sheet on the emulator
+  (`site/deck/img/app-clock-out.png`).
 - **Speaker notes:** "The habit hangs on three things people already do every night: bedtime, the
   charger and the alarm. If the OS kills the app, the rig goes cold and nothing is spent. On the
   tenth of October my Redmi did all of this on mainnet except the morning reveal: one approval in
@@ -144,8 +145,9 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   when I picked it up and unlocked it, a clock-out, and the SOL back. Two honest notes. On the
   phone I tapped Clock in inside the app; the tile's path has run on the emulator. And that
   evening the app did not hear that its first clock-in had landed, so I approved a second one;
-  the app now finds a landed clock-in on-chain by itself, which has run on the emulator and not
-  yet on the phone. The digs ran under a price ceiling I raised for the demo."
+  the app now finds a landed clock-in on-chain by itself. That repair has run on the emulator; on
+  the phone the failure has not come back in the three clock-ins since. The digs ran under a
+  price ceiling I raised for the demo."
 - **Serves:** Public: Stickiness & PMF, UX. Align: UX, UI.
 - **Sources:** `docs/MAINNET.md` (the first shift, every transaction), `android/README.md`
   (clock-in, shift loop), `docs/SPEC.md` (CORE_LOOP), `scripts/devstack/emulator-smoke.sh` (the
@@ -181,11 +183,13 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
     only for a hot rig and for ORE."
   - "The rules: one action, in the thumb zone. The most a shift can place beside it, before the
     wallet opens. Nothing moves by itself."
-  - "The real app on an Android 14 emulator against the local fork of mainnet, 11 Oct 2026. The
-    reveal shows the sample night the app offers before a first haul, and says so on screen. The
-    redesigned build has not run on the Redmi yet."
-- **Visual:** Four screenshots in a row (`site/deck/img/app-home-cold.png`, `app-home-armed.png`,
-  `app-take-back.png`, `app-reveal.png`): cold, armed, Take it back, the morning reveal.
+  - "The first two: the app on the Redmi 14C, on mainnet, 11 Oct 2026, where this build clocked
+    in three times and dug ten rounds. The last two: the same build on an Android 14 emulator
+    against the local fork of mainnet; the reveal shows the sample night the app offers before a
+    first haul, and says so on screen."
+- **Visual:** Four screenshots in a row (`site/deck/img/redmi-home-cold.png`,
+  `redmi-home-armed.png`, `app-take-back.png`, `app-reveal.png`): cold and armed on the Redmi,
+  Take it back and the morning reveal on the emulator.
 - **Speaker notes:** "The first build was a plain dark screen with pill buttons. After it worked
   on mainnet I redesigned it around one idea: this app does its job face-down, so its mark is the
   underside. The slab on the home screen is drawn by one small shader and is held level with the
@@ -193,8 +197,9 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   teaches the one gesture the product needs. Gold is rationed: it is light, or an amount of ORE,
   never a button. Every sentence and every test tag of the screens that ran on mainnet stayed as
   it was, so the app's tests and the end-to-end run on the emulator, with Solana Mobile's test
-  wallet, pass unchanged. What you see here is that emulator; the redesigned build has not run
-  on my phone yet."
+  wallet, pass unchanged. The first two pictures are my phone, on the evening of the eleventh:
+  this build clocked in three times there and dug ten rounds. The other two are the emulator,
+  where its clock-out and the way out have run; on the phone those two ran with the first build."
 - **Serves:** Public: UX, Presentation & Demo. Align: UI, UX.
 - **Sources:** `android/core/design/` (tokens, type, components), `android/README.md` ("The
   Underside"), `android/app/src/main/kotlin/xyz/headsdown/ui/slab/` (the slab),
@@ -365,9 +370,10 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   - "HyperOS keep-alive setup and a 'killed last night' check"
   - "Android 16 Live Update notification, with a 14/15 fallback"
   - "A clock-in the wallet sent is found on-chain if the app never heard so"
-  - "1,324 JVM unit tests passed (5 more skipped)"
-  - "Ran on a Redmi 14C, Android 16, HyperOS 3, on 10 October 2026: setup, TEE rig key,
-    attestation, and a short shift on mainnet. **On mainnet**"
+  - "1,330 JVM unit tests passed (5 more skipped)"
+  - "Ran on a Redmi 14C, Android 16, HyperOS 3, on 10 and 11 October 2026: setup, TEE rig key,
+    attestation, and five short shifts on mainnet, three of them on the redesigned build.
+    **On mainnet**"
 - **Visual:** The list, with two figures beside it (the test count and the phone), and a
   screenshot of setup's five steps on the emulator (`site/deck/img/app-setup.png`).
 - **Speaker notes:** "Only the launcher activity, the tile service and the two widget receivers are exported. The trampoline
@@ -376,11 +382,14 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   confirmed with no error. The phone is a Redmi 14C: accelerometer only, no gyroscope. On mainnet
   the wallet sends the clock-in itself, and twice the app did not hear that it had landed; it now
   writes down what it hands the wallet and arms the shift it prepared once the Rig shows it
-  on-chain. That has run on the emulator, not yet on the phone."
+  on-chain. That repair has run on the emulator; on the phone the failure has not come back in
+  three clock-ins. The same evening Jupiter refused the sign-in token it had given the app the
+  day before, and the wallet library reported that as a failed connection: the app now reads the
+  wallet's real answer, drops a refused token and asks for one more tap."
 - **Serves:** Public: UX. Align: UX, UI.
 - **Sources:** `android/README.md` (modules, clock-in, security notes),
   `android/INTERFACE-NOTES.md` §4 (one legacy packet), `docs/MAINNET.md` (the shift on the Redmi),
-  `docs/SECURITY_REVIEW.md` §5 (1,324 tests passed).
+  `docs/SECURITY_REVIEW.md` §5 (1,330 tests passed).
 
 ## Slide 12: SKR is collateral and gifts, and never pays you for holding it
 
@@ -487,7 +496,7 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   | Registrar (SIWS + Key Attestation) | 116 passed, 19 of them on real Google attestation chains | `registrar/README.md`, `README.md` |
   | Indexer | 477 passed | `docs/SECURITY_REVIEW.md` §5 |
   | Dashboard | 48 passed | the 48 cases in `dashboard/test`; re-run 2026-10-03 |
-  | Android | 1,324 passed; 5 more are skipped | `docs/SECURITY_REVIEW.md` §5; re-run 2026-10-11 |
+  | Android | 1,330 passed; 5 more are skipped | `docs/SECURITY_REVIEW.md` §5; re-run 2026-10-11 |
   | `p256-introspect` | 30 passed | `crates/p256-introspect/README.md` |
   | `sgt-verify` (host suites) | 69 passed, plus LiteSVM suites | `crates/sgt-verify/README.md` |
 
@@ -529,6 +538,7 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   | Clock-out | `3VfbzUZHzAYj468iXo2bnsqRfAcrTMt76dHzWFT51ZnrvseFF1bYEzo6fAqurTG8tB9AM1cPRYsXtJK2R25LuTUm` |
   | SOL taken back: 0.00502704 SOL, what the screen said, to the lamport | `46NXJnX54wUdTgBVBGwfid8NQeqRL3LkGCyFkhtqJuVVHwp6R2UbnNxxhTSv8FHgtuyJupEPRQi4Frqf4NAjDcFF` |
   | The shift: 6 rounds dark, 0.005 SOL placed on 20 squares | no ORE won |
+  | Since then, on 11 October: 4 more shifts, 15 digs in 15 rounds | `docs/MAINNET.md` |
 
   - "Demo build: price ceiling raised to 1.0 SOL per ORE (default 0.53) under a wallet ceiling of
     1.2; budgets cut to 0.005 SOL a shift and 0.035 SOL a week."
