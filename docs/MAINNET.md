@@ -357,7 +357,8 @@ What it adds to the first evening:
   checkpoint when the shift's budget was used up. The crank settled it seven hours later
   (transaction 23), at the first sweep after the round was 400 rounds old, before ORE would have
   forfeited it.
-- **Round 435,572 sent back 0.00091575 SOL, not 0.000891.** Why it differs was not looked into.
+- **Round 435,572 sent back 0.00091575 SOL, not 0.000891.** It was not looked into that evening;
+  see "The third evening" for what the Miner showed a day later.
 - **The shift is still open.** At 16:25 UTC on 11 October the Rig was Cooling with shift 4 open
   and its plan window over. It has not been clocked out, and the Automation has not been emptied.
 - **Not an overnight run.** The phone was in use that night; the shift lasted about twenty
@@ -406,6 +407,16 @@ What it showed:
   any heartbeat it has already taken: 11,025 and 11,042 lamports of the crank's fees for nothing.
   Two in ten digs that evening, none in nine before. A second attempt that reused the first's
   signed transaction could not land twice; the crank signs a new one. Not changed.
+- **ORE has been mined.** At 20:15 UTC the rig's ORE Miner
+  [`A6Rjhk1S…`](https://solscan.io/account/A6Rjhk1SHe9vKvfpnQ6HHMWrEtRxd8i8hdYXnUYEomAm) read:
+  `lifetime_deployed` 20,000,000 lamports (twenty digs of 0.001 SOL), `lifetime_rewards_sol`
+  17,003,250 (the nineteen rounds settled: sixteen sent back 891,000 and three sent back
+  915,750), `rewards_ore` 193,224,455 and `refined_ore` 66,899, `lifetime_rewards_ore`
+  193,291,354. ORE has 11 decimals, so that is 0.00193 ORE. It was 0 after the first evening.
+  Which rounds it came from was not traced; the three rounds that sent back more SOL (435,572,
+  436,532 and 436,535) are the candidates. In SOL the nineteen settled rounds cost 1,996,750
+  lamports of what was placed and 190,000 of executor fees: about 1.13 SOL per ORE on this small
+  sample, with the wallet's ceiling at 1.2. The ORE is in the Miner, unclaimed.
 - **The first shift lasted 29 seconds.** The charger came out and the phone signed the BREAK a
   Night Shift signs for that (reason 7). No dig, and the next clock-in paid for sealing it.
 - **Three clock-ins, where one and a clock-out were meant.** After a pickup the home screen's

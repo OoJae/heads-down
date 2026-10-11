@@ -43,10 +43,11 @@ outside them is a note for the founder. Form fields are listed in
 > Status on 10 October 2026: the heads_down program is deployed on Solana mainnet
 > (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p), and the crank, the registrar, the indexer and
 > the dashboard run against it. One rig, the founder's own phone (a Redmi 14C, with Jupiter Mobile
-> as its wallet), has run one short shift: five digs of 0.001 SOL, each one gated by a heartbeat
-> signed by a key in the phone's secure hardware, then a BREAK when the phone was unlocked, a
-> clock-out, and the SOL left in its ORE Automation taken back. That shift ran on a debug build with the cost
-> ceiling raised; the default build would not have dug that evening. No ORE has been won. There are no
+> as its wallet), has run five short shifts on 10 and 11 October: 20 digs of 0.001 SOL, each one
+> gated by a heartbeat signed by a key in the phone's secure hardware, a BREAK each time a shift
+> was interrupted, and after the first shift a clock-out and the SOL left in its ORE Automation taken
+> back. They ran on a debug build with the cost ceiling raised; the default build would not have dug
+> on those evenings. The rig's Miner holds its first 0.0019 ORE, unclaimed. There are no
 > users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
 > has been no third-party audit.
 
@@ -252,10 +253,11 @@ not the founder, a change of the upgrade key. The record to check it against is
 - "Status on 10 October 2026: the heads_down program is deployed on Solana mainnet
   (HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p), and the crank, the registrar, the indexer and
   the dashboard run against it. One rig, the founder's own phone (a Redmi 14C, with Jupiter Mobile
-  as its wallet), has run one short shift: five digs of 0.001 SOL, each one gated by a heartbeat
-  signed by a key in the phone's secure hardware, then a BREAK when the phone was unlocked, a
-  clock-out, and the SOL left in its ORE Automation taken back. That shift ran on a debug build with the cost
-  ceiling raised; the default build would not have dug that evening. No ORE has been won. There are no
+  as its wallet), has run five short shifts on 10 and 11 October: 20 digs of 0.001 SOL, each one
+  gated by a heartbeat signed by a key in the phone's secure hardware, a BREAK each time a shift
+  was interrupted, and after the first shift a clock-out and the SOL left in its ORE Automation taken
+  back. They ran on a debug build with the cost ceiling raised; the default build would not have dug
+  on those evenings. The rig's Miner holds its first 0.0019 ORE, unclaimed. There are no
   users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
   has been no third-party audit."
 
@@ -292,5 +294,6 @@ described the state before the deploy.
       release signing key exists (see the APK row in section 2).
 - [x] The dashboard's data is real. The indexer it reads serves the dataset `mainnet`, not the
       simulator (read 2026-10-10 20:44 UTC: 1 rig, 5 rounds dug, 5,000,000 lamports deployed,
-      0 ORE mined). Look at the page itself once before filming.
+      0 ORE mined; on 2026-10-11 at 20:09 UTC: 1 rig, 20 rounds dug). Look at the page itself
+      once before filming.
 - [ ] Radiants security audit run on the public repo, and its findings fixed.

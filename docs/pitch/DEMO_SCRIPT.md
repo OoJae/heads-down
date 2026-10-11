@@ -60,7 +60,8 @@ time).
   ceiling to 1.2. **Disclose it in the VO and a caption.** What it cost that evening: each
   0.001 SOL dig also paid the 10,000-lamport executor fee, and for each of the four rounds
   settled that evening ORE sent 0.000891 SOL back. The fifth round, 435,228, was settled by the
-  next evening's first dig and sent back the same. No ORE came out of the five.
+  next evening's first dig and sent back the same. No ORE came out of the five; the fifteen
+  digs of 11 October brought the rig's first 0.0019 ORE (`docs/MAINNET.md`, the third evening).
 
 **B. Local devstack (rehearsal and fallback).** `scripts/devstack/up.sh` (docs/DEVSTACK.md): a
 local validator with the live ORE binary and accounts loaded, the program, the crank and the

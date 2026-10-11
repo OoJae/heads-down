@@ -93,6 +93,8 @@ What that run was not: it was a debug build with a demo policy that raised the c
 1.0 SOL per ORE. ORE's own cost figure was 0.690 to 0.704 SOL per ORE during the shift, above the
 app's default of 0.53, so the default build would have dug nothing. No ORE came out of the four
 rounds settled that evening, nor of the fifth, which the next evening's first dig settled. The
+fifteen digs of 11 October brought the rig's first ORE: its Miner holds 0.0019 ORE, unclaimed
+([docs/MAINNET.md](docs/MAINNET.md#the-third-evening-11-october-2026-the-redesigned-app-on-the-phone)). The
 first clock-in armed a shift that a second clock-in sealed about five minutes later with no round dug in it: the wallet had
 sent the transaction and the app never heard so, so the phone stayed cold and the founder
 approved a second clock-in. It happened again the next night. The app now writes down what it

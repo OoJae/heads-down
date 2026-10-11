@@ -522,7 +522,7 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
 - **Message:** The program is on mainnet since 10 October 2026 and every figure links to the chain.
   There are no users yet, and none is claimed.
 - **On slide:**
-  - "On mainnet since 10 October 2026. One phone has worked a shift. No users yet."
+  - "On mainnet since 10 October 2026. One phone has mined its first ORE. No users yet."
 
   | What | Where to check it |
   |---|---|
@@ -538,7 +538,7 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   | Clock-out | `3VfbzUZHzAYj468iXo2bnsqRfAcrTMt76dHzWFT51ZnrvseFF1bYEzo6fAqurTG8tB9AM1cPRYsXtJK2R25LuTUm` |
   | SOL taken back: 0.00502704 SOL, what the screen said, to the lamport | `46NXJnX54wUdTgBVBGwfid8NQeqRL3LkGCyFkhtqJuVVHwp6R2UbnNxxhTSv8FHgtuyJupEPRQi4Frqf4NAjDcFF` |
   | The shift: 6 rounds dark, 0.005 SOL placed on 20 squares | no ORE won |
-  | Since then, on 11 October: 4 more shifts, 15 digs in 15 rounds | `docs/MAINNET.md` |
+  | Since then, on 11 October: 4 more shifts, 15 digs in 15 rounds | 0.0019 ORE mined (`docs/MAINNET.md`, the third evening) |
 
   - "Demo build: price ceiling raised to 1.0 SOL per ORE (default 0.53) under a wallet ceiling of
     1.2; budgets cut to 0.005 SOL a shift and 0.035 SOL a week."
@@ -557,7 +557,10 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   BREAK, I clocked out and took the SOL back, and the wallet received exactly what the screen had
   said. The digs ran under a ceiling I raised for the demo, with the budget cut to 0.005 SOL a
   shift. What that evening found, including a dig window that was too short and a clock-in the
-  app did not hear about, is written down in `docs/MAINNET.md` with what was changed."
+  app did not hear about, is written down in `docs/MAINNET.md` with what was changed. The next
+  day the phone worked four more short shifts: fifteen digs in fifteen rounds, and the rig's
+  first ORE, 0.0019 of it, sitting unclaimed in its own Miner account. On that small sample it
+  cost about 1.13 SOL per ORE: this is not a money machine, and the page says so."
 - **Serves:** Public: Stickiness & PMF. Align: Ecosystem Impact.
 - **Sources:** `docs/MAINNET.md` (every transaction of the shift, and what it cost),
   `deploy/receipts/mainnet/20261010T184116Z-fresh-d67a1a40c2a0.json`,
@@ -598,7 +601,8 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
     on-chain; the SGT check; Stack, Focus Bond, Gift a Rig and the Bury auction."
   - "On mainnet, 10 October 2026: the program, its bytes equal to the build; crank, registrar,
     indexer and dashboard running; the Redmi's TEE rig key attested. Its first shift, under the raised
-    demo ceiling: 5 digs, a BREAK, a clock-out, SOL back to the lamport"
+    demo ceiling: 5 digs, a BREAK, a clock-out, SOL back to the lamport; 15 more digs since, and
+    its first 0.0019 ORE"
   - "Open, and next: one upgrade key, then a multisig, then an immutable v1; no third-party audit;
     the Stack and Gift screens and the buy leg; a whole night, and the morning reveal, on the phone."
   - "Founder: solo, Nigeria (WAT), building with AI agents on one Redmi 14C.
