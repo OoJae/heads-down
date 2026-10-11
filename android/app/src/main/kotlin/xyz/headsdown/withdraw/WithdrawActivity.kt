@@ -9,6 +9,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -36,9 +37,14 @@ import xyz.headsdown.core.design.HeadsDownTheme
 import xyz.headsdown.core.design.components.BarButton
 import xyz.headsdown.core.design.components.BarButtonStyle
 import xyz.headsdown.core.design.components.Choice
+import xyz.headsdown.core.design.components.LocalHdHaptics
 import xyz.headsdown.core.design.components.NoticeTone
 import xyz.headsdown.core.wallet.HeadsDownWallet
+import xyz.headsdown.feature.shift.ShiftStatusRepository
+import xyz.headsdown.feature.shift.isRunning
 import xyz.headsdown.rig.ClockInPolicy
+import xyz.headsdown.surface.haptics.Haptics
+import xyz.headsdown.ui.AppHaptics
 import javax.inject.Inject
 import android.graphics.Color as AndroidColor
 
@@ -54,6 +60,10 @@ class WithdrawActivity : ComponentActivity() {
 
     @Inject lateinit var wallet: HeadsDownWallet
 
+    @Inject lateinit var haptics: Haptics
+
+    @Inject lateinit var shiftStatus: ShiftStatusRepository
+
     /** Registered before the Activity is STARTED, as MWA requires. */
     private lateinit var sender: ActivityResultSender
 
@@ -66,19 +76,23 @@ class WithdrawActivity : ComponentActivity() {
         title = WithdrawLedger.TITLE
         sender = ActivityResultSender(this)
         val model = vm.model
+        // No cue reaches the motor while a shift is running: the governor refuses a shift moment.
+        val appHaptics = AppHaptics(haptics) { shiftStatus.snapshot.value.state.isRunning }
         setContent {
             HeadsDownTheme {
-                val state by model.state.collectAsStateWithLifecycle()
-                WithdrawScreen(
-                    state = state,
-                    onConnect = { model.connect { wallet.connect(sender) } },
-                    onRevoke = model::setRevoke,
-                    onCloseRig = model::setCloseRig,
-                    onConfirm = { model.confirm { prepare -> wallet.signAndSendInSession(sender, prepare) } },
-                    onRetry = model::load,
-                    onClose = ::finish,
-                    onOpenTransaction = { openExplorerLink(it) },
-                )
+                CompositionLocalProvider(LocalHdHaptics provides appHaptics) {
+                    val state by model.state.collectAsStateWithLifecycle()
+                    WithdrawScreen(
+                        state = state,
+                        onConnect = { model.connect { wallet.connect(sender) } },
+                        onRevoke = model::setRevoke,
+                        onCloseRig = model::setCloseRig,
+                        onConfirm = { model.confirm { prepare -> wallet.signAndSendInSession(sender, prepare) } },
+                        onRetry = model::load,
+                        onClose = ::finish,
+                        onOpenTransaction = { openExplorerLink(it) },
+                    )
+                }
             }
         }
     }
