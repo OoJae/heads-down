@@ -49,6 +49,8 @@ import xyz.headsdown.ui.HomeViewModel
 import xyz.headsdown.ui.NightShiftIntro
 import xyz.headsdown.ui.OnboardingScreen
 import xyz.headsdown.ui.launch
+import xyz.headsdown.ui.setup.RootScreen
+import xyz.headsdown.ui.setup.rootScreen
 import xyz.headsdown.ui.theme.HeadsDownTheme
 import xyz.headsdown.withdraw.WithdrawActivity
 import javax.inject.Inject
@@ -114,9 +116,6 @@ private fun AppLocals(content: @Composable () -> Unit) {
     CompositionLocalProvider(content = content)
 }
 
-/** What fills the screen. */
-private enum class RootScreen { Intro, Setup, Home }
-
 /** How long nothing can be tapped after one screen replaced another under the same thumb. */
 private const val REST_AFTER_SWITCH_MILLIS = 400L
 
@@ -152,21 +151,19 @@ private fun HeadsDownRoot(
     var rereadIntro by rememberSaveable { mutableStateOf(false) }
     // Until the phone's settings are read, only one thing is known: whether the introduction was
     // read. Someone who read it is most likely set up, and sees Home (its own loading state);
-    // someone who did not sees the first-launch screen. Neither sees the other flash by.
-    val setupDue = if (loaded) !onboarding.allDone else !onboarding.introSeen
-    val showSetup = setupChoice ?: setupDue
-    val screen = when {
-        rereadIntro -> RootScreen.Intro
-        showSetup -> RootScreen.Setup
-        else -> RootScreen.Home
-    }
+    // someone who did not sees the first-launch screen. Neither sees the other flash by. The
+    // answer is taken once, as the app opens: "Set up my rig" tapped before the settings were
+    // read marks the introduction read, and must not put Home on screen for the moment between.
+    val unreadAtOpen = remember { !onboarding.introSeen }
+    val screen = rootScreen(rereadIntro, setupChoice, loaded, onboarding.allDone, unreadAtOpen)
     // The hero's entrance belongs to the screen the app opened on, and is not played again once
     // another screen has been in its place.
     val openedOn = rememberSaveable { screen }
     var movedOn by rememberSaveable { mutableStateOf(false) }
 
     BackHandler(enabled = rereadIntro) { rereadIntro = false }
-    BackHandler(enabled = !rereadIntro && showSetup && setupChoice == true) { setupChoice = false }
+    // Setup that was opened from the home screen goes back to it; setup that is due does not.
+    BackHandler(enabled = screen == RootScreen.Setup && setupChoice == true) { setupChoice = false }
 
     // One screen takes another's place under the same thumb, and each has its bar in the same
     // spot: for a moment after a switch nothing takes a tap, so the second half of a double tap

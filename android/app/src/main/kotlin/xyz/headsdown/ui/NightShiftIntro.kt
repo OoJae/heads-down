@@ -1,6 +1,5 @@
 package xyz.headsdown.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -119,29 +118,21 @@ fun NightShiftIntro(onContinue: () -> Unit, continueLabel: String = NightShiftCo
 @Composable
 private fun RitualStep(index: Int, step: NightShiftCopy.Step) {
     val colors = Hd.colors
-    val shape = Hd.shapes.chip
-    // "Heads down" is the step the app is named after: its badge is the filled one.
-    val named = index == 2
     Row(
         Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
+        // Every badge is the outlined one. On the setup screen a filled badge says "done"; a
+        // filled one here, on a step of a ritual that is only being described, would say the same.
         Box(
-            Modifier
-                .padding(top = 2.dp)
-                .size(28.dp)
-                .then(if (named) Modifier.background(colors.chalk, shape) else Modifier.border(HdDimens.Hairline, colors.ash, shape)),
+            Modifier.padding(top = 2.dp).size(28.dp).border(HdDimens.Hairline, colors.ash, Hd.shapes.chip),
             contentAlignment = Alignment.Center,
         ) {
             // The number is the badge's drawing; the order of the steps already says it. Like the
             // badge it does not grow with the font, or a digit would be cut by its square.
             ProvideCappedFontScale(max = 1f) {
-                BasicText(
-                    "$index",
-                    Modifier.clearAndSetSemantics { },
-                    style = Hd.type.label.copy(color = if (named) colors.onChalk else colors.ash),
-                )
+                BasicText("$index", Modifier.clearAndSetSemantics { }, style = Hd.type.label.copy(color = colors.ash))
             }
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
