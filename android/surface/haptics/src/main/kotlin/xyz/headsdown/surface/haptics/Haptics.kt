@@ -66,6 +66,7 @@ class Haptics(
             is HapticPlan.Composed -> VibrationEffect.startComposition().apply {
                 plan.steps.forEach { addPrimitive(it.primitiveId, it.scale, it.delayMillis) }
             }.compose()
+            is HapticPlan.Predefined -> predefined(plan.effectId)
             is HapticPlan.AmplitudeWaveform ->
                 VibrationEffect.createWaveform(plan.timings.toLongArray(), plan.amplitudes.toIntArray(), NO_REPEAT)
             is HapticPlan.OnOffWaveform -> VibrationEffect.createWaveform(plan.timings.toLongArray(), NO_REPEAT)
@@ -74,6 +75,10 @@ class Haptics(
         if (effect != null) vibrate(effect, moment)
         if (plan.withSound) thunkSound().play()
     }
+
+    // The id only ever comes from HapticScripts, which uses the VibrationEffect.EFFECT_* constants.
+    @SuppressLint("WrongConstant")
+    private fun predefined(effectId: Int): VibrationEffect = VibrationEffect.createPredefined(effectId)
 
     private fun vibrate(effect: VibrationEffect, moment: HapticMoment) {
         val v = vibrator ?: return

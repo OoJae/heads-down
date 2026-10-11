@@ -67,6 +67,85 @@ class HapticGovernorTest {
         assertTrue(governor.tryAcquire(HapticCue.COOLING_TICK, HapticMoment.SHIFT))
     }
 
+    private val ui = listOf(HapticCue.UI_KNOCK, HapticCue.UI_SNAP, HapticCue.UI_CONFIRM)
+
+    @Test
+    fun `UI cues exist only in the open app, never during a shift or over the reveal`() {
+        ui.forEach { cue ->
+            assertFalse("$cue during a shift", governor.tryAcquire(cue, HapticMoment.SHIFT))
+            assertFalse("$cue over the reveal", governor.tryAcquire(cue, HapticMoment.REVEAL))
+            assertEquals(listOf(HapticMoment.FOREGROUND), HapticMoment.entries.filter { HapticGovernor.allowedAt(cue, it) })
+        }
+        // A refusal took nothing: each still plays in the foreground, and the shift's budget is whole.
+        ui.forEach { cue -> assertTrue("$cue", governor.tryAcquire(cue, HapticMoment.FOREGROUND)) }
+        assertTrue(governor.tryAcquire(HapticCue.ARM_THUNK, HapticMoment.SHIFT))
+        now += 61_000
+        assertTrue(governor.tryAcquire(HapticCue.COOLING_TICK, HapticMoment.SHIFT))
+    }
+
+    @Test
+    fun `each UI cue has its own minimum interval`() {
+        for ((cue, interval) in listOf(HapticCue.UI_KNOCK to 180L, HapticCue.UI_SNAP to 400L, HapticCue.UI_CONFIRM to 1_500L)) {
+            assertTrue("$cue", governor.tryAcquire(cue, HapticMoment.FOREGROUND))
+            now += interval - 1
+            assertFalse("$cue a millisecond early", governor.tryAcquire(cue, HapticMoment.FOREGROUND))
+            now += 1
+            assertTrue("$cue on time", governor.tryAcquire(cue, HapticMoment.FOREGROUND))
+            now += 60_000
+        }
+    }
+
+    @Test
+    fun `UI cues share a budget of eight in ten seconds`() {
+        // A finger drumming on the slab five times a second for a minute.
+        val played = ArrayList<Long>()
+        val start = now
+        repeat(300) { i ->
+            val cue = if (i % 3 == 2) HapticCue.UI_SNAP else HapticCue.UI_KNOCK
+            if (governor.tryAcquire(cue, HapticMoment.FOREGROUND)) played += now - start
+            now += 200
+        }
+        // No ten-second stretch holds more than eight.
+        for (t in played) assertTrue("more than eight from $t", played.count { it >= t && it < t + 10_000 } <= 8)
+        assertEquals("the first eight play back to back", listOf(0L, 200L, 400L, 600L, 800L, 1000L, 1200L, 1400L), played.take(8))
+        // The ninth waits for the first to leave the window.
+        assertEquals(10_000L, played[8])
+        assertTrue("played ${played.size} in a minute", played.size in 40..48)
+    }
+
+    @Test
+    fun `the UI budget is the UI cues' alone`() {
+        repeat(8) {
+            assertTrue(governor.tryAcquire(HapticCue.UI_KNOCK, HapticMoment.FOREGROUND))
+            now += 200
+        }
+        assertFalse(governor.tryAcquire(HapticCue.UI_KNOCK, HapticMoment.FOREGROUND))
+        assertFalse("the budget is shared by all three", governor.tryAcquire(HapticCue.UI_CONFIRM, HapticMoment.FOREGROUND))
+        // The rig's own cues are not UI cues: they are untouched by it, at either moment.
+        assertTrue(governor.tryAcquire(HapticCue.COOLING_TICK, HapticMoment.FOREGROUND))
+        assertTrue(governor.tryAcquire(HapticCue.ARM_THUNK, HapticMoment.SHIFT))
+        // A refused UI cue did not take a place either: once the window has moved on, eight more.
+        now += 10_000
+        repeat(8) {
+            assertTrue(governor.tryAcquire(HapticCue.UI_KNOCK, HapticMoment.FOREGROUND))
+            now += 200
+        }
+    }
+
+    @Test
+    fun `moment matrix of the UI cues`() {
+        ui.forEach { cue ->
+            assertFalse(HapticGovernor.allowedAt(cue, HapticMoment.SHIFT))
+            assertFalse(HapticGovernor.allowedAt(cue, HapticMoment.REVEAL))
+            assertTrue(HapticGovernor.allowedAt(cue, HapticMoment.FOREGROUND))
+        }
+        // The whole vocabulary: nothing but the two shift cues exists during a shift.
+        assertEquals(
+            listOf(HapticCue.ARM_THUNK, HapticCue.COOLING_TICK),
+            HapticCue.entries.filter { HapticGovernor.allowedAt(it, HapticMoment.SHIFT) },
+        )
+    }
+
     @Test
     fun `moment matrix`() {
         val allowed = HapticCue.entries.associateWith { cue ->
