@@ -1,25 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static picker preview for Android 12-14: clearly a placeholder. -->
+<!--
+    Static picker preview for Android 12-14: clearly a placeholder, drawn as the widget itself
+    is (CrewPlaceholderContent): the pit slab, the tag in plain ink, five empty seats.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/hd_widget_background"
     android:orientation="vertical"
-    android:paddingHorizontal="14dp"
-    android:paddingVertical="12dp">
+    android:paddingHorizontal="15dp"
+    android:paddingVertical="9dp">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
+        android:maxLines="1"
         android:text="@string/hd_widget_preview_crew_tag"
-        android:textColor="@color/hd_widget_cooling"
+        android:textColor="@color/hd_widget_ash"
         android:textSize="11sp" />
+
+    <!-- empty seats: outlined, never filled, because nobody is really here -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="5dp"
+        android:orientation="horizontal">
+
+        <View
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:background="@drawable/hd_widget_seat" />
+
+        <View
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/hd_widget_seat" />
+
+        <View
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/hd_widget_seat" />
+
+        <View
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/hd_widget_seat" />
+
+        <View
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/hd_widget_seat" />
+    </LinearLayout>
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="5dp"
         android:text="@string/hd_widget_preview_crew_line"
         android:textColor="@color/hd_widget_ash_muted"
         android:textSize="12sp" />

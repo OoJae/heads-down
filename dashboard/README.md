@@ -67,16 +67,27 @@ data exists, so there is nothing honest to plot. Milestone "regions" are time-zo
 
 ## Design
 
-- **Palette.** The Heads Down palette from the Android theme: charcoal background, **ember orange =
-  rig hot**, **ORE gold = hauls**. Dark by default; a light theme is opt-in (remembered in
-  localStorage, with try/catch). Chart marks use steps checked with the dataviz palette validator.
-  Every check passes in both modes: lightness band, chroma floor, CVD ΔE ≥ 26, normal-vision ΔE ≥ 29,
-  and ≥ 3:1 contrast. Dark: guest `#E8590F`, Seeker `#3987E5`, haul `#C98500` on `#1C1D20`. Light:
-  `#C2410C`, `#2A78D6`, `#B07A00` on white. Text always uses text colors. Color marks identity only
+- **Palette.** "The Underside", the palette of the Android app (`android/core/design`, `HdArgb`): a
+  near-black page, cards one step lighter and edged by a hairline (ink at 12%), warm chalk ink and
+  ash for muted text. **Ember means something is wrong**; it is not decoration. **ORE gold** is the
+  line under the section you are in, the underline of a link, the focus ring and a caution. Corners
+  are 6 px (chips 4 px, meters 2 px) and nothing casts a shadow. Dark by default; a light theme is
+  opt-in (remembered in localStorage, with try/catch). Labels and figures read off the chain are set
+  in IBM Plex Mono, loaded from IBM's own unmodified Latin-1 woff2 files in `src/app/fonts/` (SIL
+  Open Font License 1.1, its text beside them); everything else is the system font. The mark in the
+  header is inline SVG with the two paths of the app's glyph, and `src/app/icon.svg` is written by
+  `scripts/brand/render.py`, whose `--check` fails if either drifts from the design module. Chart
+  marks use steps checked with the dataviz palette validator against the new cards. Every check
+  passes in both modes for the series that are drawn side by side: lightness band, chroma floor,
+  CVD ΔE ≥ 26, normal-vision ΔE ≥ 28, and ≥ 3:1 contrast. Dark: guest `#E8590F`, Seeker `#3987E5`,
+  haul `#C98500` on `#18181A` (4.95, 4.87 and 5.77 to 1). Light: `#C2410C`, `#2A78D6`, `#9E6C00` on
+  `#E4DDD0` (3.84, 3.27 and 3.38 to 1; the haul step was `#B07A00`, which is 2.76 to 1 on the new
+  card, so it was darkened). Text always uses text colors. Color marks identity only
   through swatches. The skips histogram uses **one hue** for all reasons (they are categories of the
   same thing, named by their labels), and a selected bar is emphasised by graying the rest. On the
-  haul's round strip, ember and gold are too close for color-blind readers (validator ΔE 2), so a
-  round whose square came up is marked with an ink ring and a star, not a second hue.
+  haul's round strip, ember and gold are too close for color-blind readers (validator ΔE 2 in dark
+  and 1 in light), so a round whose square came up is marked with an ink ring and a star, not a
+  second hue.
 - **Charts** are hand-built SVG. They render at the container's measured pixel width, so tick text
   stays 11 px on a phone. Columns are ≤ 24 px with a rounded data end, there is a 2 px surface gap
   between stacked segments, and grids are solid hairlines. Every column is keyboard-focusable with an
