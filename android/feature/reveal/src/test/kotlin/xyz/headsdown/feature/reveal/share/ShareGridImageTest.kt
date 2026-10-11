@@ -94,9 +94,13 @@ class ShareGridImageTest {
         val caption = inked(bundled, below, ShareGridImage.HEIGHT)
         assertTrue("the caption and the featured line are drawn: ${caption.size} px", caption.size > 2_000)
         assertFalse("they are in the mono face", caption == inked(platform, below, ShareGridImage.HEIGHT))
-        // The featured line is gold: there is gold ink below the caption.
-        val featured = (ShareGridImage.HEIGHT - 110 until ShareGridImage.HEIGHT - 60).sumOf { y -> (96 until 600).count { x -> bundled.getPixel(x, y) == HdArgb.SEAM } }
-        assertTrue("POWERED BY ORE is drawn in gold: $featured px", featured > 50)
+        // The featured line is under the caption, in chalk: gold as ink is for amounts of ORE, and
+        // this image has none. The one gold thing in it is the line of light under the slab.
+        fun inkOf(colour: Int, top: Int, bottom: Int) = (top until bottom).sumOf { y -> (0 until ShareGridImage.WIDTH).count { x -> bundled.getPixel(x, y) == colour } }
+        val featured = inkOf(HdArgb.CHALK, ShareGridImage.HEIGHT - 110, ShareGridImage.HEIGHT - 60)
+        assertTrue("POWERED BY ORE is drawn in chalk: $featured px", featured > 50)
+        assertEquals("no word is gold", 0, inkOf(HdArgb.SEAM, 0, plateTop.toInt()) + inkOf(HdArgb.SEAM, below, ShareGridImage.HEIGHT))
+        assertTrue("the line of light is", inkOf(HdArgb.SEAM, (plateTop + plateSize).toInt(), below) > 1_000)
         // The grid itself does not depend on the faces.
         for (tile in 0 until Board.TILES) {
             val (x, y) = centre(tile)

@@ -3,6 +3,7 @@ package xyz.headsdown.feature.reveal.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -16,9 +17,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -30,6 +33,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import xyz.headsdown.core.design.Hd
 import xyz.headsdown.feature.reveal.board.BoardFrame
@@ -41,13 +45,17 @@ const val REVEAL_BOARD_TAG = "reveal-board"
 
 /**
  * The night replayed on ORE's 5x5 board, drawn as the underside of the slab: dark wells, and gold
- * light where the rig dug (brighter the more it dug there). Each round's winning tile flashes in
- * chalk, in gold when it was one of the rig's; when the replay is over, every tile of the rig
- * that came up is solid gold inside a chalk outline. Ember is not used here: it means a problem.
+ * light where the rig dug. The light comes from underneath, as everywhere in this design: a dug
+ * well is lit from its lower edge and nearly dark at its upper, brighter the more the rig dug
+ * there. (One flat tint of gold over the pit is brown: it reads as a heat map, not as light.)
+ * Each round's winning tile flashes in chalk, in gold when it was one of the rig's; when the
+ * replay is over, every tile of the rig that came up is solid gold inside a chalk outline. Ember
+ * is not used here: it means a problem.
  *
  * Driven by `withFrameNanos`, so it runs at the display's refresh rate (120 Hz where the
  * activity asked for it). The frame is read inside the draw lambda: each tick redraws the
- * canvas without recomposing anything. The loop ends with the replay; after it nothing is drawn.
+ * canvas without recomposing anything, with the grid and its brushes kept from frame to frame.
+ * The loop ends with the replay; after it nothing is drawn.
  *
  * A screen reader hears how the replay ended once, when it ends (a polite live region).
  */
@@ -88,18 +96,23 @@ fun RevealBoard(
         "Replaying $rounds rounds on the ORE board"
     }
     val ink = boardInk()
-    Canvas(
+    Spacer(
         modifier
             .aspectRatio(1f)
             .testTag(REVEAL_BOARD_TAG)
             .semantics {
                 contentDescription = description
                 liveRegion = LiveRegionMode.Polite
+            }
+            .drawWithCache {
+                // Built when the board is sized, not on every frame of the replay.
+                val grid = BoardGrid(size, this, ink)
+                onDrawBehind {
+                    val frame = if (finished) final else replay.frameAt(elapsed.longValue)
+                    drawBoard(grid, frame, ink, hits = if (finished) replay.hitTiles else emptySet())
+                }
             },
-    ) {
-        val frame = if (finished) final else replay.frameAt(elapsed.longValue)
-        drawBoard(frame, ink, hits = if (finished) replay.hitTiles else emptySet())
-    }
+    )
 }
 
 /** The board before the night has arrived: twenty-five dark wells. Still, and nothing to a screen reader. */
@@ -107,7 +120,7 @@ fun RevealBoard(
 internal fun EmptyBoard(modifier: Modifier = Modifier) {
     val ink = boardInk()
     Canvas(modifier.aspectRatio(1f).clearAndSetSemantics { }) {
-        val grid = BoardGrid(this)
+        val grid = BoardGrid(size, this, ink)
         for (tile in 0 until Board.TILES) drawRoundRect(ink.well, grid.origin(tile), grid.cellSize, grid.radius)
     }
 }
@@ -130,22 +143,43 @@ internal fun boardInk(): BoardInk {
     }
 }
 
-/** Where the tiles are: square wells with 4dp between them. */
-private class BoardGrid(scope: DrawScope) {
-    private val gap = with(scope) { 4.dp.toPx() }
-    val cell = (scope.size.minDimension - gap * (Board.SIZE - 1)) / Board.SIZE
+/**
+ * Where the tiles are: square wells with 4dp between them. And the light of each row: a gradient
+ * is laid out in the board's own coordinates, so each of the five rows has its own.
+ */
+private class BoardGrid(size: Size, density: Density, ink: BoardInk) {
+    private val gap = with(density) { 4.dp.toPx() }
+    val cell = (size.minDimension - gap * (Board.SIZE - 1)) / Board.SIZE
     val cellSize = Size(cell, cell)
-    val radius = with(scope) { CornerRadius(2.dp.toPx()) }
+    val radius = with(density) { CornerRadius(2.dp.toPx()) }
+
+    /** A hit's outline: 2dp of chalk just inside the tile's edge, its corners following the tile's. */
+    val outline = with(density) { 2.dp.toPx() }
+    val outlineSize = Size(cell - outline, cell - outline)
+    val outlineRadius = CornerRadius((radius.x - outline / 2).coerceAtLeast(0f))
+
+    private val rowGlow: List<Brush> = List(Board.SIZE) { row ->
+        val top = row * (cell + gap)
+        Brush.verticalGradient(0f to ink.light.copy(alpha = GLOW_AT_TOP), 1f to ink.light, startY = top, endY = top + cell)
+    }
 
     fun origin(tile: Int) = Offset((tile % Board.SIZE) * (cell + gap), (tile / Board.SIZE) * (cell + gap))
+
+    /** A dug tile's light at full strength: all of it at the lower edge, [GLOW_AT_TOP] of it at the upper. */
+    fun glow(tile: Int): Brush = rowGlow[tile / Board.SIZE]
 }
 
-/** The gold light on a tile the rig dug: from one dig in a night to the busiest tile. Never solid: solid is a hit. */
-private const val GLOW_FAINTEST = 0.16f
-private const val GLOW_BRIGHTEST = 0.6f
+/**
+ * The gold light at the lower edge of a tile the rig dug: from one dig in a night to the busiest
+ * tile. Never a solid tile: solid is a hit.
+ */
+internal const val GLOW_FAINTEST = 0.22f
+internal const val GLOW_BRIGHTEST = 0.9f
 
-private fun DrawScope.drawBoard(frame: BoardFrame, ink: BoardInk, hits: Set<Int>) {
-    val grid = BoardGrid(this)
+/** How much of that light reaches the tile's upper edge. */
+internal const val GLOW_AT_TOP = 0.28f
+
+private fun DrawScope.drawBoard(grid: BoardGrid, frame: BoardFrame, ink: BoardInk, hits: Set<Int>) {
     val cell = grid.cell
     for (tile in 0 until Board.TILES) {
         val at = grid.origin(tile)
@@ -154,8 +188,8 @@ private fun DrawScope.drawBoard(frame: BoardFrame, ink: BoardInk, hits: Set<Int>
         if (tile in hits) {
             drawRoundRect(ink.light, at, grid.cellSize, grid.radius)
         } else if (heat > 0 && frame.maxHeat > 0) {
-            val alpha = GLOW_FAINTEST + (GLOW_BRIGHTEST - GLOW_FAINTEST) * heat / frame.maxHeat
-            drawRoundRect(ink.light.copy(alpha = alpha), at, grid.cellSize, grid.radius)
+            val strength = GLOW_FAINTEST + (GLOW_BRIGHTEST - GLOW_FAINTEST) * heat / frame.maxHeat
+            drawRoundRect(grid.glow(tile), at, grid.cellSize, grid.radius, alpha = strength)
         }
         if ((frame.litNow ushr tile) and 1 == 1) {
             // The round being replayed: a bright pixel in the tile's corner.
@@ -171,10 +205,9 @@ private fun DrawScope.drawBoard(frame: BoardFrame, ink: BoardInk, hits: Set<Int>
         }
         drawRoundRect(color, grid.origin(flash.tile), grid.cellSize, grid.radius)
     }
-    val stroke = 2.dp.toPx()
     for (tile in hits) {
-        val at = grid.origin(tile) + Offset(stroke / 2, stroke / 2)
-        drawRoundRect(ink.mark, at, Size(cell - stroke, cell - stroke), grid.radius, style = Stroke(stroke))
+        val at = grid.origin(tile) + Offset(grid.outline / 2, grid.outline / 2)
+        drawRoundRect(ink.mark, at, grid.outlineSize, grid.outlineRadius, style = Stroke(grid.outline))
     }
 }
 

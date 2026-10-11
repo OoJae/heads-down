@@ -95,11 +95,11 @@ class RevealLayoutTest {
         renderMode?.let { System.setProperty(RENDER_MODE, it) } ?: System.clearProperty(RENDER_MODE)
     }
 
-    private fun show(clockOut: Boolean = true) = rule.setContent {
+    private fun show(clockOut: Boolean = true, animate: Boolean = false) = rule.setContent {
         val device = LocalDensity.current
         CompositionLocalProvider(LocalDensity provides Density(device.density, fontScale)) {
             RevealRoute(
-                state = state, zone = zone, animate = false,
+                state = state, zone = zone, animate = animate,
                 onReplayStarted = {}, onReplayFinished = {}, onBuyRest = {}, onShare = {}, onDone = {},
                 onShowSample = {}, onClockOut = if (clockOut) ({}) else null,
             )
@@ -144,9 +144,9 @@ class RevealLayoutTest {
     }
 
     /** Nothing on screen is wider than the screen or cut, and the dock's bar is whole and at the bottom. */
-    private fun assertNothingIsCut(what: String, dockTag: String) {
+    private fun assertNothingIsCut(what: String, dockTag: String, widthPx: Int = 720, heightPx: Int = 1600) {
         val screen = rule.onRoot().fetchSemanticsNode().size
-        assertEquals("a 360dp by 800dp screen at 2 px to the dp", 720 to 1600, screen.width to screen.height)
+        assertEquals("the screen this test was written for, at 2 px to the dp", widthPx to heightPx, screen.width to screen.height)
         val nodes = textNodes()
         assertTrue("$what: the screen has its words (${nodes.size})", nodes.size >= 3)
         for (node in nodes) {
@@ -161,15 +161,11 @@ class RevealLayoutTest {
         assertEquals("$what: the dock's bar is not clipped", bar.unclipped(), bar.boundsInRoot)
         assertTrue("$what: the bar is on screen: ${bar.boundsInRoot}", bar.boundsInRoot.bottom <= screen.height && bar.boundsInRoot.top > screen.height / 2f)
         assertTrue("$what: the bar is ${bar.size.height} px tall", bar.size.height >= 112)
-        assertEquals("$what: the bar spans the margins", 40f to 680f, bar.boundsInRoot.left to bar.boundsInRoot.right)
+        assertEquals("$what: the bar spans the margins", 40f to widthPx - 40f, bar.boundsInRoot.left to bar.boundsInRoot.right)
     }
 
-    private fun figure(text: String): SemanticsNode = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
-
-    @Test
-    fun `every state fits a 360dp screen from font scale 1 to 2, and no figure is cut`() {
-        show()
-        val states = listOf(
+    private val everyState
+        get() = listOf(
             "loading" to RevealUiState.Loading,
             "no haul" to RevealUiState.NoHaul,
             "a sample night" to RevealUiState.Ready(sample),
@@ -177,13 +173,76 @@ class RevealLayoutTest {
             "a night that placed nothing" to RevealUiState.Ready(closed),
             "a night of long figures" to RevealUiState.Ready(heavy),
         )
+
+    private fun dockTag(shown: RevealUiState): String =
+        if (shown is RevealUiState.Ready && shown.summary.provenance != HaulProvenance.SAMPLE) RevealTags.CLOCK_OUT else RevealTags.DONE
+
+    private fun figure(text: String): SemanticsNode = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
+
+    @Test
+    fun `every state fits a 360dp screen from font scale 1 to 2, and no figure is cut`() {
+        show()
         for (scale in listOf(1f, 1.3f, 1.5f, 2f)) {
-            for ((name, shown) in states) {
+            for ((name, shown) in everyState) {
                 fontScale = scale
                 state = shown
                 rule.waitForIdle()
-                val clockOut = shown is RevealUiState.Ready && shown.summary.provenance != HaulProvenance.SAMPLE
-                assertNothingIsCut("$name at $scale", dockTag = if (clockOut) RevealTags.CLOCK_OUT else RevealTags.DONE)
+                assertNothingIsCut("$name at $scale", dockTag(shown))
+            }
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h568dp-xhdpi")
+    fun `every state fits a small phone too, 320dp by 568dp, from font scale 1 to 2`() {
+        show()
+        for (scale in listOf(1f, 2f)) {
+            for ((name, shown) in everyState) {
+                fontScale = scale
+                state = shown
+                rule.waitForIdle()
+                assertNothingIsCut("$name at $scale on a small phone", dockTag(shown), widthPx = 640, heightPx = 1136)
+            }
+        }
+        // And the amounts of the longest night are still whole lines there.
+        fontScale = 2f
+        state = RevealUiState.Ready(heavy)
+        rule.waitForIdle()
+        for (text in listOf("1234.567 ORE", "12,345", "1,234", "123.456 SOL")) {
+            val layout = figure(text).textLayout()!!
+            assertEquals("\"$text\" is one line", 1, layout.lineCount)
+            assertWhole("\"$text\"", layout)
+        }
+    }
+
+    /** Every node a finger can press, in the order a screen reader meets them. */
+    private fun actions(): List<SemanticsNode> {
+        val out = mutableListOf<SemanticsNode>()
+        fun walk(n: SemanticsNode) {
+            if (n.config.getOrNull(SemanticsActions.OnClick) != null) out += n
+            n.children.forEach(::walk)
+        }
+        walk(rule.onRoot().fetchSemanticsNode())
+        return out
+    }
+
+    @Test
+    fun `everything that can be pressed is at least 48dp by 48dp, at both font scales`() {
+        show()
+        for (scale in listOf(1f, 2f)) {
+            for ((name, shown) in everyState) {
+                fontScale = scale
+                state = shown
+                rule.waitForIdle()
+                val pressable = actions()
+                assertTrue("$name: there is a way out", pressable.isNotEmpty())
+                for (node in pressable) {
+                    val words = node.words()
+                    assertTrue("$name at $scale: \"$words\" is ${node.size} px", node.size.width >= 96 && node.size.height >= 96)
+                    assertTrue("$name at $scale: \"$words\" is on the screen's width", node.unclipped().left >= 0f && node.unclipped().right <= 720f)
+                }
+                // The dock's bar is the last of them: a screen reader reaches it after the page.
+                assertEquals("$name at $scale", dockTag(shown), pressable.last().config[SemanticsProperties.TestTag])
             }
         }
     }
@@ -285,6 +344,168 @@ class RevealLayoutTest {
         // No scrolling by the test: the notice appears under the finger and the page follows it.
         val notice = rule.onNodeWithTag(RevealTags.BUY_STUB).assertIsDisplayed().fetchSemanticsNode()
         assertEquals("all of the notice is on screen", notice.unclipped(), notice.boundsInRoot)
+        // With the page's 16dp under it, not flush against the dock's hairline (12dp above the bar).
+        val dock = rule.onNodeWithTag(RevealTags.DONE).fetchSemanticsNode().boundsInRoot.top - 24f
+        assertTrue("the notice ends ${dock - notice.boundsInRoot.bottom} px above the dock", dock - notice.boundsInRoot.bottom >= 30f)
+        // A second tap changes nothing on the page, and the notice is still where it was.
+        rule.onNodeWithTag(RevealTags.BUY).performClick()
+        rule.waitForIdle()
+        assertEquals(notice.boundsInRoot, rule.onNodeWithTag(RevealTags.BUY_STUB).fetchSemanticsNode().boundsInRoot)
+    }
+
+    // ------------------------------------------------------------------ the hours, the amount's ink, the page's width
+
+    @Test
+    fun `the hours are one line while they fit, and break at the dot when they do not`() {
+        state = RevealUiState.Ready(sample)
+        show()
+        val hours = "23:10 – 06:50 · 7 h 40 m shift"
+        // Read and matched as written, however it is drawn: exactly one node, at every size.
+        fun box() = rule.onNodeWithText(hours).assertIsDisplayed().fetchSemanticsNode().size
+        // The face is monospaced, and "First pickup 06:52" is set in the same style on one line at
+        // every size: it gives the width of a letter (the system does not enlarge type in proportion).
+        val pickup = "First pickup 06:52"
+        fun letter() = figure(pickup).size.let { size -> size.width / pickup.length.toFloat() }
+        fun line() = figure(pickup).size.height
+        val oneLine = box()
+        assertEquals("one line", line(), oneLine.height)
+        assertEquals("the whole sentence on it", hours.length * letter(), oneLine.width.toFloat(), 1f)
+        for (scale in listOf(1.3f, 2f)) {
+            fontScale = scale
+            rule.waitForIdle()
+            val broken = box()
+            assertEquals("two lines at $scale", 2 * line(), broken.height)
+            // Each half on its own line, so the block is as wide as the longer half, "7 h 40 m shift".
+            // Left to the line breaker it is "… · 7 h 40 m" over "shift" at 1.3, and "… ·" over the rest at 2.
+            assertEquals("broken at the dot at $scale", "7 h 40 m shift".length * letter(), broken.width.toFloat(), 1f)
+        }
+        assertEquals("23:10 – 06:50\n7 h 40 m shift", brokenAtTheDot(hours))
+        assertEquals(null, brokenAtTheDot("All night"))
+        assertEquals(null, brokenAtTheDot("23:10 · 06:50 · 7 h"))
+        assertEquals(null, brokenAtTheDot("23:10 – 06:50 · "))
+    }
+
+    private fun isGold(c: Color): Boolean {
+        val argb = c.toArgb()
+        return abs(((argb shr 16) and 0xFF) - 0xF2) <= 4 && abs(((argb shr 8) and 0xFF) - 0xB2) <= 4 && abs((argb and 0xFF) - 0x33) <= 4
+    }
+
+    private fun isChalk(c: Color): Boolean {
+        val argb = c.toArgb()
+        return abs(((argb shr 16) and 0xFF) - 0xEF) <= 4 && abs(((argb shr 8) and 0xFF) - 0xEA) <= 4 && abs((argb and 0xFF) - 0xE0) <= 4
+    }
+
+    private fun PixelMap.count(fromY: Int = 0, untilY: Int = height, test: (Color) -> Boolean): Int =
+        (fromY until untilY).sumOf { y -> (0 until width).count { x -> test(this[x, y]) } }
+
+    @Test
+    fun `gold on the amount's plate is ORE that exists, and the featured line is never gold`() {
+        show()
+        // The label's row is the plate's first 16dp of padding and 18dp of type: 68 px.
+        val labels = 68
+        state = RevealUiState.Ready(sample)
+        rule.waitForIdle()
+        val mined = rule.onNodeWithText("0.0058 ORE").captureToImage().toPixelMap()
+        assertTrue("the amount is gold", mined.count(fromY = labels, test = ::isGold) > 5_000)
+        assertEquals("the featured line is not: gold as ink is for amounts of ORE", 0, mined.count(untilY = labels, test = ::isGold))
+        assertTrue("it is chalk", mined.count(untilY = labels, test = ::isChalk) > 100)
+
+        state = RevealUiState.Ready(closed)
+        rule.waitForIdle()
+        val nothing = rule.onNodeWithText("0 ORE").captureToImage().toPixelMap()
+        assertEquals("a night that mined nothing has no gold on its plate", 0, nothing.count(test = ::isGold))
+        assertTrue("\"0 ORE\" is said in chalk, as large", nothing.count(fromY = labels, test = ::isChalk) > 5_000)
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h360dp-land-xhdpi")
+    fun `on a phone held on its side the page stays a column and the board a board`() {
+        state = RevealUiState.Ready(mine)
+        show()
+        val screen = rule.onRoot().fetchSemanticsNode().size
+        assertEquals(1600 to 720, screen.width to screen.height)
+        // A column of 420dp in the middle: the board in it is 420dp less the plate's padding, not 736dp.
+        val board = rule.onNodeWithTag(REVEAL_BOARD_TAG).fetchSemanticsNode().unclipped()
+        assertEquals("the board is square", board.width, board.height)
+        assertEquals("396dp wide", 792f, board.width, 1f)
+        assertEquals("in the middle of the screen", 800f, board.center.x, 1f)
+        val amount = rule.onNodeWithText("0.0058 ORE").fetchSemanticsNode().unclipped()
+        assertEquals("the amount's plate is the column's width", 840f, amount.width, 1f)
+        assertEquals(800f, amount.center.x, 1f)
+        // The dock's bar is the same column, whatever the state.
+        for ((name, shown) in everyState) {
+            state = shown
+            rule.waitForIdle()
+            val bar = rule.onNodeWithTag(dockTag(shown)).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("$name: the bar is 420dp wide", 840f, bar.width, 1f)
+            assertEquals("$name: the bar is in the middle", 800f, bar.center.x, 1f)
+            assertTrue("$name: the bar is 56dp tall and on screen", bar.height >= 112f && bar.bottom <= 720f)
+        }
+    }
+
+    @Test
+    fun `no haul stands on the dock and is a plain column when there is no room to spare`() {
+        state = RevealUiState.NoHaul
+        show()
+        val bar = rule.onNodeWithTag(RevealTags.DONE).fetchSemanticsNode().boundsInRoot
+        val offer = rule.onNodeWithTag(RevealTags.SHOW_SAMPLE).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val statement = rule.onNodeWithText("No haul yet").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        // The offer ends the page: 24dp of page under it, then the dock's 12dp above its bar.
+        assertEquals("the offer stands on the dock", bar.top - 24f - 48f, offer.bottom, 1f)
+        assertTrue("the words are by the thumb, in the lower half: $statement", statement.top > 800f)
+        assertTrue(statement.bottom < offer.top)
+        // Nothing to scroll: all of it is on the one screen.
+        assertEquals(offer, rule.onNodeWithTag(RevealTags.SHOW_SAMPLE).fetchSemanticsNode().unclipped())
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h470dp-xhdpi")
+    fun `on a short screen no haul keeps its order and its gaps, and scrolls`() {
+        state = RevealUiState.NoHaul
+        fontScale = 2f
+        show()
+        // No room to spare: the spaces around the slab are closed, and the heading follows the
+        // brand row (48dp, 4dp from the top) and the slab (112dp) at the page's 16dp.
+        val statement = rule.onNodeWithText("No haul yet").assertIsDisplayed().fetchSemanticsNode().unclipped()
+        assertEquals("16dp under the slab", (4 + 48 + 16 + 112 + 16) * 2f, statement.top, 2f)
+        val offer = rule.onNodeWithTag(RevealTags.SHOW_SAMPLE).fetchSemanticsNode()
+        assertTrue("the offer is further down the page than the screen is tall", offer.unclipped().bottom > rule.onNodeWithTag(RevealTags.DONE).fetchSemanticsNode().boundsInRoot.top)
+        rule.onNodeWithTag(RevealTags.SHOW_SAMPLE).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h742dp-xhdpi")
+    fun `with the status bar and three-button navigation off the Redmi's 820dp, the amount is still on the first screen`() {
+        // 360dp by 820dp, less about 30dp of status bar and 48dp of navigation bar: 742dp for the page and its dock.
+        state = RevealUiState.Ready(mine)
+        show()
+        val dock = rule.onNodeWithTag(RevealTags.CLOCK_OUT).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top - 24f
+        val board = rule.onNodeWithTag(REVEAL_BOARD_TAG).assertIsDisplayed().fetchSemanticsNode()
+        assertEquals("the whole board is on screen", board.unclipped(), board.boundsInRoot)
+        // The digits stand on their baseline above the dock (the line's empty descent may be under it).
+        val amount = figure("0.0058 ORE")
+        val baseline = amount.unclipped().top + amount.textLayout()!!.firstBaseline
+        assertTrue("the amount's digits end at $baseline, the dock begins at $dock", baseline + 16f <= dock)
+    }
+
+    @Test
+    fun `the frame is seen turning over while the replay is already running`() {
+        rule.mainClock.autoAdvance = false
+        state = RevealUiState.Ready(mine)
+        show(animate = true)
+        rule.mainClock.advanceTimeBy(32)
+        val board = rule.onNodeWithTag(REVEAL_BOARD_TAG).fetchSemanticsNode()
+        assertTrue(board.config[SemanticsProperties.ContentDescription].single().startsWith("Replaying 312 rounds"))
+        // A point of the plate's own padding, left of the board near its top: slab when the plate is flat.
+        val x = (board.unclipped().left - 12f).toInt()
+        val y = (board.unclipped().top + 40f).toInt()
+        val turning = rule.onRoot().captureToImage().toPixelMap()
+        assertColor("32 ms in, the plate lies back: the page shows through where its top will be", HdPalette.Dark.pit, turning[x, y])
+        rule.mainClock.advanceTimeBy(600)
+        val flat = rule.onRoot().captureToImage().toPixelMap()
+        assertColor("after the entrance the plate is flat", HdPalette.Dark.slab, flat[x, y])
+        val later = rule.onNodeWithTag(REVEAL_BOARD_TAG).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
+        assertTrue("and the replay is still running: $later", later.startsWith("Replaying"))
     }
 
     // ------------------------------------------------------------------ what the board is drawn in
@@ -303,8 +524,10 @@ class RevealLayoutTest {
         assertTrue("$what: expected ${Integer.toHexString(e)}, drawn ${Integer.toHexString(a)}", far <= tolerance)
     }
 
+    private fun light(c: Color): Int = c.toArgb().let { ((it shr 16) and 0xFF) + ((it shr 8) and 0xFF) + (it and 0xFF) }
+
     @Test
-    fun `the final board is gold light on dark wells, a hit solid gold in a chalk outline, and no ember`() {
+    fun `the final board is gold light from underneath on dark wells, a hit solid gold in a chalk outline, and no ember`() {
         state = RevealUiState.Ready(sample)
         show()
         val colors = HdPalette.Dark
@@ -332,9 +555,18 @@ class RevealLayoutTest {
                 }
                 heat > 0 -> {
                     dug++
-                    val alpha = 0.16f + 0.44f * heat / final.maxHeat
-                    assertColor("tile $tile was dug $heat times: gold light", colors.seamLight.copy(alpha = alpha).compositeOver(colors.pit), centre)
-                    assertTrue("never solid: solid is a hit", alpha <= 0.6f)
+                    // Lit from its lower edge: from 22% of the gold for one dig to 90% for the busiest
+                    // tile there, and 28% of that at the upper edge. Sampled a pixel inside each edge.
+                    val strength = 0.22f + 0.68f * heat / final.maxHeat
+                    fun lightAt(fromTop: Float) = colors.seamLight.copy(alpha = strength * (0.28f + 0.72f * fromTop / cell)).compositeOver(colors.pit)
+                    val upper = pixels.at(left + cell / 2, top + 1f)
+                    val lower = pixels.at(left + cell / 2, top + cell - 2f)
+                    assertColor("tile $tile was dug $heat times: its lower edge", lightAt(cell - 1.5f), lower, tolerance = 5)
+                    assertColor("tile $tile was dug $heat times: its upper edge", lightAt(1.5f), upper, tolerance = 5)
+                    assertColor("tile $tile was dug $heat times: its middle", lightAt(cell / 2 + 0.5f), centre, tolerance = 5)
+                    assertTrue("tile $tile: the light comes from underneath", light(lower) > light(centre) && light(centre) > light(upper))
+                    assertTrue("never a solid tile: solid is a hit", strength <= 0.9f)
+                    assertFalse("tile $tile is not mistaken for a hit", isGold(centre))
                 }
                 else -> {
                     empty++

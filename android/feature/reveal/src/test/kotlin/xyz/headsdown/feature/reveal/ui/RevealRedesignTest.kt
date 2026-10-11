@@ -197,6 +197,41 @@ class RevealRedesignTest {
     }
 
     @Test
+    fun `a page exposes words and actions only, in reading order, with the dock last`() {
+        var shown by mutableStateOf(sample)
+        rule.setContent { RevealTheme { RevealScreen(shown, zone, animate = false, onClockOut = {}) } }
+        for (haul in listOf(sample, mine, FakeHaulRepository.sampleGateClosed(now, zone))) {
+            shown = haul
+            rule.waitForIdle()
+            // Every node that has no child says something: no hairline, glyph or plate is a node of its own.
+            val leaves = mutableListOf<SemanticsNode>()
+            fun walk(n: SemanticsNode) {
+                if (n.children.isEmpty()) leaves += n else n.children.forEach(::walk)
+            }
+            walk(rule.onRoot().fetchSemanticsNode())
+            for (leaf in leaves) {
+                val says = leaf.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } ?: leaf.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()
+                assertTrue("a node of ${leaf.size} at ${leaf.positionInRoot} says nothing", !says.isNullOrBlank())
+            }
+            // The hours are one node, read as the sentence was written.
+            rule.onAllNodesWithText("23:10 – 06:50 · 7 h 40 m shift").assertCountEquals(1)
+        }
+        // Top to bottom for a haul of the user's own: the way out, the title, the hours, the board and
+        // its legend, the amount, the counts, the price, and the dock's bar after everything else.
+        shown = mine
+        rule.waitForIdle()
+        val texts = screenTexts()
+        val order = listOf(
+            "HEADS DOWN", "Done", "Morning haul", "23:10 – 06:50 · 7 h 40 m shift",
+            "Board replay finished: 312 rounds. Your tiles came up on 1 of 25 squares.", RevealWords.LEGEND,
+            "ORE mined", "0.0058 ORE", "Powered by ORE", "Rounds dark", "312", "Digs", "18", "SOL placed", "0.0180 SOL",
+            "Effective price per ORE", "0.680 SOL per ORE", "Market 0.758",
+        )
+        assertEquals(order, texts.take(order.size))
+        assertEquals("Clock out", texts.last())
+    }
+
+    @Test
     fun `the notice that nothing was bought is a polite live region`() {
         rule.setContent { RevealTheme { RevealScreen(sample, zone, animate = false) } }
         rule.onNodeWithTag(RevealTags.BUY).performScrollTo().assert(isButton).performClick()
@@ -221,6 +256,8 @@ class RevealRedesignTest {
     @Test
     fun `the entrance flip does not delay the replay's start or its end`() {
         val events = mutableListOf<String>()
+        // The flip does run here: this environment has not removed animations, so the theme's motion is not reduced.
+        assertFalse(HdMotion.systemReduced())
         rule.mainClock.autoAdvance = false
         rule.setContent {
             RevealTheme { RevealScreen(mine, zone, animate = true, onReplayStarted = { events += "start" }, onReplayFinished = { events += "end" }) }

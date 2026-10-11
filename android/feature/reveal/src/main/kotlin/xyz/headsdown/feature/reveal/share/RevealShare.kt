@@ -24,8 +24,9 @@ import xyz.headsdown.core.design.R as DesignR
  * Always the dark palette of "The Underside": the image leaves the device, and the brand is dark.
  * The grid is the slab's underside, as on the reveal: dark wells in a slab plate, and where the
  * rig dug, chalk (lighter the more it dug there). No tile is gold: on the reveal solid gold means
- * "your tile came up", and this grid carries no outcomes. The gold here is the line of light
- * under the slab and the name of what it mines.
+ * "your tile came up", and this grid carries no outcomes. The only gold here is the line of light
+ * under the slab; the featured line is chalk, as on the reveal (gold as ink is for amounts of
+ * ORE, and this image has none).
  */
 object ShareGridImage {
     const val WIDTH = 1080
@@ -105,7 +106,7 @@ object ShareGridImage {
         if (wide > plate.width()) caption.textSize *= plate.width() / wide
         canvas.drawText(words, MARGIN, plate.bottom + 82f, caption)
 
-        label.color = HdArgb.SEAM
+        label.color = HdArgb.CHALK
         label.textSize = 30f
         canvas.drawText("POWERED BY ORE", MARGIN, plate.bottom + 132f, label)
         return bitmap

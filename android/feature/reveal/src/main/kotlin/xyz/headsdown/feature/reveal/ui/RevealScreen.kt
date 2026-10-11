@@ -1,12 +1,14 @@
 package xyz.headsdown.feature.reveal.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -30,16 +32,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import xyz.headsdown.core.design.BrandGlyph
 import xyz.headsdown.core.design.Hd
@@ -169,8 +178,7 @@ fun RevealScreen(
     // The amount of ORE is the page's one number; the other counts are a row under it.
     val (amounts, counts) = remember(copy) { copy.stats.partition { it.label == ORE_MINED } }
 
-    PinnedBarScreen(
-        contentPadding = PagePadding,
+    Page(
         content = {
             Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Unit)) {
                 BrandRow(onDone = onDone.takeIf { clockOut != null })
@@ -179,7 +187,7 @@ fun RevealScreen(
             Underside(
                 replay = replay,
                 animate = animate,
-                modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp).align(Alignment.CenterHorizontally),
+                modifier = Modifier.fillMaxWidth(),
                 onStarted = onReplayStarted,
                 onFinished = onReplayFinished,
             )
@@ -221,17 +229,11 @@ fun RevealScreen(
                 Sentence(RevealCopyBuilder.CLOCK_OUT_DETAIL)
             }
         },
-        dock = {
-            ActionDock {
-                if (clockOut != null) {
-                    BarButton(
-                        RevealCopyBuilder.CLOCK_OUT_BUTTON,
-                        onClick = clockOut,
-                        modifier = Modifier.fillMaxWidth().testTag(RevealTags.CLOCK_OUT),
-                    )
-                } else {
-                    DoneBar(onDone)
-                }
+        bar = { inColumn ->
+            if (clockOut != null) {
+                BarButton(RevealCopyBuilder.CLOCK_OUT_BUTTON, onClick = clockOut, modifier = inColumn.testTag(RevealTags.CLOCK_OUT))
+            } else {
+                DoneBar(onDone, inColumn)
             }
         },
     )
@@ -246,11 +248,39 @@ private const val ORE_FIGURE_SHARE = 80f / 112f
 /** The page's own margins: the brand row is 48dp tall (it may hold "Done"), so less is needed above it. */
 private val PagePadding = PaddingValues(start = HdDimens.Margin, end = HdDimens.Margin, top = 4.dp, bottom = 24.dp)
 
+/** Between the groups of a page: what `PinnedBarScreen` puts between its children. */
+private val PageGap = 16.dp
+
+/**
+ * The widest the page is drawn. On a phone held upright it is the screen less its margins; on a
+ * tablet, or a phone on its side, the page stays a column in the middle of the screen (and the
+ * board in it a board, not a wall of tiles each as wide as a hand).
+ */
+private val PageMaxWidth = 420.dp
+
+/** A child of a screen-wide column, held to the page's width and centred in what is left over. */
+private fun ColumnScope.inPageColumn(): Modifier =
+    Modifier.widthIn(max = PageMaxWidth).fillMaxWidth().align(Alignment.CenterHorizontally)
+
+/**
+ * A page of the reveal: [content] in a column that scrolls, over a dock that holds the one [bar].
+ * Both are held to [PageMaxWidth]; the page still scrolls from anywhere on the screen. The bar is
+ * given the modifier that puts it in the column.
+ */
+@Composable
+private fun Page(content: @Composable ColumnScope.() -> Unit, bar: @Composable (Modifier) -> Unit) {
+    PinnedBarScreen(
+        contentPadding = PagePadding,
+        content = { Column(inPageColumn(), verticalArrangement = Arrangement.spacedBy(PageGap), content = content) },
+        dock = { ActionDock { bar(inPageColumn()) } },
+    )
+}
+
 /** The mark and the name; with [onDone], the way out at the far end (when the dock is taken by "Clock out"). */
 @Composable
-private fun BrandRow(onDone: (() -> Unit)?) {
+private fun BrandRow(onDone: (() -> Unit)?, modifier: Modifier = Modifier) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = HdDimens.Touch),
+        modifier.fillMaxWidth().heightIn(min = HdDimens.Touch),
         horizontalArrangement = Arrangement.spacedBy(HdDimens.Rhythm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -279,18 +309,59 @@ private fun DoneAction(onDone: () -> Unit) {
 
 /** The dock's bar when there is nothing to clock out of. */
 @Composable
-private fun DoneBar(onDone: () -> Unit) {
-    BarButton(DONE, onClick = onDone, modifier = Modifier.fillMaxWidth().testTag(RevealTags.DONE))
+private fun DoneBar(onDone: () -> Unit, modifier: Modifier) {
+    BarButton(DONE, onClick = onDone, modifier = modifier.testTag(RevealTags.DONE))
 }
 
 @Composable
 private fun Title(copy: RevealCopy) {
     Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Unit)) {
         DisplayText(copy.title, Modifier.semantics { heading() }, style = Hd.type.title)
-        BasicText(copy.subtitle, style = Hd.type.figure.copy(color = Hd.colors.ash))
+        Hours(copy.subtitle)
         copy.sampleBadge?.let { SampleBadge(it) }
     }
 }
+
+/**
+ * The night's hours and its length: two halves joined by a middle dot ("23:10 – 06:50 · 7 h 40 m
+ * shift"). On one line while it fits. When it does not (a narrow screen, a large font) it is
+ * broken at the dot and nowhere else, each half on a line of its own: left to the line breaker
+ * it ends "· 7", or leaves "shift" alone on the second line. A screen reader and a test get the
+ * sentence as it was written, whichever way it is drawn.
+ */
+@Composable
+private fun Hours(text: String) {
+    val style = Hd.type.figure.copy(color = Hd.colors.ash)
+    val broken = remember(text) { brokenAtTheDot(text) }
+    if (broken == null) {
+        BasicText(text, style = style)
+        return
+    }
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val width = constraints.maxWidth
+        val fits = remember(text, style, density, width) {
+            measurer.measure(text, style, softWrap = false, maxLines = 1, density = density).size.width <= width
+        }
+        BasicText(
+            if (fits) text else broken,
+            Modifier.clearAndSetSemantics { this.text = AnnotatedString(text) },
+            style = style,
+        )
+    }
+}
+
+/** What joins the two halves of the hours line in `RevealCopy`. */
+private const val HOURS_SEPARATOR = " · "
+
+/**
+ * The hours line as two lines, one half on each, the dot between them gone (the line break says
+ * what it said). Null when the sentence is not two halves joined by one dot: then it is drawn as
+ * it is and wraps where it will.
+ */
+internal fun brokenAtTheDot(text: String): String? =
+    text.split(HOURS_SEPARATOR).takeIf { halves -> halves.size == 2 && halves.none { it.isBlank() } }?.joinToString("\n")
 
 /** Not the user's own night: said in words, in ember, right under the title and above everything the night shows. */
 @Composable
@@ -332,11 +403,14 @@ private fun Underside(
 }
 
 /**
- * What the night brought: the one number on the page, in gold because it is an amount of ORE,
- * on a slab plate that also carries the featured line. One node to a screen reader.
+ * What the night brought: the one number on the page, on a slab plate that also carries the
+ * featured line. One node to a screen reader.
  *
- * [lit]: ORE was mined, so the slab has its line of light under it. A night that mined nothing
- * has none.
+ * [lit]: ORE was mined. The amount is in gold, because it is an amount of ORE, and the slab has
+ * its line of light under it. A night that mined nothing has neither: "0 ORE" is said in chalk,
+ * as plainly and as large, and nothing on the plate glows. Gold on this page is ORE that exists.
+ *
+ * The featured line is chalk in both: gold as ink is for amounts of ORE and nothing else.
  */
 @Composable
 private fun OreMined(stat: RevealStat, lit: Boolean) {
@@ -362,10 +436,10 @@ private fun OreMined(stat: RevealStat, lit: Boolean) {
         Box(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Unit)) {
                 Label(stat.label)
-                OreFigure(stat.value)
-                if (!oneRow) Label(RevealWords.POWERED_BY, color = colors.seam)
+                OreFigure(stat.value, color = if (lit) colors.seam else colors.chalk)
+                if (!oneRow) Label(RevealWords.POWERED_BY, color = colors.chalk)
             }
-            if (oneRow) Label(RevealWords.POWERED_BY, Modifier.align(Alignment.TopEnd), color = colors.seam)
+            if (oneRow) Label(RevealWords.POWERED_BY, Modifier.align(Alignment.TopEnd), color = colors.chalk)
         }
     }
 }
@@ -379,11 +453,11 @@ private fun OreMined(stat: RevealStat, lit: Boolean) {
  * 40dp, it is still larger than body text at font scale 2.0 (28dp).
  */
 @Composable
-private fun OreFigure(value: String) {
+private fun OreFigure(value: String, color: Color) {
     val device = LocalDensity.current
     val figure = remember(device) { Density(device.density, fontScale = ORE_FIGURE_SHARE) }
     CompositionLocalProvider(LocalDensity provides figure) {
-        HeroNumerals(value, color = Hd.colors.seam)
+        HeroNumerals(value, color = color)
     }
 }
 
@@ -436,7 +510,16 @@ private fun BuyTheRest(copy: RevealCopy, tapped: Boolean, onBuy: () -> Unit) {
     // Counted here and not saved: the page follows the notice when the bar is tapped, every time,
     // and not when the screen comes back from a rotation with the notice already on it.
     var taps by remember { mutableIntStateOf(0) }
-    LaunchedEffect(taps) { if (taps > 0) stub.bringIntoView() }
+    // The notice is brought into view with the page's own gap under it: asked for by itself it
+    // stops flush against the dock's hairline. Its size is known only once it has been laid out,
+    // which on the first tap is after this effect first runs.
+    var notice by remember { mutableStateOf(IntSize.Zero) }
+    val gap = with(LocalDensity.current) { PageGap.toPx() }
+    LaunchedEffect(taps, notice) {
+        if (taps > 0 && notice != IntSize.Zero) {
+            stub.bringIntoView(Rect(0f, 0f, notice.width.toFloat(), notice.height + gap))
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Rhythm)) {
         BarButton(
             label,
@@ -451,17 +534,21 @@ private fun BuyTheRest(copy: RevealCopy, tapped: Boolean, onBuy: () -> Unit) {
         if (tapped) {
             Notice(
                 copy.buyStubMessage,
-                Modifier.bringIntoViewRequester(stub).testTag(RevealTags.BUY_STUB),
+                Modifier.bringIntoViewRequester(stub).onSizeChanged { notice = it }.testTag(RevealTags.BUY_STUB),
                 tone = NoticeTone.Problem,
             )
         }
     }
 }
 
-/** A hairline across the page, between its groups. Decoration. */
+/**
+ * A hairline across the page, between its groups. Drawn, not filled: a background would put an
+ * empty node in the accessibility tree for every rule on the page.
+ */
 @Composable
 private fun Rule() {
-    Box(Modifier.fillMaxWidth().height(HdDimens.Hairline).background(Hd.colors.hairline))
+    val hairline = Hd.colors.hairline
+    Box(Modifier.fillMaxWidth().height(HdDimens.Hairline).drawBehind { drawRect(hairline) })
 }
 
 /** A sentence of the page: body text, muted unless it is news. */
@@ -477,8 +564,7 @@ private fun Sentence(text: String, muted: Boolean = true) {
  */
 @Composable
 private fun Loading(onDone: () -> Unit) {
-    PinnedBarScreen(
-        contentPadding = PagePadding,
+    Page(
         content = {
             Column(verticalArrangement = Arrangement.spacedBy(HdDimens.Unit)) {
                 BrandRow(onDone = null)
@@ -494,7 +580,7 @@ private fun Loading(onDone: () -> Unit) {
             }
             // The board's frame, with the three lines under the board as two.
             Plate(
-                Modifier.fillMaxWidth().widthIn(max = 420.dp).align(Alignment.CenterHorizontally),
+                Modifier.fillMaxWidth(),
                 tone = PlateTone.Slab,
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -519,31 +605,44 @@ private fun Loading(onDone: () -> Unit) {
                 repeat(3) { SkeletonBlock(Modifier.weight(1f), height = 56.dp) }
             }
         },
-        dock = { ActionDock { DoneBar(onDone) } },
+        bar = { inColumn -> DoneBar(onDone, inColumn) },
     )
 }
 
-/** No finished shift, no indexer or no network: there is nothing to reveal, and the page says so. */
+/**
+ * No finished shift, no indexer or no network: there is nothing to reveal, and the page says so.
+ *
+ * What the screen has to spare goes above and below the slab: it hangs cold in the dark, and the
+ * words and the offer stand on the dock, by the thumb, instead of leaving the lower half of the
+ * screen empty. With nothing to spare (a short screen, a large font) both spaces close and the
+ * page is an ordinary column that scrolls.
+ */
 @Composable
 private fun NoHaul(onDone: () -> Unit, onShowSample: (() -> Unit)?) {
     val cold = remember { HeroSpec(SlabState.Cold, heat = 0) }
     PinnedBarScreen(
         contentPadding = PagePadding,
+        verticalArrangement = Arrangement.Top,
         content = {
-            BrandRow(onDone = null)
-            Hero(cold, Modifier.height(112.dp))
-            DisplayText("No haul yet", Modifier.semantics { heading() })
-            Sentence("Your first haul appears after your first mined shift.")
-            if (onShowSample != null) {
-                BarButton(
-                    "See a sample night (not your data)",
-                    onClick = onShowSample,
-                    modifier = Modifier.fillMaxWidth().testTag(RevealTags.SHOW_SAMPLE),
-                    style = BarButtonStyle.Secondary,
-                )
+            // The weights need the screen's own column, so each child is put in the page's by itself.
+            BrandRow(onDone = null, modifier = inPageColumn())
+            Spacer(Modifier.weight(1f))
+            Hero(cold, inPageColumn().padding(top = PageGap).height(112.dp))
+            Spacer(Modifier.weight(1f))
+            Column(inPageColumn().padding(top = PageGap), verticalArrangement = Arrangement.spacedBy(PageGap)) {
+                DisplayText("No haul yet", Modifier.semantics { heading() })
+                Sentence("Your first haul appears after your first mined shift.")
+                if (onShowSample != null) {
+                    BarButton(
+                        "See a sample night (not your data)",
+                        onClick = onShowSample,
+                        modifier = Modifier.fillMaxWidth().testTag(RevealTags.SHOW_SAMPLE),
+                        style = BarButtonStyle.Secondary,
+                    )
+                }
             }
         },
-        dock = { ActionDock { DoneBar(onDone) } },
+        dock = { ActionDock { DoneBar(onDone, inPageColumn()) } },
     )
 }
 
