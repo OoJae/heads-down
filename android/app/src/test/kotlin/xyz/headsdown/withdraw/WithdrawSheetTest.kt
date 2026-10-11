@@ -39,6 +39,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import xyz.headsdown.clockout.SheetTestBase
 import xyz.headsdown.core.chain.withdraw.CloseBlock
+import xyz.headsdown.core.chain.withdraw.LogRent
 import xyz.headsdown.core.chain.withdraw.Revoke
 import xyz.headsdown.core.chain.withdraw.RigClose
 import xyz.headsdown.feature.reveal.haul.HonestCopy
@@ -70,6 +71,10 @@ class WithdrawSheetTest : SheetTestBase() {
         "Confirmed on-chain. 0.02000448 SOL back in your wallet from the ORE Automation. Rig closed: 0.00244992 SOL of rent back in your wallet."
 
     /** Every state the sheet has, with the tag of the control its dock holds. */
+    /** Seven sealed shifts on the Redmi: nothing ripe before 9 November 2026; then two of them. */
+    private val logsWaiting = LogRent(logs = 7, lamports = 9_103_360uL, ripe = emptyList(), ripeLamports = 0uL, nextRipeAtUnix = 1_794_256_544L)
+    private val logsRipe = logsWaiting.copy(ripe = listOf(1uL, 2uL), ripeLamports = 2_600_960uL)
+
     private val states: List<Triple<String, WithdrawState, String>> = listOf(
         Triple("loading", WithdrawState.Loading, WithdrawTags.CLOSE),
         Triple("needs a wallet", WithdrawState.NeedsWallet(), WithdrawTags.CONNECT),
@@ -82,6 +87,8 @@ class WithdrawSheetTest : SheetTestBase() {
         Triple("ready, nothing to take", WithdrawState.Ready(nothing), WithdrawTags.CONFIRM),
         Triple("ready, the wallet is open", WithdrawState.Ready(both, revoke = true, closeRig = true, working = true), WithdrawTags.CONFIRM),
         Triple("ready, a problem", WithdrawState.Ready(both, revoke = true, problem = WithdrawModel.NOT_CONFIRMED), WithdrawTags.CONFIRM),
+        Triple("ready, logs inside their 30 days", WithdrawState.Ready(both.copy(logRent = logsWaiting)), WithdrawTags.CONFIRM),
+        Triple("ready, ripe logs chosen", WithdrawState.Ready(both.copy(logRent = logsRipe), closeLogs = true), WithdrawTags.CONFIRM),
         Triple("done", WithdrawState.Done(confirmed, SIGNATURE), WithdrawTags.CLOSE),
         Triple("done, no explorer", WithdrawState.Done(confirmed), WithdrawTags.CLOSE),
     )
@@ -425,5 +432,35 @@ class WithdrawSheetTest : SheetTestBase() {
             show(state)
             for (text in textsInOrder()) assertEquals("$name: \"$text\"", emptyList<String>(), HonestCopy.violations(text))
         }
+    }
+
+    // --- shift-log rent ---
+
+    @Test
+    fun `the logs' rent is stated from the first sealed shift and offered only once a log is ripe`() {
+        val chosen = mutableListOf<Boolean>()
+        var state by mutableStateOf<WithdrawState>(WithdrawState.Ready(both))
+        show { WithdrawScreen(state, {}, {}, {}, {}, {}, {}, onCloseLogs = { chosen += it }) }
+        // A rig with no sealed shift: no row.
+        rule.onAllNodesWithTag(WithdrawTags.LOGS).assertCountEquals(0)
+
+        state = WithdrawState.Ready(both.copy(logRent = logsWaiting))
+        rule.waitForIdle()
+        rule.onNodeWithTag(WithdrawTags.LOGS).performScrollTo().assertIsDisplayed().assertTextEquals(WithdrawCopy.logs(both.copy(logRent = logsWaiting))!!)
+        rule.onNodeWithText("0.00910336 SOL").assertExists()
+        // Inside the 30 days the row informs: there is nothing to choose and nothing to sign for it.
+        rule.onAllNodesWithTag(WithdrawTags.CLOSE_LOGS).assertCountEquals(0)
+
+        state = WithdrawState.Ready(both.copy(logRent = logsRipe))
+        rule.waitForIdle()
+        rule.onNodeWithTag(WithdrawTags.CLOSE_LOGS).performScrollTo().assertIsNotSelected().assertTextEquals(WithdrawCopy.LOGS_CHOICE).performClick()
+        assertEquals(listOf(true), chosen)
+        rule.onAllNodesWithTag(WithdrawTags.LOGS_DETAIL).assertCountEquals(0)
+
+        state = WithdrawState.Ready(both.copy(logRent = logsRipe), closeLogs = true)
+        rule.waitForIdle()
+        rule.onNodeWithTag(WithdrawTags.CLOSE_LOGS).assertIsSelected()
+        rule.onNodeWithTag(WithdrawTags.LOGS_DETAIL).assertTextEquals(WithdrawCopy.logsDetail(both.copy(logRent = logsRipe))!!)
+        rule.onNodeWithTag(WithdrawTags.CONFIRM).assertIsEnabled().assertTextEquals("Take the log rent back")
     }
 }

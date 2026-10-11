@@ -87,6 +87,7 @@ class WithdrawActivity : ComponentActivity() {
                         onConnect = { model.connect { wallet.connect(sender) } },
                         onRevoke = model::setRevoke,
                         onCloseRig = model::setCloseRig,
+                        onCloseLogs = model::setCloseLogs,
                         onConfirm = { model.confirm { prepare -> wallet.signAndSendInSession(sender, prepare) } },
                         onRetry = model::load,
                         onClose = ::finish,
@@ -110,6 +111,9 @@ object WithdrawTags {
     const val RIG = "withdraw-rig"
     const val CLOSE_RIG = "withdraw-close-rig"
     const val CLOSE_DETAIL = "withdraw-close-detail"
+    const val LOGS = "withdraw-logs"
+    const val CLOSE_LOGS = "withdraw-close-logs"
+    const val LOGS_DETAIL = "withdraw-logs-detail"
     const val CONFIRM = "withdraw-confirm"
     const val NOTHING = "withdraw-nothing"
     const val PROBLEM = "withdraw-problem"
@@ -132,11 +136,12 @@ object WithdrawLedger {
     const val AUTOMATION = "ORE Automation"
     const val RIG = "Rig"
     const val RIG_RENT = "Rig rent"
+    const val LOG_RENT = "Shift logs"
     const val CONNECT = "Connect wallet"
 
     fun sol(lamports: ULong): String = "${ClockInPolicy.sol(lamports)} SOL"
 
-    val all: List<String> = listOf(EYEBROW, TITLE, AUTOMATION, RIG, RIG_RENT, CONNECT) + SheetWords.all
+    val all: List<String> = listOf(EYEBROW, TITLE, AUTOMATION, RIG, RIG_RENT, LOG_RENT, CONNECT) + SheetWords.all
 }
 
 @Composable
@@ -150,6 +155,8 @@ fun WithdrawScreen(
     onClose: () -> Unit,
     cluster: String = BuildConfig.SOLANA_CHAIN,
     onOpenTransaction: (url: String) -> Unit = {},
+    /** Chooses to close the shift logs that are past their 30 days. Only offered when one is. */
+    onCloseLogs: (Boolean) -> Unit = {},
 ) {
     // One control closes the sheet: the bar in the dock when nothing else needs it, the header's otherwise.
     val dockIsTaken = state is WithdrawState.Ready || state is WithdrawState.NeedsWallet || state is WithdrawState.Unavailable
@@ -190,7 +197,7 @@ fun WithdrawScreen(
                 }
                 is WithdrawState.Unavailable -> SheetNotice(state.message, WithdrawTags.MESSAGE, NoticeTone.Problem)
                 is WithdrawState.Done -> Unit
-                is WithdrawState.Ready -> Ready(state, onRevoke, onCloseRig)
+                is WithdrawState.Ready -> Ready(state, onRevoke, onCloseRig, onCloseLogs)
             }
         },
         dock = {
@@ -207,7 +214,7 @@ fun WithdrawScreen(
                 is WithdrawState.Unavailable -> BarButton(SheetWords.RETRY, onRetry, bar.testTag(WithdrawTags.RETRY))
                 is WithdrawState.Done -> BarButton(SheetWords.DONE, onClose, bar.testTag(WithdrawTags.CLOSE))
                 is WithdrawState.Ready -> BarButton(
-                    label = if (state.working) SheetWords.WAITING else WithdrawCopy.button(state.revoke, state.closeRig),
+                    label = if (state.working) SheetWords.WAITING else WithdrawCopy.button(state.revoke, state.closeRig, state.closeLogs),
                     onClick = onConfirm,
                     modifier = bar.testTag(WithdrawTags.CONFIRM),
                     // Closing the rig cannot be taken back: the bar says so in ember.
@@ -222,7 +229,12 @@ fun WithdrawScreen(
 
 /** The ledger: what the Automation holds and what the rig's account would hand back, each with its choice. */
 @Composable
-private fun ColumnScope.Ready(state: WithdrawState.Ready, onRevoke: (Boolean) -> Unit, onCloseRig: (Boolean) -> Unit) {
+private fun ColumnScope.Ready(
+    state: WithdrawState.Ready,
+    onRevoke: (Boolean) -> Unit,
+    onCloseRig: (Boolean) -> Unit,
+    onCloseLogs: (Boolean) -> Unit,
+) {
     val facts = state.facts
 
     SheetRule()
@@ -261,6 +273,28 @@ private fun ColumnScope.Ready(state: WithdrawState.Ready, onRevoke: (Boolean) ->
             role = Role.Checkbox,
         )
         if (state.closeRig) WithdrawCopy.closeDetail(facts)?.let { SheetNotice(it, WithdrawTags.CLOSE_DETAIL, NoticeTone.Problem) }
+    }
+
+    // The rent the sealed shifts' logs hold: stated from the first clock-out, offered once the program lets go of it.
+    WithdrawCopy.logs(facts)?.let { sentence ->
+        SheetRule()
+        Fact(
+            label = WithdrawLedger.LOG_RENT,
+            sentence = sentence,
+            tag = WithdrawTags.LOGS,
+            figure = facts.logRent?.let { WithdrawLedger.sol(it.lamports) },
+        )
+        if (facts.canCloseLogs) {
+            Choice(
+                label = WithdrawCopy.LOGS_CHOICE,
+                selected = state.closeLogs,
+                onClick = { onCloseLogs(!state.closeLogs) },
+                modifier = Modifier.testTag(WithdrawTags.CLOSE_LOGS),
+                enabled = !state.working,
+                role = Role.Checkbox,
+            )
+            if (state.closeLogs) WithdrawCopy.logsDetail(facts)?.let { SheetNotice(it, WithdrawTags.LOGS_DETAIL) }
+        }
     }
 
     state.problem?.let { SheetNotice(it, WithdrawTags.PROBLEM, NoticeTone.Problem) }

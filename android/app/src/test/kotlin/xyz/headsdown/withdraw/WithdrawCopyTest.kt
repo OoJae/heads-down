@@ -6,9 +6,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import xyz.headsdown.core.chain.withdraw.CloseBlock
+import xyz.headsdown.core.chain.withdraw.LogRent
 import xyz.headsdown.core.chain.withdraw.Revoke
 import xyz.headsdown.core.chain.withdraw.RigClose
 import xyz.headsdown.feature.reveal.haul.HonestCopy
+import java.time.ZoneId
 
 /** The withdraw screen's words: amounts, what stops, what stays, and what cannot be undone. */
 class WithdrawCopyTest {
@@ -123,5 +125,59 @@ class WithdrawCopyTest {
         }
         assertTrue(all.size > 80)
         all.forEach { assertEquals(it, emptyList<String>(), HonestCopy.violations(it)) }
+    }
+
+    // --- shift-log rent ---
+
+    private val utc = ZoneId.of("UTC")
+
+    /** 9 November 2026, 20:35:44 UTC: thirty days after the shift sealed on 10 October at that time. */
+    private val ninthOfNovember = 1_794_256_544L
+
+    @Test
+    fun `the logs' row states the rent, the 30 days and the day the first comes back`() {
+        val waiting = LogRent(logs = 7, lamports = 9_103_360uL, ripe = emptyList(), ripeLamports = 0uL, nextRipeAtUnix = ninthOfNovember)
+        assertEquals(
+            "Sealing your shifts stored 7 logs on-chain, and your wallet paid 0.00910336 SOL of rent for them. " +
+                "The program gives a log's rent back from 30 days after its shift ended. The first can come back from 9 November 2026.",
+            WithdrawCopy.logs(facts().copy(logRent = waiting), utc),
+        )
+        assertEquals(
+            "Sealing a shift stored its log on-chain, and your wallet paid 0.00130048 SOL of rent for it. " +
+                "The program gives a log's rent back from 30 days after its shift ended. The first can come back from 9 November 2026.",
+            WithdrawCopy.logs(facts().copy(logRent = waiting.copy(logs = 1, lamports = 1_300_480uL)), utc),
+        )
+        // No log of the wallet's: no row, and nothing to choose.
+        assertNull(WithdrawCopy.logs(facts(), utc))
+        assertNull(WithdrawCopy.logsDetail(facts().copy(logRent = waiting)))
+        assertFalse(facts().copy(logRent = waiting).canCloseLogs)
+        assertFalse(facts().copy(logRent = waiting).somethingToSign(revoke = false, closeRig = false, closeLogs = true))
+    }
+
+    @Test
+    fun `ripe logs are offered with what arrives and what is erased`() {
+        val ripe = LogRent(logs = 7, lamports = 9_103_360uL, ripe = listOf(1uL, 2uL), ripeLamports = 2_600_960uL, nextRipeAtUnix = ninthOfNovember)
+        val f = facts().copy(logRent = ripe)
+        assertTrue(WithdrawCopy.logs(f, utc)!!.endsWith("0.00260096 SOL of it can come back now, the next from 9 November 2026."))
+        assertTrue(WithdrawCopy.logs(f.copy(logRent = ripe.copy(nextRipeAtUnix = null)), utc)!!.endsWith("0.00260096 SOL of it can come back now."))
+        assertEquals(
+            "Closes 2 logs and sends 0.00260096 SOL to your wallet. The on-chain record of those shifts is erased with them; " +
+                "their transactions stay in the chain's history. This cannot be undone.",
+            WithdrawCopy.logsDetail(f),
+        )
+        assertTrue(WithdrawCopy.logsDetail(f.copy(logRent = ripe.copy(ripe = listOf(1uL), ripeLamports = 1_300_480uL)))!!.startsWith("Closes 1 log and sends 0.00130048 SOL"))
+        assertTrue(f.canCloseLogs)
+        assertTrue(f.somethingToSign(revoke = false, closeRig = false, closeLogs = true))
+        assertEquals("Take the log rent back", WithdrawCopy.button(revoke = false, closeRig = false, closeLogs = true))
+        // With the SOL or the rig as well, the bar keeps their name; the notice beside the choice says the rest.
+        assertEquals("Take SOL back", WithdrawCopy.button(revoke = true, closeRig = false, closeLogs = true))
+        assertEquals(
+            "Confirmed on-chain. 0.02000448 SOL back in your wallet from the ORE Automation. 2 shift logs closed: 0.00260096 SOL of rent back in your wallet.",
+            WithdrawCopy.done(revoke, null, logsClosed = 2, logRentLamports = 2_600_960uL),
+        )
+        assertEquals("Confirmed on-chain. 1 shift log closed: 0.00130048 SOL of rent back in your wallet.", WithdrawCopy.done(null, null, 1, 1_300_480uL))
+        for (said in listOf(WithdrawCopy.logs(f, utc)!!, WithdrawCopy.logsDetail(f)!!, WithdrawCopy.LOGS_CHOICE, WithdrawCopy.done(null, null, 1, 1_300_480uL))) {
+            assertEquals(said, emptyList<String>(), HonestCopy.violations(said))
+        }
     }
 }

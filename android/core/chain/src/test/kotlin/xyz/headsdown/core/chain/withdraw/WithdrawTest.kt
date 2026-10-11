@@ -213,4 +213,107 @@ class WithdrawTest {
             instructions(prepared).map { it.first },
         )
     }
+
+    // --- shift-log rent ---
+
+    private val logRent = (128L + 128) * 6_960
+    private val day = 86_400L
+    private val now = 1_793_000_000L
+
+    /** A sealed shift's log. [payer]: who paid its rent (null: sealed before the program recorded it). */
+    private fun FakeChain.log(shiftId: Long, endedDaysAgo: Long, payer: Pubkey? = authority) = put(
+        HeadsDownProgram.shiftLog(rigAddress, shiftId.toULong()).address, HeadsDownProgram.ID,
+        TestAccounts.shiftLogBytes(rigAddress, shiftId, endTs = now - endedDaysAgo * day).also { bytes ->
+            payer?.bytes?.copyInto(bytes, destinationOffset = 112, startIndex = 0, endIndex = 16)
+        },
+        lamports = logRent,
+    )
+
+    private fun service(chain: FakeChain) = WithdrawService(chain.rpc()) { now }
+
+    @Test
+    fun `the preview counts the rent the wallet's logs hold and says when the first can come back`() = runBlocking {
+        // Shifts 5, 6 and 7 are sealed; all three inside their 30 days.
+        val preview = service(chain().rig().log(5, 3).log(6, 2).log(7, 1)).preview(authority)
+        assertEquals(
+            LogRent(logs = 3, lamports = (3 * logRent).toULong(), ripe = emptyList(), ripeLamports = 0uL, nextRipeAtUnix = now - 3 * day + 30 * day),
+            preview.logRent,
+        )
+        // No sealed shift, no log: nothing to say.
+        assertNull(service(chain().rig()).preview(authority).logRent)
+        assertNull(service(chain().automation()).preview(authority).logRent)
+    }
+
+    @Test
+    fun `only logs past their 30 days are closed, oldest first, each to the wallet that paid`() = runBlocking {
+        val chain = chain().rig().log(4, 45).log(5, 31).log(6, 29).log(7, 1)
+        val preview = service(chain).preview(authority)
+        assertEquals(listOf(4uL, 5uL), preview.logRent!!.ripe)
+        assertEquals((2 * logRent).toULong(), preview.logRent!!.ripeLamports)
+        assertEquals(now + day, preview.logRent!!.nextRipeAtUnix) // shift 6, tomorrow
+
+        val prepared = service(chain).prepare(authority, WithdrawRequest(closeLogs = true), v0)!!
+        assertEquals(listOf(4uL, 5uL), prepared.plan.logsClosed)
+        assertEquals((2 * logRent).toULong(), prepared.plan.logRentLamports)
+        val sent = instructions(prepared)
+        assertEquals(2, sent.size)
+        for ((i, shiftId) in listOf(4uL, 5uL).withIndex()) {
+            val expected = HeadsDownInstructions.closeShiftLog(rigAddress, shiftId, authority)
+            assertEquals(HeadsDownProgram.ID.toBase58(), sent[i].first)
+            assertTrue(expected.data.contentEquals(sent[i].second))
+        }
+        // Not asked for: not signed, however ripe.
+        assertNull(service(chain).prepare(authority, WithdrawRequest(), v0))
+    }
+
+    @Test
+    fun `a log on the day its 30 days end waits for the margin between the phone's clock and the chain's`() = runBlocking {
+        val state = { endTs: Long -> WithdrawChainState(null, 0uL, null, 0uL, false, 0uL, listOf(SealedLog(7uL, 1_781_760uL, endTs, paidByWallet = true))) }
+        val ttl = WithdrawComposer.LOG_TTL_SECONDS
+        val margin = WithdrawComposer.LOG_CLOCK_MARGIN_SECONDS
+        assertTrue(WithdrawComposer.logRent(state(now - ttl), now)!!.ripe.isEmpty())
+        assertTrue(WithdrawComposer.logRent(state(now - ttl - margin + 1), now)!!.ripe.isEmpty())
+        assertEquals(listOf(7uL), WithdrawComposer.logRent(state(now - ttl - margin), now)!!.ripe)
+        // Until then the sheet names the day the program itself goes by.
+        assertEquals(now, WithdrawComposer.logRent(state(now - ttl), now)!!.nextRipeAtUnix)
+    }
+
+    @Test
+    fun `a log somebody else paid for, or whose bond is still there, is not asked for`() = runBlocking {
+        val crank = Pubkey.fromBase58("5Xec1ZUwXcB2ZGeWqqBHrxaHT4WQrGVUgH9xmqgC1kzk")
+        // Shift 3: sealed by the crank, which paid its rent. Shift 4: its Focus Bond was never resolved.
+        // Shift 5: sealed before the program recorded a payer, so its rent is the rig's wallet's.
+        val chain = chain().rig().log(3, 60, payer = crank).log(4, 50).bond(4).log(5, 40, payer = null)
+        val rent = service(chain).preview(authority).logRent!!
+        assertEquals(2, rent.logs) // 4 and 5 are the wallet's; 3 is the crank's
+        assertEquals(listOf(5uL), rent.ripe)
+        val prepared = service(chain).prepare(authority, WithdrawRequest(closeLogs = true), v0)!!
+        assertEquals(listOf(5uL), prepared.plan.logsClosed)
+        assertEquals(1, instructions(prepared).size)
+    }
+
+    @Test
+    fun `one transaction closes at most eight logs and still takes the SOL back and closes the rig`() = runBlocking {
+        var chain = chain().automation().rig(shiftId = 12)
+        for (id in 1L..12L) chain = chain.log(id, 40 + id)
+        val prepared = service(chain).prepare(authority, WithdrawRequest(revoke = true, closeRig = true, closeLogs = true), legacy)!!
+        assertEquals((1uL..8uL).toList(), prepared.plan.logsClosed)
+        val sent = instructions(prepared)
+        // ORE's automate, eight close_shift_log, close_rig: in that order, in a packet.
+        assertEquals(10, sent.size)
+        assertEquals(Ore.PROGRAM_ID.toBase58(), sent.first().first)
+        assertTrue(HeadsDownInstructions.closeRig(authority).data.contentEquals(sent.last().second))
+        assertTrue(prepared.transactions.single().size <= 1232)
+        // The four that are left are still there for the next visit.
+        assertEquals(12, service(chain).preview(authority).logRent!!.logs)
+    }
+
+    @Test
+    fun `another wallet's rig has no log rent to offer`() = runBlocking {
+        val other = Pubkey.fromBase58("9DSVM862oJrstiPmmQmgqXb7AkuXrKJtYgd1fwbeqeeW")
+        val chain = chain().rig().log(5, 40)
+        // The rig at this wallet's address is its own by construction; a log names its payer.
+        assertEquals(1, service(chain).preview(authority).logRent!!.logs)
+        assertNull(service(chain).preview(other).logRent)
+    }
 }
