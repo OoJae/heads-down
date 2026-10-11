@@ -4,8 +4,10 @@ import android.animation.ValueAnimator
 import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -49,7 +51,8 @@ class RevealActivity : ComponentActivity() {
     private var state by mutableStateOf<RevealUiState>(RevealUiState.Loading)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // The reveal is dark whatever the phone's own theme: light icons over the pit on both bars.
+        enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         NotificationManagerCompat.from(this).cancel(RevealAlarmReceiver.NOTIFICATION_ID)
         HighRefreshRate.request(this)
