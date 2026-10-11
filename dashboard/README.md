@@ -82,7 +82,11 @@ data exists, so there is nothing honest to plot. Milestone "regions" are time-zo
   CVD ΔE ≥ 26, normal-vision ΔE ≥ 28, and ≥ 3:1 contrast. Dark: guest `#E8590F`, Seeker `#3987E5`,
   haul `#C98500` on `#18181A` (4.95, 4.87 and 5.77 to 1). Light: `#C2410C`, `#2A78D6`, `#9E6C00` on
   `#E4DDD0` (3.84, 3.27 and 3.38 to 1; the haul step was `#B07A00`, which is 2.76 to 1 on the new
-  card, so it was darkened). Text always uses text colors. Color marks identity only
+  card, so it was darkened). The gray of what is context and not data (a dark round with no dig, the
+  bars that are not selected) is quieter on purpose: `#55565C` in dark (2.42 to 1) and `#98938A` in
+  light (2.26 to 1; it was `#B8B3AC`, which is 1.54 to 1 on the new card). Text always uses text
+  colors, and "not yet" on the cohort table's hatch takes the second ink, because muted ink is 4.2 to
+  1 on the hatch's darker stripe in light. Color marks identity only
   through swatches. The skips histogram uses **one hue** for all reasons (they are categories of the
   same thing, named by their labels), and a selected bar is emphasised by graying the rest. On the
   haul's round strip, ember and gold are too close for color-blind readers (validator ΔE 2 in dark

@@ -16,6 +16,9 @@
  *   dark  on #18181A: guest #E8590F 4.95, seeker #3987E5 4.87, haul #C98500 5.77
  *   light on #E4DDD0: guest #C2410C 3.84, seeker #2A78D6 3.27, haul #9E6C00 3.38
  * (the light haul step was #B07A00, which is 2.76 on the new card, so it was darkened).
+ * The gray of what is context and not data (a dark round with no dig, the bars that are not
+ * selected) is quieter on purpose: 2.42 in dark, and in light #98938A, 2.26 (it was #B8B3AC,
+ * which fell from 2.08 on the old white card to 1.54 on the new one).
  * Text never wears a data color; identity comes from the swatch beside it.
  */
 
@@ -89,7 +92,7 @@
   --viz-guest: #c2410c;
   --viz-seeker: #2a78d6;
   --viz-haul: #9e6c00;
-  --viz-context: #b8b3ac;
+  --viz-context: #98938a;
   --heat-on: #ffffff;
   --sim-a: #fff1cc;
   --sim-b: #ffe8a8;
@@ -242,8 +245,13 @@ button:focus-visible,
   }
 }
 
-main {
-  padding: 20px 0 48px;
+/*
+ * The page's own space above and below. Written as longhands on main.wrap: .wrap sets the side
+ * gutters with a shorthand, which used to zero these and leave the last card on the footer's line.
+ */
+main.wrap {
+  padding-top: 20px;
+  padding-bottom: 48px;
 }
 
 h1 {
@@ -549,8 +557,9 @@ td.num {
   border: 2px solid var(--surface);
   min-width: 64px;
 }
+/* "not yet" sits on the hatch, whose darker stripe is the second surface: muted ink is 4.2 to 1 there in light, so it takes the second ink. */
 .heat.immature {
-  color: var(--text-muted);
+  color: var(--text-2);
   font-family: var(--sans);
   background: repeating-linear-gradient(45deg, transparent 0 5px, var(--surface-2) 5px 10px);
 }
@@ -612,10 +621,12 @@ td.num {
   font-size: 13px;
   padding: 20px 0 32px;
 }
+/* An address is one unbroken word of 44 characters: on a phone it breaks where the line ends, and the page does not scroll sideways. */
 code,
 .mono {
   font-family: var(--mono);
   font-size: 0.92em;
+  overflow-wrap: anywhere;
 }
 dl.defs dt {
   font-weight: 600;
@@ -644,9 +655,20 @@ dl.defs dd {
   gap: 8px 12px;
   margin-bottom: 12px;
 }
-.filter-row input {
+/* A label and its field stay inside the page: on a phone the field takes the next line and its full width, never more. */
+.filter-row label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
   max-width: 100%;
-  margin-left: 4px;
+}
+.filter-row input,
+.filter-row select {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: 0;
 }
 .btn[disabled] {
   opacity: 0.5;
