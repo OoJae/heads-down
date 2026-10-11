@@ -380,18 +380,18 @@ once the local indexer has it. Build the APK for it with a short window as well
 
 ```text
 [emulator-smoke +   5s] installed app-localdev.apk on emulator-5554 (Android 14) and started it
-[emulator-smoke +  69s] setup done: notifications, background running, tile, rig key in the device's Keystore
-[emulator-smoke + 130s] CLOCKED IN with the wallet HERdakGZCHqAHqZTeZiqEuS6R1ZYLU3sPYfQ2Rh727s1: the app built the transaction, the wallet signed, the app submitted and confirmed it; rig GW5ZyQbPyAgMA7RfvMCJNxuBdQ4YBsAcMWzcKYQs8eF7 is armed
-[emulator-smoke + 258s] the crank accepted a heartbeat signed by the device's Keystore key
-[emulator-smoke + 337s] DIG LANDED on-chain with that heartbeat: tx 2k2qUAqBEEB1NX5u9NiTETrMFDXHRRHiX8DV7KhGX5Dx3YPcXoNaND1fHG3DF65fAHqB4PsWyV5ENxSx4qnePv1r
-[emulator-smoke + 349s] LIFTED: the app signed a BREAK and the crank landed it (the rig is now Cooling on-chain)
-[emulator-smoke + 414s] CLOCKED OUT with the wallet: Confirmed on-chain. Shift sealed as ended early.
-[emulator-smoke + 475s] CLOCKED IN on shift 2 with a Focus Bond: 10 SKR left the wallet; the window ends in 455 s
-[emulator-smoke + 654s] a dig landed inside the window; waiting 275 s for the window to end
-[emulator-smoke + 970s] WINDOW OVER, phone lifted: no BREAK was sent (the rig is still Down on-chain)
-[emulator-smoke +1054s] REVEAL, not sealed: 3 rounds signed dark
-[emulator-smoke +1092s] CLOCKED OUT from the reveal: Confirmed on-chain. Shift sealed as completed. Focus Bond back in your wallet: 10 SKR. The wallet holds 100 SKR again.
-[emulator-smoke +1203s] REVEAL, sealed: Streak 0 → 1 after See this shift on-chain
+[emulator-smoke +  71s] setup done: notifications, background running, tile, rig key in the device's Keystore
+[emulator-smoke + 130s] CLOCKED IN with the wallet CbbacWQMdeP9WYYmMQHdBrV6oJocCBVXFvLZJCAAEf3o: the app built the transaction, the wallet signed, the app submitted and confirmed it; rig FodViQfU5a9DZFb7xHRCSQfgXtxPTtcTCm2YgyYkLp3W is armed
+[emulator-smoke + 198s] the crank accepted a heartbeat signed by the device's Keystore key
+[emulator-smoke + 277s] DIG LANDED on-chain with that heartbeat: tx 4WUqX5g2m97ZVYnfvRNMfPKF5vb1oCEHJUx6vUcwz1tJ8uuhMWNiuQjT7TRYBgVqPGvPKCxCenhCkAYWxvHUQpiT
+[emulator-smoke + 289s] LIFTED: the app signed a BREAK and the crank landed it (the rig is now Cooling on-chain)
+[emulator-smoke + 348s] CLOCKED OUT with the wallet: Confirmed on-chain. Shift sealed as ended early.
+[emulator-smoke + 409s] CLOCKED IN on shift 2 with a Focus Bond: 10 SKR left the wallet; the window ends in 454 s
+[emulator-smoke + 592s] a dig landed inside the window; waiting 271 s for the window to end
+[emulator-smoke + 902s] WINDOW OVER, phone lifted: no BREAK was sent (the rig is still Down on-chain)
+[emulator-smoke + 986s] REVEAL, not sealed: 3 rounds signed dark
+[emulator-smoke +1024s] CLOCKED OUT from the reveal: Confirmed on-chain. Shift sealed as completed. Focus Bond back in your wallet: 10 SKR. The wallet holds 100 SKR again.
+[emulator-smoke +1127s] REVEAL, sealed: the haul of shift 2 is on the page (Streak 0 → 1)
 
 EMULATOR SMOKE PASSED (with a wallet app and a Focus Bond): shift 1 sealed early, 10 SKR locked on shift 2, a dig, the window run out, no BREAK, the reveal before and after the clock-out, the shift sealed completed, 10 SKR back. No crash.
 ```
