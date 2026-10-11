@@ -44,6 +44,8 @@ import xyz.headsdown.rig.VoucherStore
 import xyz.headsdown.surface.tile.TileAddOutcome
 import xyz.headsdown.surface.tile.TilePrompt
 import xyz.headsdown.surface.widget.RigWidgetReceiver
+import xyz.headsdown.surface.widget.RigWidgetState
+import xyz.headsdown.surface.widget.WidgetStateStore
 import javax.inject.Inject
 
 data class OnboardingState(
@@ -113,6 +115,20 @@ class HomeViewModel @Inject constructor(
     private val _health = MutableStateFlow<ShiftHealth>(ShiftHealth.NoRecentShift)
     val health: StateFlow<ShiftHealth> = _health.asStateFlow()
 
+    private val _loaded = MutableStateFlow(false)
+
+    /**
+     * False until the first [refresh] has read every permission and setting. Until then a screen
+     * shows still skeleton lines where those facts go, not a guess that nothing is set up.
+     */
+    val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
+    /**
+     * What the Rig widget last stored: the last real haul and the streak read from the on-chain
+     * Rig. The home screen prints the same two facts, in the widget's own words (RigWidgetCopy).
+     */
+    val widget: StateFlow<RigWidgetState> = WidgetStateStore.get(context).state
+
     val notificationAskedBefore: Boolean get() = prefs.getBoolean(K_NOTIF_ASKED, false)
 
     init {
@@ -140,6 +156,7 @@ class HomeViewModel @Inject constructor(
             _shiftWindow.value = runCatching {
                 ShiftWindow.describe(policy, System.currentTimeMillis(), reveal.nextSystemAlarmWallMillis())
             }.getOrNull()
+            _loaded.value = true
         }
     }
 
