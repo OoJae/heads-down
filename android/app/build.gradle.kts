@@ -133,6 +133,11 @@ require(policyShiftBudget >= policyDigLamports && policyWeeklyBudget >= policySh
 // The default keeps them: scripts/devstack/emulator-smoke.sh opens "Rig key and devstack".
 val devEntries = prop("headsdown.devEntries") ?: "true"
 require(devEntries == "true" || devEntries == "false") { "headsdown.devEntries must be true or false" }
+// How the hero slab is drawn: the shader where the phone allows it (the default), the drawn
+// fallback with the same motion, or the still slab.
+//   ./gradlew :app:assembleDebug -Pheadsdown.slab=polygon
+val slab = prop("headsdown.slab") ?: "shader"
+require(slab in setOf("shader", "polygon", "static")) { "headsdown.slab must be shader, polygon or static" }
 
 android {
     namespace = "xyz.headsdown"
@@ -164,6 +169,7 @@ android {
         buildConfigField("long", "POLICY_SHIFT_BUDGET_LAMPORTS", "${policyShiftBudget}L")
         buildConfigField("long", "POLICY_WEEKLY_BUDGET_LAMPORTS", "${policyWeeklyBudget}L")
         buildConfigField("boolean", "SHOW_DEV_ENTRIES", devEntries)
+        buildConfigField("String", "SLAB", "\"$slab\"")
     }
 
     buildFeatures {

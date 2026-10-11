@@ -91,7 +91,11 @@ import xyz.headsdown.core.design.components.PinnedBarScreen
 import xyz.headsdown.core.design.components.SkeletonLine
 import xyz.headsdown.core.design.components.TextAction
 import xyz.headsdown.core.wallet.HeadsDownWallet
+import xyz.headsdown.feature.shift.ShiftStatusRepository
+import xyz.headsdown.feature.shift.isRunning
 import xyz.headsdown.rig.ClockInPolicy
+import xyz.headsdown.surface.haptics.Haptics
+import xyz.headsdown.ui.AppHaptics
 import javax.inject.Inject
 import kotlin.math.roundToInt
 import android.graphics.Color as AndroidColor
@@ -108,6 +112,10 @@ class ClockOutActivity : ComponentActivity() {
 
     @Inject lateinit var wallet: HeadsDownWallet
 
+    @Inject lateinit var haptics: Haptics
+
+    @Inject lateinit var shiftStatus: ShiftStatusRepository
+
     /** Registered before the Activity is STARTED, as MWA requires. */
     private lateinit var sender: ActivityResultSender
 
@@ -120,18 +128,22 @@ class ClockOutActivity : ComponentActivity() {
         title = ClockOutLedger.TITLE
         sender = ActivityResultSender(this)
         val model = vm.model
+        // No cue reaches the motor while a shift is running: the governor refuses a shift moment.
+        val appHaptics = AppHaptics(haptics) { shiftStatus.snapshot.value.state.isRunning }
         setContent {
             HeadsDownTheme {
-                val state by model.state.collectAsStateWithLifecycle()
-                ClockOutScreen(
-                    state = state,
-                    onClaimAll = model::setClaimAll,
-                    onEndEarly = model::setEndEarly,
-                    onConfirm = { model.confirm { prepare -> wallet.signAndSendInSession(sender, prepare) } },
-                    onRetry = model::load,
-                    onClose = ::finish,
-                    onOpenTransaction = { openExplorerLink(it) },
-                )
+                CompositionLocalProvider(LocalHdHaptics provides appHaptics) {
+                    val state by model.state.collectAsStateWithLifecycle()
+                    ClockOutScreen(
+                        state = state,
+                        onClaimAll = model::setClaimAll,
+                        onEndEarly = model::setEndEarly,
+                        onConfirm = { model.confirm { prepare -> wallet.signAndSendInSession(sender, prepare) } },
+                        onRetry = model::load,
+                        onClose = ::finish,
+                        onOpenTransaction = { openExplorerLink(it) },
+                    )
+                }
             }
         }
     }

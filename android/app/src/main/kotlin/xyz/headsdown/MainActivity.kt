@@ -35,22 +35,40 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import xyz.headsdown.clockout.ClockOutActivity
 import xyz.headsdown.core.design.Hd
+import xyz.headsdown.core.design.components.HdHaptics
+import xyz.headsdown.core.design.components.LocalHdHaptics
+import xyz.headsdown.core.design.components.LocalHeroRenderer
 import xyz.headsdown.core.wallet.HeadsDownWallet
 import xyz.headsdown.core.wallet.WalletResult
 import xyz.headsdown.devtools.RigDebug
 import xyz.headsdown.feature.reveal.RevealActivity
+import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.feature.shift.devlog.SensorLab
+import xyz.headsdown.feature.shift.isRunning
 import xyz.headsdown.rig.ClockInPolicy
+import xyz.headsdown.surface.haptics.Haptics
 import xyz.headsdown.surface.tile.TrampolineActivity
 import xyz.headsdown.surface.widget.RigWidgetCopy
+import xyz.headsdown.ui.AppHaptics
 import xyz.headsdown.ui.HomeCopy
 import xyz.headsdown.ui.HomeScreen
 import xyz.headsdown.ui.HomeViewModel
+import xyz.headsdown.ui.LiveHero
 import xyz.headsdown.ui.NightShiftIntro
 import xyz.headsdown.ui.OnboardingScreen
 import xyz.headsdown.ui.launch
 import xyz.headsdown.ui.setup.RootScreen
 import xyz.headsdown.ui.setup.rootScreen
+import xyz.headsdown.ui.slab.LayDownGlow
+import xyz.headsdown.ui.slab.LocalSlabConfig
+import xyz.headsdown.ui.slab.LocalTiltSource
+import xyz.headsdown.ui.slab.SensorTiltSource
+import xyz.headsdown.ui.slab.SlabConfig
+import xyz.headsdown.ui.slab.SlabMotion
+import xyz.headsdown.ui.slab.SlabPolicy
+import xyz.headsdown.ui.slab.SlabRenderer
+import xyz.headsdown.ui.slab.SlabWindow
+import xyz.headsdown.ui.slab.TiltSource
 import xyz.headsdown.ui.theme.HeadsDownTheme
 import xyz.headsdown.withdraw.WithdrawActivity
 import javax.inject.Inject
@@ -63,6 +81,14 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var wallet: HeadsDownWallet
 
+    @Inject lateinit var haptics: Haptics
+
+    /** How the hero is drawn on this phone right now: resolved when the app opens and each time it comes back. */
+    private var slabConfig by mutableStateOf(SlabConfig.Inert)
+
+    /** The hero's own, UI-only reader of the accelerometer; it listens only while a live hero is on screen. */
+    private val tilt: TiltSource by lazy { SensorTiltSource(applicationContext) }
+
     /** The wallet's Sign In With Solana when the rig key is created (registered before STARTED). */
     private lateinit var sender: ActivityResultSender
 
@@ -72,9 +98,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         sender = ActivityResultSender(this)
+        slabConfig = resolveSlab()
+        // No cue reaches the motor while a shift is running: the governor refuses a shift moment.
+        val appHaptics = AppHaptics(haptics) { vm.shift.value.state.isRunning }
         setContent {
             HeadsDownTheme {
-                AppLocals {
+                AppLocals(slabConfig, tilt, appHaptics) {
                     HeadsDownRoot(
                         vm = vm,
                         onClockIn = { startActivity(Intent(this, TrampolineActivity::class.java)) },
@@ -100,20 +129,39 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vm.refresh() // permissions and OEM settings are changed outside the app
+        // Battery saver and "Remove animations" are changed outside the app too.
+        slabConfig = resolveSlab()
+        // The shader is sized for 60 frames a second: hold the panel there while it is live.
+        if (slabConfig.renderer == SlabRenderer.Shader && slabConfig.motion == SlabMotion.Live) SlabWindow.pinSixtyHertz(window) else SlabWindow.unpin(window)
+    }
+
+    /**
+     * The build decides how far the hero may go (`-Pheadsdown.slab=shader|polygon|static`), the
+     * phone decides the rest: Android 13 for the shader, and no live motion under battery saver
+     * or "Remove animations".
+     */
+    private fun resolveSlab(): SlabConfig = when (BuildConfig.SLAB) {
+        "static" -> SlabConfig.Inert
+        "polygon" -> SlabPolicy.resolve(this, shaderDisabled = true)
+        else -> SlabPolicy.resolve(this)
     }
 }
 
 /**
- * THE ONE PLACE where the app provides CompositionLocals to every screen under the theme. Nothing
- * is provided yet: the hero draws the design module's still slab and the haptics are silent.
- * The live hero (`LocalHeroRenderer provides …`, with whatever it needs to be live: its config,
- * its tilt source) and the motor (`LocalHdHaptics provides …`) are wired here, and nowhere else.
- * The screens give the hero the clear box between the brand row and the line under it, the
- * screen's full width; nothing but the page's own scroller clips what is drawn past that box.
+ * THE ONE PLACE where the app provides CompositionLocals to every screen under the theme: the
+ * live hero with what it needs to be live (how it is drawn on this phone, and its own reader of
+ * the accelerometer), and the motor. A screen composed without this (a test, a preview) gets the
+ * design module's still slab and silent haptics.
  */
 @Composable
-private fun AppLocals(content: @Composable () -> Unit) {
-    CompositionLocalProvider(content = content)
+private fun AppLocals(slab: SlabConfig, tilt: TiltSource, haptics: HdHaptics, content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalSlabConfig provides slab,
+        LocalTiltSource provides tilt,
+        LocalHeroRenderer provides LiveHero,
+        LocalHdHaptics provides haptics,
+        content = content,
+    )
 }
 
 /** How long nothing can be tapped after one screen replaced another under the same thumb. */
@@ -232,6 +280,8 @@ private fun HeadsDownRoot(
                 )
             }
         }
+        // Light for the room: an armed phone laid face-down warms the screen once, then goes dark.
+        if (screen == RootScreen.Home) LayDownGlow(armed = snapshot.state is ShiftState.Armed, modifier = Modifier.fillMaxSize())
         if (resting) {
             Box(
                 Modifier.fillMaxSize().pointerInput(Unit) {
