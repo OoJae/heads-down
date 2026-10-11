@@ -58,16 +58,18 @@ internal fun WidgetSlab(mode: WidgetColorMode, description: String, open: Action
  * labels and figures, the default face for a sentence.
  *
  * A widget is a box that does not grow, so its text follows the system font scale only up to
- * [MAX_SCALE] (the cap the app's display face has), and a layout that is already full at 1.0 passes
- * a lower `max` still. Sizes are given in sp all the same: [sp] gives back fewer of them where the
- * system would draw the size larger than the cap allows. The system's own conversion is asked both
- * ways, because from Android 14 a font scale no longer multiplies every size by the same number.
- * Where a box is too small anyway, what falls off its lower edge is its last line, never an
- * amount and never the time.
+ * `max`, and never past [MAX_SCALE] (the cap the app's display face has). Both widgets pass 1:
+ * each of their layouts is full at the size it is declared for, and the size a launcher really
+ * gives is not known here, so a larger system font leaves their text at its size (a smaller one
+ * is honoured). The slab is one node to a screen reader and says everything it shows.
+ *
+ * Sizes are given in sp all the same: [sp] gives back fewer of them where the system would draw
+ * the size larger than the cap allows. The system's own conversion is asked both ways, because
+ * from Android 14 a font scale no longer multiplies every size by the same number.
  */
 internal class WidgetType(resources: Resources, max: Float = MAX_SCALE) {
     private val metrics: DisplayMetrics = resources.displayMetrics
-    private val system = resources.configuration.fontScale.takeIf { it > 0f } ?: 1f
+    private val system = systemScale(resources)
 
     /** The most the text grows: the system's font scale, up to [max]. Never under 1 for a larger font, never over the system's own. */
     val scale: Float = minOf(system, maxOf(1f, minOf(max, MAX_SCALE)))
@@ -98,6 +100,9 @@ internal class WidgetType(resources: Resources, max: Float = MAX_SCALE) {
 
     companion object {
         const val MAX_SCALE = 1.3f
+
+        /** The system's font scale (1 where it is not set). */
+        fun systemScale(resources: Resources): Float = resources.configuration.fontScale.takeIf { it > 0f } ?: 1f
 
         /** The platform's condensed sans, by its family name: the stand-in for Big Shoulders Display. */
         const val CONDENSED_FAMILY = "sans-serif-condensed"

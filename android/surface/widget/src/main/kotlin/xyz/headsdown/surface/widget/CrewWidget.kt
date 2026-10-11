@@ -9,7 +9,6 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.LocalContext
-import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -22,7 +21,7 @@ import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
-import androidx.glance.layout.height
+import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
@@ -74,27 +73,29 @@ object CrewPlaceholderCopy {
 @Composable
 internal fun CrewPlaceholderContent(mode: WidgetColorMode, open: Action?) {
     val colors = GlanceTheme.colors
-    // One row of the home screen, full at 1.0: the text grows only as far as the box is taller than 90dp.
-    val type = WidgetType(LocalContext.current.resources, max = LocalSize.current.height.value / CrewWidget.SIZE.height.value)
+    // One row of the home screen, full at the size it asks for: its text keeps its size under a larger system font.
+    val type = WidgetType(LocalContext.current.resources, max = 1f)
     WidgetSlab(mode, CrewPlaceholderCopy.DESCRIPTION, open) {
-        Column(GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Column(GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(CrewPlaceholderCopy.TITLE, style = type.label(11f, colors.onSurfaceVariant), maxLines = 1)
                 Spacer(GlanceModifier.width(8.dp))
                 // Plain ink, not an accent: "not live" is a fact about this widget, not a problem with the rig.
                 Text(CrewPlaceholderCopy.TAG, style = type.label(11f, colors.onSurface), maxLines = 1)
             }
-            Spacer(GlanceModifier.height(5.dp))
-            // Empty seats: outlined squares, never filled, because nobody is really here.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                repeat(CrewPlaceholderCopy.EMPTY_SEATS) { i ->
-                    if (i > 0) Spacer(GlanceModifier.width(8.dp))
-                    Box(GlanceModifier.size(SEAT).background(colors.outline).padding(SEAT_EDGE)) {
-                        Box(GlanceModifier.fillMaxSize().background(colors.surface)) {}
+            // Empty seats: outlined squares, never filled, because nobody is really here. They sit in the
+            // height the two texts leave, so in a row shorter than the widget asks for it is the seats that
+            // give way and never a line of the sentence.
+            Box(GlanceModifier.defaultWeight().fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    repeat(CrewPlaceholderCopy.EMPTY_SEATS) { i ->
+                        if (i > 0) Spacer(GlanceModifier.width(8.dp))
+                        Box(GlanceModifier.size(SEAT).background(colors.outline).padding(SEAT_EDGE)) {
+                            Box(GlanceModifier.fillMaxSize().background(colors.surface)) {}
+                        }
                     }
                 }
             }
-            Spacer(GlanceModifier.height(5.dp))
             Text(CrewPlaceholderCopy.LINE, style = type.body(12f, colors.onSurfaceVariant), maxLines = 2)
         }
     }

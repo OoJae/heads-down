@@ -45,11 +45,19 @@ import androidx.glance.unit.ColorProvider
  * It is laid out as the wordmark is: what the slab is doing above a line, the ORE under it. The
  * line is the seam. It is gold while the rig is hot, light from underneath, and a hairline
  * the rest of the time. Nothing here moves but the chronometer's digits.
+ *
+ * SIZES. A launcher is handed one layout per declared size and, for the box it gives the widget,
+ * takes the nearest of those that fit (`RemoteViews.findBestFitLayout`: least squared distance).
+ * Nearest is not largest: of two sizes that both fit, a wide low one can beat a narrow tall one.
+ * So [SIZES] is closed under "the wider width with the taller height" (two widths by four
+ * heights, less the pairs that would draw the same thing), which makes the nearest size the
+ * widest and tallest that fits, and the layout a matter of the box alone (RigWidgetSizesTest
+ * asks the platform itself).
  */
 class RigWidget : GlanceAppWidget() {
 
-    override val sizeMode: SizeMode = SizeMode.Responsive(setOf(COMPACT, STRIP, STANDARD, WIDE, TALL))
-    override val previewSizeMode = SizeMode.Responsive(setOf(STANDARD, WIDE, TALL))
+    override val sizeMode: SizeMode = SizeMode.Responsive(SIZES)
+    override val previewSizeMode = SizeMode.Responsive(setOf(STANDARD, TALL))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val store = WidgetStateStore.get(context)
@@ -75,20 +83,36 @@ class RigWidget : GlanceAppWidget() {
     }
 
     companion object {
-        /** One row of the home screen, as narrow as it goes: the rig word, then the time or the status. */
+        /** A short row two cells wide, the least a launcher may give: the rig word over the time or the status. */
         val COMPACT = DpSize(110.dp, 40.dp)
 
-        /** One row, three cells wide: the lights, the rig word and the time on a single line. */
-        val STRIP = DpSize(190.dp, 40.dp)
+        /** A short row three cells wide or more (a home screen on its side): the same two lines, with the lights. */
+        val STRIP = DpSize(180.dp, 40.dp)
+
+        /** One row of a phone's home screen, two cells wide: the rig word, the time, the status. */
+        val ROW_NARROW = DpSize(110.dp, 80.dp)
+
+        /** One row, three cells wide or more: the name, the rig word beside the time, the status. */
+        val ROW = DpSize(180.dp, 80.dp)
 
         /** The smallest size that shows everything, in small type. */
         val STANDARD = DpSize(180.dp, 100.dp)
 
-        /** The same layout with room beside it: one row of a tablet or a tall cell, four cells wide. */
-        val WIDE = DpSize(260.dp, 100.dp)
+        /** Two rows, two cells wide: everything, set narrow. */
+        val SQUARE = DpSize(110.dp, 170.dp)
 
         /** Two rows of the home screen, which is what the widget asks for: room for the rig word at its full size. */
         val TALL = DpSize(180.dp, 170.dp)
+
+        /**
+         * Four cells of one tall row. It is drawn exactly as [STANDARD] is, so it is not declared:
+         * declared, it was nearer to a box of four cells by two rows than [TALL] is, and put the
+         * small layout there over an empty band.
+         */
+        val WIDE = DpSize(260.dp, 100.dp)
+
+        /** Every size the launcher is given a layout for. */
+        val SIZES: Set<DpSize> = setOf(COMPACT, STRIP, ROW_NARROW, ROW, STANDARD, SQUARE, TALL)
 
         private const val PREVIEW_NOW = 1_790_000_000_000L
 
@@ -110,6 +134,26 @@ class RigWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = RigWidget()
 }
 
+/** The four layouts, from the least a box can hold to the most. */
+internal enum class RigLayout { STRIP, ROW, STANDARD, TALL }
+
+/** What one declared size draws: which layout, and whether it is the two-cell (narrow) setting of it. */
+internal class RigPlan private constructor(val layout: RigLayout, val narrow: Boolean) {
+    companion object {
+        fun of(size: DpSize): RigPlan {
+            val narrow = size.width < RigWidget.STRIP.width
+            val layout = when {
+                size.height < RigWidget.ROW.height -> RigLayout.STRIP
+                size.height < RigWidget.STANDARD.height -> RigLayout.ROW
+                // Two cells cannot hold the small layout's lines: they keep the row until there are two rows.
+                size.height < RigWidget.TALL.height -> if (narrow) RigLayout.ROW else RigLayout.STANDARD
+                else -> RigLayout.TALL
+            }
+            return RigPlan(layout, narrow)
+        }
+    }
+}
+
 @Composable
 internal fun RigWidgetContent(
     text: RigWidgetText,
@@ -121,7 +165,6 @@ internal fun RigWidgetContent(
     val colors = GlanceTheme.colors
     val accents = WidgetAccents(mode)
     val resources = LocalContext.current.resources
-    val type = WidgetType(resources)
     val look = RigLook(
         word = accents.word(text.heat, ink = colors.onSurface, muted = colors.onSurfaceVariant),
         lights = accents.lights(text.heat, muted = colors.onSurfaceVariant),
@@ -131,14 +174,16 @@ internal fun RigWidgetContent(
         haul = if (text.hasHaul) accents.gold else colors.onSurfaceVariant,
     )
     val clock = text.chronometerSinceWallMillis?.let { ShiftClock(it, mode, previewNowWallMillis) }
-    // Larger text needs a larger box: each layout is chosen for the size that holds it at this font scale.
-    val size = LocalSize.current
+    // The layout is chosen for the size Glance composes, which is one of [RigWidget.SIZES].
+    val plan = RigPlan.of(LocalSize.current)
+    // Every layout is full at the size it is declared for, so its text keeps its size under a larger system font.
+    val type = WidgetType(resources, max = 1f)
     WidgetSlab(mode, text.contentDescription, open) {
-        when {
-            size.height < STANDARD_MIN_HEIGHT -> StripRig(text, look, type, clock, roomForLights = size.width.value / type.scale >= RigWidget.STRIP.width.value)
-            size.height.value / type.scale >= RigWidget.TALL.height.value -> TallRig(text, look, type, clock)
-            // The small layout is full at 100dp: its text grows only as far as the box is taller than that.
-            else -> StandardRig(text, look, WidgetType(resources, max = size.height.value / RigWidget.STANDARD.height.value), clock)
+        when (plan.layout) {
+            RigLayout.STRIP -> StripRig(text, look, type, clock, plan.narrow)
+            RigLayout.ROW -> if (plan.narrow) NarrowRowRig(text, look, type, clock) else RowRig(text, look, type, clock)
+            RigLayout.STANDARD -> StandardRig(text, look, type, clock)
+            RigLayout.TALL -> if (plan.narrow) SquareRig(text, look, type, clock) else TallRig(text, look, type, clock)
         }
     }
 }
@@ -150,34 +195,64 @@ private class ShiftClock(val sinceWallMillis: Long, val mode: WidgetColorMode, v
 private class RigLook(val word: ColorProvider, val lights: ColorProvider, val seam: ColorProvider, val haul: ColorProvider)
 
 /**
- * One line: the lights, the rig word, then the running time or the status.
+ * A short row: the rig word, and under it the status in small type, whole wherever the row is
+ * three cells wide. A running time sits at the end of the word's line.
  *
- * A time is never cut short (half of "1:12:00" is another time): it is measured first and sits
- * whole at the end of the row, and what gives way is the word, with an ellipsis. Where even the
- * lights do not fit beside a running time they are left out: the word says the same thing.
+ * Two cells are too few for the word and a time side by side (half of "1:12:00" is another
+ * time, and "Ri…" is no word), so there the time takes the second line. The status and the
+ * lights are then left to the widget's description: the word says what the lights say.
  */
 @Composable
-private fun StripRig(text: RigWidgetText, look: RigLook, type: WidgetType, clock: ShiftClock?, roomForLights: Boolean) {
+private fun StripRig(text: RigWidgetText, look: RigLook, type: WidgetType, clock: ShiftClock?, narrow: Boolean) {
     val colors = GlanceTheme.colors
-    Row(GlanceModifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (clock == null || roomForLights) {
-            HeatPixels(text.heat, look.lights, colors.outline)
-            Spacer(GlanceModifier.width(8.dp))
-        }
-        if (clock != null) {
-            Text(text.headline, modifier = GlanceModifier.defaultWeight(), style = type.word(17f, look.word), maxLines = 1)
-            Spacer(GlanceModifier.width(6.dp))
-            ShiftChronometer(clock, type.spValue(12f))
+    Column(
+        GlanceModifier.fillMaxSize().padding(horizontal = if (narrow) 8.dp else 10.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (narrow) {
+            Text(text.headline, style = type.word(14f, look.word), maxLines = 1)
         } else {
-            Text(text.headline, style = type.word(17f, look.word), maxLines = 1)
-            Spacer(GlanceModifier.width(8.dp))
-            Text(text.line, modifier = GlanceModifier.defaultWeight(), style = type.body(12f, colors.onSurfaceVariant), maxLines = 1)
+            Headline(text, look, type, clock, wordSize = 14f, timeSize = 11f, lights = true)
+        }
+        if (narrow && clock != null) {
+            ShiftChronometer(clock, type.spValue(11f))
+        } else {
+            Text(text.line, style = type.body(11f, colors.onSurfaceVariant), maxLines = 1)
         }
     }
 }
 
+/** One row of a home screen, three cells wide or more: the name, the rig word beside the time, the status. */
+@Composable
+private fun RowRig(text: RigWidgetText, look: RigLook, type: WidgetType, clock: ShiftClock?) {
+    val colors = GlanceTheme.colors
+    Column(GlanceModifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        BrandRow(text.heat, look, type, labelSize = 10f)
+        Headline(text, look, type, clock, wordSize = 20f, timeSize = 12f)
+        Text(text.line, style = type.body(11f, colors.onSurfaceVariant), maxLines = 2)
+    }
+}
+
 /**
- * Everything, in small type, for a box that is only 100dp tall.
+ * One row, two cells wide: the rig word, the status under it, the time under that (as the
+ * two-row layouts read: "Dark for", then how long). No line is shared, so none is cut.
+ */
+@Composable
+private fun NarrowRowRig(text: RigWidgetText, look: RigLook, type: WidgetType, clock: ShiftClock?) {
+    val colors = GlanceTheme.colors
+    Column(GlanceModifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text.headline, style = type.word(18f, look.word), maxLines = 1)
+        Text(text.line, style = type.body(11f, colors.onSurfaceVariant), maxLines = 2)
+        if (clock != null) ShiftChronometer(clock, type.spValue(12f))
+    }
+}
+
+/**
+ * Everything, in small type, for a box that is only 100dp tall: the row above, then the seam and
+ * the ORE under it.
+ *
+ * The status has a line to itself. Beside the time it wrapped in a box under 204dp wide, and its
+ * second line pushed the streak out of the slab.
  *
  * Seven children. A Glance container keeps ten and drops the rest without a word, so the seam is
  * one element and not a line between two spacers (WidgetRemoteViewsTest counts what arrives).
@@ -187,15 +262,8 @@ private fun StandardRig(text: RigWidgetText, look: RigLook, type: WidgetType, cl
     val colors = GlanceTheme.colors
     Column(GlanceModifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp)) {
         BrandRow(text.heat, look, type, labelSize = 10f)
-        Text(text.headline, style = type.word(20f, look.word), maxLines = 1)
-        // A ledger row: the status on the left, wrapping if it must, and the time whole on the right.
-        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(text.line, modifier = GlanceModifier.defaultWeight(), style = type.body(12f, colors.onSurfaceVariant), maxLines = 2)
-            if (clock != null) {
-                Spacer(GlanceModifier.width(6.dp))
-                ShiftChronometer(clock, type.spValue(12f))
-            }
-        }
+        Headline(text, look, type, clock, wordSize = 20f, timeSize = 12f)
+        Text(text.line, style = type.body(11f, colors.onSurfaceVariant), maxLines = 2)
         Spacer(GlanceModifier.defaultWeight())
         Seam(look, above = 2, below = 2)
         // An amount is never cut: if it cannot fit the line it takes a second one.
@@ -223,6 +291,37 @@ private fun TallRig(text: RigWidgetText, look: RigLook, type: WidgetType, clock:
     }
 }
 
+/**
+ * Two rows, two cells wide: the two-row layout set narrow. The lights stand without the name
+ * (the two do not fit one line), and a line too long for two cells takes a second one. An amount
+ * goes to that second line whole: its number is not parted from "ORE".
+ */
+@Composable
+private fun SquareRig(text: RigWidgetText, look: RigLook, type: WidgetType, clock: ShiftClock?) {
+    val colors = GlanceTheme.colors
+    Column(GlanceModifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
+        HeatPixels(text.heat, look.lights, colors.outline)
+        Text(text.headline, modifier = GlanceModifier.padding(top = 4.dp), style = type.word(24f, look.word), maxLines = 1)
+        Text(text.line, style = type.body(11f, colors.onSurfaceVariant), maxLines = 2)
+        if (clock != null) ShiftChronometer(clock, type.spValue(16f))
+        Spacer(GlanceModifier.defaultWeight())
+        Seam(look, above = 4, below = 4)
+        Text(if (text.hasHaul) amountKeptWhole(text.haul) else text.haul, style = type.figure(10f, look.haul), maxLines = 2)
+        Text(text.streak, style = type.figure(10f, colors.onSurfaceVariant), maxLines = 2)
+    }
+}
+
+/**
+ * [line] with the space before its last word made a no-break space, so "0.0194 ORE" wraps as one
+ * piece. The same characters to a reader; a line break is the only thing it changes.
+ */
+internal fun amountKeptWhole(line: String): String {
+    val space = line.lastIndexOf(' ')
+    return if (space < 0) line else line.replaceRange(space, space + 1, NO_BREAK_SPACE)
+}
+
+internal const val NO_BREAK_SPACE = " "
+
 /** The five lights and the name. */
 @Composable
 private fun BrandRow(heat: RigHeat, look: RigLook, type: WidgetType, labelSize: Float) {
@@ -231,6 +330,35 @@ private fun BrandRow(heat: RigHeat, look: RigLook, type: WidgetType, labelSize: 
         HeatPixels(heat, look.lights, colors.outline)
         Spacer(GlanceModifier.width(8.dp))
         Text("HEADS DOWN", style = type.label(labelSize, colors.onSurfaceVariant), maxLines = 1)
+    }
+}
+
+/**
+ * The rig word and, at the end of its line, the running time: a ledger row, the state and its
+ * figure. The time is measured first and is always whole; on a line too short for both it is
+ * the word that gives way.
+ */
+@Composable
+private fun Headline(
+    text: RigWidgetText,
+    look: RigLook,
+    type: WidgetType,
+    clock: ShiftClock?,
+    wordSize: Float,
+    timeSize: Float,
+    lights: Boolean = false,
+) {
+    val colors = GlanceTheme.colors
+    Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (lights) {
+            HeatPixels(text.heat, look.lights, colors.outline)
+            Spacer(GlanceModifier.width(8.dp))
+        }
+        Text(text.headline, modifier = GlanceModifier.defaultWeight(), style = type.word(wordSize, look.word), maxLines = 1)
+        if (clock != null) {
+            Spacer(GlanceModifier.width(6.dp))
+            ShiftChronometer(clock, type.spValue(timeSize))
+        }
     }
 }
 
@@ -287,5 +415,4 @@ private fun ShiftChronometer(clock: ShiftClock, textSizeSp: Float) {
     AndroidRemoteViews(views, GlanceModifier.wrapContentSize())
 }
 
-private val STANDARD_MIN_HEIGHT = 90.dp
 private const val PIXELS = 5
