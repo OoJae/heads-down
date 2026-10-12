@@ -237,7 +237,7 @@ stay in the user's own ORE Automation and Miner accounts.
 | `crank` | 214, 14 against the real program on the fork, and one end to end on a local validator (the 214 and the 14 were run again on 10 October 2026 with the crank's rebroadcast test added; the end-to-end test was not) |
 | `registrar` | 116 |
 | `services/indexer` | 477 |
-| `android` (JVM unit tests, all modules, the debug variant; run again on 11 October 2026 after the redesign and the clock-in fix) | 1,330 passed; 5 more are skipped (four need a mainnet RPC or a running devstack; one compiles the slab's shader exactly as written, which the test runner's graphics library is too old to do: it compiles on the emulator, and a second test compiles it in the old dialect) |
+| `android` (JVM unit tests, all modules, the debug variant; run again on 12 October 2026 on build 0.1.2) | 1,440 passed; 5 more are skipped (four need a mainnet RPC or a running devstack; one compiles the slab's shader exactly as written, which the test runner's graphics library is too old to do: it compiles on the emulator, and a second test compiles it in the old dialect) |
 | End to end, local mainnet fork | clock-in, dig, lift, replay refused, indexer: passes |
 
 To report a vulnerability, use GitHub's private "Report a vulnerability" advisory on this

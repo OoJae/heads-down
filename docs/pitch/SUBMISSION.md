@@ -80,7 +80,7 @@ filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
 >   [a first ORE purchase at clock-out].
 > - An Android 14 emulator against a local fork of mainnet: the same app end to end, signed in
 >   Solana Mobile's test wallet.
-> - [1,375] automated tests of the app, 171 of the program and 228 of the relay.
+> - 1,440 automated tests of the app, 171 of the program and 229 of the relay.
 >
 > WHAT IS OPEN, stated once. It has not run on a Seeker: the program can verify a Seeker Genesis
 > Token (tested on a fork with real tokens) and the app has no screen for it yet. The filmed build
