@@ -236,6 +236,9 @@ pub struct RecordConfig {
     pub every_rounds: u64,
     /// Also record rigs whose cost gate is closed this round (off: the crank pays for them).
     pub gate_closed_rigs: bool,
+    /// Also record rigs whose budget cannot pay for another dig, so that a shift's dark rounds
+    /// do not stop at its last dig (off: the crank pays for them).
+    pub budget_spent_rigs: bool,
     /// Seconds after a round is first seen before its record pass (the phone's heartbeat for
     /// the new round arrives first).
     pub delay_secs: u64,
@@ -255,6 +258,7 @@ impl Default for RecordConfig {
             enabled: true,
             every_rounds: 3,
             gate_closed_rigs: false,
+            budget_spent_rigs: false,
             delay_secs: 20,
             max_rigs_per_tx: 8,
             max_lamports_per_hour: 2_000_000,
@@ -271,11 +275,13 @@ impl RecordConfig {
         CuEstimate { base: self.cu_base, per_rig: self.cu_per_rig, per_checkpoint: 0 }
     }
 
-    /// Planner policy.
-    pub fn policy(&self, clock_margin_secs: i64) -> crate::planner::RecordPolicy {
+    /// Planner policy. `executor_fee` is the program Config's, when it has been read: a rig's
+    /// budget is spent or not at that fee, so without it no rig is recorded for a spent budget.
+    pub fn policy(&self, clock_margin_secs: i64, executor_fee: Option<u64>) -> crate::planner::RecordPolicy {
         crate::planner::RecordPolicy {
             every_rounds: self.every_rounds,
             gate_closed_rigs: self.gate_closed_rigs,
+            budget_spent_fee: if self.budget_spent_rigs { executor_fee } else { None },
             clock_margin_secs,
         }
     }
@@ -1380,7 +1386,13 @@ mod tests {
         let t = "[signals]\nenabled = false\nmax_lamports_per_hour = 5\n[record]\nevery_rounds = 1\ngate_closed_rigs = true\n[end_shift]\nmax_lamports_per_day = 0\n";
         let c = Config::from_toml(t).unwrap().finalize(&no_env).unwrap();
         assert!(!c.signals.hub().enabled);
-        assert_eq!(c.record.policy(5).every_rounds, 1);
+        assert_eq!(c.record.policy(5, None).every_rounds, 1);
+        // A spent budget is judged at the program's executor fee: off unless asked for, and
+        // off while that fee is not known.
+        assert_eq!(c.record.policy(5, Some(10_000)).budget_spent_fee, None);
+        let asked = Config::from_toml("[record]\nbudget_spent_rigs = true\n").unwrap().finalize(&no_env).unwrap();
+        assert_eq!(asked.record.policy(5, Some(10_000)).budget_spent_fee, Some(10_000));
+        assert_eq!(asked.record.policy(5, None).budget_spent_fee, None);
         assert_eq!(c.end_shift.max_lamports_per_day, 0);
         assert!(Config::from_toml("[record]\nevery_rounds = 0").unwrap().finalize(&no_env).is_err());
         assert!(Config::from_toml("[record]\nmax_rigs_per_tx = 33").unwrap().finalize(&no_env).is_err());

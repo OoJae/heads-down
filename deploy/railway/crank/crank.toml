@@ -100,6 +100,15 @@ max_lamports_per_hour = 250000
 # records itself (about 6,300 lamports per rig, every `every_rounds` rounds), and this budget
 # is the most it can spend on them in an hour (0.024 SOL a day).
 gate_closed_rigs = true
+# A shift goes on after its budget is spent, and the phone keeps signing. Without this the chain
+# hears nothing more from it: the shift's dark rounds stop at its last dig (the night of 12 October
+# 2026 sealed three hours as six dark rounds), and a rig that cooled for a moment and went dark
+# again stays Cooling on-chain, which seals the shift as ended early and loses a Focus Bond.
+budget_spent_rigs = true
+# One record a round. The published app's lease is one round, so a larger step leaves gaps. A
+# record of one rig cost 10,140 lamports on mainnet (12 October): about 0.0003 SOL for a
+# 35-minute shift and 0.0046 SOL for an eight-hour night, from this fee payer, not returned.
+every_rounds = 1
 max_lamports_per_hour = 1000000
 
 [end_shift]

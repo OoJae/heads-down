@@ -579,7 +579,7 @@ fn records_go_to_the_longest_waiting_rig_first_whatever_its_address() {
         rig.lease_from_round = ROUND - 3;
         rig.lease_to_round = ROUND - 2;
     }
-    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, budget_spent_fee: None, clock_margin_secs: 5 };
     // Two rigs have waited longer than the others (one never had a lease in this shift).
     let mut by_address = rigs.clone();
     by_address.sort_by_key(|a| a.to_bytes());
@@ -620,7 +620,7 @@ fn focus_only_rigs_get_their_heartbeats_recorded_every_n_rounds() {
     let night = w.add(2, true);
     w.rig_mut(&focus).plan_flags = hd::PLAN_FLAG_FOCUS_ONLY;
     w.rig_mut(&focus).shift_start_round = ROUND;
-    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    let policy = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, budget_spent_fee: None, clock_margin_secs: 5 };
     let (d, skips) = records(&w, policy);
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].rig, focus);
@@ -653,11 +653,53 @@ fn focus_only_rigs_get_their_heartbeats_recorded_every_n_rounds() {
 }
 
 #[test]
+fn rigs_with_a_spent_budget_are_recorded_only_when_asked() {
+    let mut w = World::new();
+    let night = w.add(2, true);
+    // Gate open, so only the budget can make it eligible.
+    w.rig_mut(&night).plan_max_ev_cost = u64::MAX;
+    w.rig_mut(&night).cap_max_cost = u64::MAX;
+    let fee = 10_000;
+    let off = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, budget_spent_fee: None, clock_margin_secs: 5 };
+    let on = RecordPolicy { budget_spent_fee: Some(fee), ..off };
+    // Budget left for a dig: the dig carries the heartbeat, with the option or without it.
+    {
+        let rig = w.rig_mut(&night);
+        rig.cap_shift = rig.cap_shift.max(5 * (rig.plan_dig_lamports + fee));
+        rig.cap_week = rig.cap_week.max(rig.cap_shift);
+        rig.cap_round = rig.cap_round.max(rig.plan_dig_lamports + fee);
+        rig.spent_shift = 0;
+    }
+    assert!(records(&w, off).0.is_empty());
+    assert!(records(&w, on).0.is_empty(), "a rig that can still dig is not recorded");
+    // The shift's budget is spent: nothing digs it, and only the option records it.
+    {
+        let rig = w.rig_mut(&night);
+        rig.spent_shift = rig.cap_shift;
+    }
+    assert!(records(&w, off).0.is_empty());
+    assert_eq!(records(&w, on).0.len(), 1, "a rig whose shift budget is spent is recorded");
+    // What is left is under the fee: still no dig, still recorded.
+    {
+        let rig = w.rig_mut(&night);
+        rig.spent_shift = rig.cap_shift - fee;
+    }
+    assert_eq!(records(&w, on).0.len(), 1);
+    // The week's budget is spent while the shift's is not: the same.
+    {
+        let rig = w.rig_mut(&night);
+        rig.spent_shift = 0;
+        rig.spent_week = rig.cap_week; // the world's week began an hour ago: it has not rolled
+    }
+    assert_eq!(records(&w, on).0.len(), 1, "a rig whose weekly budget is spent is recorded");
+}
+
+#[test]
 fn gate_closed_rigs_are_recorded_only_when_asked() {
     let mut w = World::new();
     let night = w.add(2, true);
     w.rig_mut(&night).plan_max_ev_cost = 1; // gate closed
-    let off = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 };
+    let off = RecordPolicy { every_rounds: 3, gate_closed_rigs: false, budget_spent_fee: None, clock_margin_secs: 5 };
     assert!(records(&w, off).0.is_empty());
     let on = RecordPolicy { gate_closed_rigs: true, ..off };
     assert_eq!(records(&w, on).0.len(), 1);

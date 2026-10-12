@@ -444,7 +444,8 @@ fn decode_miner(m: Option<&Option<RawAccount>>) -> Result<Miner, Skip> {
 }
 
 // ---------------------------------------------------------------------------------------
-// record_heartbeats: focus-only rigs (and, opt-in, rigs whose cost gate is closed).
+// record_heartbeats: focus-only rigs (and, opt-in, rigs whose cost gate is closed or whose budget
+// is spent).
 
 /// When to record a rig's held heartbeat with `record_heartbeats` (no deploy, no CPI).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -456,20 +457,26 @@ pub struct RecordPolicy {
     /// Also record night / day rigs whose cost gate is closed this round (they would otherwise
     /// end the shift with no dark round). Off by default: the crank pays these fees.
     pub gate_closed_rigs: bool,
+    /// Also record night / day rigs whose budget cannot pay for another dig at this executor
+    /// fee. Their shift goes on, and without this the chain stops hearing from the phone at the
+    /// last dig: the shift's dark rounds stop there, and a rig that cooled and went dark again
+    /// can never show it. `None`: off. The crank pays these fees.
+    pub budget_spent_fee: Option<u64>,
     /// Clock skew allowance for the plan window.
     pub clock_margin_secs: i64,
 }
 
 impl Default for RecordPolicy {
     fn default() -> Self {
-        RecordPolicy { every_rounds: 3, gate_closed_rigs: false, clock_margin_secs: 5 }
+        RecordPolicy { every_rounds: 3, gate_closed_rigs: false, budget_spent_fee: None, clock_margin_secs: 5 }
     }
 }
 
 /// Why a rig's heartbeat is not recorded this round.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordSkip {
-    /// Not focus-only (and not a gate-closed rig with `gate_closed_rigs`).
+    /// Not focus-only (and not a gate-closed rig with `gate_closed_rigs`, nor a rig with its
+    /// budget spent with `budget_spent_fee`).
     NotEligible,
     /// Not Armed, Down or Cooling.
     State,
@@ -544,6 +551,17 @@ fn record_tiebreak(rig: &Address, round_id: u64) -> u64 {
     h.finish()
 }
 
+/// The rig cannot pay for another dig: `dig_budget` leaves less than one lamport for each square
+/// the plan asks for, which the dig pass skips as `budget_exhausted`. The dig pass divides by the
+/// squares still free in the round, never more than the plan's, so a rig called spent here is
+/// never dug in the same round unless its budget is a handful of lamports.
+fn budget_spent(rig: &Rig, now_ts: i64, executor_fee: u64) -> bool {
+    let budget =
+        dig_budget(rig.plan_dig_lamports, rig.cap_round, rig.cap_shift, rig.spent_shift, rig.cap_week, spent_week_at(rig, now_ts), executor_fee);
+    let squares = u64::from(rig.plan_split_tiles) + u64::from(rig.plan_solo_tiles);
+    budget < squares.max(1)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn check_record(
     board: &Board,
@@ -557,7 +575,8 @@ fn check_record(
 ) -> Result<RecordDecision, RecordSkip> {
     let eligible = rig.focus_only()
         || (policy.gate_closed_rigs
-            && !gate::gate_open(board.production_cost_ema, treasury.motherlode, rig.plan_max_ev_cost, rig.cap_max_cost));
+            && !gate::gate_open(board.production_cost_ema, treasury.motherlode, rig.plan_max_ev_cost, rig.cap_max_cost))
+        || policy.budget_spent_fee.is_some_and(|fee| budget_spent(rig, now_ts, fee));
     if !eligible {
         return Err(RecordSkip::NotEligible);
     }
