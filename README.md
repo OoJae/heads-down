@@ -136,8 +136,18 @@ crank's first dig landed after its round had ended and was skipped; three of
 the crank's settings were changed on the running service that evening
 ([docs/MAINNET.md](docs/MAINNET.md#what-the-first-night-found)).
 
+**The night of 12 October.** The phone worked its first shift through a night: clocked in at 02:09
+local time, five digs in the first six minutes, and about 170 heartbeats signed over three hours,
+until the charger lost power at 05:08
+([docs/MAINNET.md](docs/MAINNET.md#the-night-of-12-october-2026-three-hours-on-the-charger-then-the-power-went)).
+Two things it showed. The chain holds only six of those rounds as dark, because once a shift's
+budget is spent the crank stops landing its heartbeats: the phone's own count is on the reveal
+("Signed on this phone") and not on-chain. And no alarm had been set, so the power cut fell inside
+an eight-hour window and the shift counts as ended early. A power cut should not cost a night;
+the rule that tells one from a pickup does not exist yet.
+
 **Not done yet, in plain words.** There are no users: the one rig on mainnet is the founder's.
-Not run on a phone: a whole night under HyperOS, the haul reveal at the alarm, a dig refused
+Not run on a phone: a whole night to its alarm under HyperOS, the page that opens after the alarm, a dig refused
 because the cost gate is shut, Close rig, Unfreeze, Claim, the Focus Bond, buying ORE at
 clock-out, the Seeker tier, and any wallet other than Jupiter's (Solflare, Phantom and Seed Vault
 have not been tried). The Focus Bond ran end to end on the emulator on 11 October (10 test SKR
@@ -153,7 +163,7 @@ BuryVault account does not exist there yet. The app has no screens yet for Stack
 clock-out can buy ORE through Jupiter in a build that is given a swap API (added 11 October): a
 live quote and the transaction built from it were simulated on mainnet, and nothing has been
 signed for one yet. There is no release signing key: the APK to download is the
-founder's debug-signed build ([release](https://github.com/OoJae/heads-down/releases/tag/v0.1.0-clock-in)), the only one the registrar accepts. With one rig the crank pays more in fees
+founder's debug-signed build ([release](https://github.com/OoJae/heads-down/releases/tag/v0.1.2-clock-in)), the only one the registrar accepts. With one rig the crank pays more in fees
 than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports net, and each
 skipped attempt and the BREAK their whole fee: 60,473 lamports net over nine transactions.
 Whether the 4,480,400 lamports that ORE holds in the wallet's Miner account can ever be taken
