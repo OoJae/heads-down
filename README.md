@@ -26,9 +26,13 @@ shift ends on, with a labelled sample in place of your own night.
 
 1. Install a Solana wallet that speaks Mobile Wallet Adapter. The app has been run with Jupiter
    Mobile only.
-2. In the Clock app, set an alarm at least 35 minutes ahead. The shift ends two minutes before it.
-3. Plug the phone in, tap Clock in, approve once, and lay the phone face-down.
-4. After the alarm, clock out on the page that opens (or from the home screen). The reveal follows.
+2. In the Clock app, set an alarm at least 35 minutes ahead (on Xiaomi's HyperOS, at least 50:
+   its Clock registers reminders as alarms). Check the home screen's line "runs until HH:MM,
+   two minutes before your alarm" before you clock in.
+3. Plug the phone in, tap Clock in, confirm in the wallet within 90 seconds, and lay the phone
+   face-down.
+4. After the window's end, clock out on the page that opens, or from the home screen if your
+   phone's system has closed the app. The reveal follows.
 5. "Take it back" returns the SOL that was not placed.
 
 A first clock-in moves about 0.014 SOL: the shift's budget of 0.005 SOL (placed in digs, or taken
@@ -144,15 +148,25 @@ Two things it showed. The chain holds only six of those rounds as dark, because 
 budget is spent the crank stops landing its heartbeats: the phone's own count is on the reveal
 ("Signed on this phone") and not on-chain. And no alarm had been set, so the power cut fell inside
 an eight-hour window and the shift counts as ended early. A power cut should not cost a night;
-the rule that tells one from a pickup does not exist yet.
+the rule that tells one from a pickup does not exist yet. The first of the two was changed that
+afternoon: the crank now records a rig's heartbeats after its budget is spent.
+
+**The afternoon of 12 October: the first completed shift, with a Focus Bond.** On build 0.1.2 the
+phone lay face-down for a whole window of 41 minutes with 10 SKR locked on the shift. The chain
+holds 37 dark rounds for it. One approval sealed it as completed and released the same 10 SKR,
+the streak went from 0 to 1, and a second approval bought ORE through Jupiter for 0.001 SOL
+([docs/MAINNET.md](docs/MAINNET.md#the-afternoon-of-12-october-2026-build-012-on-the-phone-and-the-focus-bond)).
+Three things it showed. The page that should open after the window did not: HyperOS stopped the
+app six seconds after the window's end, and the founder opened it by hand. HyperOS's Clock
+registers its reminders as alarms, so the window ended 17 minutes before the alarm rang, and an
+alarm set less than about 47 minutes ahead would have rung inside the shift. And the wallet's
+sheet has to be confirmed within 90 seconds, which the app does not say.
 
 **Not done yet, in plain words.** There are no users: the one rig on mainnet is the founder's.
-Not run on a phone: a whole night to its alarm under HyperOS, the page that opens after the alarm, a dig refused
-because the cost gate is shut, Close rig, Unfreeze, Claim, the Focus Bond, buying ORE at
-clock-out, the Seeker tier, and any wallet other than Jupiter's (Solflare, Phantom and Seed Vault
-have not been tried). The Focus Bond ran end to end on the emulator on 11 October (10 test SKR
-locked at clock-in, the shift run to the end of its window, the SKR back at clock-out), against
-the local fork with a stand-in SKR mint. Close rig
+Not run on a phone: a whole night to its alarm under HyperOS, the morning page opening by itself,
+a dig refused because the cost gate is shut, Close rig, Unfreeze, Claim, a Focus Bond that is
+lost, the Seeker tier, and any wallet other than Jupiter's (Solflare, Phantom and Seed Vault
+have not been tried). Close rig
 and a clock-in over the tombstone it leaves have run only on an Android 14 emulator against a
 local fork of mainnet, signed in Solana Mobile's test wallet
 (`scripts/devstack/emulator-smoke.sh --wallet`), where the amounts that came back matched the
@@ -160,11 +174,10 @@ screen to the lamport. On that emulator the test wallet showed the name and icon
 identity page; on the phone, Jupiter's wallet showed "Could not verify request" on its connect
 prompt and still connected and signed. On 12 October its approval sheet also showed "This
 transaction has been flagged as malicious" over a clock-out and over a clock-in: the wallet's
-scanner does not know this program, and nothing has been done about the flag yet. No SKR instruction has been sent on mainnet, and the
+scanner does not know this program, and nothing has been done about the flag yet. No Focus Bond has been forfeited on mainnet, and the
 BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift. Its
-clock-out can buy ORE through Jupiter in a build that is given a swap API (added 11 October): a
-live quote and the transaction built from it were simulated on mainnet, and nothing has been
-signed for one yet. There is no release signing key: the APK to download is the
+clock-out can buy ORE through Jupiter in a build that is given a swap API (added 11 October):
+one purchase of 0.001 SOL was signed on mainnet on 12 October. There is no release signing key: the APK to download is the
 founder's debug-signed build ([release](https://github.com/OoJae/heads-down/releases/tag/v0.1.2-clock-in)), the only one the registrar accepts. With one rig the crank pays more in fees
 than the program reimburses: that evening each dig cost it 3,053 to 4,082 lamports net, and each
 skipped attempt and the BREAK their whole fee: 60,473 lamports net over nine transactions.

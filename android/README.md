@@ -8,8 +8,10 @@ attested, a sign-in, two clock-ins, a clock-out and "Take it back" signed in Jup
 heartbeats that dug five ORE rounds, and a BREAK after the phone was unlocked
 ([docs/MAINNET.md](../docs/MAINNET.md#the-first-shift-10-october-2026)). That was one short shift
 on a debug build with the demo policy below. Not run on a phone: a whole night under HyperOS, the
-haul reveal at the alarm, a dig while the cost gate is shut, Close rig, Unfreeze, Claim, the Focus
-Bond, the Seeker tier, and Solflare, Phantom or Seed Vault.
+morning page opening by itself, a dig while the cost gate is shut, Close rig, Unfreeze, Claim, a
+lost Focus Bond, the Seeker tier, and Solflare, Phantom or Seed Vault. A Focus Bond's lock and
+release and an ORE purchase ran on the phone on 12 October
+([docs/MAINNET.md](../docs/MAINNET.md#the-afternoon-of-12-october-2026-build-012-on-the-phone-and-the-focus-bond)).
 
 The on-chain contract is `programs/heads-down/INTERFACE.md` **v1.3** and its machine-checked
 vectors in `programs/heads-down/vectors/`. The app's builders are tested byte for byte against
@@ -309,8 +311,8 @@ fresh read:
 - **Where it has run.** On the Redmi 14C on mainnet on 10 October 2026 the clock-out sealed a
   shift that an unlock had already broken, signed in Jupiter Mobile. After confirmation the
   screen read "Confirmed on-chain. Shift sealed as ended early." The wallet paid 1,305,480
-  lamports: the ShiftLog's rent of 1,300,480 and the 5,000-lamport fee. `claim_ore`,
-  `claim_sol` and `release_focus_bond` have not run on a phone.
+  lamports: the ShiftLog's rent of 1,300,480 and the 5,000-lamport fee. `claim_ore` and
+  `claim_sol` have not run on a phone; `release_focus_bond` ran on one on 12 October.
 
 ## Taking SOL back and closing the rig (one wallet approval)
 

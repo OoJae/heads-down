@@ -79,36 +79,31 @@ indexer. Use Solana Explorer with a custom cluster:
 
 ## 3. Shot list
 
-Rewritten on 12 October 2026 for the live form. The four criteria are Stickiness and product-market
-fit, User experience, Innovation and Presentation, 25 each, and the platform's AI coach reads a
-**transcript** of this video. So the voice-over says what ran, where and when, and every sentence
-stands without its picture. The film opens on the morning, because that is the moment the product
-exists for.
+Rewritten on 12 October 2026 for the live form, and again that evening for what was recorded. The
+four criteria are Stickiness and product-market fit, User experience, Innovation and Presentation,
+25 each, and the platform's AI coach reads a **transcript** of this video. So the voice-over says
+what ran, where and when, and every sentence stands without its picture. The film opens on the
+morning, because that is the moment the product exists for.
 
-The take is the bonded shift of 12 October on the Redmi 14C (build 0.1.2, mainnet). Numbers in
-square brackets are filled in from that run and from [MAINNET.md](../MAINNET.md) before recording
-the voice-over. A clause marked (if built) is cut when that screen is not in the filmed build.
+Every phone picture is the Redmi 14C's own screen, recorded over adb (`scrcpy --record`) on
+12 October 2026 while build 0.1.2 ran on mainnet. Nothing is staged and no emulator footage is
+used. The wallet's sheets are Jupiter Mobile's, with its "flagged as malicious" line left in.
 
-| Time | Picture | On-screen text | VO (section 7) |
-|---|---|---|---|
-| 0:00–0:10 | Daylight, a desk. The Redmi face-down on its wall charger. The alarm rings. A hand dismisses it without unlocking. Camera, not screen capture. | "Redmi 14C · Solana mainnet · 12 October 2026" | 1 |
-| 0:10–0:38 | The reveal page opens over the lock screen: "Not sealed yet" and its three facts. Tap Clock out, the sheet, the wallet approval (camera: wallets can block capture), "Reading the haul", then the board replay and the numbers. A cut inside the wait is labelled with the seconds it removes. | "One approval" · the transaction signature | 2 |
-| 0:38–0:58 | The start of the same shift, in order: charger in, alarm set, Clock in, the wallet approval, the phone laid down, the rig hot. | "One approval a shift" · "Inside limits the wallet signed" | 3 |
-| 0:58–1:18 | The streak on Home and on the reveal. The widget on the launcher. The Nights screen (if built). The share card. | "Streak stored on-chain" · "2 nights off a month" | 4 |
-| 1:18–1:45 | Solscan: one dig transaction, with the secp256r1 check, the program's dig and ORE's deploy. Then the plain shift of the same day: the phone lifted from the desk, the cooling cue, and the `ShiftBroken` transaction. | "Signed in the phone's secure hardware" · "Checked by Solana in the same transaction" | 5 |
-| 1:45–2:05 | Home's Focus Bond chooser at 10 SKR. The line "It also locks your 10 SKR Focus Bond." Then Solscan: the same 10 SKR back in the wallet. | "10 SKR locked · the same 10 SKR back" | 6 |
-| 2:05–2:25 | Home's line with ORE's cost figure and the ceiling (if built). The reveal's price row with the market price beside it. The clock-out sheet's "Buy ORE". | "Demo setting: price ceiling raised for this film" | 7 |
-| 2:25–2:48 | The public dashboard, a tile clicked through to Solscan. The table in MAINNET.md. | "On mainnet since 10 October 2026" · "Not run on a Seeker · no third-party audit · one user" | 8 |
-| 2:48–3:00 | The founder, or the phone face-down. | "Heads Down. Put it down. It digs." · "Powered by ORE" | 9 |
+| # | Picture (phone on the left, a text card on the right) | VO paragraph (section 7) |
+|---|---|---|
+| 1 | Shift 10 after its window: Home opens, then the reveal page "Not sealed yet" | 1 |
+| 2 | The reveal's three facts, Clock out, the sheet ("Completed", "Your Focus Bond comes back"), the wallet's approval, "Confirmed on-chain", then the haul and "Streak 0 → 1" | 2 |
+| 3 | The start of the same shift: Home's "runs until 16:44", the bond chosen, Clock in, the wallet's approval with −10 SKR | 3 |
+| 4 | Home's "Streak 1 night", then the Nights screen: streak, nights off left, totals, the list of shifts | 4 |
+| 5 | Shift 9 the same afternoon: armed, then "Shift ended: the phone was unlocked", then its clock-out sheet | 5 |
+| 6 | The bond chooser and its sentence, the wallet's −10 SKR, the clock-out's "Focus Bond back in your wallet: 10 SKR" | 6 |
+| 7 | Home's line with ORE's cost figure and the ceiling, the haul's price row beside the market, the "Buy ORE" sheet and its confirmation | 7 |
+| 8 | A card: shifts, digs, the night, what is open | 8 |
+| 9 | The end card | 9 |
 
-**What has to be on film from today, and when to shoot it**
-
-1. During the plain shift on 0.1.2: the lift, the cooling cue and the phone picked up (shot 5).
-2. Before the bonded clock-in: the bond chooser, the alarm being set, the clock-in and its approval,
-   the phone going down (shots 3 and 6).
-3. At the alarm: one unbroken camera take from the ringing alarm to the haul (shots 1 and 2). Do
-   not unlock before the reveal page appears: an unlocked phone gets a small notification instead.
-4. After it: Home, widget, Nights, share card, dashboard, Solscan (shots 4, 7, 8), as screen capture.
+**Left out on purpose.** The share sheet, because Android's chooser shows the founder's contacts.
+The two clock-in attempts that timed out in the wallet, and the hand-opening of the app after
+HyperOS had stopped it, are in [MAINNET.md](../MAINNET.md) and in paragraph 8 of the voice-over.
 
 **Captions.** Upload the caption file with the video: automatic captions will mangle ORE, SKR and
 secp256r1. Its text is the voice-over below, as recorded.
@@ -272,46 +267,46 @@ explorer's block time visible.
 
 ## 7. VO transcript (for captions and the transcript reader)
 
-Read by the founder. The bracketed numbers come from the run; the last block is the founder's own.
+Read by the founder. Every number is from the run of 12 October 2026 (shift 10 in
+[MAINNET.md](../MAINNET.md)); the last block is the founder's own.
 
-> This is a Redmi 14C on its charger. For [thirty-five] minutes it has been lying face-down,
-> working a shift on Solana mainnet. That sound is its alarm.
+> This is a Redmi 14C. This afternoon it lay face-down on its charger for forty-one minutes,
+> working a shift on Solana mainnet. I have just picked it up.
 >
-> After the alarm, Heads Down opens its reveal page over the lock screen. The shift is over and not
-> sealed yet: [31] rounds signed by this phone. I tap Clock out and approve once in my wallet. That
-> seals the shift on-chain, returns my Focus Bond and buys a little ORE. Then the haul: the rounds
-> it was dark, the digs that landed, and what I paid per ORE with the market price next to it.
+> I open Heads Down. The shift is over and not sealed yet: thirty-eight rounds signed by this
+> phone. I tap Clock out and approve once in my wallet. The shift is sealed on-chain as completed,
+> and my Focus Bond comes back. Then the haul: thirty-seven rounds dark, five digs, and the price I
+> paid per ORE beside the market price. My streak goes from zero to one.
 >
 > Heads Down is your phone's night shift, powered by ORE. You plug in, set your alarm, clock in with
 > one approval and lay the phone face-down. While it stays down it digs ORE from your own ORE
 > account, inside limits your wallet signed. Pick it up, and the rig goes cold.
 >
-> The habit is the product. Every completed night adds to a streak stored on-chain, with two nights
-> off a month, so one bad night does not end it. A widget shows the rig. The Nights screen keeps
-> every shift, and a share card shows the night without a wallet address.
+> Every completed night adds to a streak stored on-chain, with two nights off a month, so one bad
+> night does not end it. The Nights screen shows the streak and the rig's totals, and a share card
+> shows the night with no wallet address.
 >
 > What is new is the referee. Once a minute the phone signs a heartbeat with a key that cannot
 > leave its secure hardware. Solana checks that signature in the same transaction as the dig,
 > through the secp256r1 precompile. No server can say this phone was face-down, mine included. Here
-> I lift it during a shift: it signs a break, and the digging stops.
+> I lift it in an earlier shift: it signs a break, and the digging stops.
 >
 > SKR is the Focus Bond. I locked ten SKR on this shift. It completed, so the same ten came back.
-> By the program's rule a lost bond is never paid to the team or to another player: it is sold for
+> By the program's rule a lost bond is never paid to the team or another player: it is sold for
 > ORE that is burned.
 >
 > It is plain about ORE: mining is one route to ORE, not income. The rig digs only while ORE's own
-> cost figure is under a ceiling, which I raised for this film so a dig could land. Over this
-> rig's first twenty digs I paid about 1.13 SOL per ORE.
+> cost figure is under a ceiling, raised for this film so a dig could land. Today's digs cost 0.894
+> SOL per ORE against a market price of 1.057; the rig's first twenty cost about 1.13. The
+> clock-out can also buy: one more approval swapped a little SOL for ORE through Jupiter.
 >
-> All of this ran on Solana mainnet, on this one phone, since 10 October 2026: [10] shifts and [35]
-> digs. Through last night it worked for three hours, about 170 heartbeats, until a power cut.
-> Every transaction is public. It has not run on a Seeker, nobody outside the project has audited
-> it, and so far I am its only user.
+> All of this ran on Solana mainnet since 10 October 2026: ten shifts and thirty-five digs, every
+> transaction public. Last night it worked three hours until a power cut. Still open: it has not
+> run on a Seeker, nobody outside the project has audited it, the morning page did not open by
+> itself on this phone, and I am its only user.
 >
 > [Founder: two sentences of your own, who you are and how this was built.] Heads Down. Put it
 > down. It digs. Powered by ORE.
 
-Before recording: replace every bracket, cut the Nights clause if that screen is not in the filmed
-build, and read the bond and clock-out sentences against what the run did (how many approvals,
-what came back). Every claim above has its row in [MAINNET.md](../MAINNET.md) or its file in
-`docs/pitch/DECK.md`.
+Before recording: replace the founder's bracket with your own two sentences. Every claim above
+has its row in [MAINNET.md](../MAINNET.md) or its file in `docs/pitch/DECK.md`.

@@ -520,24 +520,111 @@ What it showed, read from the Rig account and these transactions:
   that window; the shift was already over by then. Build 0.1.2 never opens that page before the
   window's end.
 
+## The afternoon of 12 October 2026: build 0.1.2 on the phone, and the Focus Bond
+
+Two more shifts ran that afternoon on build 0.1.2, both on the Redmi 14C: a short plain one to see
+the build work a shift, then one with a Focus Bond of 10 SKR. Times are UTC (the phone is at
+UTC+1); the numbering goes on.
+
+**Shift 9: a plain shift, lifted on purpose.**
+
+| # | Time | Slot | Transaction | Signed by | What it did |
+|---|---|---|---|---|---|
+| 54 | 14:22:35 | 456,078,182 | [`61GTXAMr…`](https://solscan.io/tx/61GTXAMrFc1KwSBzVKYgTZdq5vhkVRBBshSZkcz7e2iY9MHoGE91d4f7M9wQsEnja12NpfybHuHLyRXLyNXzfWsT) | wallet | Clock-in from build 0.1.2, its first on a phone: ORE `automate` (a top-up of 575,250 lamports), `set_caps` with the build's weekly cap of 0.07 SOL, `arm_shift` (`ShiftArmed`, shift 9) |
+| 55 | 14:23:28 | 456,078,425 | [`2eiHdtH8…`](https://solscan.io/tx/2eiHdtH8pctskN3KBF5aFhx9xDmqAGeUvYHGaN3H9PRbVzT94L6DLiEhp3B1NcWAKvjwdK1hzkrXMgsqHrnQwAxD) | crank | `dig` for round 437,693 |
+| 56 | 14:24:31 | 456,078,712 | [`KGRfpPWT…`](https://solscan.io/tx/KGRfpPWTf4yKnYrWhcSuzRmSHWfofLW3EVgotDoJ9KCxEMGJAMYY1WN5ZKBSJ9HJZkUZ6yneQ8gfqRN7caUC91U) | crank | ORE `checkpoint`, then `dig` for round 437,694 |
+| 57 | 14:25:35 | 456,079,001 | [`49MaKDtN…`](https://solscan.io/tx/49MaKDtNT5jRWzd5QgxhA8oGjD817jokPjDA51EBunz4zrKd2hamt3zNhcSVK3Y9AvP7Cnitn36LkLmieLvtc99C) | crank | ORE `checkpoint`, then `dig` for round 437,695 |
+| 58 | 14:26:42 | 456,079,307 | [`3oYv9LQX…`](https://solscan.io/tx/3oYv9LQXGrmyrbYqbG5X9zrdMnoVkB7Uj4Ff4hYh8Lbz6EKvSXBj9GoM8PSzhuv9E5ZvGq63eSuVs4PhHYVTXUCh) | crank | ORE `checkpoint`, then `dig` for round 437,696 |
+| 59 | 14:27:56 | 456,079,650 | [`2zyfPVB4…`](https://solscan.io/tx/2zyfPVB43W5bNGzQJXychi382NonjztcnyPXYt1zwmdTBvNpB28gjEHeMWnrVSFuA93AMBexiQAcgM69Qmr9Cbbx) | crank | ORE `checkpoint`, then `dig` for round 437,697 |
+| 60 | 14:28:45 | 456,079,876 | [`5zDLeTsQ…`](https://solscan.io/tx/5zDLeTsQPduXdRTPrdDf7cdVaUmBDpqFyCRfTpe7krCReDXQWr52NHGZgRjitv1zn6eG7e2Z3wUJbU4iavJPVxF4) | crank | `record_heartbeats` for a rig whose budget is spent, the crank's new rule: `HeartbeatsRecorded`, round 437,698, 1 dark round added |
+| 61 | 14:29:48 | 456,080,156 | [`5cjNAmjw…`](https://solscan.io/tx/5cjNAmjw4bnvhkCphwjor82KusufvenRNVZ13Arc97L5DHq6KXpXmexUPGbxBTbeCZsocFSDMmRmn1LfwwNZsKPT) | crank | `record_heartbeats` for a rig whose budget is spent, the crank's new rule: `HeartbeatsRecorded`, round 437,699, 1 dark round added |
+| 62 | 14:30:28 | 456,080,336 | [`33aAQgcb…`](https://solscan.io/tx/33aAQgcbvtqzrVbMGX4du9ziDcVbjyTJwDrDXyh58Si6kyzk3vz2R5S1iA3SyLPMroS95kRmjR3eme8UwGZLogeB) | crank | A BREAK the phone signed when it was lifted and unlocked: `ShiftBroken` (shift 9, reason 8 `unlocked`) |
+| 63 | 14:31:50 | 456,080,711 | [`3BZVJ15n…`](https://solscan.io/tx/3BZVJ15n4D3dSZQUwtkC1CMiJPkGMJ1TdEWUrHdESca1WH1U4LfLGDZP7RJ7kcW3UMGWptPuw1YoJRCz3ABWd396) | wallet | The clock-out: `end_shift` (shift 9: 7 dark rounds, 5 rounds dug, 5,050,000 lamports, reason 8 `unlocked`, rounds 437,692 to 437,701) |
+
+- **The crank's new rule ran.** Rows 60 and 61 are `record_heartbeats` for a rig whose budget is
+  spent: the change the night had asked for, deployed that afternoon (`[record] budget_spent_rigs`
+  in `deploy/railway/crank/crank.toml`). The shift sealed with 7 dark rounds from 5 digs. Each
+  record cost the crank 10,140 lamports.
+- **Its window came from a calendar entry.** No alarm was set. Home said "runs until 20:57, two
+  minutes before your alarm", and the plan window on-chain ends at 19:58:04. The "alarm" was an
+  entry the phone's calendar had registered with Android for 21:00: the app asks Android for the
+  next alarm clock and does not check which app set it. Not fixed in this build.
+
+**Shift 10: the Focus Bond, and the first shift to complete.** An alarm was set for 17:02 local
+time; the phone lay face-down on a USB charger, in airplane mode with Wi-Fi on.
+
+| # | Time | Slot | Transaction | Signed by | What it did |
+|---|---|---|---|---|---|
+| 64 | 15:03:51 | 456,089,455 | [`4QSDYqcZ…`](https://solscan.io/tx/4QSDYqcZBhyjZWBHcJXKxVyDxXeorpodzvnu1sEnzLb5g3PCYo1c2kiJo3gsF6TQYg1qogDjguCmhz1gCxuJzvuR) | wallet | Clock-in with a Focus Bond, at 16:03 local time: ORE `automate`, `set_caps`, `arm_shift` (`ShiftArmed`, shift 10, window to 15:45:02), then the bond's SKR vault and `lock_focus_bond`: **10 SKR** from the wallet into the vault. The wallet's SOL went down by 4,392,980 lamports, of which 1,463,040 is the bond account's rent and 1,488,440 its vault's |
+| 65 | 15:05:16 | 456,089,840 | [`3naKDhs4…`](https://solscan.io/tx/3naKDhs4vJJdspDNLpxUES2gK7YrvVgD81acbxPEbKEfqr3WQv3ZVfVMR57V5tn2cwnFJjMVifNYSsKnX1RhQpBC) | crank | ORE `checkpoint` (of round 437,697, from shift 9), then `dig` for round 437,729: 0.001 SOL on four squares |
+| 66 | 15:05:16 | 456,089,840 | [`3bbANYTB…`](https://solscan.io/tx/3bbANYTBdwJbUyrytm91VCBVb86N1uZTimhWF9Yx1dT3fjmFftWamksqHgcwtVQ2c5GciD8QYNj6TnbMDyXLhQMT) | crank | The crank's other attempt for round 437,729, in the same slot: no deploy ran (`RigSkipped`) |
+| 67 | 15:06:10 | 456,090,088 | [`4MfN3mcU…`](https://solscan.io/tx/4MfN3mcU3kDUg7XhLAT4YEnS1zB4cxF5MWYZMmS17zktgQC1ht19JCgbCh2hBQ6i7aGZC9B967G9i6tZNaPHTDk5) | crank | ORE `checkpoint`, then `dig` for round 437,730 |
+| 68 | 15:07:15 | 456,090,384 | [`2yv8Cs6P…`](https://solscan.io/tx/2yv8Cs6P8FM5u59YriXwDiqih72BeJANvF4ajRFJ2tzw54WS1bWjzcvP968t74ecN4hnmG1tjioZJg8xPvLAurna) | crank | ORE `checkpoint`, then `dig` for round 437,731 |
+| 69 | 15:08:16 | 456,090,664 | [`43uK2mZU…`](https://solscan.io/tx/43uK2mZUrA8aA2UtzfPEKS7xnEkRAtQ6Y5cmur4cc3Y1HoxE84oeWxtuEa7PTTpLjdBG4DXVie3HSqXqtXkwE4wU) | crank | ORE `checkpoint`, then `dig` for round 437,732 |
+| 70 | 15:09:21 | 456,090,954 | [`PfariyMt…`](https://solscan.io/tx/PfariyMt5uqsVhqpPSEetKKdWvbF1t2kMFiNpe9CzT1aCBiLDDqwRcqfQTeEbEr31vhMTF8TRiVxbUdNTuRQ2wA) | crank | ORE `checkpoint`, then `dig` for round 437,733 |
+| 71 to 102 | 15:10:11 to 15:44:21 | 456,091,187 to 456,100,489 | [`55g7M1ug…`](https://solscan.io/tx/55g7M1ug5YzhajmpWiPn7zKNVd1xXfN4rrfYvWvGBd2mCtSt9XP2z3TtQQenjh72AyxvTxEY3JEfgCU4qduKqo32) to [`3NDz7zPA…`](https://solscan.io/tx/3NDz7zPA9ZhA1ZFVTpDYqYK4Bp7pMVLBnRf2Eb4cHNQmY7Wn1p2XRGiKS8XoBj15nmaK4M5n5rTwhajLPdaMrKJZ) | crank | 32 `record_heartbeats`, one for each round after the budget was spent, each adding one dark round (10,140 lamports each, paid by the crank) |
+| 103 | 15:52:59 | 456,102,846 | [`BaiMVwRK…`](https://solscan.io/tx/BaiMVwRKXZK8q9EqW6iwaFZ6uavHHMRwZGWWfdHXACSCzDu2sTAAEeSA4FaEG8omVc4NmWABcMGdMNxqQn7Lvdt) | wallet | The clock-out, one approval: `end_shift` (`ShiftEnded` and `ShiftEndedV2` for shift 10: **37 dark rounds**, 5 rounds dug, 5,050,000 lamports, reason 0 `completed`, rounds 437,728 to 437,772), then `release_focus_bond`: the same **10 SKR** back to the wallet, the vault and the bond account closed. The wallet's SOL went up by 1,646,000 lamports: both rents back, less the log's rent of 1,300,480 and a 5,000-lamport fee |
+| 104 | 15:58:25 | 456,104,328 | [`JJsQ4SXr…`](https://solscan.io/tx/JJsQ4SXrMZnFQGNPUxHMjVf1cRjiaVRGoGqpJUCL5rTqaGDiop3Nzi74gAAN8P9KbWKEQzZTzMvJJqKq5v2Aom6) | wallet | "Buy ORE" on the clock-out sheet, a second approval: 0.001 SOL swapped through Jupiter (Meteora DLMM, Omnipair, Meteora DLMM) for 0.00094735939 ORE, into a new ORE token account of the wallet. The wallet's SOL went down by 2,493,440 lamports: the swap, 1,488,440 of rent for that account, and a 5,000-lamport fee |
+
+What it showed:
+
+- **The bond ran on mainnet with real SKR.** Ten SKR left the wallet at the clock-in and the same
+  ten came back in the clock-out's one approval, because the shift's log says `completed`. The
+  clock-out sheet said so before the wallet opened: "Your Focus Bond comes back to your wallet:
+  10 SKR." No forfeit has run on mainnet: the auction's vault does not exist there.
+- **The first completed shift.** The phone stayed face-down for the whole window of 41 minutes
+  and 24 seconds. The chain holds 37 dark rounds for it: five from its digs and 32 from the
+  crank's records. The phone's own count was 38 signed rounds. The streak in the Rig account went
+  from 0 to 1, and the reveal said "Streak 0 → 1".
+- **The haul, as the phone showed it:** "Rounds dark 37", "Digs 5", "SOL placed 0.0050 SOL",
+  "Signed on this phone 38 rounds", "0.894 SOL per ORE", "Market 1.057", "Mining was the cheaper
+  route last night: 15% below market." Its header gave the shift as 16:03 to 16:52: the log's
+  end is the moment it was sealed. The Nights screen then read "Streak 1 night", "Nights off
+  left: 2", and for all shifts "Rounds dark 71", "Digs 35".
+- **The ORE purchase ran.** Row 104 is the buy leg's first signed transaction on mainnet. The
+  sheet had said "0.001 SOL buys about 0.00095052 ORE right now: 1.053 SOL per ORE" and named a
+  floor of 0.00093631 ORE; 0.00094735939 ORE arrived.
+- **The morning page did not open by itself.** At 16:45:08 local time, six seconds after the
+  window's end, HyperOS stopped the app (its log: "stop xyz.headsdown due to UserDefined: The
+  system loading is too high and ANR is occurring"). A stopped app loses its alarms, so the reveal
+  planned for 16:48 never fired. The founder picked the phone up at 16:50 and opened the page from
+  Home; it read "Not sealed yet", "Clocked in 16:03", "Last heartbeat 16:45", "38 rounds signed
+  dark". Home's own line was wrong about it: "Last night's shift ended early: Heads Down was
+  closed at 4:45 pm after 38 rounds. Nothing was spent." The shift had completed. Neither is
+  fixed.
+- **HyperOS's Clock registers its reminders as alarms.** For one alarm it registers three alarm
+  clocks with Android: a reminder 60 minutes before, another 15 minutes before, and the alarm. The
+  app asks Android for the next alarm clock and gets the earliest. So the window ended 17 minutes
+  before the alarm rang (Home said "runs until 16:44, two minutes before your alarm", and the
+  alarm was for 17:02), and an alarm less than about 47 minutes ahead would have left the build's
+  eight-hour window with the alarm ringing inside it. The first alarm set for this shift, 38
+  minutes ahead, was such a one; it was caught by reading Android's alarm list before the
+  clock-in, and replaced. Not fixed in this build.
+- **The wallet's sheet has 90 seconds.** Twice before row 64 the Jupiter sheet stayed open longer
+  than the app waits for a wallet (the client library's 90 seconds). The first time the sheet
+  closed; the second, its Confirm did nothing and an empty overlay stayed on top. Nothing was
+  signed either time. The app does not say how long the user has.
+- **What the shift cost the crank:** 356,052 lamports over its 38 transactions, net of what the
+  five digs paid it.
+
 ## Not run yet
 
 On a phone:
 
 - a whole night under HyperOS (the night of 12 October ran three hours, until a power cut);
-- the haul reveal at alarm time on the device;
+- the morning page opening by itself on the device (on 12 October HyperOS stopped the app at the
+  window's end, and the page was opened by hand);
 - a dig attempt while the cost gate is shut;
 - Solflare, Phantom or Seed Vault (only Jupiter Mobile has signed);
 - the Seeker tier on a device;
 - Close rig, Unfreeze and Claim;
-- Stack, the Focus Bond and Gift (the app has no screens for Stack and Gift);
-- the buy leg;
+- Stack and Gift (the app has no screens for them);
 - the default build with its 0.53 plan digging, and a release build: the shift ran on a debug
   build with the demo policy.
 
 On mainnet at all:
 
-- any SKR instruction;
+- a Focus Bond forfeit (the auction's vault has not been created), Stack or Gift;
 - a crank transaction with more than one rig, a lease reuse, a lookup table, a
   an `end_shift` or a FREEZE sent by the crank (a `record_heartbeats` ran on 12 October);
 - a second rig, or a rig that is not the founder's;
