@@ -8,6 +8,7 @@ import xyz.headsdown.feature.reveal.haul.HaulSummary
  * The spoiler-free share grid: where the rig dug last night and how long it stayed dark, and
  * nothing else. No ORE amount, no SOL, no price, no winning tiles, no Motherlode, no wallet.
  * A room's Muster reveal stays a surprise, and the image leaks nothing about the user's funds.
+ * The text ends with the project's site, the same address for everyone; the image does not carry it.
  */
 data class ShareGrid(
     /** 0 (no digs) .. 3 (the rig's busiest tiles), row-major 5x5. */
@@ -29,12 +30,16 @@ data class ShareGrid(
         append("Heads Down · night shift\n")
         emojiRows().forEach { append(it).append('\n') }
         append(caption()).append('\n')
-        append("Powered by ORE")
+        append("Powered by ORE\n")
+        append(SITE)
     }
 
     companion object {
         const val MAX_LEVEL = 3
         private val EMOJI = listOf("⬛", "🟫", "🟧", "🟨")
+
+        /** Where the share text sends a reader. One fixed address: nothing of the wallet or the rig is in it. */
+        const val SITE = "https://oojae.github.io/heads-down/"
 
         /** Only the dug masks and counts are read: outcomes cannot leak into the grid. */
         fun from(h: HaulSummary): ShareGrid {
