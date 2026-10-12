@@ -495,9 +495,10 @@ fun HomeScreen(
         Column(Modifier.fillMaxWidth().padding(top = SECTION_GAP, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
             if (state.beforeShift && (clockInAmounts != null || state is ShiftState.Frozen)) {
                 PageSection(HomeCopy.LIMITS) {
-                    clockInAmounts?.let { Body(it, Modifier.testTag(HomeTags.CLOCK_IN_AMOUNTS)) }
-                    // A frozen rig digs at no figure: the line is for a cold one.
+                    // A frozen rig digs at no figure: the line is for a cold one. It stands first: the
+                    // amounts end on the Focus Bond's sentence, which belongs next to the chooser under it.
                     if (gateLine != null && state !is ShiftState.Frozen) Body(gateLine, Modifier.testTag(HomeTags.GATE))
+                    clockInAmounts?.let { Body(it, Modifier.testTag(HomeTags.CLOCK_IN_AMOUNTS)) }
                     if (state is ShiftState.Frozen) {
                         Body(
                             "Freezing took the phone's key. Coming back takes your wallet: one approval unfreezes the rig and arms a new shift.",

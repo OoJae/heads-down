@@ -259,7 +259,9 @@ class HomeFirstScreenTest : ScreenTest() {
 
     // ------------------------------------------------------------------ whether the rig would dig
 
-    @Test fun `the gate line closes tonight's limits on a cold rig - a frozen or running rig has none`() {
+    // The gate line opens the block and the amounts close it: their last sentence is the Focus Bond's,
+    // and it has to stay on screen with the chooser under it (the emulator run reads it there).
+    @Test fun `the gate line opens tonight's limits on a cold rig - a frozen or running rig has none`() {
         var shown by mutableStateOf(Screens.idle)
         show { Screens.Home(shown) }
         for (cold in listOf(Screens.idle, Screens.broken, Screens.complete)) {
@@ -271,8 +273,8 @@ class HomeFirstScreenTest : ScreenTest() {
             val gate = bounds(HomeTags.GATE)
             val next = bounds(HomeTags.BOND_CARD)
             assertTrue(
-                "${cold.name}: under the heading and the amounts, over the next section: $heading, $amounts, $gate, $next",
-                heading.bottom <= amounts.top && amounts.bottom <= gate.top && gate.bottom <= next.top,
+                "${cold.name}: under the heading, over the amounts and the next section: $heading, $gate, $amounts, $next",
+                heading.bottom <= gate.top && gate.bottom <= amounts.top && amounts.bottom <= next.top,
             )
             assertDrawnWhole(HomeTags.GATE, Screens.gate)
         }
