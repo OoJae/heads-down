@@ -483,9 +483,9 @@ goes on.
 | 50 | 01:14:57 | 455,861,678 | [`2kc643V7…`](https://solscan.io/tx/2kc643V7aWMAVTye4MGniGuDVk35ARH57vx2BGgzUQTmtv1wtyRNHpZ45uJd3SLkGJ2TmDsPeVGkAkiptUeuKNH3) | crank | ORE `checkpoint`, then `dig` for round 436,947: the fifth dig, and the shift's budget |
 | 51 | 04:01:17 | 455,907,324 | [`4VtssJM3…`](https://solscan.io/tx/4VtssJM3TK26TZ5PkJQcjppYS4XrNqhpQjtFbwoxNrXhRz1YXabybSziTp6Hj95ZGENFgG1Hh3muaH7YVVN9HKFo) | crank | `record_heartbeats`, the first on mainnet: `HeartbeatsRecorded`, round 437,105, one dark round added. The crank sends it only in a round where the rig's cost gate is shut |
 | 52 | 04:08:36 | 455,909,336 | [`3TBjJwzz…`](https://solscan.io/tx/3TBjJwzzuMYj9P6CwSD9sqaGzXqf9qchUrdJARDdQqFciq1PT8gTCaSMC6ymEZGkcfFntZ3eyF5mmGYugU5KADmW) | crank | A BREAK the phone signed: `ShiftBroken` (shift 8, reason 7 `unplugged`). The charger had lost power at 05:08 local time |
+| 53 | 14:08:10 | 456,074,228 | [`3mn78my6…`](https://solscan.io/tx/3mn78my6bRihZWMgFAcZVy2Smwj9dJFXZ3C38qi5eDuD6VEKHVuFgSuGDCQDrXt9cdkR1ZtosHrbq2TmiT8Vpr3t) | wallet | The clock-out, ten hours later, from build 0.1.2 installed over 0.1.0: `end_shift` (`ShiftEnded` and `ShiftEndedV2` for shift 8: 6 dark rounds, 5 rounds dug, 5,050,000 lamports, reason 7 `unplugged`, rounds 436,942 to 437,679). The wallet paid the log's rent, 1,300,480 lamports, and a 5,000-lamport fee |
 
-What it showed, read from the Rig account and these transactions on the morning of 12 October,
-before the clock-out:
+What it showed, read from the Rig account and these transactions:
 
 - **Three hours face-down, signing.** The Rig's heartbeat counter went from 52 to 223 between
   the clock-in and the BREAK: about 170 messages signed by the key in the phone's secure
@@ -501,6 +501,20 @@ before the clock-out:
   a Night Shift signs for that, and the crank landed it. Inside the window that seals the shift
   as ended early: no streak day. Had a Focus Bond been on it, the bond would have been lost to a
   power cut. The rule that tells a pickup from an outage does not exist yet.
+- **Build 0.1.2 showed the night as itself.** It was installed over 0.1.0 that afternoon (the rig's
+  key and the shift's journal kept) and its reveal read: "Not sealed yet", "Clocked in 02:09",
+  "Last heartbeat 05:08", "170 rounds signed dark". The clock-out sheet said the shift would seal
+  as ended early because the charger was unplugged, stated the log's rent to the lamport, and
+  after one approval said "Confirmed on-chain. Shift sealed as ended early." The Miner then held
+  0.00253693 ORE. Five minutes later, when the indexer had read the seal, the reveal showed the
+  haul: "Rounds dark 6", "Digs 5", "SOL placed 0.0050 SOL", "Signed on this phone 170 rounds",
+  "ORE mined 0.0006 ORE", "0.948 SOL per ORE", "Market 1.071", and "Mining was the cheaper route
+  last night: 11% below market." Its header gave the shift as 02:09 to 15:08, twelve hours and 58
+  minutes: the log's end is the moment it was sealed, not the moment the phone stopped.
+- **Jupiter's approval sheet called that clock-out malicious.** It showed "This transaction has
+  been flagged as malicious" over a transaction of one instruction that pays 0.0013 SOL of rent
+  into the shift's own log. The founder confirmed, and it landed. The program is ten days old and
+  unknown to the wallet's scanner; nothing has been done about the flag yet.
 - **No alarm, an eight-hour window.** With an alarm set before the clock-in, the window would have
   ended two minutes before it. Build 0.1.0 also planned its own morning page for 07:00, inside
   that window; the shift was already over by then. Build 0.1.2 never opens that page before the
