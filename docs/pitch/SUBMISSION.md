@@ -9,6 +9,130 @@ outside them is a note for the founder. Form fields are listed in
 
 ---
 
+## 0. The live form (read from the platform on 12 October 2026)
+
+The form the hackathon uses today is not the one sections 1 to 3 were drafted for. Its record lists
+four criteria at 25 each (Stickiness and product-market fit, User experience, Innovation,
+Presentation and demo), and it has **no description or tagline field**. The prose is three answers
+of up to 5,000 characters each: porting, new mobile development, and SKR integration. The platform's
+AI coach reads those answers, about 8,000 characters of the deck's text, a transcript of the video
+and the security audit. Paste only the text inside the quote blocks. Numbers in square brackets are
+filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
+
+**Title** (up to 200 characters):
+
+> Heads Down: your phone's night shift, powered by ORE
+
+**Porting features:**
+
+<!-- port:start -->
+> No. Nothing was ported. All code was written in this repository for this project, starting on
+> 29 September 2026.
+<!-- port:end -->
+
+**New mobile development:**
+
+<!-- nmd:start -->
+> Yes. Heads Down is a native Android app (Kotlin, Jetpack Compose, minSdk 31, targetSdk 36) written
+> in this repository for this hackathon, with its own Solana program, relay and indexer. It is not a
+> PWA or a WebView wrapper.
+>
+> WHAT IT IS. Your phone's night shift, powered by ORE. At bedtime you plug the phone in, set your
+> alarm, tap Clock in and approve one transaction in your wallet. You lay the phone face-down. While
+> it stays down, it digs ORE from your own ORE Automation account, inside a budget and a price
+> ceiling your wallet signed. Pick it up and the rig goes cold. After your alarm a page opens over
+> the lock screen; you clock out with one approval and the reveal shows the night: the rounds it was
+> dark, the digs that landed, what you paid per ORE, and the market price next to it.
+>
+> WHY YOU COME BACK. A completed night adds to a streak that the program stores on-chain, with two
+> nights off every 30 days, so one bad night does not end it. The reveal follows your own alarm. A
+> home-screen widget and a Quick Settings tile show the rig. A Nights screen keeps every shift, and
+> a share card shows the night without a wallet address. The posture is the one Pokémon Sleep's own
+> tips teach (plugged in, face-down, all night), in an app that has passed 30 million downloads.
+> Here the morning holds a real asset the user owns.
+>
+> WHAT IS NEW. The referee is the phone's own secure hardware. About once a minute the app signs a
+> heartbeat with a P-256 key that cannot leave the Android Keystore. The Solana program lets ORE's
+> deploy happen only when that signature verifies on-chain, through the secp256r1 precompile, in the
+> same transaction as the dig. No server can say the phone was face-down, ours included: any relay
+> can carry a heartbeat, none can forge one, and the program alone chooses amounts and squares. The
+> SOL never leaves ORE's own Automation account, and "Take it back" withdraws what was not placed.
+>
+> MOBILE-NATIVE PARTS, all written here: Mobile Wallet Adapter 2.2 (clock-in, clock-out and take-back
+> are single approvals); an Android Keystore key with hardware attestation checked by our registrar;
+> a foreground shift service that reads the accelerometer and the charger (the test phone has no
+> gyroscope); a Quick Settings tile, home-screen widgets, an Android 16 Live Update and haptics; an
+> exact alarm aligned to the user's own alarm for the reveal; and an on-device model that tells a
+> knock on the table from a pickup.
+>
+> PLAIN ABOUT MONEY. Mining is one route to ORE, not income. The rig digs only while ORE's own cost
+> figure is under the ceiling, the reveal shows the price paid beside the market price, and the
+> clock-out can buy ORE through Jupiter instead. In a backtest over 58,801 ORE rounds, digging a
+> little every round cost 36 to 90% more than buying, which is why the gate exists.
+>
+> WHAT HAS RUN, AND WHERE. Every transaction is listed in docs/MAINNET.md.
+> - Solana mainnet since 10 October 2026: the program HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p,
+>   the relay, the registrar, the indexer and a public dashboard.
+> - One rig, the founder's only phone, a Redmi 14C (Android 16, HyperOS 3) with Jupiter Mobile:
+>   [9] shifts and [30] digs to 12 October, each dig gated by a heartbeat from the phone's secure
+>   hardware; on 12 October a shift of [three] hours that sealed as completed, and the reveal after
+>   the alarm; pickups that ended earlier shifts; clock-outs; SOL taken back to the lamport; and
+>   [a first ORE purchase at clock-out].
+> - An Android 14 emulator against a local fork of mainnet: the same app end to end, signed in
+>   Solana Mobile's test wallet.
+> - [1,375] automated tests of the app, 171 of the program and 228 of the relay.
+>
+> WHAT IS OPEN, stated once. It has not run on a Seeker: the program can verify a Seeker Genesis
+> Token (tested on a fork with real tokens) and the app has no screen for it yet. The filmed build
+> digs under a raised price ceiling. The pickup model is trained on synthetic data. Once a shift's
+> budget is spent, the chain stops recording its dark rounds, so a long night seals with the rounds
+> of its digs. One key can upgrade the program. There has been no third-party audit. The APK is
+> debug-signed and not yet on the dApp Store. The founder is its only user so far.
+<!-- nmd:end -->
+
+**SKR integration** (finish after the bonded shift: the bracketed parts are that run):
+
+<!-- skr-live:start -->
+> SKR is Heads Down's commitment collateral. The app's Focus Bond lets you lock SKR on tonight's
+> shift: if the shift completes, the same SKR comes back; if you pick the phone up, it is forfeit.
+>
+> IT RAN ON MAINNET. On 12 October 2026, on the founder's Redmi 14C: 10 SKR locked at clock-in
+> [transaction], a [35]-minute shift that sealed as completed, and the same 10 SKR released to the
+> wallet at clock-out [transaction]. The lock and the release are checked against the shift's own
+> on-chain log, which exists only because the phone's secure hardware signed its heartbeats.
+>
+> WHY SKR. It is the token Seeker owners already hold from using their phone, so a bond in SKR puts
+> something that came from the device behind a habit on the device. Heads Down emits no SKR, pays
+> nothing for holding it and keeps none.
+>
+> WHO DECIDES, AND WHO IS PAID. In commitment apps the company usually judges the failure and keeps
+> the money. Here the breach is a message signed by the phone's secure hardware and checked by the
+> Solana program. And by the program's rule a lost bond is never paid to the team or to another
+> player: it goes to an on-chain Dutch auction with no oracle, whose buyers pay ORE that goes
+> through ORE's own bury instruction.
+>
+> IN THE PROGRAM TODAY (deployed on mainnet; tested on a fork of mainnet and end to end on the
+> emulator): the Focus Bond (lock, release, forfeit); Stack, a table of players who each bond SKR on
+> keeping their phones face-down for a window of ORE rounds, where a seat counts a round only if its
+> phone's heartbeat verified in that round; Gift a Rig, SOL escrowed for a wallet or a Seeker Genesis
+> Token that only its holder can claim; and the auction.
+>
+> IN THE APP TODAY: the Focus Bond chooser on the home screen, the bond's line on the clock-in
+> sheet, and its release at clock-out. Not in the app yet: the Stack and Gift screens.
+>
+> NOT RUN ON MAINNET: a forfeit (the auction's vault has not been created there), Stack, Gift a Rig
+> and the Seeker Genesis Token check.
+>
+> WHAT A BOND CAN COST THAT IS NOT YOUR DOING. A bonded shift is lost if none of its heartbeats
+> reaches the chain, so a relay outage or a call that lights the screen can cost the bond. A rule
+> that tells a flinch from an outage is the next change to the program.
+<!-- skr-live:end -->
+
+Sections 1 to 3 below are the drafts for the earlier form. Their facts stand as of 10 October;
+their fields are not on the live form.
+
+---
+
 ## 1. Project
 
 **Name:** Heads Down
