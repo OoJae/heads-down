@@ -23,6 +23,13 @@ filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
 
 > Heads Down: your phone's night shift, powered by ORE
 
+**APK URL:** `https://github.com/OoJae/heads-down/releases/download/v0.1.2-clock-in/heads-down-0.1.2-clock-in.apk`
+(build 0.1.2, published 12 October 2026 as the pre-release `v0.1.2-clock-in`; sha256
+`f687a375cf975d5f0732bda2a39350152364ef3c25d486985f7dc354cf94c9b3`). **Repository:**
+`https://github.com/OoJae/heads-down`. **Deck URL:** the Google Drive link of
+`site/deck/heads-down-deck.pdf` (the form takes Google Slides or a PDF on Drive, shared with
+"Anyone with the link"). **Video URL:** to be filled in.
+
 **Porting features:**
 
 <!-- port:start -->
