@@ -161,7 +161,7 @@ object HomeCopy {
     const val FREEZE_KEEP = "Keep the shift"
 
     /** Under the rig's word once a shift has run its whole window: what is left to do, not why the rig stopped. */
-    const val SHIFT_COMPLETE = "Shift complete: clock out to seal it and see the haul."
+    const val SHIFT_COMPLETE = "Shift complete: it ran to the end of its window."
 
     /** The hero's sentence for that shift. */
     const val HERO_COMPLETE = "A dark slab lying face-down, with no light under it: the shift is complete."

@@ -38,9 +38,9 @@ data class NotificationCopy(
  * - only the user-started shift (armed / hot / cooling) is ongoing and promotable.
  */
 object RigNotificationCopy {
-    /** A shift that ran its whole window, in the home screen's words ("Shift complete: clock out to seal it …"). */
+    /** A shift that ran its whole window, in the home screen's words. True before the clock-out and after it. */
     const val COMPLETE_TITLE = "Shift complete"
-    const val COMPLETE_TEXT = "Clock out to seal it"
+    const val COMPLETE_TEXT = "It ran its whole window"
 
     fun from(state: RigNotificationState): NotificationCopy {
         val rounds = state.darkRounds.coerceAtLeast(0)

@@ -435,10 +435,11 @@ What changed since 0.1.1. Where each has run is in [docs/MAINNET.md](../docs/MAI
   clock-in is still inside an eight-hour window: set the alarm at least 32 minutes ahead.
 - **A shift that ran its whole window reads as complete.** After the window the phone sends no
   BREAK, but its own state machine still cooled and broke when the alarm lit the screen, and Home
-  said "Shift ended: the screen stayed on." Home now says "Shift complete: clock out to seal it
-  and see the haul.", and the notification "Shift complete". A break inside the window keeps its
-  words whenever the screen is read. This is the phone's own reading: the clock-out sheet states
-  what the chain will record.
+  said "Shift ended: the screen stayed on." Home now says "Shift complete: it ran to the end of its
+  window.", with "Clock out" under it, and the notification "Shift complete". The sentence is true
+  before the clock-out and after it. A break inside the window keeps its words whenever the
+  screen is read. This is the phone's own reading: the clock-out sheet states what the chain will
+  record.
 - **The sealed haul shows what the phone signed.** One row, "Signed on this phone", from the shift
   journal, while the journal still holds that shift. It is not an on-chain count: once a shift's
   budget is spent and the cost gate is open the crank lands no more heartbeats, so the sealed

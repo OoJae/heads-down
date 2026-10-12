@@ -238,7 +238,7 @@ class HomeFactsTest {
         assertEquals(0, CompleteLook.pixels)
         assertFalse(CompleteLook.problem)
         assertTrue(CompleteLook.complete)
-        assertEquals("Shift complete: clock out to seal it and see the haul.", CompleteLook.line)
+        assertEquals("Shift complete: it ran to the end of its window.", CompleteLook.line)
         // A break's look is never the complete one, and says so in its own words.
         for (reason in BreakReason.entries) assertFalse(lookOf(ShiftState.Broken(spec, 0, reason)).complete)
         // The hero's sentence has the shape of the six others, and is none of them.
