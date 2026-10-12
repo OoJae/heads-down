@@ -79,21 +79,39 @@ indexer. Use Solana Explorer with a custom cluster:
 
 ## 3. Shot list
 
-| Time | Picture (A-roll) | On-screen text | VO | B-roll / capture |
-|---|---|---|---|---|
-| 0:00–0:08 | Macro, dark bedroom, 23:0x. Redmi on a nightstand, charger in. Thumb swipes down and taps the "Heads Down" tile next to Do Not Disturb. The wallet sheet appears; fingerprint. The phone goes face-down. | none | "Most phones spend the night doing nothing. Mine works a night shift." | Camera, not screen capture: wallet apps can block recording. Room audio for the arm cue once R10 ships. |
-| 0:08–0:22 | Slow push-in on the face-down phone. | "Heads Down · powered by ORE" · "Any Android · verified Seeker tier" | "This is Heads Down. Face-down, my phone digs ORE from my own ORE Automation. Pick it up, and the rig goes cold. Only a heartbeat signed inside this phone can switch it on. No server can forge one, mine included." | none |
-| 0:22–0:45 | Screen capture of the same clock-in: tile, wallet approval (camera if the wallet blocks capture), "Rig armed" notification. Cut to Solscan: one transaction with ORE `automate`, `register_rig` (first run), `set_caps`, `arm_shift`. | "One approval · one transaction" · the tx signature | "I tap the Quick Settings tile. One wallet approval funds tonight's capped shift inside ORE's own Automation and arms the rig. That's the only signature tonight. This is a Redmi 14C. Any Android with a mobile wallet can run a guest rig, and Seeker owners get a tier verified on-chain by their Seeker Genesis Token." | `scrcpy` recording started **before** arming (§5). |
-| 0:45–1:22 | **Trustless beat** (step by step in §4). Split screen: phone on the left, terminal and Solscan on the right. | "Round N · dig ✓" → "Phone lifted" → "Replayed heartbeat → RigSkipped · 7 StaleHeartbeat · no ORE instruction" → "Round N+1 · fresh heartbeat · dig ✓" · "Demo setting: price ceiling raised for this take" | "Every ORE round, about 78 seconds, the phone signs a heartbeat with a key that never leaves its Keystore. A crank can dig for my rig only if that heartbeat verifies on-chain, through Solana's secp256r1 precompile. Now I pick the phone up. It stops signing. So I play a dishonest crank: I copy my last heartbeat off the chain and resend it. The program skips my rig: stale heartbeat. Nothing reaches ORE. Phone back down. Next round, a fresh heartbeat, and the dig lands in ORE." | Terminal: `hd-crank` log lines for accepted heartbeats; the replay tool's output (R7). |
-| 1:22–1:44 | Chart: `ml/forecaster/figures/eff_price_vs_budget.png`, then the live gate value from `hd-crank check`. | "58,801 ORE rounds · 47 nights" · "every round: +36% to +90% vs buying" · "gated chunks + buy the rest: −1.4% to −3.0%" | "For this take I raised my price ceiling so a dig could land on camera. Normally the gate decides. In our backtest of 58,801 ORE rounds, digging a little every round cost 36 to 90 percent more than buying. Gated chunks plus buying the rest came out 1.4 to 3 percent cheaper. Modest, and we say so." | `ml/forecaster/RESULTS.md` TL;DR figures. |
-| 1:44–2:03 | The detector on a table: phone face-down, a knock, no change; a lift, cooling. Use the debug sensor view if it exists (captioned), else the terminal. | "On-device · accelerometer only (no gyroscope)" · "Forecaster: advisory (lost to the on-chain rule)" · "Can only tighten wallet-signed limits" | "The AI runs on the phone. Pickup detection uses only the accelerometer; this phone has no gyroscope. A pickup-versus-bump classifier is built, trained on synthetic data so far. Our cost forecaster lost to the simple on-chain rule, so it only explains the night. Nothing on the phone can raise the limits my wallet signed." | `ml/forecaster/MODEL_CARD.md` card as a 2 s insert. |
-| 2:03–2:15 | **If R8 ships:** 07:00 alarm opens the full-screen haul reveal. **Fallback:** the "Rig cold · Shift ended · N rounds dark" notification, then Solscan: the `end_shift` tx and its ShiftLog. | reveal: "rounds dark · digs · price per ORE vs market" / fallback: "ShiftLog on-chain" | Reveal: "At my alarm, the haul reveal replays the night: rounds dark, digs landed, and what I paid per ORE against the market." Fallback: "In the morning the shift closes on-chain: dark rounds, rounds dug and SOL deployed, in a ShiftLog anyone can read." | Real footage from a real night only. Never a staged Motherlode. |
-| 2:15–2:35 | **Stretch (R9 ships):** a dinner table, friends' phones pair over Nearby, each posts an SKR bond; a knock, all stay hot; a reach, one rig breaks; Solscan settle. **Alternative (default today):** three friends' Android phones as guest rigs on a table; knock the table; one friend reaches for their phone. | Stretch: "SKR bond · 80% of forfeits to finishers · 20% buys ORE for ORE's bury" / Alternative: "3 phones · 3 guest rigs · knock ≠ pickup" | Stretch: "SKR makes it social. At a table, each friend bonds SKR on keeping their phone down. A knock on the table doesn't count; a pickup does. Finishers take back their bonds plus most of the forfeits, and the rest buys ORE that ORE buries." Alternative: "Three friends, three different Android phones, all guest rigs. I knock the table: every rig keeps heartbeating. One of us reaches for a phone: that rig cools. SKR-bonded table contests build on exactly this; the program has them, the app's screens come next." | Terminal: per-rig heartbeat acceptances at the crank (needs R3). |
-| 2:35–2:52 | Dashboard scrolled: `/` tiles, `/share/`, `/digs/` with Solscan links. Then the repo: `docs/THREAT_MODEL.md`, `crates/`. | Real data: tile values with links. Simulated: the SIMULATED banner stays in frame. | "Every number on the dashboard comes from chain data and links to the transaction behind it. The program, the crank, the Seeker and P-256 crates and the threat model are open source, with a written worst case for every key." If simulated, add first: "This is still the labelled simulated dataset." | `dashboard/README.md` run steps. |
-| 2:52–3:00 | The face-down phone in the dark. | "Heads Down. Put it down. It digs." · "Powered by ORE" · store status `[TBD]` | "Heads Down. Put it down. It digs. Powered by ORE." | none |
+Rewritten on 12 October 2026 for the live form. The four criteria are Stickiness and product-market
+fit, User experience, Innovation and Presentation, 25 each, and the platform's AI coach reads a
+**transcript** of this video. So the voice-over says what ran, where and when, and every sentence
+stands without its picture. The film opens on the morning, because that is the moment the product
+exists for.
 
-VO total: about 405 words, about 2:32 at 160 words a minute, which leaves room for the cold open,
-the pauses and the close.
+The take is the bonded shift of 12 October on the Redmi 14C (build 0.1.2, mainnet). Numbers in
+square brackets are filled in from that run and from [MAINNET.md](../MAINNET.md) before recording
+the voice-over. A clause marked (if built) is cut when that screen is not in the filmed build.
+
+| Time | Picture | On-screen text | VO (section 7) |
+|---|---|---|---|
+| 0:00–0:10 | Daylight, a desk. The Redmi face-down on its wall charger. The alarm rings. A hand dismisses it without unlocking. Camera, not screen capture. | "Redmi 14C · Solana mainnet · 12 October 2026" | 1 |
+| 0:10–0:38 | The reveal page opens over the lock screen: "Not sealed yet" and its three facts. Tap Clock out, the sheet, the wallet approval (camera: wallets can block capture), "Reading the haul", then the board replay and the numbers. A cut inside the wait is labelled with the seconds it removes. | "One approval" · the transaction signature | 2 |
+| 0:38–0:58 | The start of the same shift, in order: charger in, alarm set, Clock in, the wallet approval, the phone laid down, the rig hot. | "One approval a shift" · "Inside limits the wallet signed" | 3 |
+| 0:58–1:18 | The streak on Home and on the reveal. The widget on the launcher. The Nights screen (if built). The share card. | "Streak stored on-chain" · "2 nights off a month" | 4 |
+| 1:18–1:45 | Solscan: one dig transaction, with the secp256r1 check, the program's dig and ORE's deploy. Then the plain shift of the same day: the phone lifted from the desk, the cooling cue, and the `ShiftBroken` transaction. | "Signed in the phone's secure hardware" · "Checked by Solana in the same transaction" | 5 |
+| 1:45–2:05 | Home's Focus Bond chooser at 10 SKR. The line "It also locks your 10 SKR Focus Bond." Then Solscan: the same 10 SKR back in the wallet. | "10 SKR locked · the same 10 SKR back" | 6 |
+| 2:05–2:25 | Home's line with ORE's cost figure and the ceiling (if built). The reveal's price row with the market price beside it. The clock-out sheet's "Buy ORE". | "Demo setting: price ceiling raised for this film" | 7 |
+| 2:25–2:48 | The public dashboard, a tile clicked through to Solscan. The table in MAINNET.md. | "On mainnet since 10 October 2026" · "Not run on a Seeker · no third-party audit · one user" | 8 |
+| 2:48–3:00 | The founder, or the phone face-down. | "Heads Down. Put it down. It digs." · "Powered by ORE" | 9 |
+
+**What has to be on film from today, and when to shoot it**
+
+1. During the plain shift on 0.1.2: the lift, the cooling cue and the phone picked up (shot 5).
+2. Before the bonded clock-in: the bond chooser, the alarm being set, the clock-in and its approval,
+   the phone going down (shots 3 and 6).
+3. At the alarm: one unbroken camera take from the ringing alarm to the haul (shots 1 and 2). Do
+   not unlock before the reveal page appears: an unlocked phone gets a small notification instead.
+4. After it: Home, widget, Nights, share card, dashboard, Solscan (shots 4, 7, 8), as screen capture.
+
+**Captions.** Upload the caption file with the video: automatic captions will mangle ORE, SKR and
+secp256r1. Its text is the voice-over below, as recorded.
 
 ---
 
@@ -254,46 +272,47 @@ explorer's block time visible.
 
 ## 7. VO transcript (for captions and the transcript reader)
 
-> Most phones spend the night doing nothing. Mine works a night shift.
->
-> This is Heads Down. Face-down, my phone digs ORE from my own ORE Automation. Pick it up, and the
-> rig goes cold. Only a heartbeat signed inside this phone can switch it on. No server can forge
-> one, mine included.
->
-> I tap the Quick Settings tile. One wallet approval funds tonight's capped shift inside ORE's own
-> Automation and arms the rig. That's the only signature tonight. This is a Redmi 14C. Any Android
-> with a mobile wallet can run a guest rig, and Seeker owners get a tier verified on-chain by their
-> Seeker Genesis Token.
->
-> Every ORE round, about 78 seconds, the phone signs a heartbeat with a key that never leaves its
-> Keystore. A crank can dig for my rig only if that heartbeat verifies on-chain, through Solana's
-> secp256r1 precompile. Now I pick the phone up. It stops signing. So I play a dishonest crank: I
-> copy my last heartbeat off the chain and resend it. The program skips my rig: stale heartbeat.
-> Nothing reaches ORE. Phone back down. Next round, a fresh heartbeat, and the dig lands in ORE.
->
-> For this take I raised my price ceiling so a dig could land on camera. Normally the gate decides.
-> In our backtest of 58,801 ORE rounds, digging a little every round cost 36 to 90 percent more
-> than buying. Gated chunks plus buying the rest came out 1.4 to 3 percent cheaper. Modest, and we
-> say so.
->
-> The AI runs on the phone. Pickup detection uses only the accelerometer; this phone has no
-> gyroscope. A pickup-versus-bump classifier is built, trained on synthetic data so far. Our cost
-> forecaster lost to the
-> simple on-chain rule, so it only explains the night. Nothing on the phone can raise the limits my
-> wallet signed.
->
-> In the morning the shift closes on-chain: dark rounds, rounds dug and SOL deployed, in a ShiftLog
-> anyone can read.
->
-> Three friends, three different Android phones, all guest rigs. I knock the table: every rig keeps
-> heartbeating. One of us reaches for a phone: that rig cools. SKR-bonded table contests build on
-> exactly this; the program has them, the app's screens come next.
->
-> Every number on the dashboard comes from chain data and links to the transaction behind it. The
-> program, the crank, the Seeker and P-256 crates and the threat model are open source, with a
-> written worst case for every key.
->
-> Heads Down. Put it down. It digs. Powered by ORE.
+Read by the founder. The bracketed numbers come from the run; the last block is the founder's own.
 
-Swap in the reveal and Stack lines from §3 if R8 or R9 ship. Keep each claim in the transcript
-backed by a file listed in `docs/pitch/DECK.md`.
+> This is a Redmi 14C on its charger. For [thirty-five] minutes it has been lying face-down,
+> working a shift on Solana mainnet. That sound is its alarm.
+>
+> After the alarm, Heads Down opens its reveal page over the lock screen. The shift is over and not
+> sealed yet: [31] rounds signed by this phone. I tap Clock out and approve once in my wallet. That
+> seals the shift on-chain, returns my Focus Bond and buys a little ORE. Then the haul: the rounds
+> it was dark, the digs that landed, and what I paid per ORE with the market price next to it.
+>
+> Heads Down is your phone's night shift, powered by ORE. You plug in, set your alarm, clock in with
+> one approval and lay the phone face-down. While it stays down it digs ORE from your own ORE
+> account, inside limits your wallet signed. Pick it up, and the rig goes cold.
+>
+> The habit is the product. Every completed night adds to a streak stored on-chain, with two nights
+> off a month, so one bad night does not end it. A widget shows the rig. The reveal follows your
+> alarm. The Nights screen keeps every shift, and a share card shows the night without a wallet
+> address.
+>
+> What is new is the referee. About once a minute the phone signs a heartbeat with a key that cannot
+> leave its secure hardware. Solana checks that signature in the same transaction as the dig,
+> through the secp256r1 precompile. No server can say this phone was face-down, mine included. Here
+> I lift it during a shift: it signs a break, and the digging stops.
+>
+> SKR is the Focus Bond. I locked ten SKR on this shift. It completed, so the same ten came back.
+> By the program's rule a lost bond is never paid to the team or to another player: it is sold for
+> ORE that is burned.
+>
+> And it is plain about ORE. Mining is one route to ORE, not income. The rig digs only while ORE's
+> own cost figure is under a ceiling, which I raised for this film so a dig could land. The reveal
+> puts the price I paid next to the market price. Over this rig's first twenty digs that was about
+> 1.13 SOL per ORE.
+>
+> All of this ran on Solana mainnet, on this one phone, since 10 October 2026: [9] shifts, [30]
+> digs, and this morning a shift of [three] hours. Every transaction is public. It has not run on a
+> Seeker, nobody outside the project has audited it, and so far I am its only user.
+>
+> [Founder: two sentences of your own, who you are and how this was built.] Heads Down. Put it
+> down. It digs. Powered by ORE.
+
+Before recording: replace every bracket, cut the Nights clause if that screen is not in the filmed
+build, and read the bond and clock-out sentences against what the run did (how many approvals,
+what came back). Every claim above has its row in [MAINNET.md](../MAINNET.md) or its file in
+`docs/pitch/DECK.md`.

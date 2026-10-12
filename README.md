@@ -4,9 +4,42 @@
 > A dig needs a heartbeat signed by a key in your phone's Android Keystore, verified on-chain. Our servers cannot forge one.
 
 An entry for [Clock In](https://solanamobile.radiant.nexus/), the third Solana Mobile hackathon.
-Native Android, built on the Solana Mobile Stack and Mobile Wallet Adapter. Runs on any Android
-phone with a Solana wallet; Seeker owners get a tier verified on-chain by their Seeker Genesis Token.
-[Download the APK](https://github.com/OoJae/heads-down/releases/tag/v0.1.0-clock-in) (a demo build: read the release's notes on what it does with real SOL).
+Native Android (Kotlin, Compose), built on the Solana Mobile Stack and Mobile Wallet Adapter. Runs on
+any Android 12+ phone with a Solana wallet.
+
+| | |
+|---|---|
+| **APK** | [Releases](https://github.com/OoJae/heads-down/releases): the newest build is the one to install. Debug-signed, Solana mainnet. Read its notes on what it does with real SOL |
+| **Video** | to be linked here when it is published |
+| **Deck** | 10 slides: [PDF](site/deck/heads-down-deck.pdf), [in the browser](https://oojae.github.io/heads-down/deck/) |
+| **See it working, no install** | [The founder's rig: every shift, from chain data](https://dashboard-production-b80c.up.railway.app/haul/?rig=DUmg1GrZhaELtpjY1KpA5ov6ANn4msoUPn4mLV2TWZgL) · [the dashboard](https://dashboard-production-b80c.up.railway.app/) |
+| **Every transaction it has made** | [docs/MAINNET.md](docs/MAINNET.md) |
+
+## Try it
+
+**Five minutes, no wallet, no SOL.** Install the APK and open it. Turn the slab over with your thumb,
+walk through setup (the rig key is made inside the phone; no wallet is asked for), then on the home
+screen tap "Open the morning reveal" and "See a sample night (not your data)". That is the page a
+shift ends on, with a labelled sample in place of your own night.
+
+**A real shift: 35 minutes, a wallet and about 0.02 SOL.**
+
+1. Install a Solana wallet that speaks Mobile Wallet Adapter. The app has been run with Jupiter
+   Mobile only.
+2. In the Clock app, set an alarm at least 35 minutes ahead. The shift ends two minutes before it.
+3. Plug the phone in, tap Clock in, approve once, and lay the phone face-down.
+4. After the alarm, clock out on the page that opens (or from the home screen). The reveal follows.
+5. "Take it back" returns the SOL that was not placed.
+
+A first clock-in moves about 0.014 SOL: the shift's budget of 0.005 SOL (placed in digs, or taken
+back) and one-time account rents. Part of the rents comes back when the rig is closed, the shift
+log's rent comes back after 30 days, and for the ORE Miner's rent it is not known. Each amount is in
+the table "Does it come back?" in [docs/MAINNET.md](docs/MAINNET.md).
+
+**What it has and has not run on.** One phone, the founder's Redmi 14C (Android 16, HyperOS 3), on
+mainnet since 10 October 2026, and an Android 14 emulator against a local fork of mainnet. It has
+not run on a Seeker. The program can verify a Seeker Genesis Token (tested on a fork with real
+tokens); the app has no screen for that yet, so every rig is a guest rig today.
 
 <p>
   <img src="site/deck/img/app-first-launch.png" width="190" alt="The app's first screen: a dark slab seen from below, the words Turn it over, and the button Set up my rig">
@@ -16,16 +49,13 @@ phone with a Solana wallet; Seeker owners get a tier verified on-chain by their 
 </p>
 
 The app on an Android 14 emulator against a local fork of mainnet, 11 October 2026; the last
-screen is the sample night the app offers before a first haul. The same build ran three short
-shifts on the Redmi 14C that evening, on mainnet
-([docs/MAINNET.md](docs/MAINNET.md#the-third-evening-11-october-2026-the-redesigned-app-on-the-phone)). [The deck](https://oojae.github.io/heads-down/deck/) is 18 slides
-([PDF](https://oojae.github.io/heads-down/deck/heads-down-deck.pdf)).
+screen is the sample night the app offers before a first haul.
 
 ## How it works
 
 You clock in with **one wallet approval**. It funds a capped shift inside **your own ORE Automation
 account** and arms your rig. While the phone lies face-down it signs a heartbeat for every ORE
-round (about 78 seconds) with a P-256 key that never leaves the Android Keystore. Anyone may
+round (about a minute) with a P-256 key that never leaves the Android Keystore. Anyone may
 submit a dig for your rig, but the `heads_down` program signs ORE's `deploy` **only** when that
 heartbeat verifies on-chain, in the same transaction, through Solana's secp256r1 precompile. Pick
 the phone up and the next dig is refused with `StaleHeartbeat`. If the phone dies or the app is
