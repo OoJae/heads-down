@@ -79,34 +79,36 @@ indexer. Use Solana Explorer with a custom cluster:
 
 ## 3. Shot list
 
-Rewritten on 12 October 2026 for the live form, and again that evening for what was recorded. The
-four criteria are Stickiness and product-market fit, User experience, Innovation and Presentation,
-25 each, and the platform's AI coach reads a **transcript** of this video. So the voice-over says
-what ran, where and when, and every sentence stands without its picture. The film opens on the
-morning, because that is the moment the product exists for.
+The film as published on 12 October 2026: 2 minutes 12 seconds, 1920 by 1080, built as an HTML
+composition with [HyperFrames](https://github.com/heygen-com/hyperframes) and GSAP, and cut to the
+voice-over word by word (the recording is transcribed, and each picture hangs on the time of a
+phrase in it). Its source is in [film/](film/): `template.html` is the composition, `build.py`
+times it to a recording, `script.txt` is the narration and `heads-down-film.srt` the captions.
 
-Every phone picture is the Redmi 14C's own screen, recorded over adb (`scrcpy --record`) on
+Every phone screen in it is the Redmi 14C's own screen, recorded over adb (`scrcpy --record`) on
 12 October 2026 while build 0.1.2 ran on mainnet. Nothing is staged and no emulator footage is
-used. The wallet's sheets are Jupiter Mobile's, with its "flagged as malicious" line left in.
+used. The wallet's sheets are Jupiter Mobile's, with its "flagged as malicious" line left in and
+one line of text under the phone that says why. The phone itself is drawn: a slab that lies down
+and stands up, with the recording placed in its screen.
 
-| # | Picture (phone on the left, a text card on the right) | VO paragraph (section 7) |
+| # | Picture | VO paragraph (section 7) |
 |---|---|---|
-| 1 | Shift 10 after its window: Home opens, then the reveal page "Not sealed yet" | 1 |
-| 2 | The reveal's three facts, Clock out, the sheet ("Completed", "Your Focus Bond comes back"), the wallet's approval, "Confirmed on-chain", then the haul and "Streak 0 → 1" | 2 |
-| 3 | The start of the same shift: Home's "runs until 16:44", the bond chosen, Clock in, the wallet's approval with −10 SKR | 3 |
-| 4 | Home's "Streak 1 night", then the Nights screen: streak, nights off left, totals, the list of shifts | 4 |
-| 5 | Shift 9 the same afternoon: armed, then "Shift ended: the phone was unlocked", then its clock-out sheet | 5 |
-| 6 | The bond chooser and its sentence, the wallet's −10 SKR, the clock-out's "Focus Bond back in your wallet: 10 SKR" | 6 |
-| 7 | Home's line with ORE's cost figure and the ceiling, the haul's price row beside the market, the "Buy ORE" sheet and its confirmation | 7 |
-| 8 | A card: shifts, digs, the night, what is open | 8 |
-| 9 | The end card | 9 |
+| 1 | The slab lying dark; "Heads Down gives it a night shift" as its light comes on | 1 |
+| 2 | The phone stands with Home on its screen; four steps; the wallet's sheet for the clock-in with a 10 SKR bond; "Armed"; it lies down and ORE's board lights four squares a round; picked up, the screen reads "Rig cold" | 2 |
+| 3 | The phone, Solana and the dig as three nodes with a heartbeat travelling between them, "the same transaction"; then shift 9's home screen after it was lifted: "Shift ended: the phone was unlocked" | 3 |
+| 4 | Shift 10: "Not sealed yet", the clock-out sheet, the wallet's approval, "Confirmed on-chain", the board replay and the numbers; beside it 41, 37 and 5 count up over 37 ticks, then the price paid and the market price | 4 |
+| 5 | A 10 SKR token moves from the wallet to the shift's vault and back, with the two transactions; the bond chooser, the wallet's sheet and "Focus Bond back in your wallet: 10 SKR" on the phone | 5 |
+| 6 | Streak 0 to 1 and a 30-day strip; Home's "Streak 1 night"; the Nights screen and its list; the share card redrawn from the shared text | 6 |
+| 7 | A scale of SOL per ORE: ORE's cost figure 0.80, the ceiling 1.00, this shift's 0.894, the market's 1.057, the first twenty digs' 1.13; the "Buy ORE" sheet and its confirmation | 7 |
+| 8 | 10 shifts, 35 digs, and fourteen of the day's transactions scrolling as a ledger | 8 |
+| 9 | The slab, lit, and the name | 9 |
 
-**Left out on purpose.** The share sheet, because Android's chooser shows the founder's contacts.
-The two clock-in attempts that timed out in the wallet, and the hand-opening of the app after
-HyperOS had stopped it, are in [MAINNET.md](../MAINNET.md) and in paragraph 8 of the voice-over.
+**Left out on purpose.** The share sheet itself, the lock screen and the launcher, because they
+show the founder's contacts, notifications and apps. What is still open is not in the film; it is
+in [MAINNET.md](../MAINNET.md), the README and the form's answers.
 
-**Captions.** Upload the caption file with the video: automatic captions will mangle ORE, SKR and
-secp256r1. Its text is the voice-over below, as recorded.
+**Captions.** Upload `film/heads-down-film.srt` with the video: automatic captions mangle ORE, SKR
+and secp256r1.
 
 ---
 
@@ -267,46 +269,41 @@ explorer's block time visible.
 
 ## 7. VO transcript (for captions and the transcript reader)
 
-Read by the founder. Every number is from the run of 12 October 2026 (shift 10 in
-[MAINNET.md](../MAINNET.md)); the last block is the founder's own.
+The narration as recorded: a generated voice (Clipchamp) reading this text. Every number is from
+the run of 12 October 2026 (shifts 9 and 10 in [MAINNET.md](../MAINNET.md)).
 
-> This is a Redmi 14C. This afternoon it lay face-down on its charger for forty-one minutes,
-> working a shift on Solana mainnet. I have just picked it up.
+> Every night your phone lies face-down on its charger, doing nothing. Heads Down gives it a night
+> shift.
 >
-> I open Heads Down. The shift is over and not sealed yet: thirty-eight rounds signed by this
-> phone. I tap Clock out and approve once in my wallet. The shift is sealed on-chain as completed,
-> and my Focus Bond comes back. Then the haul: thirty-seven rounds dark, five digs, and the price I
-> paid per ORE beside the market price. My streak goes from zero to one.
+> Heads Down is your phone's night shift, powered by ORE. Plug in, set your alarm, clock in with
+> one wallet approval, and lay the phone face-down. While it stays down, it digs ORE from your own
+> ORE account, inside limits your wallet signed. Pick it up, and the rig goes cold.
 >
-> Heads Down is your phone's night shift, powered by ORE. You plug in, set your alarm, clock in with
-> one approval and lay the phone face-down. While it stays down it digs ORE from your own ORE
-> account, inside limits your wallet signed. Pick it up, and the rig goes cold.
+> What is new is the referee. Once a minute, the phone signs a heartbeat with a key that cannot
+> leave its secure hardware. Solana checks that signature in the same transaction as the dig,
+> through the secp256r1 precompile. No server can say this phone was face-down. Not even ours.
+> Lift the phone, and it signs a break. The digging stops.
 >
-> Every completed night adds to a streak stored on-chain, with two nights off a month, so one bad
-> night does not end it. The Nights screen shows the streak and the rig's totals, and a share card
+> Here is a real shift. Solana mainnet, the twelfth of October 2026, on a Redmi 14C. Forty-one
+> minutes face-down. Thirty-seven rounds dark. Five digs. One approval seals it on-chain as
+> completed. Then the haul: the price paid per ORE, beside the market price.
+>
+> SKR is the Focus Bond. Ten SKR were locked on that shift. It completed, so the same ten came
+> back. A lost bond is never paid to the team, or to another player. By the program's rule, it is
+> sold for ORE that is burned.
+>
+> And you come back. Every completed night adds to a streak stored on-chain, with two nights off a
+> month, so one bad night does not end it. The Nights screen keeps every shift, and a share card
 > shows the night with no wallet address.
 >
-> What is new is the referee. Once a minute the phone signs a heartbeat with a key that cannot
-> leave its secure hardware. Solana checks that signature in the same transaction as the dig,
-> through the secp256r1 precompile. No server can say this phone was face-down, mine included. Here
-> I lift it in an earlier shift: it signs a break, and the digging stops.
+> Heads Down is plain about money. Mining is one route to ORE, not income. The rig digs only while
+> ORE's own cost figure is under a price ceiling, raised for this film so a dig could land. That
+> shift's digs cost 0.894 SOL per ORE, against a market price of 1.057. The rig's first twenty
+> digs cost about 1.13. And the clock-out can buy ORE through Jupiter instead.
 >
-> SKR is the Focus Bond. I locked ten SKR on this shift. It completed, so the same ten came back.
-> By the program's rule a lost bond is never paid to the team or another player: it is sold for
-> ORE that is burned.
+> All of it has run on Solana mainnet since the tenth of October: ten shifts, thirty-five digs,
+> every transaction public.
 >
-> It is plain about ORE: mining is one route to ORE, not income. The rig digs only while ORE's own
-> cost figure is under a ceiling, raised for this film so a dig could land. Today's digs cost 0.894
-> SOL per ORE against a market price of 1.057; the rig's first twenty cost about 1.13. The
-> clock-out can also buy: one more approval swapped a little SOL for ORE through Jupiter.
->
-> All of this ran on Solana mainnet since 10 October 2026: ten shifts and thirty-five digs, every
-> transaction public. Last night it worked three hours until a power cut. Still open: it has not
-> run on a Seeker, nobody outside the project has audited it, the morning page did not open by
-> itself on this phone, and I am its only user.
->
-> [Founder: two sentences of your own, who you are and how this was built.] Heads Down. Put it
-> down. It digs. Powered by ORE.
+> Heads Down. Put it down. It digs. Powered by ORE.
 
-Before recording: replace the founder's bracket with your own two sentences. Every claim above
-has its row in [MAINNET.md](../MAINNET.md) or its file in `docs/pitch/DECK.md`.
+Every claim above has its row in [MAINNET.md](../MAINNET.md) or its file in `docs/pitch/DECK.md`.
