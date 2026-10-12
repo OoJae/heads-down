@@ -16,8 +16,7 @@ four criteria at 25 each (Stickiness and product-market fit, User experience, In
 Presentation and demo), and it has **no description or tagline field**. The prose is three answers
 of up to 5,000 characters each: porting, new mobile development, and SKR integration. The platform's
 AI coach reads those answers, about 8,000 characters of the deck's text, a transcript of the video
-and the security audit. Paste only the text inside the quote blocks. Numbers in square brackets are
-filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
+and the security audit. Paste only the text inside the quote blocks. Every number is from [MAINNET.md](../MAINNET.md), through the shifts of 12 October.
 
 **Title** (up to 200 characters):
 
@@ -47,14 +46,15 @@ filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
 > WHAT IT IS. Your phone's night shift, powered by ORE. At bedtime you plug the phone in, set your
 > alarm, tap Clock in and approve one transaction in your wallet. You lay the phone face-down. While
 > it stays down, it digs ORE from your own ORE Automation account, inside a budget and a price
-> ceiling your wallet signed. Pick it up and the rig goes cold. After your alarm a page opens over
-> the lock screen; you clock out with one approval and the reveal shows the night: the rounds it was
-> dark, the digs that landed, what you paid per ORE, and the market price next to it.
+> ceiling your wallet signed. Pick it up and the rig goes cold. In the morning you clock out with
+> one approval and the reveal shows the night: the rounds it was dark, the digs that landed, what
+> you paid per ORE, and the market price next to it.
 >
 > WHY YOU COME BACK. A completed night adds to a streak that the program stores on-chain, with two
-> nights off every 30 days, so one bad night does not end it. The reveal follows your own alarm. A
-> home-screen widget and a Quick Settings tile show the rig. A Nights screen keeps every shift, and
-> a share card shows the night without a wallet address. The posture is the one Pokémon Sleep's own
+> nights off every 30 days, so one bad night does not end it. The shift's window follows your own
+> alarm. A home-screen widget and a Quick Settings tile show the rig. A Nights screen shows the
+> streak, the nights off left and the rig's totals, and a share card shows the night without a
+> wallet address. The posture is the one Pokémon Sleep's own
 > tips teach (plugged in, face-down, all night), in an app that has passed 30 million downloads.
 > Here the morning holds a real asset the user owns.
 >
@@ -81,39 +81,43 @@ filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
 > - Solana mainnet since 10 October 2026: the program HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p,
 >   the relay, the registrar, the indexer and a public dashboard.
 > - One rig, the founder's only phone, a Redmi 14C (Android 16, HyperOS 3) with Jupiter Mobile:
->   8 shifts and 25 digs to 12 October, each dig gated by a heartbeat from the phone's secure
+>   10 shifts and 35 digs to 12 October, each dig gated by a heartbeat from the phone's secure
 >   hardware. Through the night of 12 October it worked a shift of three hours, about 170
->   heartbeats signed, until a power cut. Also: pickups that ended earlier shifts, clock-outs,
->   and SOL taken back to the lamport.
+>   heartbeats signed, until a power cut.
+> - The first completed shift, on 12 October: 41 minutes face-down with a 10 SKR Focus Bond, 37
+>   dark rounds on-chain, sealed as completed with one approval, the same 10 SKR back, the streak
+>   from 0 to 1. A second approval bought ORE through Jupiter at the clock-out (0.001 SOL).
+> - Also: pickups that ended earlier shifts, and SOL taken back to the lamport.
 > - An Android 14 emulator against a local fork of mainnet: the same app end to end, signed in
 >   Solana Mobile's test wallet.
 > - 1,440 automated tests of the app, 171 of the program and 229 of the relay.
 >
 > WHAT IS OPEN, stated once. It has not run on a Seeker: the program can verify a Seeker Genesis
-> Token (tested on a fork with real tokens) and the app has no screen for it yet. On the phone no
-> shift has yet run to its alarm, and the ORE purchase at clock-out has been simulated on mainnet
-> and not signed there. The filmed build digs under a raised price ceiling. The pickup model is trained on synthetic data. Once a shift's
-> budget is spent, the chain stops recording its dark rounds, so a long night seals with the rounds
-> of its digs. A power cut, or a call that lights the screen, ends a shift. Jupiter Mobile's
-> scanner flags the app's transactions as malicious: the program is ten days old and unknown to
-> it, and each transaction can be read on Solscan. One key can upgrade the program. There has been no third-party audit. The APK is
-> debug-signed and not yet on the dApp Store. The founder is its only user so far.
+> Token (tested on a fork with real tokens) and the app has no screen for it yet. On the phone the
+> morning page did not open by itself: HyperOS stopped the app seconds after the window ended, and
+> the founder opened it by hand. HyperOS's Clock also registers reminders as alarms, so there the
+> window ends 17 minutes before the alarm rings, not two. The filmed build digs under a raised
+> price ceiling. The pickup model is trained on synthetic data. A power cut, or a call that lights
+> the screen, ends a shift. Jupiter Mobile's scanner flags the app's transactions as malicious:
+> the program is ten days old and unknown to it, and each transaction can be read on Solscan. One
+> key can upgrade the program. There has been no third-party audit. The APK is debug-signed and
+> not yet on the dApp Store. The founder is its only user so far.
 <!-- nmd:end -->
 
-**SKR integration.** The text below is true as of 12 October, 12:15 UTC, before any bonded shift
-on mainnet. If the bonded shift runs, replace its second paragraph with the one given after the
-block.
+**SKR integration.** True as of 12 October, 16:00 UTC, after the bonded shift on mainnet (shift 10
+in [MAINNET.md](../MAINNET.md)).
 
 <!-- skr-live:start -->
 > SKR is Heads Down's commitment collateral. The app's Focus Bond lets you lock SKR on tonight's
 > shift: if the shift completes, the same SKR comes back; if you pick the phone up, it is forfeit.
 >
-> WHERE IT HAS RUN. End to end in the real app on an Android emulator, against a local fork of
-> mainnet with a stand-in mint at SKR's address: 10 SKR locked at clock-in, a shift run to the end
-> of its window, sealed as completed, and the same 10 SKR back in the wallet at clock-out. On
-> mainnet the program is deployed and no SKR instruction has run yet. The lock and the release are
-> checked against the shift's own on-chain log, which exists only because the phone's secure
-> hardware signed its heartbeats.
+> IT RAN ON MAINNET. On 12 October 2026, on the founder's Redmi 14C with Jupiter Mobile and real
+> SKR: 10 SKR locked at clock-in (transaction 4QSDYqcZBhyj…CxuJzvuR), a shift that stayed
+> face-down for its whole 41-minute window and sealed as completed with 37 dark rounds, and the
+> same 10 SKR released to the wallet in the clock-out's one approval (transaction
+> BaiMVwRKXZK8…xqQn7Lvdt). Before that it had run end to end on an Android emulator against a
+> local fork of mainnet. The lock and the release are checked against the shift's own on-chain
+> log, which exists only because the phone's secure hardware signed its heartbeats.
 >
 > WHY SKR. It is the token Seeker owners already hold from using their phone, so a bond in SKR puts
 > something that came from the device behind a habit on the device. Heads Down emits no SKR, pays
@@ -134,24 +138,18 @@ block.
 > IN THE APP TODAY: the Focus Bond chooser on the home screen, the bond's line on the clock-in
 > sheet, and its release at clock-out. Not in the app yet: the Stack and Gift screens.
 >
-> NOT RUN ON MAINNET: any SKR instruction, so also no forfeit (the auction's vault has not been
-> created there), Stack, Gift a Rig or the Seeker Genesis Token check.
+> NOT RUN ON MAINNET: a forfeit (the auction's vault has not been created there), Stack, Gift a Rig
+> or the Seeker Genesis Token check.
 >
 > WHAT A BOND CAN COST THAT IS NOT YOUR DOING. A bonded shift is lost if none of its heartbeats
-> reaches the chain, so a relay outage or a call that lights the screen can cost the bond. A rule
-> that tells a flinch from an outage is the next change to the program.
+> reaches the chain, so a relay outage or a call that lights the screen can cost the bond. On
+> HyperOS an alarm set less than about 47 minutes ahead rings inside the shift, because the
+> phone's Clock registers its reminders as alarms: found before this clock-in, not yet fixed. A
+> rule that tells a flinch from an outage is the next change to the program.
 <!-- skr-live:end -->
 
-**If the bonded shift runs on mainnet,** the second paragraph of the SKR answer becomes: "IT RAN
-ON MAINNET. On 12 October 2026, on the founder's Redmi 14C: 10 SKR locked at clock-in
-(transaction …), a shift that ran to its alarm and sealed as completed, and the same 10 SKR
-released to the wallet at clock-out (transaction …)." Its "NOT RUN ON MAINNET" line then starts
-"a forfeit (the auction's vault has not been created there), Stack, …". In the answer on new
-mobile development, the sentence "On the phone no shift has yet run to its alarm …" goes, and
-"What has run" gains the shift, its reveal after the alarm and the ORE purchase.
-
-Sections 1 to 3 below are the drafts for the earlier form. Their facts stand as of 10 October;
-their fields are not on the live form.
+Sections 1 to 3 below are the drafts for the earlier form. Their facts stand as of 10 October,
+except the SKR sentences, brought up to date on 12 October; their fields are not on the live form.
 
 ---
 
@@ -194,7 +192,7 @@ their fields are not on the live form.
 > was interrupted, and after the first shift a clock-out and the SOL left in its ORE Automation taken
 > back. They ran on a debug build with the cost ceiling raised; the default build would not have dug
 > on those evenings. The rig's Miner holds its first 0.0019 ORE, unclaimed. There are no
-> users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
+> users. Of its SKR parts only the Focus Bond has run on mainnet. One key can upgrade the program at once, and there
 > has been no third-party audit.
 
 The Status paragraph is the line of section 4. Read it again on the day you submit and change
@@ -228,7 +226,7 @@ the command in section 5.
 
 <!-- skr-A:start -->
 > SKR is Heads Down's commitment collateral and gifting currency, built into its Solana program,
-> deployed on mainnet on 10 October 2026. No SKR instruction has run there yet, and the app has
+> deployed on mainnet on 10 October 2026. Its Focus Bond ran there on 12 October 2026; nothing else in SKR has, and the app has
 > only the Focus Bond chooser. In tests on a fork of mainnet: Stack: players bond SKR on keeping
 > their phones face-down for a window of ORE rounds. A seat counts a round only if its phone's
 > Keystore-key heartbeat, verified by the secp256r1 precompile, landed in that round. Finishers
@@ -243,7 +241,7 @@ the command in section 5.
 > SKR is Heads Down's commitment collateral and gifting currency. Four roles are in its Solana
 > program, deployed on mainnet on 10 October 2026 and tested on a fork of mainnet: Stack bonds,
 > the Focus Bond, Gift a Rig, and a no-oracle auction that sells forfeited SKR for ORE and sends
-> that ORE through ORE's own bury instruction. No SKR instruction has run on mainnet yet. In the
+> that ORE through ORE's own bury instruction. On mainnet only the Focus Bond has run. In the
 > app the Focus Bond chooser is built; the Stack and Gift screens are not. Heads Down emits no
 > SKR, pays nothing for holding it and keeps none.
 <!-- skr-B:end -->
@@ -404,7 +402,7 @@ not the founder, a change of the upgrade key. The record to check it against is
   was interrupted, and after the first shift a clock-out and the SOL left in its ORE Automation taken
   back. They ran on a debug build with the cost ceiling raised; the default build would not have dug
   on those evenings. The rig's Miner holds its first 0.0019 ORE, unclaimed. There are no
-  users. No SKR instruction has run on mainnet. One key can upgrade the program at once, and there
+  users. Of its SKR parts only the Focus Bond has run on mainnet. One key can upgrade the program at once, and there
   has been no third-party audit."
 
 The two earlier options are gone: one claimed live SKR flows, which do not exist, and the other

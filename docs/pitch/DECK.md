@@ -79,8 +79,8 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   - "One approval at bedtime. The phone works the shift. Your alarm ends it."
   - Seven steps, each with where it has run: clock in; one approval funds a capped shift in your
     own ORE Automation; a heartbeat every ORE round; a dig only when the price gate is open; a
-    pickup cools the rig; after the alarm a page opens over the lock screen and the clock-out
-    there shows the reveal; take your SOL back whenever you like.
+    pickup cools the rig; in the morning the reveal page shows the shift, and the clock-out there
+    replays the night from chain data; take your SOL back whenever you like.
   - "From the Redmi 14C, 10 Oct 2026, on mainnet: clock-in, clock-out, SOL back to the lamport."
 - **Visual:** The steps as a table with a chip per row; two pictures from the Redmi.
 - **Speaker notes:** The habit hangs on three things people already do every night: bedtime, the
@@ -129,7 +129,8 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   - A table of who decides and who gets the money: Forfeit (the company; the company keeps it),
     Digital Detox (the app; its developer), Heads Down (the phone's secure hardware, checked by
     Solana; nobody: it is sold for ORE that is burned).
-  - The bond's status on the day, with its transactions once it has run on mainnet.
+  - "On mainnet: 12 October 2026, on the Redmi: 10 SKR locked at clock-in, the 41-minute window
+    completed, the same 10 SKR back at clock-out."
   - "Heads Down emits no SKR, pays nothing for holding it and keeps none."
 - **Visual:** The three-row table with Heads Down's row lit.
 - **Speaker notes:** SKR is what Seeker owners already hold from using the phone. The auction's
