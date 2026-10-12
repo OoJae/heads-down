@@ -99,7 +99,8 @@ and the security audit. Paste only the text inside the quote blocks. Every numbe
 > window ends 17 minutes before the alarm rings, not two. The filmed build digs under a raised
 > price ceiling. The pickup model is trained on synthetic data. A power cut, or a call that lights
 > the screen, ends a shift. Jupiter Mobile's scanner flags the app's transactions as malicious:
-> the program is ten days old and unknown to it, and each transaction can be read on Solscan. One
+> the program has been on mainnet for two days and is unknown to it, and each transaction can be
+> read on Solscan. One
 > key can upgrade the program. There has been no third-party audit. The APK is debug-signed and
 > not yet on the dApp Store. The founder is its only user so far.
 <!-- nmd:end -->
@@ -112,10 +113,11 @@ in [MAINNET.md](../MAINNET.md)).
 > shift: if the shift completes, the same SKR comes back; if you pick the phone up, it is forfeit.
 >
 > IT RAN ON MAINNET. On 12 October 2026, on the founder's Redmi 14C with Jupiter Mobile and real
-> SKR: 10 SKR locked at clock-in (transaction 4QSDYqcZBhyj…CxuJzvuR), a shift that stayed
+> SKR: 10 SKR locked at clock-in (transaction
+> 4QSDYqcZBhyjZWBHcJXKxVyDxXeorpodzvnu1sEnzLb5g3PCYo1c2kiJo3gsF6TQYg1qogDjguCmhz1gCxuJzvuR), a shift that stayed
 > face-down for its whole 41-minute window and sealed as completed with 37 dark rounds, and the
 > same 10 SKR released to the wallet in the clock-out's one approval (transaction
-> BaiMVwRKXZK8…xqQn7Lvdt). Before that it had run end to end on an Android emulator against a
+> BaiMVwRKXZK8q9EqW6iwaFZ6uavHHMRwZGWWfdHXACSCzDu2sTAAEeSA4FaEG8omVc4NmWABcMGdMNxqQn7Lvdt). Before that it had run end to end on an Android emulator against a
 > local fork of mainnet. The lock and the release are checked against the shift's own on-chain
 > log, which exists only because the phone's secure hardware signed its heartbeats.
 >
