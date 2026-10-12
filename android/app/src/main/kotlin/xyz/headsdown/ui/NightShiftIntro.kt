@@ -49,8 +49,8 @@ object NightShiftCopy {
         ),
         Step(
             "Heads down",
-            "Lay the phone face-down on the charger. While it stays dark, it signs a heartbeat about every " +
-                "78 seconds with a key that never leaves the phone's Android Keystore.",
+            "Lay the phone face-down on the charger. While it stays dark, it signs a heartbeat about once " +
+                "a minute with a key that never leaves the phone's Android Keystore.",
         ),
         Step(
             "The rig digs, or it waits",
@@ -65,7 +65,8 @@ object NightShiftCopy {
         ),
         Step(
             "Morning haul",
-            "Your alarm opens the haul: what the rig dug, what you paid per ORE, and the market price next to it.",
+            "After your alarm a page opens: the shift is over and not sealed yet. Clock out there and the haul " +
+                "appears: what the rig dug, what you paid per ORE, and the market price next to it.",
         ),
     )
 
