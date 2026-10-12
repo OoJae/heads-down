@@ -513,8 +513,8 @@ What it showed, read from the Rig account and these transactions:
   minutes: the log's end is the moment it was sealed, not the moment the phone stopped.
 - **Jupiter's approval sheet called that clock-out malicious.** It showed "This transaction has
   been flagged as malicious" over a transaction of one instruction that pays 0.0013 SOL of rent
-  into the shift's own log. The founder confirmed, and it landed. The program is ten days old and
-  unknown to the wallet's scanner; nothing has been done about the flag yet.
+  into the shift's own log. The founder confirmed, and it landed. The program had been on mainnet
+  for two days and is unknown to the wallet's scanner; nothing has been done about the flag yet.
 - **No alarm, an eight-hour window.** With an alarm set before the clock-in, the window would have
   ended two minutes before it. Build 0.1.0 also planned its own morning page for 07:00, inside
   that window; the shift was already over by then. Build 0.1.2 never opens that page before the
