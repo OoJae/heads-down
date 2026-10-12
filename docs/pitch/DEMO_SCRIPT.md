@@ -305,9 +305,10 @@ Read by the founder. The bracketed numbers come from the run; the last block is 
 > puts the price I paid next to the market price. Over this rig's first twenty digs that was about
 > 1.13 SOL per ORE.
 >
-> All of this ran on Solana mainnet, on this one phone, since 10 October 2026: [9] shifts, [30]
-> digs, and this morning a shift of [three] hours. Every transaction is public. It has not run on a
-> Seeker, nobody outside the project has audited it, and so far I am its only user.
+> All of this ran on Solana mainnet, on this one phone, since 10 October 2026: [10] shifts and [35]
+> digs. Through last night it worked for three hours, about 170 heartbeats, until a power cut.
+> Every transaction is public. It has not run on a Seeker, nobody outside the project has audited
+> it, and so far I am its only user.
 >
 > [Founder: two sentences of your own, who you are and how this was built.] Heads Down. Put it
 > down. It digs. Powered by ORE.
