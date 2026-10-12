@@ -63,8 +63,6 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
   - "Your phone's night shift."
   - "Face-down, it digs ORE. Pick it up, the rig goes cold."
   - "A focus timer whose tree is an ORE rig. Any Android."
-  - "Built solo in Nigeria, with AI agents, on the one phone I own: a Redmi 14C. On Solana
-    mainnet since 10 October 2026."
 - **Visual:** The wordmark, with the home screen from the Redmi 14C beside it
   (`site/deck/img/redmi-home-cold.png`).
 - **Speaker notes:** The founder's own two sentences, then the product in one breath. `[TBD:
@@ -211,8 +209,7 @@ Jupiter's wallet. The phone's first shift on mainnet ran the same evening: five 
     not run on a Seeker and no screen sends the Seeker check; one user so far.
   - Next: the haul already on screen when the alarm rings; nights that arm themselves; a night
     partner; a multisig, then an immutable v1; the dApp Store.
-  - "One builder in Nigeria (WAT), building with AI agents, on one Redmi 14C."
-- **Visual:** Three cards and the founder's line with the two links.
+- **Visual:** Three cards and the two links.
 - **Speaker notes:** The open items are said once and plainly, here.
 - **Serves:** Presentation & Demo; User Experience.
 - **Sources:** `docs/THREAT_MODEL.md`, `docs/SECURITY_REVIEW.md`, `README.md`.
