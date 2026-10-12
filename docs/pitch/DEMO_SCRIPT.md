@@ -287,11 +287,10 @@ Read by the founder. The bracketed numbers come from the run; the last block is 
 > account, inside limits your wallet signed. Pick it up, and the rig goes cold.
 >
 > The habit is the product. Every completed night adds to a streak stored on-chain, with two nights
-> off a month, so one bad night does not end it. A widget shows the rig. The reveal follows your
-> alarm. The Nights screen keeps every shift, and a share card shows the night without a wallet
-> address.
+> off a month, so one bad night does not end it. A widget shows the rig. The Nights screen keeps
+> every shift, and a share card shows the night without a wallet address.
 >
-> What is new is the referee. About once a minute the phone signs a heartbeat with a key that cannot
+> What is new is the referee. Once a minute the phone signs a heartbeat with a key that cannot
 > leave its secure hardware. Solana checks that signature in the same transaction as the dig,
 > through the secp256r1 precompile. No server can say this phone was face-down, mine included. Here
 > I lift it during a shift: it signs a break, and the digging stops.
@@ -300,10 +299,9 @@ Read by the founder. The bracketed numbers come from the run; the last block is 
 > By the program's rule a lost bond is never paid to the team or to another player: it is sold for
 > ORE that is burned.
 >
-> And it is plain about ORE. Mining is one route to ORE, not income. The rig digs only while ORE's
-> own cost figure is under a ceiling, which I raised for this film so a dig could land. The reveal
-> puts the price I paid next to the market price. Over this rig's first twenty digs that was about
-> 1.13 SOL per ORE.
+> It is plain about ORE: mining is one route to ORE, not income. The rig digs only while ORE's own
+> cost figure is under a ceiling, which I raised for this film so a dig could land. Over this
+> rig's first twenty digs I paid about 1.13 SOL per ORE.
 >
 > All of this ran on Solana mainnet, on this one phone, since 10 October 2026: [10] shifts and [35]
 > digs. Through last night it worked for three hours, about 170 heartbeats, until a power cut.
