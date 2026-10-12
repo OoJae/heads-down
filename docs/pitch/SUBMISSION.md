@@ -94,8 +94,9 @@ filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
 > shift has yet run to its alarm, and the ORE purchase at clock-out has been simulated on mainnet
 > and not signed there. The filmed build digs under a raised price ceiling. The pickup model is trained on synthetic data. Once a shift's
 > budget is spent, the chain stops recording its dark rounds, so a long night seals with the rounds
-> of its digs. A power cut, or a call that lights the screen, ends a shift. One key can upgrade the
-> program. There has been no third-party audit. The APK is
+> of its digs. A power cut, or a call that lights the screen, ends a shift. Jupiter Mobile's
+> scanner flags the app's transactions as malicious: the program is ten days old and unknown to
+> it, and each transaction can be read on Solscan. One key can upgrade the program. There has been no third-party audit. The APK is
 > debug-signed and not yet on the dApp Store. The founder is its only user so far.
 <!-- nmd:end -->
 
