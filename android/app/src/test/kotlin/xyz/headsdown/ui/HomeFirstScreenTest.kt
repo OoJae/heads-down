@@ -257,6 +257,52 @@ class HomeFirstScreenTest : ScreenTest() {
         rule.onNodeWithTag(HomeTags.END_SHIFT).assertIsDisplayed()
     }
 
+    // ------------------------------------------------------------------ whether the rig would dig
+
+    @Test fun `the gate line closes tonight's limits on a cold rig - a frozen or running rig has none`() {
+        var shown by mutableStateOf(Screens.idle)
+        show { Screens.Home(shown) }
+        for (cold in listOf(Screens.idle, Screens.broken, Screens.complete)) {
+            shown = cold
+            rule.waitForIdle()
+            rule.onNodeWithTag(HomeTags.GATE).performScrollTo().assertTextEquals(Screens.gate).assertIsDisplayed()
+            val heading = rule.onNodeWithText(HomeCopy.LIMITS).getUnclippedBoundsInRoot()
+            val amounts = bounds(HomeTags.CLOCK_IN_AMOUNTS)
+            val gate = bounds(HomeTags.GATE)
+            val next = bounds(HomeTags.BOND_CARD)
+            assertTrue(
+                "${cold.name}: under the heading and the amounts, over the next section: $heading, $amounts, $gate, $next",
+                heading.bottom <= amounts.top && amounts.bottom <= gate.top && gate.bottom <= next.top,
+            )
+            assertDrawnWhole(HomeTags.GATE, Screens.gate)
+        }
+        // A frozen rig digs at no figure, and a running shift has no limits block at all.
+        for (other in listOf(Screens.frozen, Screens.armed, Screens.down, Screens.cooling)) {
+            shown = other
+            rule.waitForIdle()
+            assertEquals(other.name, 0, rule.onAllNodesWithTag(HomeTags.GATE).fetchSemanticsNodes().size)
+        }
+    }
+
+    @Test fun `the gate line at font scale 2 - the figure and the ceiling are drawn whole`() {
+        show(2f, bars = true) { Screens.Home(Screens.idle) }
+        rule.onNodeWithTag(HomeTags.GATE).performScrollTo().assertIsDisplayed()
+        assertDrawnWhole(HomeTags.GATE, Screens.gate)
+    }
+
+    @Test fun `until ORE's figure is read there is no gate line, and the limits stand as they were`() {
+        show {
+            HomeScreen(
+                snapshot = Screens.idle.snapshot, onboarding = Screens.setUp, health = Screens.idle.health,
+                onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {},
+                clockInAmounts = Screens.amounts,
+            )
+        }
+        rule.onNodeWithTag(HomeTags.CLOCK_IN_AMOUNTS).performScrollTo().assertTextEquals(Screens.amounts)
+        assertEquals(0, rule.onAllNodesWithTag(HomeTags.GATE).fetchSemanticsNodes().size)
+        assertFalse(uiMatches("ORE's cost figure").isNotEmpty())
+    }
+
     private fun largeOnAPhone(case: HomeCase) {
         show(2f, bars = true) { Screens.Home(case) }
         assertFirstScreenful(case, 2f, bars = true)

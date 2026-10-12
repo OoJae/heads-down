@@ -17,6 +17,7 @@ import xyz.headsdown.feature.shift.ShiftSpec
 import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.rig.ShiftWindow
+import java.math.BigInteger
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -139,6 +140,43 @@ class HomeFactsTest {
         // The same number the disclosure sentence opens with, and no second "Clock in" on the screen.
         assertTrue(night.disclosure().startsWith("This shift can place up to 0.02 SOL"))
         assertTrue("clock in" !in HomeCopy.clockInCap(night).lowercase())
+    }
+
+    @Test
+    fun `the gate line names ORE's figure, the ceiling fixed in the build, and what the rig would do at it`() {
+        fun gate(lamportsPerOre: Long, policy: ClockInPolicy = night) = HomeCopy.gate(BigInteger.valueOf(lamportsPerOre), policy)
+        // The program's own live vector, 0.629818854 SOL per ORE: over a Steady plan, under a Hunter one.
+        assertEquals(
+            "ORE's cost figure is 0.62 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would wait.",
+            gate(629_818_854),
+        )
+        assertEquals(
+            "ORE's cost figure is 0.62 SOL per ORE. The ceiling fixed in this build is 0.67. At that figure the rig would dig.",
+            gate(629_818_854, night.copy(planMaxEvCostPerOre = 670_000_000uL)),
+        )
+        // The figure is rounded down, never up; at the ceiling itself the gate is open, as on-chain.
+        assertEquals("ORE's cost figure is 0.52 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would dig.", gate(529_999_999))
+        assertEquals("ORE's cost figure is 0.53 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would dig.", gate(530_000_000))
+        // A hair over it the rig waits, and the figure is printed far enough to show it is over.
+        assertEquals("ORE's cost figure is 0.534 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would wait.", gate(534_900_000))
+        assertEquals("ORE's cost figure is 0.530000001 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would wait.", gate(530_000_001))
+        // The ceiling is printed exactly: two decimals at least, and every one it has.
+        assertTrue(gate(1, night.copy(planMaxEvCostPerOre = 1_000_000_000uL, capMaxCostPerOre = 1_000_000_000uL)).contains("in this build is 1.00. "))
+        assertTrue(gate(1, night.copy(planMaxEvCostPerOre = 535_000_000uL)).contains("in this build is 0.535. "))
+        // It is the tighter of the plan's and the wallet's, which is what the program compares with.
+        assertTrue(gate(1, night.copy(planMaxEvCostPerOre = 700_000_000uL)).contains("in this build is 0.67. "))
+        // A figure above a u64 (ORE's EMA at its largest, pot empty) is still a figure, and the rig waits.
+        val huge = HomeCopy.gate(BigInteger("22136092888451461938"), night)
+        assertTrue(huge, huge.startsWith("ORE's cost figure is 22136092888.45 SOL per ORE. ") && huge.endsWith("the rig would wait."))
+
+        // ECONOMICS §4: ORE's figure, never the reader's cost, a price or a saving, and no market price.
+        for (line in listOf(gate(629_818_854), gate(1), huge)) {
+            assertTrue(line, line.startsWith("ORE's cost figure is "))
+            assertTrue("banned words in: $line", HonestCopy.violations(line).isEmpty())
+            for (word in listOf("price", "saving", "save", "cheaper", "your cost", "market", "worth", "$")) {
+                assertFalse("'$word' in: $line", word in line.lowercase())
+            }
+        }
     }
 
     @Test

@@ -56,6 +56,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import xyz.headsdown.core.chain.accounts.OreGate
 import xyz.headsdown.core.design.BrandGlyph
 import xyz.headsdown.core.design.Hd
 import xyz.headsdown.core.design.HdArgb
@@ -98,6 +99,9 @@ import xyz.headsdown.ui.setup.HeroFirstScreen
 import xyz.headsdown.ui.setup.HeroPage
 import xyz.headsdown.ui.setup.PageSection
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.math.RoundingMode
 import java.text.DateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -119,6 +123,9 @@ object HomeTags {
     const val HOW_IT_WORKS = "home-how-it-works"
     const val CRANK_REFUSAL = "home-crank-refusal"
     const val CLOCK_IN_AMOUNTS = "home-clock-in-amounts"
+
+    /** Under the amounts: whether the rig would dig at ORE's cost figure as last read. */
+    const val GATE = "home-gate"
     const val SHIFT_WINDOW = "home-shift-window"
     const val UNFREEZE = "home-unfreeze"
     const val BOND_CARD = "home-focus-bond"
@@ -162,6 +169,30 @@ object HomeCopy {
     /** The most a shift can place, under the bar that opens the wallet. */
     fun clockInCap(policy: ClockInPolicy): String =
         "Up to ${ClockInPolicy.sol(policy.shiftBudgetLamports)} SOL ${if (policy.day) "this shift" else "tonight"}"
+
+    /**
+     * Whether a rig would dig at ORE's cost figure, in one line under tonight's limits.
+     *
+     * [emaEv] is the figure the program's gate compares each round ([OreGate.emaEv]: ORE's
+     * production-cost EMA with its Motherlode pool counted in, lamports per ORE), and the ceiling
+     * is the one this build's plan carries. The figure is ORE's: it is never called the reader's
+     * cost, a price or a saving, and no market price stands next to it (docs/ECONOMICS.md §4).
+     * The ceiling is printed exactly and the figure rounded down to two decimals; the verdict is
+     * the gate's own, so a figure a hair over the ceiling is printed to as many decimals as show it.
+     */
+    fun gate(emaEv: BigInteger, policy: ClockInPolicy): String {
+        val open = OreGate.gateOpen(emaEv, policy.planMaxEvCostPerOre, policy.capMaxCostPerOre)
+        val ceiling = BigDecimal(BigInteger(minOf(policy.planMaxEvCostPerOre, policy.capMaxCostPerOre).toString()), LAMPORT_DECIMALS)
+        val figure = BigDecimal(emaEv, LAMPORT_DECIMALS)
+        var decimals = 2
+        while (!open && decimals < LAMPORT_DECIMALS && figure.setScale(decimals, RoundingMode.DOWN) <= ceiling) decimals++
+        val exact = ceiling.stripTrailingZeros().let { if (it.scale() < 2) it.setScale(2) else it }
+        return "ORE's cost figure is ${figure.setScale(decimals, RoundingMode.DOWN).toPlainString()} SOL per ORE. " +
+            "The ceiling fixed in this build is ${exact.toPlainString()}. " +
+            "At that figure the rig would ${if (open) "dig" else "wait"}."
+    }
+
+    private const val LAMPORT_DECIMALS = 9
 
     /** One sentence for the hero: the slab, and what its light says about the rig. */
     fun hero(state: ShiftState): String = when (state) {
@@ -308,6 +339,8 @@ fun HomeScreen(
     crank: CrankLinkStatus = CrankLinkStatus(),
     /** What a clock-in can move, stated before the wallet opens (ClockInPolicy.disclosure). */
     clockInAmounts: String? = null,
+    /** Whether the rig would dig at ORE's cost figure as last read ([HomeCopy.gate]). Null: not read, and no line. */
+    gateLine: String? = null,
     /** Until when a shift started now would run, and that a pickup before then ends it early. */
     shiftWindow: String? = null,
     /** The Focus Bond locked at the next clock-in, SKR base units (0 = none). */
@@ -463,6 +496,8 @@ fun HomeScreen(
             if (state.beforeShift && (clockInAmounts != null || state is ShiftState.Frozen)) {
                 PageSection(HomeCopy.LIMITS) {
                     clockInAmounts?.let { Body(it, Modifier.testTag(HomeTags.CLOCK_IN_AMOUNTS)) }
+                    // A frozen rig digs at no figure: the line is for a cold one.
+                    if (gateLine != null && state !is ShiftState.Frozen) Body(gateLine, Modifier.testTag(HomeTags.GATE))
                     if (state is ShiftState.Frozen) {
                         Body(
                             "Freezing took the phone's key. Coming back takes your wallet: one approval unfreezes the rig and arms a new shift.",

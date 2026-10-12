@@ -45,6 +45,7 @@ import xyz.headsdown.ui.setup.SetupActions
 import xyz.headsdown.ui.setup.SetupContent
 import xyz.headsdown.ui.setup.SetupStep
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import java.math.BigInteger
 
 /** One state of the home screen, as the tests of the rebuilt screens compose it. */
 data class HomeCase(
@@ -73,6 +74,9 @@ object Screens {
     val policy = ClockInPolicy()
     val amounts = policy.disclosure(10_000_000uL)
     val cap = HomeCopy.clockInCap(policy)
+
+    /** ORE's figure as the program's own test vector has it (0.629818854 SOL per ORE): over this policy's ceiling. */
+    val gate = HomeCopy.gate(BigInteger.valueOf(629_818_854), policy)
 
     /**
      * The end of the shift's plan window, and the two moments a screen is read at: an hour before
@@ -156,6 +160,7 @@ object Screens {
         onOpenRigDebug = {},
         crank = case.crank,
         clockInAmounts = amounts,
+        gateLine = if (case.loading) null else gate,
         shiftWindow = if (case.loading) null else WINDOW,
         bondSkr = 10_000_000uL,
         onBondChange = {},
