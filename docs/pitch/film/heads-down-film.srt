@@ -1,0 +1,163 @@
+1
+00:00:00,200 --> 00:00:03,753
+Every night your phone lies face-down on its charger, doing nothing.
+
+2
+00:00:03,813 --> 00:00:05,560
+Heads Down gives it a night shift.
+
+3
+00:00:05,920 --> 00:00:09,217
+Heads Down is your phone's night shift, powered by ORE.
+[On screen: the Redmi 14C's own screen, recorded on Solana mainnet on 12 October 2026. The app's home screen reads Rig cold.]
+
+4
+00:00:09,277 --> 00:00:14,589
+Plug in, set your alarm, clock in with one wallet approval, and lay the phone face-down.
+[On screen: Clock in is tapped. Jupiter Mobile's approval sheet shows minus 10 SKR. The app then reads Armed.]
+
+5
+00:00:14,649 --> 00:00:18,190
+While it stays down, it digs ORE from your own ORE account,
+
+6
+00:00:18,250 --> 00:00:20,205
+inside limits your wallet signed.
+
+7
+00:00:20,265 --> 00:00:22,280
+Pick it up, and the rig goes cold.
+[On screen: the phone is picked up. The app reads Rig cold. Shift ended: the phone was unlocked.]
+
+8
+00:00:22,640 --> 00:00:24,351
+What is new is the referee.
+
+9
+00:00:24,411 --> 00:00:30,386
+Once a minute, the phone signs a heartbeat with a key that cannot leave its secure hardware.
+
+10
+00:00:30,446 --> 00:00:34,583
+Solana checks that signature in the same transaction as the dig,
+
+11
+00:00:34,643 --> 00:00:36,748
+through the secp256r1 precompile.
+
+12
+00:00:36,808 --> 00:00:39,569
+No server can say this phone was face-down.
+
+13
+00:00:39,629 --> 00:00:42,979
+Not even ours. Lift the phone, and it signs a break.
+[On screen: shift 9, lifted on purpose. The break the phone signed is transaction 33aAQgcb…LogeB.]
+
+14
+00:00:43,039 --> 00:00:44,160
+The digging stops.
+
+15
+00:00:44,520 --> 00:00:50,443
+Here is a real shift. Solana mainnet, the twelfth of October 2026, on a Redmi 14C.
+[On screen: shift 10. The app's reveal page reads Not sealed yet: clocked in 16:03, last heartbeat 16:45, 38 rounds signed dark.]
+
+16
+00:00:50,503 --> 00:00:52,486
+Forty-one minutes face-down.
+
+17
+00:00:52,546 --> 00:00:55,113
+Thirty-seven rounds dark. Five digs.
+
+18
+00:00:55,173 --> 00:00:58,323
+One approval seals it on-chain as completed.
+[On screen: Clock out is tapped. The sheet reads Shift: Completed, and Your Focus Bond comes back to your wallet: 10 SKR. Jupiter Mobile's sheet shows plus 10 SKR. The app reads Confirmed on-chain. Transaction BaiMVwRK…7Lvdt.]
+
+19
+00:00:58,383 --> 00:01:02,920
+Then the haul: the price paid per ORE, beside the market price.
+[On screen: the morning haul. The board replays 37 rounds. Rounds dark 37, digs 5, 0.894 SOL per ORE, market 1.057, streak 0 to 1.]
+
+20
+00:01:03,280 --> 00:01:07,029
+SKR is the Focus Bond. Ten SKR were locked on that shift.
+[On screen: Jupiter Mobile's sheet at the clock-in, minus 10 SKR, transaction 4QSDYqcZ…JzvuR. Then the app: Focus Bond back in your wallet: 10 SKR.]
+
+21
+00:01:07,089 --> 00:01:09,702
+It completed, so the same ten came back.
+
+22
+00:01:09,762 --> 00:01:13,711
+A lost bond is never paid to the team, or to another player.
+
+23
+00:01:13,771 --> 00:01:17,520
+By the program's rule, it is sold for ORE that is burned.
+
+24
+00:01:17,880 --> 00:01:22,098
+And you come back. Every completed night adds to a streak stored on-chain,
+
+25
+00:01:22,158 --> 00:01:25,682
+with two nights off a month, so one bad night does not end it.
+
+26
+00:01:25,742 --> 00:01:27,763
+The Nights screen keeps every shift,
+[On screen: the Nights screen. Streak 1 night, nights off left 2, and each sealed shift with a link to its transaction.]
+
+27
+00:01:27,823 --> 00:01:31,000
+and a share card shows the night with no wallet address.
+
+28
+00:01:31,360 --> 00:01:33,555
+Heads Down is plain about money.
+
+29
+00:01:33,615 --> 00:01:36,304
+Mining is one route to ORE, not income.
+
+30
+00:01:36,364 --> 00:01:41,308
+The rig digs only while ORE's own cost figure is under a price ceiling,
+
+31
+00:01:41,368 --> 00:01:44,198
+raised for this film so a dig could land.
+
+32
+00:01:44,258 --> 00:01:49,413
+That shift's digs cost 0.894 SOL per ORE, against a market price of 1.057.
+
+33
+00:01:49,473 --> 00:01:52,514
+The rig's first twenty digs cost about 1.13.
+
+34
+00:01:52,574 --> 00:01:56,320
+And the clock-out can buy ORE through Jupiter instead.
+[On screen: Buy ORE, 0.001 SOL. Jupiter Mobile's approval sheet, then Confirmed on-chain: 0.001 SOL swapped for ORE.]
+
+35
+00:01:56,680 --> 00:02:00,368
+All of it has run on Solana mainnet since the tenth of October:
+
+36
+00:02:00,428 --> 00:02:03,640
+ten shifts, thirty-five digs, every transaction public.
+[On screen: a ledger of the day's transactions on Solana mainnet with their signatures, from the clock-in 4QSDYqcZ…JzvuR to the ORE purchase JJsQ4SXr…2Aom6.]
+
+37
+00:02:04,000 --> 00:02:07,639
+Heads Down. Put it down. It digs.
+
+38
+00:02:07,699 --> 00:02:09,320
+Powered by ORE.
+

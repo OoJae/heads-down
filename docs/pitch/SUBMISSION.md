@@ -67,10 +67,13 @@ and the security audit. Paste only the text inside the quote blocks. Every numbe
 >
 > MOBILE-NATIVE PARTS, all written here: Mobile Wallet Adapter 2.2 (clock-in, clock-out and take-back
 > are single approvals); an Android Keystore key with hardware attestation checked by our registrar;
-> a foreground shift service that reads the accelerometer and the charger (the test phone has no
-> gyroscope); a Quick Settings tile, home-screen widgets, an Android 16 Live Update and haptics; an
+> a foreground shift service that reads the accelerometer and the charger; a Quick Settings tile, home-screen widgets, an Android 16 Live Update and haptics; an
 > exact alarm aligned to the user's own alarm for the reveal; and an on-device model that tells a
 > knock on the table from a pickup.
+>
+> FIRST RUN. A short intro explains the night in plain words, and no wallet is asked for until the
+> first clock-in. Before every signature the home screen states what it will move: the shift's
+> budget, the weekly cap, ORE's cost figure against the ceiling, and the bond.
 >
 > PLAIN ABOUT MONEY. Mining is one route to ORE, not income. The rig digs only while ORE's own cost
 > figure is under the ceiling, the reveal shows the price paid beside the market price, and the
@@ -95,8 +98,7 @@ and the security audit. Paste only the text inside the quote blocks. Every numbe
 > WHAT IS OPEN, stated once. It has not run on a Seeker: the program can verify a Seeker Genesis
 > Token (tested on a fork with real tokens) and the app has no screen for it yet. On the phone the
 > morning page did not open by itself: HyperOS stopped the app seconds after the window ended, and
-> the founder opened it by hand. HyperOS's Clock also registers reminders as alarms, so there the
-> window ends 17 minutes before the alarm rings, not two. The filmed build digs under a raised
+> the founder opened it by hand. The filmed build digs under a raised
 > price ceiling. The pickup model is trained on synthetic data. A power cut, or a call that lights
 > the screen, ends a shift. Jupiter Mobile's scanner flags the app's transactions as malicious:
 > the program has been on mainnet for two days and is unknown to it, and each transaction can be
