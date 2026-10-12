@@ -404,6 +404,28 @@ clock-out opened sooner still says "stays open". In an earlier, hand-finished ru
 crank's own `end_shift` sealed the shift before the clock-out was opened; the clock-out then had
 only the bond to release, and did.
 
+**Build 0.1.2, 12 October 2026.** Both runs again, on the code of 0.1.2 (the reveal's earliest
+time, the completed-night wording, the home screen's cost line, the Nights screen), each from a
+fresh ledger. Their last lines:
+
+```text
+[emulator-smoke + 368s] TOOK IT BACK with the wallet: +23639400 lamports, exactly what the screen said; the rig is closed
+[emulator-smoke + 411s] CLOCKED IN AGAIN over the tombstone: the same rig address, now on shift 2
+EMULATOR SMOKE PASSED (with a wallet app): setup, clock-in, heartbeat, on-chain dig, pickup, BREAK, clock-out, SOL back, rig closed, clock-in again. No crash.
+
+[emulator-smoke + 861s] WINDOW OVER, phone lifted: no BREAK was sent (the rig is still Down on-chain)
+[emulator-smoke + 943s] REVEAL, not sealed: 3 rounds signed dark
+[emulator-smoke + 982s] CLOCKED OUT from the reveal: Confirmed on-chain. Shift sealed as completed. Focus Bond back in your wallet: 10 SKR. The wallet holds 100 SKR again.
+[emulator-smoke +1108s] REVEAL, sealed: the haul of shift 2 is on the page (Streak 0 → 1)
+EMULATOR SMOKE PASSED (with a wallet app and a Focus Bond): shift 1 sealed early, 10 SKR locked on shift 2, a dig, the window run out, no BREAK, the reveal before and after the clock-out, the shift sealed completed, 10 SKR back. No crash.
+```
+
+The first try of the bonded run failed, and was right to: the new cost line on the home screen
+had pushed the sentence "It also locks your 10 SKR Focus Bond." off the screen when a bond was
+chosen. The cost line now stands above the amounts. The mainnet build of 0.1.2 was also opened on
+the emulator with no wallet: its line read "ORE's cost figure is 0.85 SOL per ORE", the figure the
+crank's `/healthz` gave at that moment (0.8507).
+
 The Quick Settings tile was tapped on the same emulator by hand (`adb shell cmd statusbar
 click-tile xyz.headsdown.localdev/xyz.headsdown.surface.tile.HeadsDownTileService`): from a
 running shift it ends the shift, from a cold rig it opens the wallet and the clock-in arms the
