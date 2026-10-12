@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import xyz.headsdown.feature.reveal.RevealScheduler
+import xyz.headsdown.feature.reveal.RevealTimePlanner
 import xyz.headsdown.feature.shift.ShiftMode
 import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.feature.shift.ShiftStatusRepository
@@ -44,8 +45,11 @@ class HeadsDownApplication : Application() {
                 val state = snapshot.state
                 if (state is ShiftState.Armed && previous !is ShiftState.Armed) {
                     haptics.prepare() // basic motors: load the audible thunk before the rig goes hot
-                    // A Night Shift that just armed gets its morning reveal, aligned to the user's alarm.
-                    if (state.spec.mode == ShiftMode.NIGHT) revealScheduler.scheduleNext()
+                    // A Night Shift that just armed gets its morning reveal, aligned to the user's alarm
+                    // and never inside the shift's own window: the reveal wakes the screen, a BREAK there.
+                    if (state.spec.mode == ShiftMode.NIGHT) {
+                        revealScheduler.scheduleNext(notBeforeWallMillis = RevealTimePlanner.notBefore(state.spec.windowEndUnix))
+                    }
                 }
                 ShiftSurfaces.cueFor(previous, state)?.let { haptics.play(it, HapticMoment.SHIFT) }
                 previous = state
