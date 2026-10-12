@@ -176,5 +176,6 @@ the local stack and [docs/DEPLOY.md](docs/DEPLOY.md) the mainnet runbook.
 
 ## License
 
-Apache-2.0, as the Cargo manifests of the program, the crank, the registrar and the two crates
-declare. A LICENSE file is still to be added.
+Apache-2.0: see [LICENSE](LICENSE). The Cargo manifests of the program, the crank, the registrar
+and the two crates declare the same. Fonts and test fixtures from other projects keep their own
+licences, next to the files. How to report a security problem: [SECURITY.md](SECURITY.md).
