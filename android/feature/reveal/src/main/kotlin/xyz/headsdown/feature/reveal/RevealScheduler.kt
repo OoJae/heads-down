@@ -24,9 +24,17 @@ class RevealScheduler(private val context: Context) {
     /** The user's next alarm clock (from any clock app), if any. */
     fun nextSystemAlarmWallMillis(): Long? = alarmManager?.nextAlarmClock?.triggerTime
 
-    fun scheduleNext(nowWallMillis: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): ScheduledReveal? {
+    /**
+     * [notBeforeWallMillis] is the earliest the reveal may fire: [RevealTimePlanner.notBefore] of
+     * the armed shift's window, so that the reveal's own screen-on cannot break the shift.
+     */
+    fun scheduleNext(
+        nowWallMillis: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
+        notBeforeWallMillis: Long? = null,
+    ): ScheduledReveal? {
         val am = alarmManager ?: return null
-        val plan = RevealTimePlanner.plan(nowWallMillis, nextSystemAlarmWallMillis(), zone)
+        val plan = RevealTimePlanner.plan(nowWallMillis, nextSystemAlarmWallMillis(), zone, notBeforeWallMillis)
         val pi = alarmIntent()
         val exact = if (am.canScheduleExactAlarms()) {
             try {

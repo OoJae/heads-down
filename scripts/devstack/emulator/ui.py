@@ -91,7 +91,9 @@ def main():
             print(hit[-1][0])
             return
         nudged = False
-        for _ in range(7):
+        # Eight looks and seven swipes, plus the one look the nudge takes: the home page's foot is
+        # within seven swipes (SmokeInvariantsTest pins that).
+        for _ in range(9):
             hit = matches(text, exact)
             if hit:
                 if cmd == "tap":

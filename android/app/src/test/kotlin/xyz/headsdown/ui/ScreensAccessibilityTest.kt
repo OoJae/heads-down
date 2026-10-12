@@ -141,6 +141,12 @@ class ScreensAccessibilityTest : ScreenTest() {
                 assertTrue("$what: the clock is one node with its label: ${clock.texts()}", clock.texts().size == 2 || case.loading)
             }
             assertEquals("$what: the haul is one node", 1, nodes.count { it.tag == HomeTags.HAUL && it.texts().isNotEmpty() })
+            // Under the haul, the way to every finished night: a button of its own inside the plate, there because a rig is bound.
+            val nights = nodes.single { it.tag == xyz.headsdown.nights.NightsTags.HOME_LINK }
+            assertEquals(listOf(xyz.headsdown.nights.NightsCopy.LINK), nights.texts())
+            assertEquals(Role.Button, nights.config.getOrNull(SemanticsProperties.Role))
+            assertTrue("$what: the link is in the haul's plate, and not in its words", nights.within(HomeTags.HAUL))
+            assertFalse(nodes.single { it.tag == HomeTags.HAUL }.texts().contains(xyz.headsdown.nights.NightsCopy.LINK))
 
             // The Focus Bond: one of a group of four radio buttons is selected, by state and not by a description.
             val choices = nodes.filter { it.tag?.startsWith(HomeTags.BOND_CHOICE) == true }

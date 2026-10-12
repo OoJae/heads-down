@@ -1,5 +1,6 @@
 package xyz.headsdown.ui
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -55,6 +56,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import xyz.headsdown.core.chain.accounts.OreGate
 import xyz.headsdown.core.design.BrandGlyph
 import xyz.headsdown.core.design.Hd
 import xyz.headsdown.core.design.HdArgb
@@ -97,6 +99,9 @@ import xyz.headsdown.ui.setup.HeroFirstScreen
 import xyz.headsdown.ui.setup.HeroPage
 import xyz.headsdown.ui.setup.PageSection
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.math.RoundingMode
 import java.text.DateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -118,6 +123,9 @@ object HomeTags {
     const val HOW_IT_WORKS = "home-how-it-works"
     const val CRANK_REFUSAL = "home-crank-refusal"
     const val CLOCK_IN_AMOUNTS = "home-clock-in-amounts"
+
+    /** Under the amounts: whether the rig would dig at ORE's cost figure as last read. */
+    const val GATE = "home-gate"
     const val SHIFT_WINDOW = "home-shift-window"
     const val UNFREEZE = "home-unfreeze"
     const val BOND_CARD = "home-focus-bond"
@@ -152,9 +160,39 @@ object HomeCopy {
     const val FREEZE_YES = "Freeze the rig"
     const val FREEZE_KEEP = "Keep the shift"
 
+    /** Under the rig's word once a shift has run its whole window: what is left to do, not why the rig stopped. */
+    const val SHIFT_COMPLETE = "Shift complete: it ran to the end of its window."
+
+    /** The hero's sentence for that shift. */
+    const val HERO_COMPLETE = "A dark slab lying face-down, with no light under it: the shift is complete."
+
     /** The most a shift can place, under the bar that opens the wallet. */
     fun clockInCap(policy: ClockInPolicy): String =
         "Up to ${ClockInPolicy.sol(policy.shiftBudgetLamports)} SOL ${if (policy.day) "this shift" else "tonight"}"
+
+    /**
+     * Whether a rig would dig at ORE's cost figure, in one line under tonight's limits.
+     *
+     * [emaEv] is the figure the program's gate compares each round ([OreGate.emaEv]: ORE's
+     * production-cost EMA with its Motherlode pool counted in, lamports per ORE), and the ceiling
+     * is the one this build's plan carries. The figure is ORE's: it is never called the reader's
+     * cost, a price or a saving, and no market price stands next to it (docs/ECONOMICS.md §4).
+     * The ceiling is printed exactly and the figure rounded down to two decimals; the verdict is
+     * the gate's own, so a figure a hair over the ceiling is printed to as many decimals as show it.
+     */
+    fun gate(emaEv: BigInteger, policy: ClockInPolicy): String {
+        val open = OreGate.gateOpen(emaEv, policy.planMaxEvCostPerOre, policy.capMaxCostPerOre)
+        val ceiling = BigDecimal(BigInteger(minOf(policy.planMaxEvCostPerOre, policy.capMaxCostPerOre).toString()), LAMPORT_DECIMALS)
+        val figure = BigDecimal(emaEv, LAMPORT_DECIMALS)
+        var decimals = 2
+        while (!open && decimals < LAMPORT_DECIMALS && figure.setScale(decimals, RoundingMode.DOWN) <= ceiling) decimals++
+        val exact = ceiling.stripTrailingZeros().let { if (it.scale() < 2) it.setScale(2) else it }
+        return "ORE's cost figure is ${figure.setScale(decimals, RoundingMode.DOWN).toPlainString()} SOL per ORE. " +
+            "The ceiling fixed in this build is ${exact.toPlainString()}. " +
+            "At that figure the rig would ${if (open) "dig" else "wait"}."
+    }
+
+    private const val LAMPORT_DECIMALS = 9
 
     /** One sentence for the hero: the slab, and what its light says about the rig. */
     fun hero(state: ShiftState): String = when (state) {
@@ -167,7 +205,7 @@ object HomeCopy {
     }
 
     val all: List<String>
-        get() = listOf(RUNS_UNTIL, LIMITS, SOL_AND_RIG, RIG_KEY, HOW_IT_WORKS, LAST_HAUL, FREEZE_ASK, FREEZE_YES, FREEZE_KEEP)
+        get() = listOf(RUNS_UNTIL, LIMITS, SOL_AND_RIG, RIG_KEY, HOW_IT_WORKS, LAST_HAUL, FREEZE_ASK, FREEZE_YES, FREEZE_KEEP, SHIFT_COMPLETE, HERO_COMPLETE)
 }
 
 /** How the rig word is inked. A role, not a colour: the palette under it may change. */
@@ -181,6 +219,8 @@ internal data class RigLook(
     val slab: SlabState,
     /** The line says why the shift ended: it is drawn in ember and read out when it appears. */
     val problem: Boolean = false,
+    /** The line says the shift ran its whole window: read out when it appears, and never in ember. */
+    val complete: Boolean = false,
 )
 
 internal fun lookOf(state: ShiftState): RigLook = when (state) {
@@ -197,6 +237,31 @@ private fun breakLine(reason: BreakReason) = when (reason) {
     BreakReason.SCREEN_ON -> "Shift ended: the screen stayed on."
     BreakReason.UNPLUGGED -> "Shift ended: the charger was unplugged."
     BreakReason.UNLOCKED -> "Shift ended: the phone was unlocked."
+}
+
+/** The rig after a shift that ran its whole window: cold and calm, with the one thing left to do. */
+internal val CompleteLook = RigLook("Rig cold", RigTone.Muted, HomeCopy.SHIFT_COMPLETE, 0, SlabState.Cold, complete = true)
+
+/**
+ * The shift ran to the end of its plan window. After it the phone sends no BREAK
+ * ([ShiftSpec.breakStillUseful]), so what stops the local rig then (the alarm lighting the screen,
+ * the phone picked up) ends nothing early: this is the same rule, read for the screen.
+ *
+ * For a broken shift the moment that counts is the break, not the reading: a pickup at 03:00 is
+ * still a pickup when the screen is read at 08:00. [ShiftState.Broken.at] is on the elapsed clock,
+ * so both clocks are asked. A cooling rig is judged now: whatever its grace ends in, it ends after
+ * this. A shift with no round signed dark is never called complete, and nor is one whose window is
+ * not known.
+ */
+internal fun ranItsWindow(snapshot: ShiftSnapshot, nowWallMillis: Long, nowElapsedMillis: Long): Boolean {
+    val state = snapshot.state
+    val spec = state.spec ?: return false
+    val atWallMillis = when (state) {
+        is ShiftState.Cooling -> nowWallMillis
+        is ShiftState.Broken -> nowWallMillis - (nowElapsedMillis - state.at)
+        else -> return false
+    }
+    return snapshot.darkRounds > 0 && !spec.breakStillUseful(Math.floorDiv(atWallMillis, 1000L))
 }
 
 private val UNTIL = Regex("""until (\d{2}:\d{2})""")
@@ -274,6 +339,8 @@ fun HomeScreen(
     crank: CrankLinkStatus = CrankLinkStatus(),
     /** What a clock-in can move, stated before the wallet opens (ClockInPolicy.disclosure). */
     clockInAmounts: String? = null,
+    /** Whether the rig would dig at ORE's cost figure as last read ([HomeCopy.gate]). Null: not read, and no line. */
+    gateLine: String? = null,
     /** Until when a shift started now would run, and that a pickup before then ends it early. */
     shiftWindow: String? = null,
     /** The Focus Bond locked at the next clock-in, SKR base units (0 = none). */
@@ -290,9 +357,15 @@ fun HomeScreen(
     loading: Boolean = false,
     /** Ask the hero to play its entrance (the app has just opened on this screen). */
     heroEnter: Boolean = false,
+    /** The wall clock a plan window ends on, in milliseconds. A test fixes it. */
+    nowWallMillis: () -> Long = System::currentTimeMillis,
+    /** The clock a shift's own times are on (`SystemClock.elapsedRealtime`), in milliseconds. */
+    nowElapsedMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     val state = snapshot.state
-    val look = lookOf(state)
+    // A night that ran its whole window is not a failure, whatever stopped the rig after it.
+    val complete = ranItsWindow(snapshot, nowWallMillis(), nowElapsedMillis())
+    val look = if (complete) CompleteLook else lookOf(state)
     val scroll = rememberScrollState()
     val haptics = LocalHdHaptics.current
     val running = state is ShiftState.Armed || state is ShiftState.Down || state is ShiftState.Cooling
@@ -368,7 +441,7 @@ fun HomeScreen(
                         onKnock = haptics::knock,
                     ),
                     modifier = Modifier.testTag(HomeTags.HERO).semantics { role = Role.Image },
-                    contentDescription = HomeCopy.hero(state),
+                    contentDescription = if (complete) HomeCopy.HERO_COMPLETE else HomeCopy.hero(state),
                 )
             },
             // Until the phone's settings are read nothing says setup is unfinished: it is not known yet.
@@ -422,6 +495,9 @@ fun HomeScreen(
         Column(Modifier.fillMaxWidth().padding(top = SECTION_GAP, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
             if (state.beforeShift && (clockInAmounts != null || state is ShiftState.Frozen)) {
                 PageSection(HomeCopy.LIMITS) {
+                    // A frozen rig digs at no figure: the line is for a cold one. It stands first: the
+                    // amounts end on the Focus Bond's sentence, which belongs next to the chooser under it.
+                    if (gateLine != null && state !is ShiftState.Frozen) Body(gateLine, Modifier.testTag(HomeTags.GATE))
                     clockInAmounts?.let { Body(it, Modifier.testTag(HomeTags.CLOCK_IN_AMOUNTS)) }
                     if (state is ShiftState.Frozen) {
                         Body(
@@ -436,7 +512,7 @@ fun HomeScreen(
             if (onBondChange != null && state.beforeShift) FocusBond(bondSkr, onBondChange)
 
             PageSection("HAUL") {
-                Haul(lastHaul, streak)
+                Haul(lastHaul, streak, nights = onboarding.rigRegistered)
                 Column {
                     LinkRow("Open the morning reveal", onClick = onPreviewReveal, modifier = Modifier.testTag(HomeTags.PREVIEW_REVEAL))
                     if (onClockOut != null) {
@@ -596,7 +672,7 @@ private fun RigState(look: RigLook, onClockOut: (() -> Unit)? = null) {
         )
         Body(
             look.line,
-            modifier = if (look.problem) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier,
+            modifier = if (look.problem || look.complete) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier,
             color = if (look.problem) colors.ember else colors.chalk,
         )
         if (onClockOut != null) TextAction("Clock out", onClick = onClockOut, modifier = Modifier.testTag(HomeTags.CLOCK_OUT_NOW))
@@ -770,9 +846,12 @@ private fun FocusBond(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
     }
 }
 
-/** The last haul in ORE gold on a raised plate, or the line that says there is none yet. */
+/**
+ * The last haul in ORE gold on a raised plate, or the line that says there is none yet. With
+ * [nights] (a rig is bound to this phone), the way to every finished night is under it.
+ */
 @Composable
-private fun Haul(lastHaul: String?, streak: String?) {
+private fun Haul(lastHaul: String?, streak: String?, nights: Boolean = false) {
     Plate(
         Modifier.fillMaxWidth().testTag(HomeTags.HAUL).semantics(mergeDescendants = true) {},
         tone = PlateTone.Slab,
@@ -787,6 +866,8 @@ private fun Haul(lastHaul: String?, streak: String?) {
             Body("Your first haul appears after your first mined shift.", color = Hd.colors.ash)
         }
         if (streak != null) Label(streak, Modifier.padding(top = 4.dp))
+        // A button of its own to a screen reader: the plate's one node stays the haul and the streak.
+        if (nights) xyz.headsdown.nights.AllNightsLink()
     }
 }
 

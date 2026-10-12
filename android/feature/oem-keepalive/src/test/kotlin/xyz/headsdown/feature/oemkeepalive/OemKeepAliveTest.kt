@@ -60,8 +60,25 @@ class KeepAliveIntentsTest {
     }
 
     @Test
+    fun `xiaomi permission editor is asked for our package and always ends with app details`() {
+        val c = KeepAliveIntents.candidates(KeepAliveStep.MORNING_PAGE_PERMISSIONS, xiaomi, pkg, "Heads Down")
+        assertEquals(3, c.size)
+        // Both tries carry the action and name the app; the first also names the activity.
+        for (spec in c.dropLast(1)) {
+            assertEquals("miui.intent.action.APP_PERM_EDITOR", spec.action)
+            assertEquals(mapOf("extra_pkgname" to pkg), spec.extras)
+        }
+        assertEquals("com.miui.securitycenter", c[0].packageName)
+        assertEquals("com.miui.permcenter.permissions.PermissionsEditorActivity", c[0].className)
+        assertEquals(null, c[1].packageName)
+        assertEquals(null, c[1].className)
+        assertTrue(c.last().isAppDetailsFallback)
+        assertEquals("package:$pkg", c.last().dataUri)
+    }
+
+    @Test
     fun `non-xiaomi devices only get the safe fallback for xiaomi-only steps`() {
-        for (step in listOf(KeepAliveStep.AUTOSTART, KeepAliveStep.BATTERY_NO_RESTRICTIONS)) {
+        for (step in listOf(KeepAliveStep.AUTOSTART, KeepAliveStep.BATTERY_NO_RESTRICTIONS, KeepAliveStep.MORNING_PAGE_PERMISSIONS)) {
             val c = KeepAliveIntents.candidates(step, pixel, pkg, "Heads Down")
             assertEquals(1, c.size)
             assertTrue(c.single().isAppDetailsFallback)
@@ -78,15 +95,66 @@ class KeepAliveIntentsTest {
     }
 
     @Test
-    fun `guide covers autostart, battery and recents lock on xiaomi only`() {
+    fun `guide covers autostart, battery, recents lock and the morning page's permissions on xiaomi only`() {
         val x = KeepAliveGuide.steps(xiaomi).mapNotNull { it.action }
         assertEquals(
-            listOf(KeepAliveStep.AUTOSTART, KeepAliveStep.BATTERY_NO_RESTRICTIONS, KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS),
+            listOf(
+                KeepAliveStep.AUTOSTART,
+                KeepAliveStep.BATTERY_NO_RESTRICTIONS,
+                KeepAliveStep.MORNING_PAGE_PERMISSIONS,
+                KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS,
+            ),
             x,
         )
         assertTrue(KeepAliveGuide.steps(xiaomi).any { it.title.contains("Recents") })
         assertEquals(listOf(KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS), KeepAliveGuide.steps(pixel).mapNotNull { it.action })
         assertTrue(KeepAliveGuide.BATTERY_JUSTIFICATION.contains("nothing is lost"))
+        // ORE rounds are about a minute now: the step gives no count of seconds.
+        assertTrue(KeepAliveGuide.BATTERY_JUSTIFICATION.contains("one heartbeat per ORE round (about once a minute)"))
+        assertFalse(KeepAliveGuide.BATTERY_JUSTIFICATION.contains("78"))
+    }
+
+    @Test
+    fun `a xiaomi owner is told the two permissions the morning page needs, by their names and where they are`() {
+        val step = KeepAliveGuide.steps(xiaomi).single { it.action == KeepAliveStep.MORNING_PAGE_PERMISSIONS }
+        assertEquals("Let the morning page open", step.title)
+        assertEquals(
+            "Settings > Apps > Heads Down > Other permissions: turn on \"Show on Lock screen\" and " +
+                "\"Display pop-up windows while running in the background\". Without both, HyperOS is likely to " +
+                "block the full-screen page that opens after your alarm.",
+            step.detail,
+        )
+        // The skin is named as the Autostart step names it.
+        val miui = KeepAliveGuide.steps(OemProfile(OemFamily.XIAOMI, XiaomiSkin.MIUI)).single { it.action == KeepAliveStep.MORNING_PAGE_PERMISSIONS }
+        assertTrue("MIUI is likely to block" in miui.detail)
+        // No other maker has these switches: nothing is said of them there.
+        for (other in listOf(pixel, OemProfile(OemFamily.SAMSUNG))) {
+            assertFalse(KeepAliveGuide.steps(other).any { "Other permissions" in it.detail || "morning page" in it.title })
+        }
+    }
+
+    @Test
+    fun `every maker's guide ends with how to keep the night quiet`() {
+        assertEquals(
+            "A call or an alert that lights the screen for more than ten seconds ends the shift: switch on " +
+                "Do Not Disturb, or airplane mode with Wi-Fi on, before you lay the phone down.",
+            KeepAliveGuide.QUIET_NIGHT,
+        )
+        for (profile in listOf(xiaomi, pixel) + OemFamily.entries.map { OemProfile(it) }) {
+            val last = KeepAliveGuide.steps(profile).last()
+            assertEquals(GuideStep("Keep the night quiet", KeepAliveGuide.QUIET_NIGHT, null), last)
+            assertEquals(1, KeepAliveGuide.steps(profile).count { it.detail == KeepAliveGuide.QUIET_NIGHT })
+        }
+    }
+
+    @Test
+    fun `the guide never says continue, and never that any of it was tried on a phone`() {
+        val profiles = listOf(xiaomi, pixel, OemProfile(OemFamily.XIAOMI, XiaomiSkin.MIUI), OemProfile(OemFamily.XIAOMI, XiaomiSkin.UNKNOWN))
+        for (text in profiles.flatMap { KeepAliveGuide.steps(it) }.flatMap { listOf(it.title, it.detail) }) {
+            for (word in listOf("continue", "tested", "verified", "confirmed", "we checked")) {
+                assertFalse("\"$word\" in: $text", word in text.lowercase())
+            }
+        }
     }
 }
 

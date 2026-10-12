@@ -167,6 +167,81 @@ class IndexerHaulClientTest {
         assertTrue(parsed.simulated)
     }
 
+    /** `GET /v1/rigs/{rig}/shifts` as the indexer serves it: an envelope, counters as strings, newest first. */
+    private fun shiftList(
+        rigAddress: String = rig.toBase58(),
+        shifts: String = """[
+            {"shiftId":"7","endedAt":1791750944,"darkRounds":"5","roundsDug":"5","reason":1,"mode":0,"signature":"$SIG"},
+            {"shiftId":"6","endedAt":1791664140,"darkRounds":"412","roundsDug":"0","reason":0,"mode":2,"signature":"$SIG"},
+            {"shiftId":5,"endedAt":"1791577740","darkRounds":3,"roundsDug":1,"reason":8,"mode":1,"signature":"not a signature"}
+        ]""",
+    ) = """{"dataset":{"cluster":"mainnet","program":"x"},"asOf":1791767329,"generatedAt":"2026-10-11T08:28:49Z",
+        "data":{"rig":"$rigAddress","shifts":$shifts}}"""
+
+    @Test
+    fun `every finished shift of a rig is listed, newest first, with its counters and its sealing transaction`() = runBlocking {
+        respond(200, shiftList())
+        val shifts = client.shifts(rig)
+        assertEquals("/v1/rigs/${rig.toBase58()}/shifts", tls.server.takeRequest().url.encodedPath)
+        assertEquals(
+            listOf(
+                IndexerShift(7uL, 1_791_750_944L, darkRounds = 5uL, roundsDug = 5uL, reason = 1, mode = HaulMode.NIGHT, signature = SIG),
+                IndexerShift(6uL, 1_791_664_140L, darkRounds = 412uL, roundsDug = 0uL, reason = 0, mode = HaulMode.FOCUS_ONLY, signature = SIG),
+                // Numbers arrive either way; what is not a signature never reaches a link.
+                IndexerShift(5uL, 1_791_577_740L, darkRounds = 3uL, roundsDug = 1uL, reason = 8, mode = HaulMode.DAY, signature = null),
+            ),
+            shifts,
+        )
+        // A rig with no finished shift, and a rig the indexer has never seen.
+        respond(200, shiftList(shifts = "[]"))
+        assertEquals(emptyList<IndexerShift>(), client.shifts(rig))
+        respond(404, """{"error":"not_found"}""")
+        assertEquals(emptyList<IndexerShift>(), client.shifts(rig))
+        respond(503, "busy")
+        assertEquals(503, runCatching { client.shifts(rig) }.exceptionOrNull().let { (it as IndexerHttpException).status })
+    }
+
+    @Test
+    fun `a list for another rig, or with an impossible shift in it, is refused`() {
+        val other = Pubkey(ByteArray(32) { 4 }).toBase58()
+        fun one(shift: String) = shiftList(shifts = "[$shift]")
+        for (body in listOf(
+            shiftList(rigAddress = other),
+            shiftList(rigAddress = "not-base58!"),
+            """{"data":{"rig":"${rig.toBase58()}"}}""",
+            """{"rig":"${rig.toBase58()}","shifts":[]}""",
+            one("""{"shiftId":"-1","endedAt":1,"darkRounds":"0","roundsDug":"0","reason":0,"mode":0,"signature":"$SIG"}"""),
+            one("""{"shiftId":"7","endedAt":-5,"darkRounds":"0","roundsDug":"0","reason":0,"mode":0,"signature":"$SIG"}"""),
+            one("""{"shiftId":"7","endedAt":9223372036854775807,"darkRounds":"0","roundsDug":"0","reason":0,"mode":0,"signature":"$SIG"}"""),
+            one("""{"shiftId":"7","endedAt":1,"darkRounds":"18446744073709551616","roundsDug":"0","reason":0,"mode":0,"signature":"$SIG"}"""),
+            one("""{"shiftId":"7","endedAt":1,"darkRounds":"0","roundsDug":"0","reason":256,"mode":0,"signature":"$SIG"}"""),
+            one("""{"shiftId":"7","endedAt":1,"darkRounds":"0","roundsDug":"0","reason":0,"mode":3,"signature":"$SIG"}"""),
+            one("""{"shiftId":"7","endedAt":1,"darkRounds":"0","reason":0,"mode":0,"signature":"$SIG"}"""),
+            one("\"7\""),
+            "not json",
+            "[]",
+        )) {
+            assertThrows(body.take(80), HaulFormatException::class.java) { IndexerHaulClient.parseShifts(body, rig) }
+        }
+        // The largest counter a ShiftLog can hold, and a shift with no signature at all.
+        val big = one("""{"shiftId":"18446744073709551615","endedAt":1,"darkRounds":"18446744073709551615","roundsDug":"0","reason":255,"mode":0}""")
+        assertEquals(
+            listOf(IndexerShift(ULong.MAX_VALUE, 1L, ULong.MAX_VALUE, 0uL, reason = 255, mode = HaulMode.NIGHT, signature = null)),
+            IndexerHaulClient.parseShifts(big, rig),
+        )
+    }
+
+    @Test
+    fun `a list longer than the bound keeps the newest and leaves the oldest out`() {
+        val many = (0 until IndexerHaulClient.MAX_SHIFTS + 5).joinToString(",") { i ->
+            """{"shiftId":"${5_000 - i}","endedAt":${2_000_000_000L - i * 86_400L},"darkRounds":"1","roundsDug":"0","reason":0,"mode":0,"signature":"$SIG"}"""
+        }
+        val parsed = IndexerHaulClient.parseShifts(shiftList(shifts = "[$many]"), rig)
+        assertEquals(IndexerHaulClient.MAX_SHIFTS, parsed.size)
+        assertEquals(5_000uL, parsed.first().shiftId)
+        assertEquals((5_000 - IndexerHaulClient.MAX_SHIFTS + 1).toULong(), parsed.last().shiftId)
+    }
+
     @Test
     fun `the indexer client refuses cleartext endpoints`() {
         assertThrows(IllegalArgumentException::class.java) { OkHttpJsonHttp("http://indexer.example", tls.client) }

@@ -11,13 +11,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import xyz.headsdown.core.chain.Ore
+import xyz.headsdown.core.chain.Pubkey
+import xyz.headsdown.core.chain.accounts.OreAccounts
+import xyz.headsdown.core.chain.accounts.OreGate
 import xyz.headsdown.core.chain.registrar.AttestationOutcome
+import xyz.headsdown.core.chain.rpc.AccountInfo
+import xyz.headsdown.core.chain.rpc.SolanaJsonRpc
 import xyz.headsdown.core.wallet.SignInProof
 import xyz.headsdown.core.wallet.SiwsRequest
 import xyz.headsdown.feature.oemkeepalive.KeepAlive
@@ -77,6 +84,22 @@ data class OnboardingState(
         get() = introSeen && notificationsGranted && exactAlarmsAllowed && keepAliveDone && tileAdded && rigKeyReady
 }
 
+/**
+ * Whether a rig would dig at ORE's cost figure right now, in [HomeCopy.gate]'s words, from one
+ * read of ORE's Board and Treasury through their checked decoders. It fails closed: an account
+ * that is missing, foreign or misshapen, or an RPC that does not answer, is no line at all.
+ */
+internal suspend fun gateLine(policy: ClockInPolicy, read: suspend (List<Pubkey>) -> List<AccountInfo?>): String? = try {
+    val accounts = read(listOf(Ore.BOARD, Ore.TREASURY))
+    val board = OreAccounts.board(Ore.BOARD, checkNotNull(accounts[0]))
+    val treasury = OreAccounts.treasury(Ore.TREASURY, checkNotNull(accounts[1]))
+    HomeCopy.gate(OreGate.emaEv(board, treasury), policy)
+} catch (e: CancellationException) {
+    throw e
+} catch (_: Exception) {
+    null
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
@@ -93,7 +116,16 @@ class HomeViewModel @Inject constructor(
     private val focusBond: FocusBondSetting,
     private val policy: ClockInPolicy,
     private val clockIn: ClockInTransactions,
+    private val rpc: SolanaJsonRpc,
 ) : ViewModel() {
+
+    private val _gate = MutableStateFlow<String?>(null)
+
+    /**
+     * Whether a rig would dig at ORE's cost figure as last read ([HomeCopy.gate]), re-read on every
+     * [refresh]. Null until it is read and whenever it cannot be: the screen then has no such line.
+     */
+    val gate: StateFlow<String?> = _gate.asStateFlow()
 
     private val _shiftWindow = MutableStateFlow<String?>(null)
 
@@ -176,6 +208,8 @@ class HomeViewModel @Inject constructor(
                 ShiftWindow.describe(policy, System.currentTimeMillis(), reveal.nextSystemAlarmWallMillis())
             }.getOrNull()
             _loaded.value = true
+            // Last, and off the main thread: an RPC that is slow or away holds nothing else back.
+            _gate.value = withContext(Dispatchers.IO) { gateLine(policy) { rpc.getMultipleAccounts(it) } }
         }
     }
 

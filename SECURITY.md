@@ -18,6 +18,8 @@ on GitHub first. Anything else can go in a public issue.
 - **`.pem` files under `registrar/roots/` and `registrar/testdata/`.** Public certificates:
   Google's hardware attestation roots, and attestation chains used as test fixtures. None is a
   private key.
+- **Long arrays of byte values in `services/indexer/test/fixtures/`.** Recorded ORE events used as
+  test input. None is a keypair.
 - **Keypairs.** None is committed. The deployed services read theirs from the environment, and the
   local development stack generates its own under the user's home directory.
 

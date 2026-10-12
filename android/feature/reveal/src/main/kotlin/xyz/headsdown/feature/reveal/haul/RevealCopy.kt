@@ -11,6 +11,8 @@ data class RevealCopy(
     /** Shown prominently when the haul is not the user's own on-chain night. */
     val sampleBadge: String?,
     val stats: List<RevealStat>,
+    /** What the phone itself signed, from its own journal: shown apart from [stats], never as an on-chain count. */
+    val signedOnPhone: RevealStat?,
     val effectivePrice: String?,
     val marketPrice: String?,
     val verdict: String,
@@ -29,7 +31,7 @@ data class RevealCopy(
         get() = listOfNotNull(
             title, subtitle, sampleBadge, effectivePrice, marketPrice, verdict, nearMiss, firstPickup,
             streak, buyButton, buyDetail, buyStubMessage, solPlacedNote, footnote, shareButton,
-        ) + stats.flatMap { listOf(it.label, it.value) }
+        ) + (stats + listOfNotNull(signedOnPhone)).flatMap { listOf(it.label, it.value) }
 }
 
 /** How far a shift with no haul yet has come. */
@@ -100,6 +102,8 @@ object RevealCopyBuilder {
     const val CLOCK_OUT_DETAIL =
         "Seals the shift and shows the ORE in your Miner. Nothing is signed until you approve it in your wallet."
 
+    /** The label of the phone's own count of the rounds it signed: whose number it is, in the label itself. */
+    const val SIGNED_ON_PHONE = "Signed on this phone"
 
     fun build(h: HaulSummary, zone: ZoneId): RevealCopy {
         val verdict = HaulMath.verdict(h)
@@ -119,6 +123,7 @@ object RevealCopyBuilder {
                 RevealStat("SOL placed", HaulFormat.sol(h.solPlacedLamports)),
                 RevealStat("ORE mined", HaulFormat.ore(h.oreMinedAtoms)),
             ),
+            signedOnPhone = h.roundsSigned?.let { RevealStat(SIGNED_ON_PHONE, if (it == 1) "1 round" else "${HaulFormat.count(it)} rounds") },
             effectivePrice = h.effectiveLamportsPerOre?.let { "${HaulFormat.price(it)} SOL per ORE" },
             marketPrice = h.marketLamportsPerOre?.let { price ->
                 "Market ${HaulFormat.price(price)}" + (h.marketSource?.let { " ($it)" } ?: "")

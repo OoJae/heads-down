@@ -45,6 +45,7 @@ import xyz.headsdown.ui.setup.SetupActions
 import xyz.headsdown.ui.setup.SetupContent
 import xyz.headsdown.ui.setup.SetupStep
 import xyz.headsdown.ui.theme.HeadsDownTheme
+import java.math.BigInteger
 
 /** One state of the home screen, as the tests of the rebuilt screens compose it. */
 data class HomeCase(
@@ -55,6 +56,8 @@ data class HomeCase(
     val loading: Boolean = false,
     val lastHaul: String? = null,
     val streak: String? = null,
+    /** When the screen is read, on the wall clock: inside the shift's plan window unless the case says otherwise. */
+    val nowWallMillis: Long = Screens.IN_WINDOW_MILLIS,
 )
 
 /** One state of the setup screen. */
@@ -72,7 +75,19 @@ object Screens {
     val amounts = policy.disclosure(10_000_000uL)
     val cap = HomeCopy.clockInCap(policy)
 
-    private val spec = ShiftSpec(1, ShiftMode.NIGHT, windowEndUnix = 1_791_700_080)
+    /** ORE's figure as the program's own test vector has it (0.629818854 SOL per ORE): over this policy's ceiling. */
+    val gate = HomeCopy.gate(BigInteger.valueOf(629_818_854), policy)
+
+    /**
+     * The end of the shift's plan window, and the two moments a screen is read at: an hour before
+     * it, and just after the alarm that rings two minutes past it. The clock is fixed, so neither
+     * depends on the day the tests run.
+     */
+    const val WINDOW_END_UNIX = 1_791_700_080L
+    const val IN_WINDOW_MILLIS = (WINDOW_END_UNIX - 3_600) * 1000
+    const val AFTER_WINDOW_MILLIS = (WINDOW_END_UNIX + 130) * 1000
+
+    private val spec = ShiftSpec(1, ShiftMode.NIGHT, windowEndUnix = WINDOW_END_UNIX)
     private val ready = RigKeyStatus.Ready(KeySecurityLevel.TRUSTED_ENVIRONMENT, "3fa9c1d2", 3, voucherLevel = 1)
     val setUp = OnboardingState(
         introSeen = true, notificationsGranted = true, exactAlarmsAllowed = true, batteryUnrestricted = true,
@@ -98,6 +113,10 @@ object Screens {
     val cooling = HomeCase("cooling", hot.copy(state = ShiftState.Cooling(spec, 0, 10_000, CoolReason.LIFTED, 0)))
     val broken = HomeCase("broken", ShiftSnapshot(ShiftState.Broken(spec, 0, BreakReason.UNPLUGGED), darkRounds = 212, darkSinceWallMillis = 5))
     val frozen = HomeCase("frozen", ShiftSnapshot(ShiftState.Frozen(3, 0), darkRounds = 12))
+
+    /** The same two stops after the window: the alarm lit the screen of a shift that ran its whole night. */
+    val complete = broken.copy(name = "complete", nowWallMillis = AFTER_WINDOW_MILLIS)
+    val completeCooling = cooling.copy(name = "complete, still cooling", nowWallMillis = AFTER_WINDOW_MILLIS)
     val banner = HomeCase("health banner", health = killed)
     val noGoodbye = HomeCase("stopped without a record", health = ShiftHealth.DiedWithoutRecord(0, 7))
     val refusal = HomeCase("crank refusal", crank = refused)
@@ -141,6 +160,7 @@ object Screens {
         onOpenRigDebug = {},
         crank = case.crank,
         clockInAmounts = amounts,
+        gateLine = if (case.loading) null else gate,
         shiftWindow = if (case.loading) null else WINDOW,
         bondSkr = 10_000_000uL,
         onBondChange = {},
@@ -148,6 +168,9 @@ object Screens {
         streak = case.streak,
         clockInCap = cap,
         loading = case.loading,
+        // Every stop in these cases is stamped 0 on the elapsed clock: the rig stopped as the screen is read.
+        nowWallMillis = { case.nowWallMillis },
+        nowElapsedMillis = { 0L },
     )
 
     @Composable

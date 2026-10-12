@@ -43,6 +43,11 @@
         <activity
             android:name=".withdraw.WithdrawActivity"
             android:exported="false" />
+
+        <!-- The night log (read-only): started only from the home screen, explicit intent, no extras. -->
+        <activity
+            android:name=".nights.NightsActivity"
+            android:exported="false" />
     </application>
 
 </manifest>

@@ -43,6 +43,8 @@ class FakeHaulRepository(
                 nightlyTargetOreAtoms = 2_000_000_000L,
                 streak = StreakUpdate(before = 22, after = 23),
                 firstPickupWallMillis = end + 2 * 60_000L,
+                // A few more than the 312 dark rounds: not every heartbeat a phone signs is landed.
+                roundsSigned = 318,
             )
         }
 

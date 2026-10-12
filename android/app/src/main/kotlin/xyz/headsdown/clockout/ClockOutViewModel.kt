@@ -258,7 +258,7 @@ class ClockOutModel(
         const val CLAIM_ALL_BPS = 10_000
         const val UNREADABLE = "Could not read the chain. Nothing was sent. Check the connection and try again."
         const val OTHER_WALLET = "That is not the wallet this rig belongs to. Nothing was sent."
-        const val NO_WALLET = "No Solana wallet app was found on this phone. Install Solflare, Phantom or another Mobile Wallet Adapter wallet."
+        const val NO_WALLET = "No Solana wallet app was found on this phone. Install one that speaks Mobile Wallet Adapter. This build has been run with Jupiter Mobile."
         const val NOTHING_LEFT = "There was nothing left to sign: the chain already shows it done."
         const val NOTHING_BOUGHT = "No ORE could be bought just now, and there was nothing else to sign. Nothing was sent."
         const val NOT_LANDED = "The clock-out did not go through on-chain. Nothing changed."

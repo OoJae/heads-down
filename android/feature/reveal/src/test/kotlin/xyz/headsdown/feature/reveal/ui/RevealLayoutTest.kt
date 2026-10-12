@@ -71,6 +71,7 @@ class RevealLayoutTest {
         rounds = mine.rounds + RoundReplay(999_999, dugMask = 1, winningTile = 24, motherlode = true, endedAtWallMillis = mine.endedAtWallMillis - 60_000),
         darkRoundsTotal = 12_345,
         digsTotal = 1_234,
+        roundsSigned = 13_579,
         solPlacedLamports = 123_456_700_000L,
         oreMinedAtoms = 123_456_700_000_000L,
         effectiveLamportsPerOre = 123_456_000_000L,
@@ -281,6 +282,11 @@ class RevealLayoutTest {
         val counts = listOf("Rounds dark", "Digs", "SOL placed").map { figure(it).unclipped() }
         assertTrue(counts.all { it.left == counts.first().left })
         assertTrue(counts[0].bottom <= counts[1].top && counts[1].bottom <= counts[2].top)
+        // What the phone signed is a row of its own: under the haul's counts, above the price, its number whole.
+        val signed = rule.onNodeWithTag(RevealTags.SIGNED_ON_PHONE).fetchSemanticsNode().unclipped()
+        assertTrue(counts[2].bottom <= signed.top && signed.bottom <= figure("Effective price per ORE").unclipped().top)
+        assertEquals(40f to 680f, signed.left to signed.right)
+        assertEquals("\"13,579 rounds\" is one line", 1, figure("13,579 rounds").textLayout()!!.lineCount)
     }
 
     @Test
@@ -326,6 +332,12 @@ class RevealLayoutTest {
         assertEquals("the whole board is on screen", board.unclipped(), board.boundsInRoot)
         val amount = figure("0.0058 ORE")
         assertTrue("the amount is above the dock: ${amount.unclipped()} against $dock", amount.unclipped().bottom < dock)
+        // What the phone signed shares one line with its label: the label on the margin, the number at the far end.
+        val signedLabel = figure("Signed on this phone").unclipped()
+        val signedRounds = figure("318 rounds").unclipped()
+        assertEquals(40f to 680f, signedLabel.left to signedRounds.right)
+        assertTrue(signedRounds.left - signedLabel.right >= 32f && signedRounds.top < signedLabel.bottom)
+        assertTrue(figure("312").unclipped().bottom <= signedLabel.top)
         // "Done" ends on the page's margin, level with the board's frame, and is a full touch target.
         val done = rule.onNodeWithTag(RevealTags.DONE).assertIsDisplayed().fetchSemanticsNode()
         val word = rule.onNodeWithText("Done", useUnmergedTree = true).fetchSemanticsNode().unclipped()

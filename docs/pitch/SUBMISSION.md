@@ -74,19 +74,21 @@ filled in from [MAINNET.md](../MAINNET.md) after the shifts of 12 October.
 > - Solana mainnet since 10 October 2026: the program HDn4vgLWFLLdexKEwfZwRHjWtizNvdqFteLbMsE67F9p,
 >   the relay, the registrar, the indexer and a public dashboard.
 > - One rig, the founder's only phone, a Redmi 14C (Android 16, HyperOS 3) with Jupiter Mobile:
->   [9] shifts and [30] digs to 12 October, each dig gated by a heartbeat from the phone's secure
->   hardware; on 12 October a shift of [three] hours that sealed as completed, and the reveal after
->   the alarm; pickups that ended earlier shifts; clock-outs; SOL taken back to the lamport; and
->   [a first ORE purchase at clock-out].
+>   [10] shifts and [35] digs to 12 October, each dig gated by a heartbeat from the phone's secure
+>   hardware. Through the night of 12 October it worked a shift of three hours, about 170
+>   heartbeats signed, until a power cut. [On 12 October a shift ran to its alarm and sealed as
+>   completed, with the reveal after the alarm.] Also: pickups that ended earlier shifts,
+>   clock-outs, SOL taken back to the lamport, and [a first ORE purchase at clock-out].
 > - An Android 14 emulator against a local fork of mainnet: the same app end to end, signed in
 >   Solana Mobile's test wallet.
-> - [1,375] automated tests of the app, 171 of the program and 228 of the relay.
+> - 1,440 automated tests of the app, 171 of the program and 229 of the relay.
 >
 > WHAT IS OPEN, stated once. It has not run on a Seeker: the program can verify a Seeker Genesis
 > Token (tested on a fork with real tokens) and the app has no screen for it yet. The filmed build
 > digs under a raised price ceiling. The pickup model is trained on synthetic data. Once a shift's
 > budget is spent, the chain stops recording its dark rounds, so a long night seals with the rounds
-> of its digs. One key can upgrade the program. There has been no third-party audit. The APK is
+> of its digs. A power cut, or a call that lights the screen, ends a shift. One key can upgrade the
+> program. There has been no third-party audit. The APK is
 > debug-signed and not yet on the dApp Store. The founder is its only user so far.
 <!-- nmd:end -->
 

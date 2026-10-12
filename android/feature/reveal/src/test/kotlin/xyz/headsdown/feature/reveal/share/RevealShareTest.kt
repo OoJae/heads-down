@@ -51,6 +51,7 @@ class RevealShareTest {
         assertEquals("content", uri.scheme)
         assertEquals(RevealShare.authority(context), uri.authority)
         assertEquals(grid.shareText(), send.getStringExtra(Intent.EXTRA_TEXT))
+        assertTrue(send.getStringExtra(Intent.EXTRA_TEXT)!!.endsWith("\nPowered by ORE\nhttps://oojae.github.io/heads-down/"))
         assertEquals(uri, send.clipData!!.getItemAt(0).uri)
     }
 

@@ -421,6 +421,50 @@ after every motion event, with screen-on, screen-off and unlock as ground truth,
 in `feature/shift/src/debug`; release has only a stub, and `feature/shift` runs its release unit
 tests to prove no lab class is compiled into release.
 
+## Build 0.1.2 (12 October 2026)
+
+What changed since 0.1.1. Where each has run is in [docs/MAINNET.md](../docs/MAINNET.md) and
+[docs/DEVSTACK.md](../docs/DEVSTACK.md).
+
+- **The morning page never opens inside the shift's window.** The reveal was planned for the
+  user's alarm plus a minute, or 07:00 with no alarm; the window is the alarm minus two minutes,
+  or the policy's length with no alarm. The two could disagree: after a clock-in at 23:30 with no
+  alarm the page opened at 07:00, half an hour inside the window, lit the screen, and the shift
+  broke. `RevealTimePlanner.plan` now takes the window's end plus a minute as its earliest time
+  (`RevealSource.WINDOW_END`). An alarm of the user's own that rings 15 to 32 minutes after the
+  clock-in is still inside an eight-hour window: set the alarm at least 32 minutes ahead.
+- **A shift that ran its whole window reads as complete.** After the window the phone sends no
+  BREAK, but its own state machine still cooled and broke when the alarm lit the screen, and Home
+  said "Shift ended: the screen stayed on." Home now says "Shift complete: it ran to the end of its
+  window.", with "Clock out" under it, and the notification "Shift complete". The sentence is true
+  before the clock-out and after it. A break inside the window keeps its words whenever the
+  screen is read. This is the phone's own reading: the clock-out sheet states what the chain will
+  record.
+- **The sealed haul shows what the phone signed.** One row, "Signed on this phone", from the shift
+  journal, while the journal still holds that shift. It is not an on-chain count: once a shift's
+  budget is spent and the cost gate is open the crank lands no more heartbeats, so the sealed
+  dark rounds can be far fewer.
+- **Tonight's limits say whether the rig would dig.** One line from ORE's Board and Treasury, read
+  at each refresh: "ORE's cost figure is 0.85 SOL per ORE. The ceiling fixed in this build is
+  1.00. At that figure the rig would dig." (or "would wait"). The figure is the one the program
+  compares (`OreGate`, a port of the program's `ema_ev` and `gate_open` with its vectors). It is
+  not the user's cost (docs/ECONOMICS.md, section 4), and no line is shown when the read fails.
+- **Nights.** Home, "All nights": the streak and the nights off left (from the Rig account),
+  lifetime rounds dark and digs, the last 28 days, and every sealed shift with how it ended and its
+  transaction (`GET /v1/rigs/{rig}/shifts`). Read-only, and no amount of SOL or ORE.
+- **Setup on Xiaomi phones** names the two permissions the full-screen morning page is likely to
+  need ("Show on Lock screen", "Display pop-up windows while running in the background") and links
+  to the app's permission page; every maker's guide ends with how to keep the night quiet. The
+  link and the two names have not been run on a Xiaomi phone.
+- **Words.** The intro and setup say what the alarm opens, a heartbeat is "about once a minute",
+  a phone with no wallet is told the one wallet the build has been run with, and the share text
+  ends with the site's address.
+
+Planned for this build and not built: a ledger of what the first clock-in moves. Rent is charged
+by the programs and its rate is the cluster's, so no amount on that sheet could come from a
+constant the clock-in composer uses. The amounts of the founder's first clock-in are in
+docs/MAINNET.md ("What it cost").
+
 ## Still stubbed
 
 - The crank, registrar and indexer URLs are build properties with no default. All three run on

@@ -71,11 +71,31 @@ data class IndexerHaul(
 )
 
 /**
+ * One finished shift as the indexer lists it: the sealed ShiftLog's counters, and the transaction
+ * that sealed it. No amount of SOL or ORE is in the list.
+ */
+data class IndexerShift(
+    val shiftId: ULong,
+    /** `ShiftLog.end_ts`, unix seconds. */
+    val endedAt: Long,
+    val darkRounds: ULong,
+    val roundsDug: ULong,
+    /** `ShiftLog.break_reason` (0 completed … 8 unlocked). */
+    val reason: Int,
+    val mode: HaulMode,
+    /** The signature of the `end_shift` transaction, or null when what arrived is not a signature. */
+    val signature: String?,
+)
+
+/**
  * The indexer's morning-haul API (contract B):
  * `GET /v1/rigs/{rig}/haul/latest` and `GET /v1/rigs/{rig}/haul/{shift_id}` → `HaulSummary`, or
  * 404 when there is no finished shift. Numbers above 2^53 arrive as decimal strings; every
  * integer is accepted either way. A summary for another rig, an impossible mask or square, or
  * a non-https explorer link is refused rather than shown.
+ *
+ * `GET /v1/rigs/{rig}/shifts` → every finished shift of the rig, newest first, inside the
+ * indexer's envelope (`data.rig`, `data.shifts`). It is read by the same rules.
  */
 class IndexerHaulClient(private val http: JsonHttp) {
 
@@ -84,6 +104,14 @@ class IndexerHaulClient(private val http: JsonHttp) {
 
     /** A given shift, or null when it is not finished or unknown (404). */
     suspend fun byShift(rig: Pubkey, shiftId: ULong): IndexerHaul? = fetch(rig, "/v1/rigs/${rig.toBase58()}/haul/$shiftId")
+
+    /** Every finished shift of the rig, newest first; empty when the indexer knows none (also a 404). */
+    suspend fun shifts(rig: Pubkey): List<IndexerShift> {
+        val reply = http.get("/v1/rigs/${rig.toBase58()}/shifts")
+        if (reply.status == 404) return emptyList()
+        if (!reply.isSuccessful) throw IndexerHttpException(reply.status)
+        return parseShifts(reply.body, rig)
+    }
 
     private suspend fun fetch(rig: Pubkey, path: String): IndexerHaul? {
         val reply = http.get(path)
@@ -95,6 +123,12 @@ class IndexerHaulClient(private val http: JsonHttp) {
     companion object {
         const val MAX_ROUNDS = 5_000
         const val MAX_SAMPLE_DIGS = 16
+
+        /** The list is newest first: what is past this many is the oldest, and is left out. */
+        const val MAX_SHIFTS = 1_000
+
+        /** The last second of the year 9999. */
+        private const val MAX_UNIX_SECONDS = 253_402_300_799L
         private const val TILES = 25
         private val ORE_ATOMS_PER_ORE = BigDecimal.TEN.pow(11)
 
@@ -146,6 +180,52 @@ class IndexerHaulClient(private val http: JsonHttp) {
                 explorerSampleDigs = ((o["explorer"] as? JsonObject)?.get("sample_digs") as? JsonArray).orEmpty()
                     .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.let(::httpsUrl) }
                     .take(MAX_SAMPLE_DIGS),
+            )
+        }
+
+        /** Parses the list of finished shifts of [expectedRig] (`{"data":{"rig":…,"shifts":[…]}}`). */
+        fun parseShifts(body: String, expectedRig: Pubkey): List<IndexerShift> {
+            val envelope = try {
+                Json.parseToJsonElement(body) as? JsonObject
+            } catch (_: SerializationException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            } ?: throw HaulFormatException("not a JSON object")
+            val data = envelope["data"] as? JsonObject ?: throw HaulFormatException("data")
+            val rig = try {
+                Pubkey.fromBase58(data.string("rig"))
+            } catch (_: IllegalArgumentException) {
+                throw HaulFormatException("rig")
+            }
+            if (rig != expectedRig) throw HaulFormatException("shifts of another rig")
+            val shifts = data["shifts"] as? JsonArray ?: throw HaulFormatException("shifts")
+            return shifts.take(MAX_SHIFTS).map { shift(it) }
+        }
+
+        private fun shift(e: JsonElement): IndexerShift {
+            val s = e as? JsonObject ?: throw HaulFormatException("shift")
+            val endedAt = s.i64("endedAt")
+            // It becomes a date on a screen: a time no calendar has is not one.
+            if (endedAt !in 0..MAX_UNIX_SECONDS) throw HaulFormatException("endedAt")
+            val reason = s.i64("reason")
+            if (reason !in 0..255) throw HaulFormatException("reason")
+            // The ShiftLog's own byte, not the summary's word.
+            val mode = when (s.i64("mode")) {
+                0L -> HaulMode.NIGHT
+                1L -> HaulMode.DAY
+                2L -> HaulMode.FOCUS_ONLY
+                else -> throw HaulFormatException("mode")
+            }
+            return IndexerShift(
+                shiftId = s.u64("shiftId"),
+                endedAt = endedAt,
+                darkRounds = s.u64("darkRounds"),
+                roundsDug = s.u64("roundsDug"),
+                reason = reason.toInt(),
+                mode = mode,
+                // It is put in an explorer link: only the shape of a signature gets that far.
+                signature = s.optionalString("signature")?.takeIf { SIGNATURE.matches(it) },
             )
         }
 
@@ -218,6 +298,9 @@ class IndexerHaulClient(private val http: JsonHttp) {
         private val EXPLORER_HOSTS = setOf("solscan.io", "explorer.solana.com")
         private val EXPLORER_PAGES = setOf("tx", "account", "address")
         private val BASE58 = Regex("[1-9A-HJ-NP-Za-km-z]{32,88}")
+
+        /** 64 bytes in base58 are 64 characters (all zero) to 88. */
+        private val SIGNATURE = Regex("[1-9A-HJ-NP-Za-km-z]{64,88}")
         private val SOURCE_LABEL = Regex("[A-Za-z0-9][A-Za-z0-9 ._/-]{0,39}")
 
         private fun JsonObject.string(key: String): String =
