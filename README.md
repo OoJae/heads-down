@@ -10,8 +10,8 @@ any Android 12+ phone with a Solana wallet.
 | | |
 |---|---|
 | **APK** | [Releases](https://github.com/OoJae/heads-down/releases): the newest build is the one to install. Debug-signed, Solana mainnet. Read its notes on what it does with real SOL |
-| **Video** | to be linked here when it is published |
-| **Deck** | 10 slides: [PDF](site/deck/heads-down-deck.pdf), [in the browser](https://oojae.github.io/heads-down/deck/) |
+| **Video** | [The demo film on YouTube](https://youtu.be/aGNVRRyyKRU): 2 minutes 12 seconds, with captions. Every phone screen in it is a recording of the Redmi 14C on mainnet, 12 October 2026 |
+| **Deck** | 10 slides: [Google Slides](https://docs.google.com/presentation/d/1bTk59mBl9nWac-YoC9V7C9ByD4q1wU_swj2RAZ6IegY/edit?usp=sharing), [PDF](site/deck/heads-down-deck.pdf), [in the browser](https://oojae.github.io/heads-down/deck/) |
 | **See it working, no install** | [The founder's rig: every shift, from chain data](https://dashboard-production-b80c.up.railway.app/haul/?rig=DUmg1GrZhaELtpjY1KpA5ov6ANn4msoUPn4mLV2TWZgL) · [the dashboard](https://dashboard-production-b80c.up.railway.app/) |
 | **Every transaction it has made** | [docs/MAINNET.md](docs/MAINNET.md) |
 
@@ -22,7 +22,10 @@ walk through setup (the rig key is made inside the phone; no wallet is asked for
 screen tap "Open the morning reveal" and "See a sample night (not your data)". That is the page a
 shift ends on, with a labelled sample in place of your own night.
 
-**A real shift: 35 minutes, a wallet and about 0.02 SOL.**
+**A real shift: 35 minutes, a wallet and about 0.02 SOL.** Use a real phone with a locked
+bootloader: the registrar vouches for a rig key on the phone's own key attestation, from its
+secure hardware. It has vouched for one phone so far, the founder's, so a second phone's first
+clock-in has not been tried.
 
 1. Install a Solana wallet that speaks Mobile Wallet Adapter. The app has been run with Jupiter
    Mobile only.
