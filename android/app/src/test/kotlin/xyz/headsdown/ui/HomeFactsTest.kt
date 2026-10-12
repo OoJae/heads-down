@@ -1,6 +1,7 @@
 package xyz.headsdown.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -154,6 +155,58 @@ class HomeFactsTest {
         for (reason in BreakReason.entries) {
             assertTrue(lookOf(ShiftState.Broken(spec, 0, reason)).line.startsWith("Shift ended: "))
         }
+    }
+
+    // ------------------------------------------------------------------ a shift that ran its window
+
+    @Test
+    fun `a rig that stops after its window ran a complete shift - one that stops inside it did not`() {
+        val end = Instant.parse("2026-10-12T06:28:00Z").epochSecond
+        val windowed = spec.copy(windowEndUnix = end)
+        fun at(unix: Long) = unix * 1000
+        // A break is stamped on the elapsed clock: this one 40 s after the phone started counting.
+        val brokeAt = 40_000L
+        fun broken(reason: BreakReason = BreakReason.SCREEN_ON) = ShiftSnapshot(ShiftState.Broken(windowed, brokeAt, reason), darkRounds = 212)
+
+        // The alarm lights the screen two minutes after the window: read at once, and an hour later.
+        assertTrue(ranItsWindow(broken(), at(end + 130), brokeAt))
+        assertTrue(ranItsWindow(broken(), at(end + 130 + 3_600), brokeAt + 3_600_000))
+        // The window's last second still sends a BREAK (ShiftSpec.breakStillUseful); the next one does not.
+        assertFalse(ranItsWindow(broken(), at(end), brokeAt))
+        assertFalse(ranItsWindow(broken(), at(end) + 999, brokeAt))
+        assertTrue(ranItsWindow(broken(), at(end + 1), brokeAt))
+        // A pickup at 03:00 is a pickup, however long after the window the screen is read.
+        val threeAm = Instant.parse("2026-10-12T03:00:00Z").epochSecond
+        for (later in listOf(0L, 3_600L, 5 * 3_600L, 24 * 3_600L)) {
+            assertFalse("read $later s on", ranItsWindow(broken(BreakReason.LIFTED), at(threeAm + later), brokeAt + later * 1000))
+        }
+        // A cooling rig is judged now: its grace can only end later.
+        val cooling = ShiftSnapshot(ShiftState.Cooling(windowed, 0, 10_000, CoolReason.SCREEN_ON, 0), darkRounds = 212)
+        assertFalse(ranItsWindow(cooling, at(end), 5_000))
+        assertTrue(ranItsWindow(cooling, at(end + 1), 5_000))
+        // No round signed dark, or no window known: never complete.
+        assertFalse(ranItsWindow(broken().copy(darkRounds = 0), at(end + 130), brokeAt))
+        assertFalse(ranItsWindow(ShiftSnapshot(ShiftState.Broken(spec, brokeAt, BreakReason.SCREEN_ON), darkRounds = 212), at(end + 130), brokeAt))
+        // And no other state is.
+        for (state in listOf(ShiftState.Idle, ShiftState.Armed(windowed, 0), ShiftState.Down(windowed, 0, 0), ShiftState.Frozen(7, 0))) {
+            assertFalse("$state", ranItsWindow(ShiftSnapshot(state, darkRounds = 212), at(end + 130), 0))
+        }
+    }
+
+    @Test
+    fun `a complete shift is said calmly - no ember, no reason, and the one thing left to do`() {
+        assertEquals("Rig cold", CompleteLook.word)
+        assertEquals(RigTone.Muted, CompleteLook.tone)
+        assertEquals(0, CompleteLook.pixels)
+        assertFalse(CompleteLook.problem)
+        assertTrue(CompleteLook.complete)
+        assertEquals("Shift complete: clock out to seal it and see the haul.", CompleteLook.line)
+        // A break's look is never the complete one, and says so in its own words.
+        for (reason in BreakReason.entries) assertFalse(lookOf(ShiftState.Broken(spec, 0, reason)).complete)
+        // The hero's sentence has the shape of the six others, and is none of them.
+        val hero = HomeCopy.HERO_COMPLETE
+        assertTrue(hero, hero.startsWith("A dark slab lying face-down, ") && hero.endsWith(".") && hero.count { it == '.' } == 1)
+        assertFalse(hero in everyState.map(HomeCopy::hero))
     }
 
     @Test

@@ -87,4 +87,25 @@ class ShiftSupportTest {
         assertEquals(20, hot.plannedRounds)
         assertNull(ShiftSnapshot(ShiftState.Idle).toNotificationState().plannedRounds)
     }
+
+    @Test
+    fun `a rig that cools or breaks after its plan window ran a complete shift`() {
+        val end = 1_790_668_800L
+        val spec = ShiftSpec(1, ShiftMode.NIGHT, windowEndUnix = end)
+        val cooling = ShiftSnapshot(ShiftState.Cooling(spec, 0, 1, CoolReason.SCREEN_ON, 0), darkRounds = 212)
+        val broken = ShiftSnapshot(ShiftState.Broken(spec, 0, BreakReason.SCREEN_ON), darkRounds = 212)
+        for (stopped in listOf(cooling, broken)) {
+            // Inside the window, to its last second, a BREAK is still sent.
+            assertFalse(stopped.toNotificationState(end - 3_600).complete)
+            assertFalse(stopped.toNotificationState(end).complete)
+            assertTrue(stopped.toNotificationState(end + 1).complete)
+            // No round signed dark: nothing was completed.
+            assertFalse(stopped.copy(darkRounds = 0).toNotificationState(end + 130).complete)
+        }
+        // A hot rig, a cold one, and a shift with no window are never complete.
+        assertFalse(ShiftSnapshot(ShiftState.Down(spec, 0, 0), darkRounds = 212).toNotificationState(end + 130).complete)
+        assertFalse(ShiftSnapshot(ShiftState.Idle, darkRounds = 212).toNotificationState(end + 130).complete)
+        val noWindow = ShiftSpec(1, ShiftMode.FOCUS_ONLY)
+        assertFalse(ShiftSnapshot(ShiftState.Broken(noWindow, 0, BreakReason.LIFTED), darkRounds = 212).toNotificationState(end + 130).complete)
+    }
 }

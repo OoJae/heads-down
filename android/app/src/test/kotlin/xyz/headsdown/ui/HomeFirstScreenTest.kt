@@ -207,6 +207,56 @@ class HomeFirstScreenTest : ScreenTest() {
 
     @Test fun `frozen at font scale 2 with a phone's bars - the rig word and Rounds dark are above the dock`() = largeOnAPhone(Screens.frozen)
 
+    @Test fun `complete at font scale 2 with a phone's bars - the rig word and Rounds dark are above the dock`() = largeOnAPhone(Screens.complete)
+
+    // ------------------------------------------------------------------ a shift that ran its window
+
+    @Test fun `complete - the first screenful holds the heading, the rig word, Rounds dark and the bar`() = firstScreenful(Screens.complete)
+
+    @Test fun `a stop inside the window keeps its words - the reason in ember's place, and Clock out under it`() {
+        show { Screens.Home(Screens.broken) }
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Rig cold")
+        rule.onNodeWithText("Shift ended: the charger was unplugged.").assertIsDisplayed()
+        rule.onAllNodesWithText(HomeCopy.SHIFT_COMPLETE).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+        rule.onNodeWithTag(HomeTags.CLOCK_OUT_NOW).assertTextEquals("Clock out").assertIsDisplayed()
+        rule.onNodeWithTag(HomeTags.HERO).assert(hasContentDescription(HomeCopy.hero(Screens.broken.snapshot.state)))
+    }
+
+    @Test fun `the same stop after the window is a complete shift - no reason, and Clock out still under it`() {
+        var clockedOut = 0
+        show {
+            HomeScreen(
+                snapshot = Screens.complete.snapshot, onboarding = Screens.setUp, health = Screens.complete.health,
+                onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {}, onClockOut = { clockedOut++ },
+                shiftWindow = Screens.WINDOW, clockInCap = Screens.cap,
+                nowWallMillis = { Screens.AFTER_WINDOW_MILLIS }, nowElapsedMillis = { 0L },
+            )
+        }
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Rig cold")
+        rule.onNodeWithText(HomeCopy.SHIFT_COMPLETE).assertIsDisplayed().assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))
+        assertFalse("no reason is given for a night that ran its window", uiHas("Shift ended"))
+        rule.onNodeWithTag(HomeTags.HERO).assert(hasContentDescription(HomeCopy.HERO_COMPLETE))
+        rule.onNodeWithTag(HomeTags.CLOCK_OUT_NOW).assertTextEquals("Clock out").assertIsDisplayed().performClick()
+        assertEquals(1, clockedOut)
+        // The next shift is still one tap away.
+        rule.onNodeWithTag(HomeTags.CLOCK_IN).assertIsDisplayed()
+    }
+
+    @Test fun `a rig still cooling after the window is not asked to be put back`() {
+        var shown by mutableStateOf(Screens.cooling)
+        show { Screens.Home(shown) }
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Cooling")
+        rule.onNodeWithText("Put it back face-down to keep the shift alive.").assertIsDisplayed()
+
+        shown = Screens.completeCooling
+        rule.waitForIdle()
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Rig cold")
+        rule.onNodeWithText(HomeCopy.SHIFT_COMPLETE).assertIsDisplayed()
+        assertFalse(uiHas("Put it back face-down"))
+        // The shift's service is still running for the length of its grace: the dock is unchanged.
+        rule.onNodeWithTag(HomeTags.END_SHIFT).assertIsDisplayed()
+    }
+
     private fun largeOnAPhone(case: HomeCase) {
         show(2f, bars = true) { Screens.Home(case) }
         assertFirstScreenful(case, 2f, bars = true)

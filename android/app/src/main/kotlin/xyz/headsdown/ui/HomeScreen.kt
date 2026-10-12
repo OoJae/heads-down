@@ -1,5 +1,6 @@
 package xyz.headsdown.ui
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -152,6 +153,12 @@ object HomeCopy {
     const val FREEZE_YES = "Freeze the rig"
     const val FREEZE_KEEP = "Keep the shift"
 
+    /** Under the rig's word once a shift has run its whole window: what is left to do, not why the rig stopped. */
+    const val SHIFT_COMPLETE = "Shift complete: clock out to seal it and see the haul."
+
+    /** The hero's sentence for that shift. */
+    const val HERO_COMPLETE = "A dark slab lying face-down, with no light under it: the shift is complete."
+
     /** The most a shift can place, under the bar that opens the wallet. */
     fun clockInCap(policy: ClockInPolicy): String =
         "Up to ${ClockInPolicy.sol(policy.shiftBudgetLamports)} SOL ${if (policy.day) "this shift" else "tonight"}"
@@ -167,7 +174,7 @@ object HomeCopy {
     }
 
     val all: List<String>
-        get() = listOf(RUNS_UNTIL, LIMITS, SOL_AND_RIG, RIG_KEY, HOW_IT_WORKS, LAST_HAUL, FREEZE_ASK, FREEZE_YES, FREEZE_KEEP)
+        get() = listOf(RUNS_UNTIL, LIMITS, SOL_AND_RIG, RIG_KEY, HOW_IT_WORKS, LAST_HAUL, FREEZE_ASK, FREEZE_YES, FREEZE_KEEP, SHIFT_COMPLETE, HERO_COMPLETE)
 }
 
 /** How the rig word is inked. A role, not a colour: the palette under it may change. */
@@ -181,6 +188,8 @@ internal data class RigLook(
     val slab: SlabState,
     /** The line says why the shift ended: it is drawn in ember and read out when it appears. */
     val problem: Boolean = false,
+    /** The line says the shift ran its whole window: read out when it appears, and never in ember. */
+    val complete: Boolean = false,
 )
 
 internal fun lookOf(state: ShiftState): RigLook = when (state) {
@@ -197,6 +206,31 @@ private fun breakLine(reason: BreakReason) = when (reason) {
     BreakReason.SCREEN_ON -> "Shift ended: the screen stayed on."
     BreakReason.UNPLUGGED -> "Shift ended: the charger was unplugged."
     BreakReason.UNLOCKED -> "Shift ended: the phone was unlocked."
+}
+
+/** The rig after a shift that ran its whole window: cold and calm, with the one thing left to do. */
+internal val CompleteLook = RigLook("Rig cold", RigTone.Muted, HomeCopy.SHIFT_COMPLETE, 0, SlabState.Cold, complete = true)
+
+/**
+ * The shift ran to the end of its plan window. After it the phone sends no BREAK
+ * ([ShiftSpec.breakStillUseful]), so what stops the local rig then (the alarm lighting the screen,
+ * the phone picked up) ends nothing early: this is the same rule, read for the screen.
+ *
+ * For a broken shift the moment that counts is the break, not the reading: a pickup at 03:00 is
+ * still a pickup when the screen is read at 08:00. [ShiftState.Broken.at] is on the elapsed clock,
+ * so both clocks are asked. A cooling rig is judged now: whatever its grace ends in, it ends after
+ * this. A shift with no round signed dark is never called complete, and nor is one whose window is
+ * not known.
+ */
+internal fun ranItsWindow(snapshot: ShiftSnapshot, nowWallMillis: Long, nowElapsedMillis: Long): Boolean {
+    val state = snapshot.state
+    val spec = state.spec ?: return false
+    val atWallMillis = when (state) {
+        is ShiftState.Cooling -> nowWallMillis
+        is ShiftState.Broken -> nowWallMillis - (nowElapsedMillis - state.at)
+        else -> return false
+    }
+    return snapshot.darkRounds > 0 && !spec.breakStillUseful(Math.floorDiv(atWallMillis, 1000L))
 }
 
 private val UNTIL = Regex("""until (\d{2}:\d{2})""")
@@ -290,9 +324,15 @@ fun HomeScreen(
     loading: Boolean = false,
     /** Ask the hero to play its entrance (the app has just opened on this screen). */
     heroEnter: Boolean = false,
+    /** The wall clock a plan window ends on, in milliseconds. A test fixes it. */
+    nowWallMillis: () -> Long = System::currentTimeMillis,
+    /** The clock a shift's own times are on (`SystemClock.elapsedRealtime`), in milliseconds. */
+    nowElapsedMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     val state = snapshot.state
-    val look = lookOf(state)
+    // A night that ran its whole window is not a failure, whatever stopped the rig after it.
+    val complete = ranItsWindow(snapshot, nowWallMillis(), nowElapsedMillis())
+    val look = if (complete) CompleteLook else lookOf(state)
     val scroll = rememberScrollState()
     val haptics = LocalHdHaptics.current
     val running = state is ShiftState.Armed || state is ShiftState.Down || state is ShiftState.Cooling
@@ -368,7 +408,7 @@ fun HomeScreen(
                         onKnock = haptics::knock,
                     ),
                     modifier = Modifier.testTag(HomeTags.HERO).semantics { role = Role.Image },
-                    contentDescription = HomeCopy.hero(state),
+                    contentDescription = if (complete) HomeCopy.HERO_COMPLETE else HomeCopy.hero(state),
                 )
             },
             // Until the phone's settings are read nothing says setup is unfinished: it is not known yet.
@@ -596,7 +636,7 @@ private fun RigState(look: RigLook, onClockOut: (() -> Unit)? = null) {
         )
         Body(
             look.line,
-            modifier = if (look.problem) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier,
+            modifier = if (look.problem || look.complete) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier,
             color = if (look.problem) colors.ember else colors.chalk,
         )
         if (onClockOut != null) TextAction("Clock out", onClick = onClockOut, modifier = Modifier.testTag(HomeTags.CLOCK_OUT_NOW))
