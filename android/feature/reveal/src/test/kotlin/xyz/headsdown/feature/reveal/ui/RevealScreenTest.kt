@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -62,6 +63,7 @@ class RevealScreenTest {
         rule.onNodeWithText("312").assertExists()
         rule.onNodeWithText("18").assertExists()
         rule.onNodeWithText("0.0180 SOL").assertExists()
+        rule.onNodeWithText("318 rounds").assertExists()
         rule.onNodeWithText("0.0058 ORE").assertExists()
         rule.onNodeWithText("0.680 SOL per ORE").assertExists()
         rule.onNodeWithText("Market 0.758").assertExists()
@@ -81,6 +83,21 @@ class RevealScreenTest {
     fun `on-chain haul has no sample badge`() {
         show(night.copy(provenance = HaulProvenance.ON_CHAIN))
         rule.onAllNodesWithTag(RevealTags.SAMPLE_BADGE).assertCountEquals(0)
+    }
+
+    @Test
+    fun `what the phone signed is one row named as the phone's, and gone when the phone does not have it`() {
+        // A night the crank stopped landing heartbeats in: five dark rounds sealed, hundreds signed.
+        var shown by mutableStateOf(night.copy(provenance = HaulProvenance.ON_CHAIN, darkRoundsTotal = 5, digsTotal = 4, roundsSigned = 371))
+        rule.setContent { RevealTheme { RevealScreen(shown, zone, animate = false) } }
+        // One node, read "Signed on this phone, 371 rounds"; the sealed shift's own count stands as it was.
+        rule.onNodeWithTag(RevealTags.SIGNED_ON_PHONE).performScrollTo().assertIsDisplayed().assertTextEquals("Signed on this phone", "371 rounds")
+        rule.onNodeWithText("5").assertTextEquals("Rounds dark", "5")
+        shown = shown.copy(roundsSigned = null)
+        rule.waitForIdle()
+        rule.onAllNodesWithTag(RevealTags.SIGNED_ON_PHONE).assertCountEquals(0)
+        assertTrue(screenTexts().none { "this phone" in it || "371" in it })
+        rule.onNodeWithText("5").assertTextEquals("Rounds dark", "5")
     }
 
     @Test

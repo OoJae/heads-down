@@ -217,7 +217,8 @@ class RevealRedesignTest {
             rule.onAllNodesWithText("23:10 – 06:50 · 7 h 40 m shift").assertCountEquals(1)
         }
         // Top to bottom for a haul of the user's own: the way out, the title, the hours, the board and
-        // its legend, the amount, the counts, the price, and the dock's bar after everything else.
+        // its legend, the amount, the counts, what the phone signed, the price, and the dock's bar after
+        // everything else.
         shown = mine
         rule.waitForIdle()
         val texts = screenTexts()
@@ -225,6 +226,7 @@ class RevealRedesignTest {
             "HEADS DOWN", "Done", "Morning haul", "23:10 – 06:50 · 7 h 40 m shift",
             "Board replay finished: 312 rounds. Your tiles came up on 1 of 25 squares.", RevealWords.LEGEND,
             "ORE mined", "0.0058 ORE", "Powered by ORE", "Rounds dark", "312", "Digs", "18", "SOL placed", "0.0180 SOL",
+            "Signed on this phone", "318 rounds",
             "Effective price per ORE", "0.680 SOL per ORE", "Market 0.758",
         )
         assertEquals(order, texts.take(order.size))
@@ -233,6 +235,8 @@ class RevealRedesignTest {
         rule.onNodeWithText("312").assertTextEquals("Rounds dark", "312")
         rule.onNodeWithText("18").assertTextEquals("Digs", "18")
         rule.onNodeWithText("0.0180 SOL").assertTextEquals("SOL placed", "0.0180 SOL")
+        // So is the phone's own count, which says whose it is.
+        rule.onNodeWithTag(RevealTags.SIGNED_ON_PHONE).assertTextEquals("Signed on this phone", "318 rounds")
         // The streak is drawn in capitals and read as written.
         rule.onNodeWithTag(RevealTags.STREAK).assertTextEquals("Streak 22 → 23")
     }

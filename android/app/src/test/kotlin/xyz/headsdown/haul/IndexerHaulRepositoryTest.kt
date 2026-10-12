@@ -25,6 +25,7 @@ import xyz.headsdown.feature.reveal.haul.HonestCopy
 import xyz.headsdown.feature.reveal.haul.NightReport
 import xyz.headsdown.feature.reveal.haul.OpenNight
 import xyz.headsdown.feature.reveal.haul.RevealCopyBuilder
+import xyz.headsdown.feature.reveal.haul.RevealStat
 import xyz.headsdown.feature.shift.RigBinding
 import xyz.headsdown.feature.shift.RigBindingProvider
 import xyz.headsdown.feature.shift.ShiftMode
@@ -124,6 +125,9 @@ class IndexerHaulRepositoryTest {
         assertEquals(758_000_000L, h.marketLamportsPerOre)
         assertEquals(23, h.streak.after)
         assertEquals(pickup, h.firstPickupWallMillis)
+        // What the phone signed stands beside what the shift sealed with: 371 heartbeats, 3 dark rounds.
+        assertEquals(371, h.roundsSigned)
+        assertEquals(RevealStat("Signed on this phone", "371 rounds"), RevealCopyBuilder.build(h, ZoneId.of("UTC")).signedOnPhone)
         assertTrue(h.explorerUrl!!.startsWith("https://explorer.solana.com/"))
         // The widget gets the real haul and the streak.
         assertEquals(listOf(WidgetHaul(582_000_000L, end * 1000)), widgets.hauls)
@@ -149,6 +153,33 @@ class IndexerHaulRepositoryTest {
         // The journal has moved on to another shift: its pickup is not this haul's.
         respond(200, summary())
         assertNull(IndexerHaulRepository(indexer, bound, { journaled(8, (end - 120) * 1000) }, widgets).latest()!!.firstPickupWallMillis)
+    }
+
+    @Test
+    fun `the rounds this phone signed are the journal's, and only for the shift the journal still holds`() = runBlocking {
+        // No journal (a new install), or one that has moved on to another shift: the count is not this haul's.
+        respond(200, summary())
+        assertNull(IndexerHaulRepository(indexer, bound, { null }, widgets).latest()!!.roundsSigned)
+        respond(200, summary())
+        assertNull(IndexerHaulRepository(indexer, bound, { journaled(8) }, widgets).latest()!!.roundsSigned)
+        // A shift the phone never signed a round of says so; a damaged count is not shown as a negative one.
+        respond(200, summary())
+        assertEquals(0, IndexerHaulRepository(indexer, bound, { journaled(7).copy(darkRounds = 0) }, widgets).latest()!!.roundsSigned)
+        respond(200, summary())
+        assertEquals(0, IndexerHaulRepository(indexer, bound, { journaled(7).copy(darkRounds = -4) }, widgets).latest()!!.roundsSigned)
+        // The night the reveal opens on, once sealed and read, carries it the same way.
+        respond(200, summary(shiftId = 8))
+        val sealed = repo(journaled(8)) { _, _ -> ShiftOnChain.SEALED }.night() as NightReport.Haul
+        assertEquals(371, sealed.summary.roundsSigned)
+        assertEquals(3, sealed.summary.roundsDark)
+        // An older sealed night shown while shift 9 is being worked is not given shift 9's count.
+        respond(200, summary(shiftId = 8))
+        val older = repo(journaled(9)) { _, _ -> ShiftOnChain.RUNNING }.night() as NightReport.Haul
+        assertNull(older.summary.roundsSigned)
+        // The mapping itself takes the count as given, and has none of its own.
+        val haul = IndexerHaulClient.parse(summary(), rig)
+        assertNull(HaulMapping.toSummary(haul, null).roundsSigned)
+        assertEquals(12, HaulMapping.toSummary(haul, null, roundsSigned = 12).roundsSigned)
     }
 
     @Test

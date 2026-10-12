@@ -31,6 +31,7 @@ class ShareGridTest {
             effectiveLamportsPerOre = 1L,
             marketLamportsPerOre = 2L,
             solPlacedLamports = 5_000_000_000L,
+            roundsSigned = 9_999,
             provenance = HaulProvenance.ON_CHAIN,
         )
         assertEquals(base, ShareGrid.from(rerolled))
@@ -42,11 +43,25 @@ class ShareGridTest {
         val text = ShareGrid.from(night).shareText()
         val expected = listOf("Heads Down · night shift") +
             ShareGrid.from(night).emojiRows() +
-            listOf("312 rounds dark · 7 h 40 m · streak 23", "Powered by ORE")
+            listOf("312 rounds dark · 7 h 40 m · streak 23", "Powered by ORE", "https://oojae.github.io/heads-down/")
         assertEquals(expected.joinToString("\n"), text)
         assertFalse(text.contains("SOL"))
         assertFalse(Regex("\\d+\\.\\d+").containsMatchIn(text))
         assertTrue(HonestCopy.violations(text).isEmpty())
+    }
+
+    @Test
+    fun `the share text ends with the site's address, the same for every night`() {
+        assertEquals("https://oojae.github.io/heads-down/", ShareGrid.SITE)
+        val closed = FakeHaulRepository.sampleGateClosed(1_790_000_000_000L, ZoneId.of("UTC"))
+        val mine = night.copy(provenance = HaulProvenance.ON_CHAIN, shiftId = 8, explorerUrl = "https://explorer.solana.com/address/x")
+        for (h in listOf(night, closed, mine)) {
+            val lines = ShareGrid.from(h).shareText().lines()
+            assertEquals(listOf("Powered by ORE", ShareGrid.SITE), lines.takeLast(2))
+            // One address in the whole text, and it is the site's: no link to a wallet, a rig or a shift.
+            assertEquals(1, lines.count { "://" in it })
+            assertFalse(lines.any { "explorer" in it || "?" in it })
+        }
     }
 
     @Test
