@@ -74,6 +74,33 @@ class RigNotificationCopyTest {
     }
 
     @Test
+    fun `a shift that ran its window is complete, not ended, and a cooling rig is not asked to be put back`() {
+        fun complete(phase: RigPhase) = RigNotificationCopy.from(RigNotificationState(phase, darkRounds = 212, complete = true))
+        val cold = complete(RigPhase.COLD)
+        assertEquals("Shift complete", cold.title)
+        assertEquals("Clock out to seal it · 212 rounds dark", cold.text)
+        assertNull(cold.chip)
+        assertFalse(cold.ongoing || cold.promote)
+        val cooling = complete(RigPhase.COOLING)
+        assertEquals("Shift complete", cooling.title)
+        assertEquals("Clock out to seal it · 212 rounds dark", cooling.text)
+        assertEquals("complete", cooling.chip)
+        assertTrue(cooling.chip!!.length <= 8)
+        // For the length of its grace it is still the running shift's notification.
+        assertTrue(cooling.ongoing && cooling.promote)
+        assertFalse(cooling.countUpChronometer)
+        // Inside the window the words are what they were.
+        assertEquals("Rig cold", all().getValue(RigPhase.COLD).title)
+        assertEquals("Shift ended · 55 rounds dark", all().getValue(RigPhase.COLD).text)
+        assertEquals("Rig cooling", all().getValue(RigPhase.COOLING).title)
+        assertEquals("Put it back face-down to keep the shift alive", all().getValue(RigPhase.COOLING).text)
+        // The flag means nothing to a rig that is armed, hot or frozen.
+        for (phase in listOf(RigPhase.ARMED, RigPhase.HOT, RigPhase.FROZEN)) {
+            assertEquals(RigNotificationCopy.from(RigNotificationState(phase, darkRounds = 212)), complete(phase))
+        }
+    }
+
+    @Test
     fun `status chip text stays short`() {
         all().values.mapNotNull { it.chip }.forEach { assertTrue(it, it.length <= 8) }
     }

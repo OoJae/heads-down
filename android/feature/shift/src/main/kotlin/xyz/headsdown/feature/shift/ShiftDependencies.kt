@@ -17,8 +17,13 @@ fun interface RigBindingProvider {
     fun current(): RigBinding
 }
 
-/** Maps the shift snapshot onto the notification module's neutral model. */
-internal fun ShiftSnapshot.toNotificationState(): RigNotificationState {
+/**
+ * Maps the shift snapshot onto the notification module's neutral model. The notification is built
+ * as the rig changes state, so [nowUnix] is the moment it cooled or broke: after the plan window
+ * no BREAK is sent for that ([ShiftSpec.breakStillUseful]), and a shift with a round signed dark
+ * is then complete, not ended early.
+ */
+internal fun ShiftSnapshot.toNotificationState(nowUnix: Long = System.currentTimeMillis() / 1000): RigNotificationState {
     val phase = when (state) {
         is ShiftState.Armed -> RigPhase.ARMED
         is ShiftState.Down -> RigPhase.HOT
@@ -33,5 +38,6 @@ internal fun ShiftSnapshot.toNotificationState(): RigNotificationState {
         plannedRounds = spec?.plannedRounds,
         darkSinceWallMillis = darkSinceWallMillis,
         focusOnly = spec?.mode == ShiftMode.FOCUS_ONLY,
+        complete = (state is ShiftState.Cooling || state is ShiftState.Broken) && darkRounds > 0 && spec?.breakStillUseful(nowUnix) == false,
     )
 }

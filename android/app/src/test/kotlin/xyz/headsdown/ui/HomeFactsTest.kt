@@ -1,6 +1,7 @@
 package xyz.headsdown.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -16,6 +17,7 @@ import xyz.headsdown.feature.shift.ShiftSpec
 import xyz.headsdown.feature.shift.ShiftState
 import xyz.headsdown.rig.ClockInPolicy
 import xyz.headsdown.rig.ShiftWindow
+import java.math.BigInteger
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -141,6 +143,43 @@ class HomeFactsTest {
     }
 
     @Test
+    fun `the gate line names ORE's figure, the ceiling fixed in the build, and what the rig would do at it`() {
+        fun gate(lamportsPerOre: Long, policy: ClockInPolicy = night) = HomeCopy.gate(BigInteger.valueOf(lamportsPerOre), policy)
+        // The program's own live vector, 0.629818854 SOL per ORE: over a Steady plan, under a Hunter one.
+        assertEquals(
+            "ORE's cost figure is 0.62 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would wait.",
+            gate(629_818_854),
+        )
+        assertEquals(
+            "ORE's cost figure is 0.62 SOL per ORE. The ceiling fixed in this build is 0.67. At that figure the rig would dig.",
+            gate(629_818_854, night.copy(planMaxEvCostPerOre = 670_000_000uL)),
+        )
+        // The figure is rounded down, never up; at the ceiling itself the gate is open, as on-chain.
+        assertEquals("ORE's cost figure is 0.52 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would dig.", gate(529_999_999))
+        assertEquals("ORE's cost figure is 0.53 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would dig.", gate(530_000_000))
+        // A hair over it the rig waits, and the figure is printed far enough to show it is over.
+        assertEquals("ORE's cost figure is 0.534 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would wait.", gate(534_900_000))
+        assertEquals("ORE's cost figure is 0.530000001 SOL per ORE. The ceiling fixed in this build is 0.53. At that figure the rig would wait.", gate(530_000_001))
+        // The ceiling is printed exactly: two decimals at least, and every one it has.
+        assertTrue(gate(1, night.copy(planMaxEvCostPerOre = 1_000_000_000uL, capMaxCostPerOre = 1_000_000_000uL)).contains("in this build is 1.00. "))
+        assertTrue(gate(1, night.copy(planMaxEvCostPerOre = 535_000_000uL)).contains("in this build is 0.535. "))
+        // It is the tighter of the plan's and the wallet's, which is what the program compares with.
+        assertTrue(gate(1, night.copy(planMaxEvCostPerOre = 700_000_000uL)).contains("in this build is 0.67. "))
+        // A figure above a u64 (ORE's EMA at its largest, pot empty) is still a figure, and the rig waits.
+        val huge = HomeCopy.gate(BigInteger("22136092888451461938"), night)
+        assertTrue(huge, huge.startsWith("ORE's cost figure is 22136092888.45 SOL per ORE. ") && huge.endsWith("the rig would wait."))
+
+        // ECONOMICS §4: ORE's figure, never the reader's cost, a price or a saving, and no market price.
+        for (line in listOf(gate(629_818_854), gate(1), huge)) {
+            assertTrue(line, line.startsWith("ORE's cost figure is "))
+            assertTrue("banned words in: $line", HonestCopy.violations(line).isEmpty())
+            for (word in listOf("price", "saving", "save", "cheaper", "your cost", "market", "worth", "$")) {
+                assertFalse("'$word' in: $line", word in line.lowercase())
+            }
+        }
+    }
+
+    @Test
     fun `the rig's word, heat and slab follow the shift state`() {
         val looks = everyState.map(::lookOf)
         assertEquals(listOf("Rig cold", "Armed", "Rig hot", "Cooling", "Rig cold", "Frozen"), looks.map { it.word })
@@ -154,6 +193,58 @@ class HomeFactsTest {
         for (reason in BreakReason.entries) {
             assertTrue(lookOf(ShiftState.Broken(spec, 0, reason)).line.startsWith("Shift ended: "))
         }
+    }
+
+    // ------------------------------------------------------------------ a shift that ran its window
+
+    @Test
+    fun `a rig that stops after its window ran a complete shift - one that stops inside it did not`() {
+        val end = Instant.parse("2026-10-12T06:28:00Z").epochSecond
+        val windowed = spec.copy(windowEndUnix = end)
+        fun at(unix: Long) = unix * 1000
+        // A break is stamped on the elapsed clock: this one 40 s after the phone started counting.
+        val brokeAt = 40_000L
+        fun broken(reason: BreakReason = BreakReason.SCREEN_ON) = ShiftSnapshot(ShiftState.Broken(windowed, brokeAt, reason), darkRounds = 212)
+
+        // The alarm lights the screen two minutes after the window: read at once, and an hour later.
+        assertTrue(ranItsWindow(broken(), at(end + 130), brokeAt))
+        assertTrue(ranItsWindow(broken(), at(end + 130 + 3_600), brokeAt + 3_600_000))
+        // The window's last second still sends a BREAK (ShiftSpec.breakStillUseful); the next one does not.
+        assertFalse(ranItsWindow(broken(), at(end), brokeAt))
+        assertFalse(ranItsWindow(broken(), at(end) + 999, brokeAt))
+        assertTrue(ranItsWindow(broken(), at(end + 1), brokeAt))
+        // A pickup at 03:00 is a pickup, however long after the window the screen is read.
+        val threeAm = Instant.parse("2026-10-12T03:00:00Z").epochSecond
+        for (later in listOf(0L, 3_600L, 5 * 3_600L, 24 * 3_600L)) {
+            assertFalse("read $later s on", ranItsWindow(broken(BreakReason.LIFTED), at(threeAm + later), brokeAt + later * 1000))
+        }
+        // A cooling rig is judged now: its grace can only end later.
+        val cooling = ShiftSnapshot(ShiftState.Cooling(windowed, 0, 10_000, CoolReason.SCREEN_ON, 0), darkRounds = 212)
+        assertFalse(ranItsWindow(cooling, at(end), 5_000))
+        assertTrue(ranItsWindow(cooling, at(end + 1), 5_000))
+        // No round signed dark, or no window known: never complete.
+        assertFalse(ranItsWindow(broken().copy(darkRounds = 0), at(end + 130), brokeAt))
+        assertFalse(ranItsWindow(ShiftSnapshot(ShiftState.Broken(spec, brokeAt, BreakReason.SCREEN_ON), darkRounds = 212), at(end + 130), brokeAt))
+        // And no other state is.
+        for (state in listOf(ShiftState.Idle, ShiftState.Armed(windowed, 0), ShiftState.Down(windowed, 0, 0), ShiftState.Frozen(7, 0))) {
+            assertFalse("$state", ranItsWindow(ShiftSnapshot(state, darkRounds = 212), at(end + 130), 0))
+        }
+    }
+
+    @Test
+    fun `a complete shift is said calmly - no ember, no reason, and the one thing left to do`() {
+        assertEquals("Rig cold", CompleteLook.word)
+        assertEquals(RigTone.Muted, CompleteLook.tone)
+        assertEquals(0, CompleteLook.pixels)
+        assertFalse(CompleteLook.problem)
+        assertTrue(CompleteLook.complete)
+        assertEquals("Shift complete: clock out to seal it and see the haul.", CompleteLook.line)
+        // A break's look is never the complete one, and says so in its own words.
+        for (reason in BreakReason.entries) assertFalse(lookOf(ShiftState.Broken(spec, 0, reason)).complete)
+        // The hero's sentence has the shape of the six others, and is none of them.
+        val hero = HomeCopy.HERO_COMPLETE
+        assertTrue(hero, hero.startsWith("A dark slab lying face-down, ") && hero.endsWith(".") && hero.count { it == '.' } == 1)
+        assertFalse(hero in everyState.map(HomeCopy::hero))
     }
 
     @Test

@@ -12,6 +12,8 @@ data class RigNotificationState(
     /** Wall-clock start of the dark time, for a count-up chronometer. */
     val darkSinceWallMillis: Long? = null,
     val focusOnly: Boolean = false,
+    /** The rig cooled or stopped after the shift's plan window had ended: nothing ended that shift early. */
+    val complete: Boolean = false,
 )
 
 /** Rendered text and behaviour for one [RigNotificationState]. */
@@ -36,6 +38,10 @@ data class NotificationCopy(
  * - only the user-started shift (armed / hot / cooling) is ongoing and promotable.
  */
 object RigNotificationCopy {
+    /** A shift that ran its whole window, in the home screen's words ("Shift complete: clock out to seal it …"). */
+    const val COMPLETE_TITLE = "Shift complete"
+    const val COMPLETE_TEXT = "Clock out to seal it"
+
     fun from(state: RigNotificationState): NotificationCopy {
         val rounds = state.darkRounds.coerceAtLeast(0)
         val roundsText = if (rounds == 1) "1 round dark" else "$rounds rounds dark"
@@ -60,16 +66,18 @@ object RigNotificationCopy {
                     progressMax = max,
                 )
             }
+            // After the window there is nothing to put back and nothing that ended early: the
+            // words change, the notification's behaviour (its phase's) does not.
             RigPhase.COOLING -> NotificationCopy(
-                title = "Rig cooling",
-                text = "Put it back face-down to keep the shift alive",
-                chip = "cooling",
+                title = if (state.complete) COMPLETE_TITLE else "Rig cooling",
+                text = if (state.complete) "$COMPLETE_TEXT · $roundsText" else "Put it back face-down to keep the shift alive",
+                chip = if (state.complete) "complete" else "cooling",
                 promote = true, ongoing = true, countUpChronometer = false,
                 progress = null, progressMax = null,
             )
             RigPhase.COLD -> NotificationCopy(
-                title = "Rig cold",
-                text = "Shift ended · $roundsText",
+                title = if (state.complete) COMPLETE_TITLE else "Rig cold",
+                text = if (state.complete) "$COMPLETE_TEXT · $roundsText" else "Shift ended · $roundsText",
                 chip = null,
                 promote = false, ongoing = false, countUpChronometer = false,
                 progress = null, progressMax = null,

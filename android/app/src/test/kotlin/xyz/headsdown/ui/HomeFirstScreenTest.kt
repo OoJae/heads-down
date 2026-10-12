@@ -207,6 +207,102 @@ class HomeFirstScreenTest : ScreenTest() {
 
     @Test fun `frozen at font scale 2 with a phone's bars - the rig word and Rounds dark are above the dock`() = largeOnAPhone(Screens.frozen)
 
+    @Test fun `complete at font scale 2 with a phone's bars - the rig word and Rounds dark are above the dock`() = largeOnAPhone(Screens.complete)
+
+    // ------------------------------------------------------------------ a shift that ran its window
+
+    @Test fun `complete - the first screenful holds the heading, the rig word, Rounds dark and the bar`() = firstScreenful(Screens.complete)
+
+    @Test fun `a stop inside the window keeps its words - the reason in ember's place, and Clock out under it`() {
+        show { Screens.Home(Screens.broken) }
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Rig cold")
+        rule.onNodeWithText("Shift ended: the charger was unplugged.").assertIsDisplayed()
+        rule.onAllNodesWithText(HomeCopy.SHIFT_COMPLETE).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+        rule.onNodeWithTag(HomeTags.CLOCK_OUT_NOW).assertTextEquals("Clock out").assertIsDisplayed()
+        rule.onNodeWithTag(HomeTags.HERO).assert(hasContentDescription(HomeCopy.hero(Screens.broken.snapshot.state)))
+    }
+
+    @Test fun `the same stop after the window is a complete shift - no reason, and Clock out still under it`() {
+        var clockedOut = 0
+        show {
+            HomeScreen(
+                snapshot = Screens.complete.snapshot, onboarding = Screens.setUp, health = Screens.complete.health,
+                onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {}, onClockOut = { clockedOut++ },
+                shiftWindow = Screens.WINDOW, clockInCap = Screens.cap,
+                nowWallMillis = { Screens.AFTER_WINDOW_MILLIS }, nowElapsedMillis = { 0L },
+            )
+        }
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Rig cold")
+        rule.onNodeWithText(HomeCopy.SHIFT_COMPLETE).assertIsDisplayed().assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))
+        assertFalse("no reason is given for a night that ran its window", uiHas("Shift ended"))
+        rule.onNodeWithTag(HomeTags.HERO).assert(hasContentDescription(HomeCopy.HERO_COMPLETE))
+        rule.onNodeWithTag(HomeTags.CLOCK_OUT_NOW).assertTextEquals("Clock out").assertIsDisplayed().performClick()
+        assertEquals(1, clockedOut)
+        // The next shift is still one tap away.
+        rule.onNodeWithTag(HomeTags.CLOCK_IN).assertIsDisplayed()
+    }
+
+    @Test fun `a rig still cooling after the window is not asked to be put back`() {
+        var shown by mutableStateOf(Screens.cooling)
+        show { Screens.Home(shown) }
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Cooling")
+        rule.onNodeWithText("Put it back face-down to keep the shift alive.").assertIsDisplayed()
+
+        shown = Screens.completeCooling
+        rule.waitForIdle()
+        rule.onNodeWithTag(HomeTags.RIG_WORD).assertTextEquals("Rig cold")
+        rule.onNodeWithText(HomeCopy.SHIFT_COMPLETE).assertIsDisplayed()
+        assertFalse(uiHas("Put it back face-down"))
+        // The shift's service is still running for the length of its grace: the dock is unchanged.
+        rule.onNodeWithTag(HomeTags.END_SHIFT).assertIsDisplayed()
+    }
+
+    // ------------------------------------------------------------------ whether the rig would dig
+
+    @Test fun `the gate line closes tonight's limits on a cold rig - a frozen or running rig has none`() {
+        var shown by mutableStateOf(Screens.idle)
+        show { Screens.Home(shown) }
+        for (cold in listOf(Screens.idle, Screens.broken, Screens.complete)) {
+            shown = cold
+            rule.waitForIdle()
+            rule.onNodeWithTag(HomeTags.GATE).performScrollTo().assertTextEquals(Screens.gate).assertIsDisplayed()
+            val heading = rule.onNodeWithText(HomeCopy.LIMITS).getUnclippedBoundsInRoot()
+            val amounts = bounds(HomeTags.CLOCK_IN_AMOUNTS)
+            val gate = bounds(HomeTags.GATE)
+            val next = bounds(HomeTags.BOND_CARD)
+            assertTrue(
+                "${cold.name}: under the heading and the amounts, over the next section: $heading, $amounts, $gate, $next",
+                heading.bottom <= amounts.top && amounts.bottom <= gate.top && gate.bottom <= next.top,
+            )
+            assertDrawnWhole(HomeTags.GATE, Screens.gate)
+        }
+        // A frozen rig digs at no figure, and a running shift has no limits block at all.
+        for (other in listOf(Screens.frozen, Screens.armed, Screens.down, Screens.cooling)) {
+            shown = other
+            rule.waitForIdle()
+            assertEquals(other.name, 0, rule.onAllNodesWithTag(HomeTags.GATE).fetchSemanticsNodes().size)
+        }
+    }
+
+    @Test fun `the gate line at font scale 2 - the figure and the ceiling are drawn whole`() {
+        show(2f, bars = true) { Screens.Home(Screens.idle) }
+        rule.onNodeWithTag(HomeTags.GATE).performScrollTo().assertIsDisplayed()
+        assertDrawnWhole(HomeTags.GATE, Screens.gate)
+    }
+
+    @Test fun `until ORE's figure is read there is no gate line, and the limits stand as they were`() {
+        show {
+            HomeScreen(
+                snapshot = Screens.idle.snapshot, onboarding = Screens.setUp, health = Screens.idle.health,
+                onClockIn = {}, onEndShift = {}, onFreeze = {}, onOpenSetup = {},
+                clockInAmounts = Screens.amounts,
+            )
+        }
+        rule.onNodeWithTag(HomeTags.CLOCK_IN_AMOUNTS).performScrollTo().assertTextEquals(Screens.amounts)
+        assertEquals(0, rule.onAllNodesWithTag(HomeTags.GATE).fetchSemanticsNodes().size)
+        assertFalse(uiMatches("ORE's cost figure").isNotEmpty())
+    }
+
     private fun largeOnAPhone(case: HomeCase) {
         show(2f, bars = true) { Screens.Home(case) }
         assertFirstScreenful(case, 2f, bars = true)
