@@ -135,7 +135,9 @@ wait_ui() { # text, seconds: until it is on screen
     [[ $t -lt ${2:-20} ]] || die "'$1' did not appear: $(ui texts | head -n 6)"
   done
 }
-home() { adb shell am start -n "$PKG/xyz.headsdown.MainActivity" >/dev/null 2>&1; sleep 3; adb shell input swipe 540 700 540 1900 250; sleep 1; adb shell input swipe 540 700 540 1900 250; sleep 1; }
+# To the top of the home page, wherever it was left: four swipes cover the page since build 0.1.2
+# made it taller (two did before, and then a link could be found under the pinned top row).
+home() { adb shell am start -n "$PKG/xyz.headsdown.MainActivity" >/dev/null 2>&1; sleep 3; for _ in 1 2 3 4; do adb shell input swipe 540 700 540 1900 250; sleep 1; done; }
 
 "$DEVSTACK_DIR/phone.sh" >/dev/null
 adb install -r "$APK" >/dev/null
@@ -158,7 +160,8 @@ if ! ui has "Rounds dark"; then
   if ui find "Create rig key" >/dev/null 2>&1; then ui tap "Create rig key" >/dev/null; sleep 6; fi
   if ui has "Continue"; then ui tap "Continue" >/dev/null; sleep 2; fi
 fi
-ui has "Rounds dark" || die "setup did not end on the home screen: $(ui texts | tail -n 5)"
+# The steps above scroll the page while they look; the check reads its top.
+ui has "Rounds dark" || { home; ui has "Rounds dark"; } || die "setup did not end on the home screen: $(ui texts | tail -n 5)"
 step "setup done: notifications, background running, tile, rig key in the device's Keystore"
 
 # ---- 2. a rig for this phone's key: armed by the Mac's dev wallet, or by a wallet app on the device
