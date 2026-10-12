@@ -5,7 +5,8 @@ Usage: python3 docs/pitch/check_pitch.py [hash_out_file]
 
 Hard failures (exit code 1): a word from the banned list in docs/ECONOMICS.md section 4 (the hard
 subset), text addressed to the people or tools scoring the submission, a repo path that does not
-exist, a skrIntegration draft over 950 characters, a deck outside 15 to 17 slides or missing a part,
+exist, an answer for the live form over 5,000 characters, a deck that is not 9 to 12 slides or is
+missing a part,
 a Q&A without 20 questions, an X post over 280 characters or without its DRAFT label, or a VO over
 460 words. Softer wording is printed as "soft" for a human to judge. Commit hashes referenced in
 backticks are written to <hash_out_file>, to verify with `git cat-file --batch-check`.
@@ -77,22 +78,23 @@ if hash_out:
         h.write("\n".join(sorted(hashes)) + "\n")
     print(f"  written to {hash_out}; verify with: git cat-file --batch-check < {hash_out}")
 
-# skrIntegration drafts <= 950 characters
+# The live form's three answers: at most 5,000 characters each, counted as pasted (with their
+# line breaks). An unfilled [bracket] is printed, not failed: the founder fills them on the day.
 sub = open(os.path.join(pitch, "SUBMISSION.md"), encoding="utf-8").read()
-for tag in ("skr-A", "skr-B"):
+for tag in ("port", "nmd", "skr-live"):
     m = re.search(r"<!-- %s:start -->\n(.*?)<!-- %s:end -->" % (tag, tag), sub, re.S)
-    s = " ".join(re.sub(r"^> ?", "", l) for l in m.group(1).splitlines() if l.startswith(">"))
-    s = re.sub(r"\s+", " ", s).strip()
-    ok = len(s) <= 950
-    print(f"skrIntegration {tag}: {len(s)} chars {'OK' if ok else 'TOO LONG'}")
+    s = "\n".join(re.sub(r"^> ?", "", l) for l in m.group(1).splitlines() if l.startswith(">"))
+    ok = len(s) <= 5000
+    todo = len(re.findall(r"\[[^\]]+\]", s))
+    print(f"answer {tag}: {len(s)} chars {'OK' if ok else 'TOO LONG'}; brackets still to fill: {todo}")
     fail |= not ok
 
-# Deck: 15-18 slides (the eighteenth is the app's own slide, added with the redesign), each with
-# the required parts
+# Deck: 9-12 slides (the coach reads about 8,000 characters of its text), each with the required
+# parts
 deck = open(os.path.join(pitch, "DECK.md"), encoding="utf-8").read()
 slides = re.split(r"\n## Slide \d+:", deck)[1:]
 print(f"deck slides: {len(slides)}")
-fail |= not (15 <= len(slides) <= 18)
+fail |= not (9 <= len(slides) <= 12)
 for i, s in enumerate(slides, 1):
     for part in ("**Message:**", "**On slide", "**Visual:**", "**Speaker notes:**", "**Serves:**",
                  "**Sources:**"):
