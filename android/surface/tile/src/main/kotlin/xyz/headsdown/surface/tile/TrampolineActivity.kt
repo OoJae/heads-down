@@ -85,6 +85,12 @@ fun interface ClockInTransactions {
     suspend fun notSigned() {}
 }
 
+/** The trampoline's words that a test reads. */
+object TrampolineCopy {
+    /** Names the one wallet that has signed for this app, and promises nothing of any other. */
+    const val NO_WALLET = "Install a Solana wallet to clock in. This build has been run with Jupiter Mobile."
+}
+
 /**
  * Translucent, **non-exported** trampoline between the QS tile (or the home screen) and the
  * wallet. MWA needs a foreground Activity with an `ActivityResultSender` registered in
@@ -155,7 +161,7 @@ class TrampolineActivity : ComponentActivity() {
             clockInTransactions.prepare(account, capabilities)
         }
         when (result) {
-            WalletResult.NoWalletInstalled -> toast("Install a Solana wallet (Solflare, Phantom or Seed Vault) to clock in.")
+            WalletResult.NoWalletInstalled -> toast(TrampolineCopy.NO_WALLET)
             is WalletResult.Failed -> {
                 val armed = if (result.reason in WalletFailures.NOTHING_SIGNED) {
                     // The wallet says it signed nothing: there is no transaction to look for.

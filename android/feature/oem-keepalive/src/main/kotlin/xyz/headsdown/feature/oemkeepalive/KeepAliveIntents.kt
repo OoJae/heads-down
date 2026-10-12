@@ -9,6 +9,9 @@ enum class KeepAliveStep {
     /** Xiaomi per-app battery saver set to "No restrictions". */
     BATTERY_NO_RESTRICTIONS,
 
+    /** Xiaomi per-app "Other permissions": the two switches the full-screen morning page needs. */
+    MORNING_PAGE_PERMISSIONS,
+
     /** Stock Android Doze exemption (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`). */
     IGNORE_BATTERY_OPTIMIZATIONS,
 }
@@ -33,6 +36,10 @@ data class IntentSpec(
 object KeepAliveIntents {
     const val MIUI_SECURITY_CENTER = "com.miui.securitycenter"
     const val MIUI_POWER_KEEPER = "com.miui.powerkeeper"
+
+    /** Opens one app's permission editor (which holds "Other permissions"); the app is named in [MIUI_EXTRA_PACKAGE]. */
+    const val MIUI_APP_PERM_EDITOR = "miui.intent.action.APP_PERM_EDITOR"
+    const val MIUI_EXTRA_PACKAGE = "extra_pkgname"
 
     fun candidates(step: KeepAliveStep, profile: OemProfile, appPackage: String, appLabel: String): List<IntentSpec> {
         val appDetails = IntentSpec(
@@ -61,6 +68,16 @@ object KeepAliveIntents {
                     extras = mapOf("package_name" to appPackage, "package_label" to appLabel),
                 ),
             )
+            KeepAliveStep.MORNING_PAGE_PERMISSIONS -> if (!xiaomi) emptyList() else listOf(
+                IntentSpec(
+                    action = MIUI_APP_PERM_EDITOR,
+                    packageName = MIUI_SECURITY_CENTER,
+                    className = "com.miui.permcenter.permissions.PermissionsEditorActivity",
+                    extras = mapOf(MIUI_EXTRA_PACKAGE to appPackage),
+                ),
+                // Whichever activity answers the action on this release, if the one above has moved.
+                IntentSpec(action = MIUI_APP_PERM_EDITOR, extras = mapOf(MIUI_EXTRA_PACKAGE to appPackage)),
+            )
             KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS -> listOf(
                 IntentSpec(action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, dataUri = "package:$appPackage"),
                 IntentSpec(action = Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
@@ -75,11 +92,21 @@ data class GuideStep(val title: String, val detail: String, val action: KeepAliv
 /**
  * The onboarding checklist, adapted from dontkillmyapp.com (Xiaomi / generic), in plain
  * words. Heads Down is fail-safe either way: if the OS kills the shift, the rig goes cold
- * and nothing is spent. These steps only keep your shift alive until morning.
+ * and nothing is spent. These steps only keep your shift alive until morning, and on Xiaomi
+ * let the morning page open. That last step and its link have not been run on a Xiaomi phone:
+ * its words say "is likely to", never that it was seen.
  */
 object KeepAliveGuide {
+    const val MORNING_PAGE_SHOW_ON_LOCK_SCREEN = "Show on Lock screen"
+    const val MORNING_PAGE_POP_UP_WINDOWS = "Display pop-up windows while running in the background"
+
+    /** For every maker: the screen lit for longer than the shift's ten seconds of grace ends it. */
+    const val QUIET_NIGHT =
+        "A call or an alert that lights the screen for more than ten seconds ends the shift: switch on " +
+            "Do Not Disturb, or airplane mode with Wi-Fi on, before you lay the phone down."
+
     const val BATTERY_JUSTIFICATION =
-        "Heads Down signs one heartbeat per ORE round (about every 78 seconds) while your phone " +
+        "Heads Down signs one heartbeat per ORE round (about once a minute) while your phone " +
             "lies face-down. If Android puts the app to sleep, your rig goes cold and simply stops: " +
             "nothing is lost, but your shift ends early. Letting Heads Down ignore battery " +
             "optimization keeps the shift alive overnight on your charger."
@@ -109,7 +136,18 @@ object KeepAliveGuide {
                     null,
                 ),
             )
+            add(
+                GuideStep(
+                    "Let the morning page open",
+                    "Settings > Apps > Heads Down > Other permissions: turn on \"$MORNING_PAGE_SHOW_ON_LOCK_SCREEN\" and " +
+                        "\"$MORNING_PAGE_POP_UP_WINDOWS\". Without both, " +
+                        (if (profile.xiaomiSkin == XiaomiSkin.MIUI) "MIUI" else "HyperOS") +
+                        " is likely to block the full-screen page that opens after your alarm.",
+                    KeepAliveStep.MORNING_PAGE_PERMISSIONS,
+                ),
+            )
         }
         add(GuideStep("Allow running in the background", BATTERY_JUSTIFICATION, KeepAliveStep.IGNORE_BATTERY_OPTIMIZATIONS))
+        add(GuideStep("Keep the night quiet", QUIET_NIGHT, null))
     }
 }

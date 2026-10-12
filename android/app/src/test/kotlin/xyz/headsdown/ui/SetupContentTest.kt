@@ -204,7 +204,7 @@ class SetupContentTest : ScreenTest() {
         rule.onNodeWithText("Turn on Autostart").assertIsDisplayed()
         rule.onNodeWithTag(SetupTags.PRIMARY).assertTextEquals("Allow background running")
         // The settings pages of the guide open from the guide; background running only from the bar.
-        rule.onAllNodesWithText("Open settings").assertCountEquals(2)
+        rule.onAllNodesWithText("Open settings").assertCountEquals(3)
         rule.onAllNodesWithText("Allow background running").assertCountEquals(1)
         rule.onAllNodesWithText("I turned Autostart on").assertCountEquals(1)
         // "Skip for now" is offered once there are steps. The page has turned itself to them,

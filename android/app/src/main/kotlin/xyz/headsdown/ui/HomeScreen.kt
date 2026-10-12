@@ -511,7 +511,7 @@ fun HomeScreen(
             if (onBondChange != null && state.beforeShift) FocusBond(bondSkr, onBondChange)
 
             PageSection("HAUL") {
-                Haul(lastHaul, streak)
+                Haul(lastHaul, streak, nights = onboarding.rigRegistered)
                 Column {
                     LinkRow("Open the morning reveal", onClick = onPreviewReveal, modifier = Modifier.testTag(HomeTags.PREVIEW_REVEAL))
                     if (onClockOut != null) {
@@ -845,9 +845,12 @@ private fun FocusBond(bondSkr: ULong, onBondChange: (ULong) -> Unit) {
     }
 }
 
-/** The last haul in ORE gold on a raised plate, or the line that says there is none yet. */
+/**
+ * The last haul in ORE gold on a raised plate, or the line that says there is none yet. With
+ * [nights] (a rig is bound to this phone), the way to every finished night is under it.
+ */
 @Composable
-private fun Haul(lastHaul: String?, streak: String?) {
+private fun Haul(lastHaul: String?, streak: String?, nights: Boolean = false) {
     Plate(
         Modifier.fillMaxWidth().testTag(HomeTags.HAUL).semantics(mergeDescendants = true) {},
         tone = PlateTone.Slab,
@@ -862,6 +865,8 @@ private fun Haul(lastHaul: String?, streak: String?) {
             Body("Your first haul appears after your first mined shift.", color = Hd.colors.ash)
         }
         if (streak != null) Label(streak, Modifier.padding(top = 4.dp))
+        // A button of its own to a screen reader: the plate's one node stays the haul and the streak.
+        if (nights) xyz.headsdown.nights.AllNightsLink()
     }
 }
 
