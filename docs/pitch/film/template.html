@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Heads Down: your phone's night shift</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Big Shoulders Display"; src: url("assets/fonts/BigShouldersDisplay-ExtraBold.ttf") format("truetype"); font-weight: 800; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; }
+      @font-face { font-family: "IBM Plex Mono"; src: url("assets/fonts/IBMPlexMono-Medium.ttf") format("truetype"); font-weight: 500; }
+      :root { --bg: #0b0b0c; --bone: #efeae0; --mute: #9a958c; --gold: #f2b233; --ember: #ff6a2a; --line: rgba(239, 234, 224, 0.16); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; color: var(--bone); font-family: "IBM Plex Mono", monospace; background: var(--bg); }
+
+      /* ---- the room: a vignette, a floor line, a fixed grain */
+      #room { position: absolute; inset: 0; background: radial-gradient(1200px 760px at 50% 46%, #17171a 0%, #0b0b0c 62%, #070708 100%); }
+      #grain { position: absolute; inset: 0; background: url("assets/grain.png"); opacity: 0.05; mix-blend-mode: overlay; }
+      #floor { position: absolute; left: 0; top: 0; width: 1100px; height: 2px; background: linear-gradient(90deg, rgba(239,234,224,0) 0%, rgba(239,234,224,0.22) 30%, rgba(239,234,224,0.22) 70%, rgba(239,234,224,0) 100%); opacity: 0; }
+
+      /* ---- the phone */
+      #glow { position: absolute; left: 0; top: 0; width: 900px; height: 190px; border-radius: 50%; opacity: 0;
+        background: radial-gradient(closest-side, rgba(255,128,48,0.95) 0%, rgba(255,106,42,0.55) 28%, rgba(255,106,42,0.16) 58%, rgba(255,106,42,0) 78%); }
+      #rig { position: absolute; left: 0; top: 0; width: 400px; height: 886px; }
+      #device { position: absolute; left: 0; top: 0; width: 400px; height: 886px; }
+      #bezel { position: absolute; inset: 0; border-radius: 54px; background: #060607; box-shadow: 0 0 0 2px #2b2b2e, 0 0 0 3px #0a0a0b, 0 50px 140px rgba(0,0,0,0.65); }
+      #face { position: absolute; left: 10px; top: 10px; width: 380px; height: 866px; border-radius: 44px; overflow: hidden; background: #0c0c0d; }
+      #face video, #face img { position: absolute; left: 0; top: 0; width: 380px; height: 866px; object-fit: cover; }
+      #back { position: absolute; inset: 0; border-radius: 54px; opacity: 0; background: linear-gradient(155deg, #232326 0%, #141416 38%, #0c0c0d 100%); box-shadow: inset 0 0 0 2px #303034; }
+      #cam { position: absolute; left: 34px; top: 34px; width: 132px; height: 132px; border-radius: 34px; background: #0a0a0b; box-shadow: inset 0 0 0 2px #2a2a2d; }
+      #cam i { position: absolute; width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #26262a, #050506 70%); box-shadow: 0 0 0 2px #1d1d20; }
+      #cam i:nth-child(1) { left: 14px; top: 14px; } #cam i:nth-child(2) { left: 74px; top: 14px; } #cam i:nth-child(3) { left: 14px; top: 74px; }
+      #src { position: absolute; left: 0; top: 0; width: 760px; white-space: nowrap; font: 500 15px/1.5 "IBM Plex Mono", monospace; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mute); text-align: center; opacity: 0; }
+      #flag { position: absolute; left: 0; top: 0; width: 760px; white-space: nowrap; font: 400 15px/1.5 "IBM Plex Mono", monospace; color: var(--mute); text-align: center; opacity: 0; }
+
+      /* ---- type */
+      .scene { position: absolute; inset: 0; }
+      .col { position: absolute; top: 0; height: 1080px; display: flex; flex-direction: column; justify-content: center; }
+      .col.right { left: 760px; width: 1040px; }
+      .col.left { left: 140px; width: 1000px; }
+      .col.wide { left: 620px; width: 1220px; }
+      .col.full { left: 140px; width: 1640px; }
+      .kicker { display: flex; align-items: center; gap: 20px; font: 500 22px/1.2 "IBM Plex Mono", monospace; letter-spacing: 0.26em; text-transform: uppercase; color: var(--mute); margin-bottom: 34px; }
+      .kicker i { display: block; width: 56px; height: 3px; background: var(--gold); }
+      .kicker span { display: block; }
+      .display { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; text-transform: uppercase; letter-spacing: 0.005em; line-height: 0.92; }
+      .display.xxl { font-size: 300px; } .display.xl { font-size: 168px; } .display.lg { font-size: 132px; } .display.md { font-size: 104px; }
+      .ln { display: block; overflow: hidden; padding-top: 0.06em; }
+      .ln > span { display: block; }
+      .gold { color: var(--gold); } .dim { color: #6f6b64; } .emberc { color: var(--ember); }
+      .note { font: 400 30px/1.42 "IBM Plex Mono", monospace; color: var(--bone); max-width: 900px; margin-top: 36px; }
+      .small { font: 400 22px/1.5 "IBM Plex Mono", monospace; color: var(--mute); }
+      .tag { display: inline-block; align-self: flex-start; margin-top: 36px; padding: 8px 18px; border: 1.5px solid var(--line); border-radius: 8px; font: 500 19px/1.4 "IBM Plex Mono", monospace; letter-spacing: 0.08em; color: var(--mute); }
+
+      /* s1 */
+      .sub { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; text-transform: uppercase; font-size: 92px; line-height: 1; color: var(--gold); margin-top: 6px; }
+
+      /* s2 steps and board */
+      .steps { list-style: none; }
+      .steps li { display: flex; align-items: baseline; gap: 34px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+      .steps li b { display: block; width: 64px; font: 500 24px/1 "IBM Plex Mono", monospace; letter-spacing: 0.1em; color: var(--gold); }
+      .steps li .ln { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; text-transform: uppercase; font-size: 112px; line-height: 0.96; }
+      .steps li em { display: block; margin-left: auto; font: 400 22px/1 "IBM Plex Mono", monospace; font-style: normal; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+      .board { display: grid; grid-template-columns: repeat(5, 54px); gap: 8px; margin-top: 60px; }
+      .board i { display: block; width: 54px; height: 54px; border-radius: 6px; background: #1a1a1c; box-shadow: inset 0 0 0 1px #262629; }
+      .board i u { display: block; width: 54px; height: 54px; border-radius: 6px; background: var(--gold); opacity: 0; }
+      .boardrow { display: flex; align-items: flex-end; gap: 44px; }
+      .boardrow .small { max-width: 520px; padding-bottom: 6px; }
+
+      /* s3 chain */
+      .chain { display: flex; align-items: stretch; }
+      .node { width: 336px; padding: 30px 30px 32px; border: 1.5px solid var(--line); border-radius: 14px; background: rgba(20,20,22,0.7); }
+      .node b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; text-transform: uppercase; font-size: 66px; line-height: 1; margin-bottom: 16px; }
+      .node span { display: block; font: 400 22px/1.42 "IBM Plex Mono", monospace; color: var(--mute); }
+      .wire { position: relative; width: 106px; align-self: center; height: 2px; background: var(--line); }
+      .wire i { position: absolute; left: 0; top: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 18px rgba(242,178,51,0.9); opacity: 0; }
+      .bracket { position: relative; margin-left: 442px; width: 778px; height: 44px; margin-top: 22px; border: 2px solid var(--gold); border-top: none; border-radius: 0 0 12px 12px; }
+      .bracket span { position: absolute; left: 0; top: 66px; width: 778px; text-align: center; font: 500 22px/1 "IBM Plex Mono", monospace; letter-spacing: 0.26em; text-transform: uppercase; color: var(--gold); }
+      .check { display: block; text-decoration: none; margin-top: 20px; font: 500 19px/1 "IBM Plex Mono", monospace; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); opacity: 0; }
+
+      /* s4 stats */
+      .stats { display: flex; gap: 70px; margin-top: 6px; }
+      .stat b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 250px; line-height: 0.86; }
+      .stat span { display: block; margin-top: 14px; font: 500 21px/1.3 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--mute); }
+      .ticks { display: flex; gap: 7px; margin-top: 46px; }
+      .ticks i { display: block; width: 17px; height: 40px; border-radius: 3px; background: #2a2a2d; }
+      .ticks i u { display: block; width: 17px; height: 40px; border-radius: 3px; background: var(--bone); opacity: 0; }
+      .ticks i.dig u { background: var(--gold); }
+      .seal { margin-top: 40px; display: flex; align-items: center; gap: 22px; }
+      .seal b { display: block; padding: 12px 22px; border: 2px solid var(--gold); border-radius: 8px; font: 500 22px/1 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); }
+      .seal span { display: block; font: 400 20px/1.4 "IBM Plex Mono", monospace; color: var(--mute); }
+      .pair { display: flex; gap: 80px; margin-top: 44px; }
+      .pair div b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 190px; line-height: 0.9; }
+      .pair div span { display: block; margin-top: 12px; font: 500 21px/1.3 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--mute); }
+
+      /* s5 bond rail */
+      .rail { position: relative; width: 1000px; height: 210px; margin-top: 10px; }
+      .station { position: absolute; top: 0; width: 250px; height: 210px; border: 1.5px solid var(--line); border-radius: 14px; padding: 22px 24px; background: rgba(20,20,22,0.7); }
+      .station b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; text-transform: uppercase; font-size: 58px; line-height: 1; }
+      .station span { display: block; margin-bottom: 8px; font: 500 15px/1.4 "IBM Plex Mono", monospace; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mute); }
+      #stw { left: 0; } #stv { left: 750px; }
+      .track { position: absolute; left: 250px; top: 158px; width: 500px; height: 2px; background: var(--line); }
+      #tok { position: absolute; left: 40px; top: 127px; width: 170px; height: 62px; border-radius: 31px; background: var(--gold); color: #141414; font: 500 26px/62px "IBM Plex Mono", monospace; text-align: center; letter-spacing: 0.04em; }
+      .events { margin-top: 44px; }
+      .event { display: flex; gap: 26px; padding: 13px 0; border-bottom: 1px solid var(--line); font: 400 25px/1.4 "IBM Plex Mono", monospace; }
+      .event b { display: block; width: 96px; font-weight: 500; color: var(--gold); }
+      .event span { display: block; }
+
+      /* s6 streak */
+      .streak { display: flex; align-items: flex-end; gap: 40px; }
+      .streak b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 300px; line-height: 0.84; }
+      .streak .arrow { display: block; width: 130px; height: 4px; background: var(--line); margin-bottom: 110px; }
+      .streak .lbl { display: block; font: 500 21px/1.5 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--mute); margin-bottom: 30px; max-width: 300px; }
+      .cal { display: flex; gap: 8px; margin-top: 50px; }
+      .cal i { display: block; width: 24px; height: 44px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px #3a3a3e; }
+      .cal i.today { box-shadow: inset 0 0 0 1.5px var(--gold); }
+      .cal i.today u { display: block; width: 24px; height: 44px; border-radius: 4px; background: var(--gold); }
+      .offs { display: flex; align-items: center; gap: 16px; margin-top: 34px; }
+      .offs i { display: block; width: 44px; height: 44px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--bone); }
+      .offs span { display: block; margin-left: 10px; font: 400 25px/1.4 "IBM Plex Mono", monospace; }
+      .share { width: 600px; padding: 34px 36px 32px; border-radius: 22px; background: #151517; box-shadow: inset 0 0 0 1.5px #2c2c30, 0 40px 100px rgba(0,0,0,0.5); }
+      .share .t { font: 500 20px/1 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--mute); margin-bottom: 24px; }
+      .share .g { display: grid; grid-template-columns: repeat(5, 62px); gap: 8px; }
+      .share .g i { display: block; width: 62px; height: 62px; border-radius: 7px; background: #0b0b0c; box-shadow: inset 0 0 0 1px #29292c; }
+      .share .g i.b { background: #6b4a1e; } .share .g i.y { background: var(--gold); } .share .g i.o { background: var(--ember); }
+      .share .s { margin-top: 26px; white-space: nowrap; font: 500 24px/1.3 "IBM Plex Mono", monospace; }
+      .share .u { margin-top: 10px; font: 400 19px/1.4 "IBM Plex Mono", monospace; color: var(--mute); }
+      .sharewrap { display: flex; align-items: center; gap: 56px; }
+      .sharewrap .note { margin-top: 0; max-width: 380px; }
+
+      /* s7 scale */
+      .scale { position: relative; width: 1000px; height: 330px; margin-top: 20px; margin-bottom: 70px; transform: scale(1.04); transform-origin: left top; }
+      .axis { position: absolute; left: 0; top: 190px; width: 1000px; height: 2px; background: var(--line); }
+      .digzone { position: absolute; left: 0; top: 150px; width: 600px; height: 40px; background: linear-gradient(90deg, rgba(242,178,51,0) 0%, rgba(242,178,51,0.16) 100%); }
+      .gate { position: absolute; left: 600px; top: 146px; width: 2px; height: 100px; background: var(--bone); }
+      .mk { position: absolute; top: 0; width: 320px; margin-left: -160px; text-align: center; }
+      .mk b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 74px; line-height: 1; }
+      .mk span { display: block; margin-top: 6px; font: 500 16px/1.35 "IBM Plex Mono", monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); }
+      .mk i { display: block; width: 18px; height: 18px; border-radius: 50%; margin: 0 auto; background: var(--bone); }
+      .mk.top { top: 6px; } .mk.top i { position: absolute; left: 151px; top: 175px; margin: 0; }
+      .mk.bot { top: 181px; width: 200px; margin-left: -100px; } .mk.bot b { margin-top: 20px; }
+      .zl { position: absolute; top: 162px; font: 500 15px/1 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; }
+
+      /* s8 */
+      .big3 { display: flex; gap: 90px; }
+      .big3 div b { display: block; font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 270px; line-height: 0.86; }
+      .big3 div span { display: block; margin-top: 12px; font: 500 21px/1.3 "IBM Plex Mono", monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--mute); }
+      .ledgerwrap { position: absolute; left: 1000px; top: 150px; width: 800px; height: 780px; overflow: hidden; }
+      .ledger p { display: flex; gap: 22px; padding: 15px 0; border-bottom: 1px solid var(--line); font: 400 21px/1.35 "IBM Plex Mono", monospace; color: var(--mute); }
+      .ledger p b { display: block; width: 104px; font-weight: 500; color: var(--bone); }
+      .ledger p u { display: block; width: 190px; text-decoration: none; color: var(--gold); }
+      .ledger p span { display: block; }
+      .open { list-style: none; margin-top: 8px; }
+      .open li { display: flex; align-items: center; gap: 30px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+      .open li i { display: block; width: 26px; height: 26px; border-radius: 50%; box-shadow: inset 0 0 0 2.5px var(--ember); }
+      .open li .ln { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; text-transform: uppercase; font-size: 82px; line-height: 1; }
+
+      /* s9 */
+      .url { margin-top: 40px; font: 400 24px/1.6 "IBM Plex Mono", monospace; color: var(--mute); }
+      .pow { margin-top: 26px; font: 500 22px/1 "IBM Plex Mono", monospace; letter-spacing: 0.3em; text-transform: uppercase; color: var(--mute); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="{{DUR}}">
+      <div id="room"></div>
+      <div id="floor"></div>
+      <div id="glow"></div>
+      <div id="rig">
+      <div id="device">
+        <div id="bezel"></div>
+        <div id="face">
+{{SCREENS}}
+        </div>
+        <div id="back"><div id="cam"><i></i><i></i><i></i></div></div>
+      </div>
+      </div>
+      <p id="src">Redmi 14C · Solana mainnet · 12 Oct 2026 · the phone's own screen</p>
+      <p id="flag">Jupiter Mobile flags this new program's transactions. Each one is public.</p>
+
+      <!-- 1 · cold open -->
+      <section id="s1" class="clip scene" data-start="{{S1}}" data-duration="{{D1}}" data-track-index="3">
+        <div class="col left" id="s1a">
+          <p class="kicker"><i></i><span>Every night</span></p>
+          <h1 class="display xl">
+            <span class="ln"><span>Your phone lies</span></span>
+            <span class="ln"><span>face-down,</span></span>
+            <span class="ln"><span class="dim">doing nothing.</span></span>
+          </h1>
+        </div>
+        <div class="col left" id="s1b">
+          <h1 class="display xxl"><span class="ln"><span>Heads Down</span></span></h1>
+          <p class="sub"><span class="ln"><span>gives it a night shift.</span></span></p>
+        </div>
+      </section>
+
+      <!-- 2 · what it is -->
+      <section id="s2" class="clip scene" data-start="{{S2}}" data-duration="{{D2}}" data-track-index="3">
+        <div class="col right" id="s2i">
+          <p class="kicker"><i></i><span>Heads Down</span></p>
+          <h1 class="display xl">
+            <span class="ln"><span>Your phone's</span></span>
+            <span class="ln"><span>night shift.</span></span>
+          </h1>
+          <p class="sub" id="s2ip"><span class="ln"><span>Powered by ORE.</span></span></p>
+        </div>
+        <div class="col right" id="s2a">
+          <p class="kicker"><i></i><span>One shift, four moves</span></p>
+          <ol class="steps">
+            <li id="st1"><b>01</b><span class="ln"><span>Plug in</span></span></li>
+            <li id="st2"><b>02</b><span class="ln"><span>Set your alarm</span></span></li>
+            <li id="st3"><b>03</b><span class="ln"><span>Clock in</span></span><em>one wallet approval</em></li>
+            <li id="st4"><b>04</b><span class="ln"><span>Lay it face-down</span></span></li>
+          </ol>
+        </div>
+        <div class="col right" id="s2b">
+          <p class="kicker"><i></i><span>While it stays down</span></p>
+          <h1 class="display lg">
+            <span class="ln"><span>It digs ORE</span></span>
+            <span class="ln"><span class="gold">from your own</span></span>
+            <span class="ln"><span class="gold">ORE account.</span></span>
+          </h1>
+          <div class="boardrow">
+            <div class="board" id="board">{{BOARD}}</div>
+            <p class="small" id="s2n">Inside limits your wallet signed: a budget for the shift, and a price ceiling.</p>
+          </div>
+        </div>
+        <div class="col right" id="s2c">
+          <h1 class="display lg">
+            <span class="ln"><span>Pick it up.</span></span>
+            <span class="ln"><span class="dim">The rig goes cold.</span></span>
+          </h1>
+        </div>
+      </section>
+
+      <!-- 3 · the referee -->
+      <section id="s3" class="clip scene" data-start="{{S3}}" data-duration="{{D3}}" data-track-index="3">
+        <div class="col wide" id="s3a">
+          <p class="kicker"><i></i><span>What is new · the referee</span></p>
+          <div class="chain">
+            <div class="node" id="n1"><b>The phone</b><span>signs a heartbeat once a minute, with a key that cannot leave its secure hardware</span></div>
+            <div class="wire" id="w1"><i id="p1"></i></div>
+            <div class="node" id="n2"><b>Solana</b><span>checks that signature through the secp256r1 precompile</span><u class="check" id="ck">signature verified</u></div>
+            <div class="wire" id="w2"><i id="p2"></i></div>
+            <div class="node" id="n3"><b>The dig</b><span>ORE's deploy runs only when the check has passed</span><u class="check" id="dg">dig landed</u></div>
+          </div>
+          <div class="bracket" id="br"><span>the same transaction</span></div>
+        </div>
+        <div class="col wide" id="s3b">
+          <h1 class="display lg">
+            <span class="ln"><span>No server can say</span></span>
+            <span class="ln"><span>this phone was</span></span>
+            <span class="ln"><span>face-down.</span></span>
+          </h1>
+          <h1 class="display lg" id="s3not"><span class="ln"><span class="gold">Not even ours.</span></span></h1>
+        </div>
+        <div class="col right" id="s3c">
+          <p class="kicker"><i></i><span>Lift the phone</span></p>
+          <h1 class="display xl">
+            <span class="ln"><span>It signs a break.</span></span>
+            <span class="ln"><span class="emberc">The digging stops.</span></span>
+          </h1>
+          <p class="tag" id="s3tag">Shift 9 · 12 Oct 2026 · lifted and unlocked on purpose · tx 33aAQgcb…LogeB</p>
+        </div>
+      </section>
+
+      <!-- 4 · a real shift -->
+      <section id="s4" class="clip scene" data-start="{{S4}}" data-duration="{{D4}}" data-track-index="3">
+        <div class="col right" id="s4i">
+          <p class="kicker"><i></i><span>Here is a real shift</span></p>
+          <h1 class="display lg">
+            <span class="ln"><span>Solana mainnet.</span></span>
+            <span class="ln"><span class="dim">12 October 2026.</span></span>
+            <span class="ln"><span class="dim">A Redmi 14C.</span></span>
+          </h1>
+        </div>
+        <div class="col right" id="s4a">
+          <p class="kicker"><i></i><span>What the chain holds for it</span></p>
+          <div class="stats">
+            <div class="stat" id="k1"><b id="k1n">0</b><span>minutes face-down</span></div>
+            <div class="stat" id="k2"><b id="k2n">0</b><span>rounds dark</span></div>
+            <div class="stat" id="k3"><b id="k3n" class="gold">0</b><span>digs</span></div>
+          </div>
+          <div class="ticks" id="ticks">{{TICKS}}</div>
+          <div class="seal" id="seal"><b>Sealed on-chain · completed</b><span>one approval · tx BaiMVwRK…7Lvdt</span></div>
+        </div>
+        <div class="col right" id="s4b">
+          <p class="kicker"><i></i><span>The haul · SOL per ORE</span></p>
+          <div class="pair">
+            <div id="pr1"><b class="gold">0.894</b><span>the price paid</span></div>
+            <div id="pr2"><b>1.057</b><span>the market price</span></div>
+          </div>
+          <p class="note" id="s4n">The reveal puts them side by side, every morning.</p>
+        </div>
+      </section>
+
+      <!-- 5 · SKR -->
+      <section id="s5" class="clip scene" data-start="{{S5}}" data-duration="{{D5}}" data-track-index="3">
+        <div class="col right" id="s5a">
+          <p class="kicker"><i></i><span>SKR · the Focus Bond</span></p>
+          <div class="rail">
+            <div class="station" id="stw"><span>yours</span><b>Wallet</b></div>
+            <div class="track"></div>
+            <div class="station" id="stv"><span>bond vault</span><b>The shift</b></div>
+            <div id="tok">10 SKR</div>
+          </div>
+          <div class="events">
+            <p class="event" id="ev1"><b>16:03</b><span>10 SKR locked at clock-in · tx 4QSDYqcZ…JzvuR</span></p>
+            <p class="event" id="ev2"><b>16:45</b><span>the 41-minute window ends, the phone still face-down</span></p>
+            <p class="event" id="ev3"><b>16:52</b><span>the same 10 SKR released · tx BaiMVwRK…7Lvdt</span></p>
+          </div>
+        </div>
+        <div class="col right" id="s5b">
+          <h1 class="display lg">
+            <span class="ln"><span>A lost bond is</span></span>
+            <span class="ln"><span>never paid to</span></span>
+            <span class="ln"><span>the team.</span></span>
+          </h1>
+          <p class="note" id="s5n">Or to another player. By the program's rule it is sold for ORE that is burned.</p>
+        </div>
+      </section>
+
+      <!-- 6 · the habit -->
+      <section id="s6" class="clip scene" data-start="{{S6}}" data-duration="{{D6}}" data-track-index="3">
+        <div class="col right" id="s6a">
+          <p class="kicker"><i></i><span>Why you come back</span></p>
+          <div class="streak">
+            <span class="lbl">A streak, stored on-chain</span>
+            <b id="sk0" class="dim">0</b><i class="arrow" id="skar"></i><b id="sk1" class="gold">1</b>
+          </div>
+          <div class="cal" id="cal">{{CAL}}</div>
+          <div class="offs" id="offs"><i></i><i></i><span>two nights off a month: one bad night does not end it</span></div>
+        </div>
+        <div class="col right" id="s6b">
+          <p class="kicker"><i></i><span>The Nights screen</span></p>
+          <p class="note" id="s6k" style="margin-top: 0; margin-bottom: 44px">Every shift, how it ended, and its transaction.</p>
+          <div class="sharewrap">
+            <div class="share" id="share">
+              <p class="t">Heads Down · night shift</p>
+              <div class="g">{{SHARE}}</div>
+              <p class="s">37 rounds dark · 49 m · streak 1</p>
+              <p class="u">oojae.github.io/heads-down</p>
+            </div>
+            <p class="note" id="s6n">The share card shows the night. No wallet address, no amounts.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7 · plain about money -->
+      <section id="s7" class="clip scene" data-start="{{S7}}" data-duration="{{D7}}" data-track-index="3">
+        <div class="col right" id="s7a">
+          <p class="kicker"><i></i><span>Plain about money</span></p>
+          <h1 class="display lg">
+            <span class="ln"><span>One route to ORE.</span></span>
+            <span class="ln"><span class="gold">Not income.</span></span>
+          </h1>
+        </div>
+        <div class="col right" id="s7b">
+          <p class="kicker"><i></i><span>SOL per ORE</span></p>
+          <div class="scale">
+            <div class="digzone" id="dz"></div>
+            <div class="axis" id="ax"></div>
+            <div class="gate" id="gate"></div>
+            <span class="zl gold" id="zl1" style="left: 440px">the rig digs</span>
+            <span class="zl" id="zl2" style="left: 622px; color: #9a958c">the rig waits</span>
+            <div class="mk top" id="m1" style="left: 200px"><b>0.80</b><span>ORE's cost figure</span><i></i></div>
+            <div class="mk top" id="m2" style="left: 600px"><b>1.00</b><span>the ceiling, raised for this film</span></div>
+            <div class="mk bot" id="m3" style="left: 388px"><i style="background: #f2b233"></i><b class="gold">0.894</b><span>this shift's digs</span></div>
+            <div class="mk bot" id="m4" style="left: 714px"><i></i><b>1.057</b><span>the market</span></div>
+            <div class="mk bot" id="m5" style="left: 912px"><i style="background: #ff6a2a"></i><b class="emberc">1.13</b><span>the rig's first twenty digs</span></div>
+          </div>
+          <p class="note" id="s7n">And the clock-out can buy ORE through Jupiter instead.</p>
+        </div>
+      </section>
+
+      <!-- 8 · what has run -->
+      <section id="s8" class="clip scene" data-start="{{S8}}" data-duration="{{D8}}" data-track-index="3">
+        <div class="col left" id="s8a">
+          <p class="kicker"><i></i><span>On Solana mainnet since 10 October 2026</span></p>
+          <div class="big3">
+            <div id="b1"><b id="b1n">0</b><span>shifts</span></div>
+            <div id="b2"><b id="b2n" class="gold">0</b><span>digs</span></div>
+          </div>
+          <p class="note" id="s8n" style="max-width: 760px">One rig, one phone. Every transaction public, and listed in the repository.</p>
+        </div>
+        <div class="ledgerwrap" id="lw"><div class="ledger" id="ledger">{{LEDGER}}</div></div>
+      </section>
+
+      <!-- 9 · close -->
+      <section id="s9" class="clip scene" data-start="{{S9}}" data-duration="{{D9}}" data-track-index="3">
+        <div class="col left" id="s9a">
+          <p class="kicker"><i></i><span>Your phone's night shift</span></p>
+          <h1 class="display xxl"><span class="ln"><span>Heads Down</span></span></h1>
+          <p class="sub"><span class="ln"><span>Put it down. It digs.</span></span></p>
+          <p class="pow" id="pow">Powered by ORE</p>
+          <p class="url" id="url">github.com/OoJae/heads-down · oojae.github.io/heads-down</p>
+        </div>
+      </section>
+
+      <audio id="vo" src="assets/{{AUDIO}}" data-start="0" data-duration="{{DUR}}" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script>
+      const T = {{TJSON}};
+      const S = T.s, C = T.c, END = T.end;
+      const tl = gsap.timeline({ paused: true });
+      const EXPO = "expo.out", INOUT = "power3.inOut";
+
+      // ---- small vocabulary of moves
+      const linesIn = (sel, t, st = 0.09, d = 0.95) => tl.fromTo(sel + " .ln > span", { yPercent: 115 }, { yPercent: 0, duration: d, ease: EXPO, stagger: st }, t);
+      const linesOut = (sel, t, d = 0.42) => {
+        tl.to(sel + " .ln > span", { yPercent: -115, duration: d, ease: "power3.in", stagger: 0.035 }, t);
+        tl.set(sel, { opacity: 0 }, t + d + 0.22); // the panel is gone, not only masked
+      };
+      const rise = (sel, t, d = 0.6, y = 22) => tl.fromTo(sel, { opacity: 0, y: y }, { opacity: 1, y: 0, duration: d, ease: "power3.out" }, t);
+      const gone = (sel, t, d = 0.34) => tl.to(sel, { opacity: 0, duration: d, ease: "power2.in" }, t);
+      const kick = (sel, t) => {
+        tl.fromTo(sel + " .kicker i", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: EXPO, transformOrigin: "left center" }, t);
+        tl.fromTo(sel + " .kicker span", { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: 0.6, ease: "power3.out" }, t + 0.1);
+      };
+      const count = (id, to, t, d = 1.0) => {
+        const o = { v: 0 }, el = document.getElementById(id);
+        tl.to(o, { v: to, duration: d, ease: "power2.out", onUpdate: () => { el.textContent = String(Math.round(o.v)); } }, t);
+      };
+      const panelOff = (sel) => tl.set(sel, { opacity: 0 }, 0);
+
+      // ---- the phone: where it stands, and how it lies down
+      const POS = { left: 200, center: 760, right: 1300 };
+      const stand = (t, x, d = 1.15) => {
+        tl.to("#rig", { x: x, y: 97, scale: 1, duration: d, ease: INOUT }, t);
+        tl.to("#device", { rotationX: 0, duration: d, ease: INOUT }, t);
+        tl.to("#back", { opacity: 0, duration: d * 0.45, ease: "power2.out" }, t + d * 0.3);
+        tl.to("#glow", { opacity: 0, duration: d * 0.5, ease: "power2.in" }, t);
+        tl.to("#floor", { opacity: 0, duration: d * 0.5 }, t);
+        tl.to("#src", { x: x - 180, opacity: 1, duration: 0.5 }, t + d * 0.7);
+      };
+      const lie = (t, x, d = 1.25, s = 0.92) => {
+        tl.to("#rig", { x: x, y: 60, scale: s, duration: d, ease: INOUT }, t);
+        tl.to("#device", { rotationX: 66, duration: d, ease: INOUT }, t);
+        tl.to("#back", { opacity: 1, duration: d * 0.4, ease: "power2.in" }, t + d * 0.15);
+        tl.set("#glow", { x: x - 250, y: 690 }, t);
+        tl.set("#floor", { x: x - 350, y: 786 }, t);
+        tl.to("#floor", { opacity: 1, duration: 0.8 }, t + d * 0.6);
+        tl.to("#glow", { opacity: 0.9, duration: 0.9, ease: "power2.out" }, t + d * 0.72);
+        tl.to("#src", { opacity: 0, duration: 0.25 }, t);
+        tl.to("#flag", { opacity: 0, duration: 0.25 }, t);
+      };
+      const breathe = (t, until) => {
+        const n = Math.max(0, Math.floor((until - t) / 2.4) - 1);
+        if (until - t > 2.4) tl.to("#glow", { opacity: 0.55, duration: 1.2, ease: "sine.inOut", yoyo: true, repeat: n * 2 + 1 }, t);
+      };
+      const flagOn = (t, x, d) => {
+        tl.set("#flag", { x: x - 180, y: 1030 }, t);
+        tl.to("#flag", { opacity: 1, duration: 0.3 }, t);
+        tl.to("#flag", { opacity: 0, duration: 0.3 }, t + d);
+      };
+
+      // ---- everything that is not in its first scene starts unseen
+      ["#s1b", "#s2a", "#s2b", "#s2c", "#s3b", "#s3c", "#s4i", "#s4a", "#s4b", "#s5b", "#s6b", "#s7b"].forEach(panelOff);
+      tl.set("#rig", { x: POS.right, y: 60, scale: 0.92 }, 0);
+      tl.set("#device", { rotationX: 66, transformPerspective: 1700, transformOrigin: "50% 50%" }, 0);
+      tl.set("#back", { opacity: 1 }, 0);
+      tl.set("#glow", { x: POS.right - 250, y: 690, opacity: 0 }, 0);
+      tl.set("#floor", { x: POS.right - 350, y: 786, opacity: 0 }, 0);
+      tl.set("#src", { y: 998, x: POS.left - 180 }, 0);
+
+      // ================= 1 · cold open
+      tl.fromTo("#rig", { opacity: 0 }, { opacity: 1, duration: 1.4, ease: "power2.out" }, 0.1);
+      tl.to("#floor", { opacity: 1, duration: 1.2 }, 0.3);
+      tl.fromTo("#rig", { scale: 0.88 }, { scale: 0.96, duration: S[2] - 0.4, ease: "sine.out" }, 0);
+      kick("#s1a", S[1] + 0.25);
+      linesIn("#s1a", S[1] + 0.35, 0.16, 1.0);
+      tl.to("#glow", { opacity: 0.3, duration: 1.6, ease: "sine.inOut" }, 0.9);
+      linesOut("#s1a", C.c1_hd - 0.45);
+      gone("#s1a .kicker", C.c1_hd - 0.45);
+      tl.set("#s1b", { opacity: 1 }, C.c1_hd - 0.1);
+      linesIn("#s1b", C.c1_hd - 0.05, 0.22, 1.05);
+      tl.to("#glow", { opacity: 0.95, duration: 1.0, ease: "power2.out" }, C.c1_hd + 0.1);
+      linesOut("#s1b", S[2] - 0.5);
+
+      // ================= 2 · what it is
+      stand(S[2] - 0.25, POS.left, 1.3);
+      kick("#s2i", S[2] + 0.45);
+      tl.fromTo("#s2i .display .ln > span", { yPercent: 115 }, { yPercent: 0, duration: 0.95, ease: EXPO, stagger: 0.12 }, S[2] + 0.55);
+      tl.fromTo("#s2ip .ln > span", { yPercent: 115 }, { yPercent: 0, duration: 0.9, ease: EXPO }, Math.min(C.c2_powered - 0.15, S[2] + 1.15));
+      linesOut("#s2i", C.c2_plug - 0.62);
+      gone("#s2i .kicker", C.c2_plug - 0.62);
+      tl.set("#s2a", { opacity: 1 }, C.c2_plug - 0.4);
+      kick("#s2a", C.c2_plug - 0.35);
+      [["#st1", C.c2_plug], ["#st2", C.c2_alarm], ["#st3", C.c2_clock], ["#st4", C.c2_lay]].forEach(([sel, t]) => {
+        tl.fromTo(sel, { opacity: 0 }, { opacity: 1, duration: 0.3 }, t - 0.15);
+        linesIn(sel, t - 0.15, 0, 0.8);
+        tl.fromTo(sel + " b", { opacity: 0, x: -10 }, { opacity: 1, x: 0, duration: 0.5 }, t - 0.05);
+      });
+      tl.fromTo("#st3 em", { opacity: 0 }, { opacity: 1, duration: 0.5 }, C.c2_clock + 0.5);
+      flagOn(T.x.flag2, POS.left, T.x.flag2d);
+      lie(C.c2_lay + 0.55, POS.left, 1.3);
+      gone("#s2a", C.c2_digs - 0.5);
+      tl.set("#s2b", { opacity: 1 }, C.c2_digs - 0.15);
+      kick("#s2b", C.c2_digs - 0.1);
+      linesIn("#s2b", C.c2_digs, 0.12, 0.95);
+      rise("#board", C.c2_digs + 0.5, 0.6);
+      rise("#s2n", C.c2_inside, 0.6);
+      {
+        // four squares a round, as the rig places them; a fixed list, so every render is the same
+        const rounds = [[2, 8, 11, 19], [0, 6, 13, 22], [4, 7, 15, 18], [1, 9, 12, 24], [3, 10, 16, 21], [5, 8, 14, 23], [2, 11, 17, 20]];
+        const span = Math.max(1.2, C.c2_pick - 0.4 - (C.c2_digs + 0.9));
+        const n = Math.max(2, Math.min(rounds.length, Math.floor(span / 0.85)));
+        for (let r = 0; r < n; r++) {
+          const at = C.c2_digs + 0.9 + r * (span / n);
+          rounds[r].forEach((c) => {
+            tl.to("#bc" + c + " u", { opacity: 1, duration: 0.16, ease: "power2.out" }, at);
+            tl.to("#bc" + c + " u", { opacity: 0, duration: 0.5, ease: "power2.in" }, at + 0.32);
+          });
+          tl.to("#glow", { opacity: 1, duration: 0.14 }, at);
+          tl.to("#glow", { opacity: 0.72, duration: 0.4 }, at + 0.16);
+        }
+      }
+      gone("#s2b", C.c2_pick - 0.35);
+      stand(C.c2_pick - 0.2, POS.left, 1.0);
+      tl.set("#s2c", { opacity: 1 }, C.c2_pick - 0.05);
+      linesIn("#s2c", C.c2_pick, 0.5, 0.9);
+      linesOut("#s2c", S[3] - 0.45);
+
+      // ================= 3 · the referee
+      lie(S[3] - 0.3, 90, 1.2, 0.78);
+      kick("#s3a", S[3] + 0.4);
+      rise("#n1", C.c3_once - 0.25, 0.7);
+      tl.fromTo("#w1", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: EXPO, transformOrigin: "left center" }, C.c3_once + 0.45);
+      rise("#n2", C.c3_sol - 0.25, 0.7);
+      tl.fromTo("#w2", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: EXPO, transformOrigin: "left center" }, C.c3_same - 0.5);
+      rise("#n3", C.c3_same - 0.25, 0.7);
+      tl.fromTo("#br", { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, C.c3_same + 0.25);
+      {
+        // a heartbeat travels the wire; each arrival is checked, then dug
+        const from = C.c3_once + 0.9, until = C.c3_no - 0.7, cyc = 1.7;
+        const n = Math.max(1, Math.floor((until - from) / cyc));
+        for (let k = 0; k < n; k++) {
+          const at = from + k * cyc;
+          tl.fromTo("#n1", { borderColor: "rgba(242,178,51,0.9)" }, { borderColor: "rgba(239,234,224,0.16)", duration: 0.7 }, at - 0.08);
+          tl.fromTo("#p1", { x: 0, opacity: 1 }, { x: 90, duration: 0.5, ease: "power1.inOut" }, at);
+          tl.to("#p1", { opacity: 0, duration: 0.1 }, at + 0.5);
+          tl.fromTo("#ck", { opacity: 0 }, { opacity: 1, duration: 0.15 }, at + 0.5);
+          tl.fromTo("#n2", { borderColor: "rgba(242,178,51,0.9)" }, { borderColor: "rgba(239,234,224,0.16)", duration: 0.7 }, at + 0.5);
+          if (at + 0.62 > C.c3_same - 0.2) {
+            tl.fromTo("#p2", { x: 0, opacity: 1 }, { x: 90, duration: 0.5, ease: "power1.inOut" }, at + 0.62);
+            tl.to("#p2", { opacity: 0, duration: 0.1 }, at + 1.12);
+            tl.fromTo("#dg", { opacity: 0 }, { opacity: 1, duration: 0.15 }, at + 1.12);
+            tl.fromTo("#n3", { borderColor: "rgba(242,178,51,0.9)" }, { borderColor: "rgba(239,234,224,0.16)", duration: 0.7 }, at + 1.12);
+          }
+          tl.to("#glow", { opacity: 1, duration: 0.12 }, at);
+          tl.to("#glow", { opacity: 0.7, duration: 0.5 }, at + 0.14);
+        }
+      }
+      gone("#s3a", C.c3_no - 0.5);
+      tl.set("#s3b", { opacity: 1 }, C.c3_no - 0.15);
+      tl.set("#s3not .ln > span", { yPercent: 115 }, C.c3_no - 0.15);
+      tl.fromTo("#s3b .display:first-child .ln > span", { yPercent: 115 }, { yPercent: 0, duration: 0.95, ease: EXPO, stagger: 0.1 }, C.c3_no - 0.1);
+      tl.to("#s3not .ln > span", { yPercent: 0, duration: 0.9, ease: EXPO }, C.c3_not - 0.1);
+      linesOut("#s3b", C.c3_lift - 0.55);
+      stand(C.c3_lift - 0.35, POS.left, 1.05);
+      tl.set("#s3c", { opacity: 1 }, C.c3_lift - 0.1);
+      kick("#s3c", C.c3_lift);
+      tl.fromTo("#s3c .display .ln:nth-child(1) > span", { yPercent: 115 }, { yPercent: 0, duration: 0.9, ease: EXPO }, C.c3_signs - 0.15);
+      tl.fromTo("#s3c .display .ln:nth-child(2) > span", { yPercent: 115 }, { yPercent: 0, duration: 0.9, ease: EXPO }, C.c3_stop - 0.15);
+      rise("#s3tag", C.c3_stop + 0.5, 0.6);
+      gone("#s3c", S[4] + 0.5);
+
+      // ================= 4 · a real shift
+      tl.set("#s4i", { opacity: 1 }, S[4] + 0.9);
+      kick("#s4i", S[4] + 0.95);
+      [C.c4_main, C.c4_date, C.c4_redmi].forEach((t, n) => {
+        tl.fromTo("#s4i .display .ln:nth-child(" + (n + 1) + ") > span", { yPercent: 115 }, { yPercent: 0, duration: 0.9, ease: EXPO }, Math.max(S[4] + 1.0, t - 0.15));
+      });
+      linesOut("#s4i", C.c4_41 - 0.8);
+      gone("#s4i .kicker", C.c4_41 - 0.8);
+      tl.set("#s4a", { opacity: 1 }, C.c4_41 - 0.45);
+      kick("#s4a", C.c4_41 - 0.4);
+      [["#k1", "k1n", 41, C.c4_41], ["#k2", "k2n", 37, C.c4_37], ["#k3", "k3n", 5, C.c4_5]].forEach(([sel, id, to, t]) => {
+        rise(sel, t - 0.2, 0.5, 30);
+        count(id, to, t - 0.15, 0.9);
+      });
+      tl.fromTo("#ticks i", { opacity: 0, scaleY: 0.3 }, { opacity: 1, scaleY: 1, duration: 0.3, stagger: 0.012, ease: "power2.out", transformOrigin: "50% 100%" }, C.c4_37 - 0.2);
+      tl.to("#ticks i u", { opacity: 1, duration: 0.2, stagger: 0.028, ease: "none" }, C.c4_37);
+      rise("#seal", C.c4_one + 0.1, 0.6);
+      tl.fromTo("#seal b", { scale: 1.12 }, { scale: 1, duration: 0.5, ease: "back.out(2)" }, C.c4_one + 0.1);
+      gone("#s4a", C.c4_haul - 0.45);
+      tl.set("#s4b", { opacity: 1 }, C.c4_haul - 0.1);
+      kick("#s4b", C.c4_haul);
+      rise("#pr1", C.c4_price - 0.2, 0.6, 30);
+      rise("#pr2", C.c4_beside - 0.2, 0.6, 30);
+      rise("#s4n", C.c4_beside + 0.7, 0.6);
+      flagOn(T.x.flag4, POS.left, T.x.flag4d);
+      gone("#s4b", S[5] - 0.4);
+
+      // ================= 5 · SKR
+      kick("#s5a", S[5] + 0.25);
+      rise("#stw", S[5] + 0.35, 0.6);
+      rise("#stv", S[5] + 0.5, 0.6);
+      tl.fromTo("#s5a .track", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: EXPO, transformOrigin: "left center" }, S[5] + 0.6);
+      tl.fromTo("#tok", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.8)" }, S[5] + 0.8);
+      tl.to("#tok", { x: 750, duration: 1.0, ease: INOUT }, C.c5_locked - 0.5);
+      tl.fromTo("#stv", { borderColor: "rgba(242,178,51,1)" }, { borderColor: "rgba(239,234,224,0.16)", duration: 0.9 }, C.c5_locked + 0.5);
+      rise("#ev1", C.c5_locked + 0.2, 0.5);
+      rise("#ev2", C.c5_done - 0.15, 0.45);
+      tl.to("#tok", { x: 0, duration: 0.9, ease: INOUT }, C.c5_done + 0.45);
+      tl.fromTo("#stw", { borderColor: "rgba(242,178,51,1)" }, { borderColor: "rgba(239,234,224,0.16)", duration: 0.9 }, C.c5_done + 1.3);
+      rise("#ev3", C.c5_done + 1.15, 0.45);
+      gone("#s5a", C.c5_lost + 0.55);
+      tl.set("#s5b", { opacity: 1 }, C.c5_lost + 0.85);
+      linesIn("#s5b", C.c5_lost + 0.9, 0.1, 0.9);
+      rise("#s5n", C.c5_rule - 0.2, 0.6);
+      gone("#s5b", S[6] - 0.4);
+
+      // ================= 6 · the habit
+      kick("#s6a", S[6] + 0.25);
+      rise("#s6a .lbl", C.c6_every - 0.1, 0.5);
+      rise("#sk0", C.c6_every, 0.5, 30);
+      tl.fromTo("#skar", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: EXPO, transformOrigin: "left center" }, C.c6_streak - 0.3);
+      tl.fromTo("#sk1", { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 0.7, ease: EXPO }, C.c6_streak - 0.1);
+      tl.fromTo("#cal i", { opacity: 0 }, { opacity: 1, duration: 0.25, stagger: 0.02 }, C.c6_streak + 0.3);
+      tl.fromTo("#cal i.today u", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: "back.out(2)", transformOrigin: "50% 100%" }, C.c6_streak + 1.0);
+      rise("#offs", C.c6_two - 0.2, 0.6);
+      tl.fromTo("#offs i", { scale: 0 }, { scale: 1, duration: 0.5, stagger: 0.14, ease: "back.out(2.2)" }, C.c6_two - 0.1);
+      gone("#s6a", C.c6_nights - 0.5);
+      tl.set("#s6b", { opacity: 1 }, C.c6_nights - 0.15);
+      kick("#s6b", C.c6_nights - 0.1);
+      rise("#s6k", C.c6_nights + 0.15, 0.6);
+      tl.fromTo("#share", { opacity: 0, y: 60, rotationZ: -2 }, { opacity: 1, y: 0, rotationZ: 0, duration: 0.9, ease: EXPO }, C.c6_share - 0.4);
+      tl.fromTo("#share .g i", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.3, stagger: 0.022, ease: "back.out(2)" }, C.c6_share - 0.1);
+      rise("#s6n", C.c6_share + 0.7, 0.6);
+      gone("#s6b", S[7] - 0.4);
+
+      // ================= 7 · plain about money
+      kick("#s7a", S[7] + 0.25);
+      tl.fromTo("#s7a .display .ln:nth-child(1) > span", { yPercent: 115 }, { yPercent: 0, duration: 0.95, ease: EXPO }, C.c7_mining - 0.15);
+      tl.fromTo("#s7a .display .ln:nth-child(2) > span", { yPercent: 115 }, { yPercent: 0, duration: 0.7, ease: EXPO }, C.c7_not - 0.15);
+      linesOut("#s7a", C.c7_cost - 0.95);
+      gone("#s7a .kicker", C.c7_cost - 0.95);
+      tl.set("#s7b", { opacity: 1 }, C.c7_cost - 0.5);
+      kick("#s7b", C.c7_cost - 0.45);
+      tl.fromTo("#ax", { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: EXPO, transformOrigin: "left center" }, C.c7_cost - 0.45);
+      rise("#m1", C.c7_cost - 0.2, 0.5, -16);
+      tl.fromTo("#gate", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: EXPO, transformOrigin: "50% 100%" }, C.c7_ceiling - 0.25);
+      rise("#m2", C.c7_ceiling - 0.15, 0.5, -16);
+      tl.fromTo("#dz", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: EXPO, transformOrigin: "right center" }, C.c7_ceiling + 0.3);
+      rise("#zl1", C.c7_ceiling + 0.5, 0.4, 0);
+      rise("#zl2", C.c7_ceiling + 0.7, 0.4, 0);
+      rise("#m3", C.c7_that - 0.1, 0.55, 20);
+      rise("#m4", C.c7_market - 0.1, 0.55, 20);
+      rise("#m5", C.c7_first - 0.1, 0.55, 20);
+      rise("#s7n", C.c7_buy - 0.1, 0.6);
+      gone("#s7b", S[8] - 0.4);
+
+      // ================= 8 · what has run
+      tl.to("#rig", { opacity: 0, x: -260, duration: 0.7, ease: "power3.in" }, S[8] - 0.5);
+      tl.to("#src", { opacity: 0, duration: 0.3 }, S[8] - 0.5);
+      kick("#s8a", S[8] + 0.3);
+      rise("#b1", C.c8_ten - 0.2, 0.5, 30);
+      count("b1n", 10, C.c8_ten - 0.15, 0.8);
+      rise("#b2", C.c8_35 - 0.2, 0.5, 30);
+      count("b2n", 35, C.c8_35 - 0.15, 0.9);
+      rise("#s8n", C.c8_every - 0.1, 0.6);
+      tl.fromTo("#lw", { opacity: 0 }, { opacity: 1, duration: 0.6 }, S[8] + 0.6);
+      tl.fromTo("#ledger", { y: 300 }, { y: -T.x.ledgerScroll, duration: Math.max(2, S[9] - S[8] - 0.9), ease: "none" }, S[8] + 0.6);
+      gone("#s8a", S[9] - 0.45);
+      gone("#lw", S[9] - 0.45);
+
+      // ================= 9 · close
+      tl.set("#rig", { x: POS.right + 260, y: 60, scale: 0.92 }, S[9] - 0.3);
+      tl.set("#device", { rotationX: 66 }, S[9] - 0.3);
+      tl.set("#back", { opacity: 1 }, S[9] - 0.3);
+      tl.set("#glow", { x: POS.right - 250, y: 690, opacity: 0 }, S[9] - 0.3);
+      tl.set("#floor", { x: POS.right - 350, y: 786 }, S[9] - 0.3);
+      tl.to("#rig", { opacity: 1, x: POS.right, duration: 1.2, ease: EXPO }, S[9] - 0.2);
+      tl.to("#rig", { scale: 0.99, duration: Math.max(1, END - S[9] - 1.2), ease: "sine.out" }, S[9] + 1.0);
+      tl.to("#floor", { opacity: 1, duration: 0.9 }, S[9]);
+      tl.to("#glow", { opacity: 0.35, duration: 1.0 }, S[9] + 0.2);
+      kick("#s9a", S[9] + 0.2);
+      tl.fromTo("#s9a .display .ln > span", { yPercent: 115 }, { yPercent: 0, duration: 1.05, ease: EXPO }, C.c9_hd - 0.15);
+      tl.fromTo("#s9a .sub .ln > span", { yPercent: 115 }, { yPercent: 0, duration: 0.95, ease: EXPO }, C.c9_put - 0.15);
+      tl.to("#glow", { opacity: 1, duration: 0.9, ease: "power2.out" }, C.c9_digs - 0.1);
+      rise("#pow", C.c9_pow - 0.1, 0.6);
+      rise("#url", C.c9_pow + 0.5, 0.6);
+      tl.to("#glow", { opacity: 0.7, duration: 1.2, ease: "sine.inOut" }, Math.min(END - 1.3, C.c9_pow + 1.0));
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
