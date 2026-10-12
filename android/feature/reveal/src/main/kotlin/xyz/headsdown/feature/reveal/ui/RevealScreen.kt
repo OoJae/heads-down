@@ -72,6 +72,7 @@ import xyz.headsdown.core.design.components.SkeletonBlock
 import xyz.headsdown.core.design.components.SkeletonLine
 import xyz.headsdown.core.design.components.SlabState
 import xyz.headsdown.core.design.components.StatBlock
+import xyz.headsdown.core.design.components.StatRow
 import xyz.headsdown.core.design.components.TextAction
 import xyz.headsdown.feature.reveal.board.BoardReplay
 import xyz.headsdown.feature.reveal.haul.FakeHaulRepository
@@ -94,6 +95,7 @@ object RevealTags {
     const val DONE = "reveal-done"
     const val VERDICT = "reveal-verdict"
     const val STREAK = "reveal-streak"
+    const val SIGNED_ON_PHONE = "reveal-signed-on-phone"
     const val EXPLORER = "reveal-explorer"
     const val SHOW_SAMPLE = "reveal-show-sample"
     const val NIGHT_STATEMENT = "reveal-night-statement"
@@ -201,6 +203,8 @@ fun RevealScreen(
             )
             amounts.forEach { OreMined(it, lit = summary.oreMinedAtoms > 0) }
             Counts(counts)
+            // The phone's own count, a row of its own under the haul's: the two are not the same number.
+            copy.signedOnPhone?.let { StatRow(it.label, it.value, Modifier.testTag(RevealTags.SIGNED_ON_PHONE)) }
             Price(copy)
             copy.nearMiss?.let { Sentence(it, muted = false) }
             copy.firstPickup?.let { BasicText(it, style = Hd.type.figure.copy(color = Hd.colors.ash)) }

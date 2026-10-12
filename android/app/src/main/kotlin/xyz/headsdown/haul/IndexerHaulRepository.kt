@@ -66,7 +66,8 @@ enum class ShiftOnChain {
  *
  * - No indexer configured, no bound rig, or no finished shift (404): null, "no haul yet".
  * - `first_pickup_ts` is not observable on-chain: it comes from the shift service's own journal
- *   ([lastShift]) when the journal still holds that shift.
+ *   ([lastShift]) when the journal still holds that shift. So does the count of rounds this
+ *   phone signed, which the sealed shift's dark rounds need not equal.
  * - A real (not `simulated`) haul updates the widget's last haul and streak.
  * - The indexer serves sealed shifts only. A shift this phone worked and that is over but not
  *   sealed is reported as itself ([night]), never covered by an older haul. The chain is asked
@@ -126,8 +127,13 @@ class IndexerHaulRepository(
     /** The haul as the reveal shows it; a real one also reaches the widget. */
     private fun shown(haul: IndexerHaul): HaulSummary? {
         val shiftId = haul.shiftId.toLongOrNull() ?: return null
-        val journaled = lastShift()?.takeIf { it.shiftId == shiftId }?.firstPickupWallMillis
-        val summary = HaulMapping.toSummary(haul, haul.firstPickupTs?.let { it * 1000 } ?: journaled)
+        // What only the phone knows of this shift, while its journal still holds that shift.
+        val journaled = lastShift()?.takeIf { it.shiftId == shiftId }
+        val summary = HaulMapping.toSummary(
+            haul,
+            firstPickupWallMillis = haul.firstPickupTs?.let { it * 1000 } ?: journaled?.firstPickupWallMillis,
+            roundsSigned = journaled?.darkRounds?.coerceAtLeast(0),
+        )
         if (!haul.simulated) {
             widgets.onHaul(WidgetHaul(summary.oreMinedAtoms, summary.endedAtWallMillis))
             widgets.onStreak(haul.streakAfter.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
@@ -141,7 +147,8 @@ class IndexerHaulRepository(
 /** Contract B → the reveal's model. Pure, so it is unit-tested without a network. */
 object HaulMapping {
 
-    fun toSummary(h: IndexerHaul, firstPickupWallMillis: Long?): HaulSummary {
+    /** [roundsSigned] is the phone's own count of the heartbeats it signed in this shift, when it has one. */
+    fun toSummary(h: IndexerHaul, firstPickupWallMillis: Long?, roundsSigned: Int? = null): HaulSummary {
         // The replay shows the rounds the rig was dark for (and any it dug), in order.
         val rounds = h.rounds.filter { it.dark || it.dugMask != 0 }.map { r ->
             RoundReplay(
@@ -165,6 +172,7 @@ object HaulMapping {
             nightlyTargetOreAtoms = null,
             streak = StreakUpdate(h.streakBefore.toIntCapped(), h.streakAfter.toIntCapped()),
             firstPickupWallMillis = firstPickupWallMillis?.takeIf { it in h.startTs * 1000..h.endTs * 1000 + MAX_PICKUP_AFTER_END_MILLIS },
+            roundsSigned = roundsSigned,
             focusOnly = h.mode == HaulMode.FOCUS_ONLY,
             darkRoundsTotal = h.darkRounds.toLongCapped().toIntCapped(),
             digsTotal = h.roundsDug.toLongCapped().toIntCapped(),

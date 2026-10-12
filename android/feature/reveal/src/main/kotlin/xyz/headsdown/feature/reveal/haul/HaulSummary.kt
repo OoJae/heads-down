@@ -73,6 +73,12 @@ data class HaulSummary(
     val streak: StreakUpdate,
     /** When the phone was first picked up after the shift, if it was. */
     val firstPickupWallMillis: Long? = null,
+    /**
+     * Rounds this phone signed a heartbeat for, from its own journal. Not an on-chain count: the
+     * sealed shift's dark rounds may be fewer (a heartbeat the crank did not land is signed all
+     * the same). Null when the phone no longer holds that shift.
+     */
+    val roundsSigned: Int? = null,
     /** Zero-SOL shift: counts for the streak, never digs. */
     val focusOnly: Boolean = false,
     /** Dark rounds from the ShiftLog, when the source reports them; else counted from [rounds]. */
@@ -91,6 +97,7 @@ data class HaulSummary(
         require(solPlacedLamports >= 0 && oreMinedAtoms >= 0 && feesLamports >= 0)
         require(darkRoundsTotal == null || darkRoundsTotal >= 0)
         require(digsTotal == null || digsTotal >= 0)
+        require(roundsSigned == null || roundsSigned >= 0)
         require(explorerUrl == null || explorerUrl.startsWith("https://")) { "explorer links are https" }
         require(effectiveLamportsPerOre == null || effectiveLamportsPerOre > 0)
         require(marketLamportsPerOre == null || marketLamportsPerOre > 0)

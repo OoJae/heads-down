@@ -2,6 +2,7 @@ package xyz.headsdown.feature.reveal.haul
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -27,6 +28,7 @@ class RevealCopyTest {
             ),
             c.stats,
         )
+        assertEquals(RevealStat("Signed on this phone", "318 rounds"), c.signedOnPhone)
         assertEquals("0.680 SOL per ORE", c.effectivePrice)
         assertEquals("Market 0.758", c.marketPrice)
         assertEquals("Mining was the cheaper route last night: 10% below market.", c.verdict)
@@ -34,6 +36,25 @@ class RevealCopyTest {
         assertEquals("Buy the rest at market · 0.0141 ORE", c.buyButton)
         assertEquals("First pickup 06:52", c.firstPickup)
         assertNull(c.nearMiss)
+    }
+
+    @Test
+    fun `what the phone signed is a fact of its own, named as the phone's, and absent when the phone does not have it`() {
+        // A night the crank stopped landing heartbeats in: five dark rounds sealed, hundreds signed.
+        val sealed = night.copy(provenance = HaulProvenance.ON_CHAIN, darkRoundsTotal = 5, digsTotal = 5, roundsSigned = 1_371)
+        val c = RevealCopyBuilder.build(sealed, zone)
+        assertEquals(RevealStat("Signed on this phone", "1,371 rounds"), c.signedOnPhone)
+        // The haul's own counts are what they were: the phone's number is not one of them.
+        assertEquals(RevealStat("Rounds dark", "5"), c.stats[0])
+        assertEquals(RevealCopyBuilder.build(sealed.copy(roundsSigned = null), zone).stats, c.stats)
+        assertTrue(c.allText.containsAll(listOf("Signed on this phone", "1,371 rounds")))
+        assertEquals("1 round", RevealCopyBuilder.build(night.copy(roundsSigned = 1), zone).signedOnPhone!!.value)
+        assertEquals("0 rounds", RevealCopyBuilder.build(night.copy(roundsSigned = 0), zone).signedOnPhone!!.value)
+        // The journal has moved on, or it is another phone's shift: nothing is said.
+        val unknown = RevealCopyBuilder.build(night.copy(roundsSigned = null), zone)
+        assertNull(unknown.signedOnPhone)
+        assertTrue(unknown.allText.none { "this phone" in it })
+        assertThrows(IllegalArgumentException::class.java) { night.copy(roundsSigned = -1) }
     }
 
     @Test

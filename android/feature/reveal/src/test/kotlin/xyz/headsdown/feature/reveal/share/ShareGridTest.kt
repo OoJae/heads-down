@@ -31,6 +31,7 @@ class ShareGridTest {
             effectiveLamportsPerOre = 1L,
             marketLamportsPerOre = 2L,
             solPlacedLamports = 5_000_000_000L,
+            roundsSigned = 9_999,
             provenance = HaulProvenance.ON_CHAIN,
         )
         assertEquals(base, ShareGrid.from(rerolled))
