@@ -465,11 +465,52 @@ started from a window that had left the foreground, which Android refuses; a clo
 wallet said it had not signed stayed on record; and a shift armed under the thumb could be
 ended by the tap that was on its way to "Clock in".
 
+## The night of 12 October 2026: three hours on the charger, then the power went
+
+The first shift the phone worked through a night. The founder clocked in at 02:09 local time
+(UTC+1) on the published build 0.1.0, laid the Redmi 14C face-down on its charger and went to
+sleep. No alarm was set, so the window was the build's eight hours. Times are UTC; the numbering
+goes on.
+
+| # | Time | Slot | Transaction | Signed by | What it did |
+|---|---|---|---|---|---|
+| 44 | 01:09:17 | 455,860,112 | [`3Ngnxsv2…`](https://solscan.io/tx/3Ngnxsv2SzUZFY12jhusNEsKYVr5X49VbT9Bi7UUUKxypeiJLFVPYHnMoVM4yLa4NC4g8CrwwZLFWxhh9yS7JJgf) | wallet | Clock-in at 02:09 local time, with no alarm set: ORE `automate`, `set_caps`, `arm_shift` (`ShiftArmed`, shift 8). The plan window is the build's eight hours, to 09:09:11 |
+| 45 | 01:10:50 | 455,860,545 | [`2sx1jTmR…`](https://solscan.io/tx/2sx1jTmRem72i8V5gDCA4VZnpsdpSgUwbekDaWwmVzcvfUJWfwNaehtKrjzD7BZH8kF7msZ2Qff4p2wpVqMqi2TQ) | crank | `dig` for round 436,943: 0.001 SOL on four squares |
+| 46 | 01:10:56 | 455,860,572 | [`W9hstcLR…`](https://solscan.io/tx/W9hstcLRC5fnnk5z5NZY1vo5scm4gP5YJ81cWcZNuQHSS2dHL5xtJbme8hceund1D49x6KGPKiaTyQsKUjzST9Q) | crank | The crank's other attempt for round 436,943, landing 27 slots later: no deploy ran (`RigSkipped`, error 7 `StaleHeartbeat`) |
+| 47 | 01:11:43 | 455,860,791 | [`6GbCLruR…`](https://solscan.io/tx/6GbCLruRt7RLZKBxNTJnqrN9zkA6r2q8WMrpsUMMfbmdjGURkh9v9gubBS2yE3NVyaPsLCbw4kdchSZp74nRpmA) | crank | ORE `checkpoint`, then `dig` for round 436,944 |
+| 48 | 01:12:49 | 455,861,089 | [`2u6q8FMg…`](https://solscan.io/tx/2u6q8FMg7EZyvQp7nS9PvwJy7WhqktJZc81g3hY88mJ6UHmpsuYRhKtuA7p9k7WCgAaLs1QEWkTCmCBUaQNbsqqR) | crank | ORE `checkpoint`, then `dig` for round 436,945 |
+| 49 | 01:13:57 | 455,861,399 | [`3zJpQ6DH…`](https://solscan.io/tx/3zJpQ6DHs2itwih38hiBMeukr2vH6DsGSTyWrZAX6M279fWSQ7sHprWCSPhugHBXok3SrQADbvj4omJHBgiATYWS) | crank | ORE `checkpoint`, then `dig` for round 436,946 |
+| 50 | 01:14:57 | 455,861,678 | [`2kc643V7…`](https://solscan.io/tx/2kc643V7aWMAVTye4MGniGuDVk35ARH57vx2BGgzUQTmtv1wtyRNHpZ45uJd3SLkGJ2TmDsPeVGkAkiptUeuKNH3) | crank | ORE `checkpoint`, then `dig` for round 436,947: the fifth dig, and the shift's budget |
+| 51 | 04:01:17 | 455,907,324 | [`4VtssJM3…`](https://solscan.io/tx/4VtssJM3TK26TZ5PkJQcjppYS4XrNqhpQjtFbwoxNrXhRz1YXabybSziTp6Hj95ZGENFgG1Hh3muaH7YVVN9HKFo) | crank | `record_heartbeats`, the first on mainnet: `HeartbeatsRecorded`, round 437,105, one dark round added. The crank sends it only in a round where the rig's cost gate is shut |
+| 52 | 04:08:36 | 455,909,336 | [`3TBjJwzz…`](https://solscan.io/tx/3TBjJwzzuMYj9P6CwSD9sqaGzXqf9qchUrdJARDdQqFciq1PT8gTCaSMC6ymEZGkcfFntZ3eyF5mmGYugU5KADmW) | crank | A BREAK the phone signed: `ShiftBroken` (shift 8, reason 7 `unplugged`). The charger had lost power at 05:08 local time |
+
+What it showed, read from the Rig account and these transactions on the morning of 12 October,
+before the clock-out:
+
+- **Three hours face-down, signing.** The Rig's heartbeat counter went from 52 to 223 between
+  the clock-in and the BREAK: about 170 messages signed by the key in the phone's secure
+  hardware, one for each ORE round of those three hours.
+- **The chain holds six of those rounds.** Five digs in the first six minutes used the shift's
+  budget of 0.005 SOL. After that the crank lands nothing for a rig whose cost gate is open
+  (`check_record` in `crank/src/planner.rs` records heartbeats only for focus-only rigs and for
+  rigs whose gate is shut). One round at 04:01 was such a round, and the crank recorded the
+  phone's heartbeat by itself: `shift_dark_rounds` is 6, `shift_rounds_dug` 5. The phone's own
+  count is in its journal and nowhere on-chain. A night's dark rounds should not depend on its
+  budget: that is a change to the crank, not made yet.
+- **A power cut ended it.** At 05:08 local time the charger lost power; the phone signed the BREAK
+  a Night Shift signs for that, and the crank landed it. Inside the window that seals the shift
+  as ended early: no streak day. Had a Focus Bond been on it, the bond would have been lost to a
+  power cut. The rule that tells a pickup from an outage does not exist yet.
+- **No alarm, an eight-hour window.** With an alarm set before the clock-in, the window would have
+  ended two minutes before it. Build 0.1.0 also planned its own morning page for 07:00, inside
+  that window; the shift was already over by then. Build 0.1.2 never opens that page before the
+  window's end.
+
 ## Not run yet
 
 On a phone:
 
-- a whole night under HyperOS;
+- a whole night under HyperOS (the night of 12 October ran three hours, until a power cut);
 - the haul reveal at alarm time on the device;
 - a dig attempt while the cost gate is shut;
 - Solflare, Phantom or Seed Vault (only Jupiter Mobile has signed);
@@ -484,7 +525,7 @@ On mainnet at all:
 
 - any SKR instruction;
 - a crank transaction with more than one rig, a lease reuse, a lookup table, a
-  `record_heartbeats`, an `end_shift` or a FREEZE sent by the crank;
+  an `end_shift` or a FREEZE sent by the crank (a `record_heartbeats` ran on 12 October);
 - a second rig, or a rig that is not the founder's;
 - a pause or any other governance transaction (the governance key still holds the 14,963,000
   lamports it was funded with), and an upgrade of the program.

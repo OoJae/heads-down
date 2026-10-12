@@ -279,14 +279,14 @@ class SmokeInvariantsTest : ScreenTest() {
     }
 
     @Test
-    fun `the debug entry at the foot of the page is within the five swipes the script makes`() {
+    fun `the debug entry at the foot of the page is within the seven swipes the script makes`() {
         show(bars = true) { Screens.Home(Screens.idle.copy(lastHaul = "0.0194 ORE", streak = "Streak 3 nights")) }
-        // `ui tap` looks, swipes up, and looks again, six times: five swipes. A swipe drags the
+        // `ui tap` looks, swipes up, and looks again, eight times: seven swipes. A swipe drags the
         // page from 78% to 33% of the screen's height; a fling carries it further, never less.
         val oneSwipe = screen * 0.45f - 16.dp
         val scroller = rule.onNode(SemanticsMatcher("the page") { (it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.maxValue?.invoke() ?: 0f) > 0f })
         val range = scroller.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue().toDp()
-        assertTrue("the page scrolls $range; five swipes move it ${oneSwipe * 5}", range <= oneSwipe * 5)
+        assertTrue("the page scrolls $range; seven swipes move it ${oneSwipe * 7}", range <= oneSwipe * 7)
     }
 
     // ------------------------------------------------------------------ I8

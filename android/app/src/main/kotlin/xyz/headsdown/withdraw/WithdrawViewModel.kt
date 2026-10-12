@@ -192,7 +192,7 @@ class WithdrawModel(
     companion object {
         const val UNREADABLE = "Could not read the chain. Nothing was sent. Check the connection and try again."
         const val OTHER_WALLET = "That is not the wallet this screen was read for. Nothing was sent."
-        const val NO_WALLET = "No Solana wallet app was found on this phone. Install Solflare, Phantom or another Mobile Wallet Adapter wallet."
+        const val NO_WALLET = "No Solana wallet app was found on this phone. Install one that speaks Mobile Wallet Adapter. This build has been run with Jupiter Mobile."
         const val NOTHING_LEFT = "There was nothing left to sign: the chain already shows it done."
         const val NOT_LANDED = "The transaction did not go through on-chain. Nothing changed."
         const val NOT_CONFIRMED = "The transaction could not be confirmed on-chain. Check your wallet's activity before trying again."

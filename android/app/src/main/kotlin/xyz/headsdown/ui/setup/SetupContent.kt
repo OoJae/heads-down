@@ -122,7 +122,7 @@ object SetupCopy {
 
     fun subtitle(step: SetupStep, state: OnboardingState): String = when (step) {
         SetupStep.Notifications -> "Your shift shows as an ongoing notification, and the morning reveal needs one."
-        SetupStep.MorningAlarm -> "Your haul reveal opens right after your own alarm rings."
+        SetupStep.MorningAlarm -> "After your own alarm rings, a page opens where you clock out and see the haul."
         SetupStep.KeepAlive -> keepAliveSubtitle(state)
         SetupStep.Tile -> "Clock in from anywhere: swipe down, tap Heads Down next to Do Not Disturb."
         SetupStep.RigKey -> rigKeySubtitle(state.rigKey, state.attestation)

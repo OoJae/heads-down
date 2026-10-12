@@ -86,7 +86,7 @@ private fun PlatesAndRows() {
     Notice("Nothing was spent.")
     Notice("The chain could not be read.", tone = NoticeTone.Problem) { TextAction("Try again", onClick = {}) }
     StepRow(1, "Notifications", subtitle = "Your shift shows as an ongoing notification.", status = StepStatus.Done)
-    StepRow(2, "Morning alarm", subtitle = "Your haul reveal opens right after your own alarm rings.", status = StepStatus.Current) {
+    StepRow(2, "Morning alarm", subtitle = "After your own alarm rings, a page opens where you clock out and see the haul.", status = StepStatus.Current) {
         BarButton("Allow exact alarm", onClick = {})
     }
     StepRow(3, "Create your rig key", status = StepStatus.Todo)
