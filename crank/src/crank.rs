@@ -1174,8 +1174,9 @@ impl Crank {
 
     // ---- record_heartbeats ------------------------------------------------------------------
 
-    /// Record the held heartbeats of focus-only rigs (and, opt-in, gate-closed rigs) so their
-    /// dark rounds count on-chain. Budgeted: nothing reimburses these fees.
+    /// Record the held heartbeats of focus-only rigs (and, opt-in, gate-closed rigs and rigs
+    /// whose budget is spent) so their dark rounds count on-chain. Budgeted: nothing reimburses
+    /// these fees.
     pub async fn record_pass(self: &Arc<Self>, view: &ChainView) -> anyhow::Result<()> {
         let (Some(board), Some(treasury)) = (view.board, view.treasury) else { return Ok(()) };
         let heartbeats: HashMap<Address, VerifiedHeartbeat> =
@@ -1184,7 +1185,8 @@ impl Crank {
             return Ok(());
         }
         let rigs = load_diggable_rigs(&self.rpc, &self.program_id).await?;
-        let policy = self.cfg.record.policy(self.cfg.dig.clock_margin_secs);
+        let executor_fee = if self.cfg.record.budget_spent_rigs { self.hd_config().await.map(|c| c.executor_fee) } else { None };
+        let policy = self.cfg.record.policy(self.cfg.dig.clock_margin_secs, executor_fee);
         let (decisions, skips) = planner::plan_records(&board, &treasury, view.unix_now(), &rigs, &heartbeats, &policy);
         for (_, s) in &skips {
             if *s != planner::RecordSkip::NotEligible {

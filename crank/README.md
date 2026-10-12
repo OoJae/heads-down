@@ -358,6 +358,12 @@ focus-only rig that is due with `record_heartbeats` (tag 7, no CPI), so its dark
   secp256r1 signature (5,000 lamports) plus its share of the transaction signature; nothing reimburses it.
 - Opt-in `record.gate_closed_rigs = true` also records night / day rigs whose cost gate is closed this round, so
   a night where the gate never opens still ends with its dark rounds counted.
+- Opt-in `record.budget_spent_rigs = true` also records night / day rigs whose budget cannot pay for another dig
+  (`dig_budget` at the Config's executor fee leaves less than a lamport a square). A shift goes on after its
+  budget is spent and the phone keeps signing; without this the chain hears nothing more, so the shift's dark
+  rounds stop at its last dig, and a rig that cooled for a moment and went dark again stays Cooling on-chain,
+  which seals the shift as ended early. Added on 12 October 2026, after the first night on a phone sealed
+  three hours as six dark rounds.
 
 ## Permissionless end_shift
 
