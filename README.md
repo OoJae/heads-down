@@ -158,7 +158,9 @@ local fork of mainnet, signed in Solana Mobile's test wallet
 (`scripts/devstack/emulator-smoke.sh --wallet`), where the amounts that came back matched the
 screen to the lamport. On that emulator the test wallet showed the name and icon of the published
 identity page; on the phone, Jupiter's wallet showed "Could not verify request" on its connect
-prompt and still connected and signed. No SKR instruction has been sent on mainnet, and the
+prompt and still connected and signed. On 12 October its approval sheet also showed "This
+transaction has been flagged as malicious" over a clock-out and over a clock-in: the wallet's
+scanner does not know this program, and nothing has been done about the flag yet. No SKR instruction has been sent on mainnet, and the
 BuryVault account does not exist there yet. The app has no screens yet for Stack or Gift. Its
 clock-out can buy ORE through Jupiter in a build that is given a swap API (added 11 October): a
 live quote and the transaction built from it were simulated on mainnet, and nothing has been
